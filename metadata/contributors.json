@@ -1832,6 +1832,14 @@
    },
    {
       "emails" : [
+         "dan_robson@apple.com"
+      ],
+      "github" : "drobson1005",
+      "name" : "Dan Robson",
+      "status" : "committer"
+   },
+   {
+      "emails" : [
          "danw@gnome.org"
       ],
       "name" : "Dan Winship",

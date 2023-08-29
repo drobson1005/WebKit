@@ -12,6 +12,12 @@ const expected = [
   // RejectObjectWithCalendarOrTimeZone
   "get fields.calendar",
   "get fields.timeZone",
+  // CopyDataProperties
+  "ownKeys options",
+  "getOwnPropertyDescriptor options.overflow",
+  "get options.overflow",
+  "getOwnPropertyDescriptor options.extra",
+  "get options.extra",
   // CalendarFields
   "get this.calendar.fields",
   "call this.calendar.fields",
@@ -59,15 +65,10 @@ const expected = [
   "get this.calendar.mergeFields",
   "call this.calendar.mergeFields",
   // InterpretTemporalDateTimeFields
-  "get options.overflow",
   "get options.overflow.toString",
   "call options.overflow.toString",
   "get this.calendar.dateFromFields",
   "call this.calendar.dateFromFields",
-  // inside Calendar.p.dateFromFields
-  "get options.overflow",
-  "get options.overflow.toString",
-  "call options.overflow.toString",
 ];
 const actual = [];
 
@@ -75,6 +76,13 @@ const calendar = TemporalHelpers.calendarObserver(actual, "this.calendar");
 const instance = new Temporal.PlainDateTime(2000, 5, 2, 12, 34, 56, 987, 654, 321, calendar);
 // clear observable operations that occurred during the constructor call
 actual.splice(0);
+
+TemporalHelpers.observeProperty(actual, instance, "hour", 12, "this");
+TemporalHelpers.observeProperty(actual, instance, "minute", 34, "this");
+TemporalHelpers.observeProperty(actual, instance, "second", 56, "this");
+TemporalHelpers.observeProperty(actual, instance, "millisecond", 987, "this");
+TemporalHelpers.observeProperty(actual, instance, "microsecond", 654, "this");
+TemporalHelpers.observeProperty(actual, instance, "nanosecond", 321, "this");
 
 const fields = TemporalHelpers.propertyBagObserver(actual, {
   year: 1.7,
@@ -89,7 +97,10 @@ const fields = TemporalHelpers.propertyBagObserver(actual, {
   nanosecond: 1.7,
 }, "fields");
 
-const options = TemporalHelpers.propertyBagObserver(actual, { overflow: "constrain" }, "options");
+const options = TemporalHelpers.propertyBagObserver(actual, {
+  overflow: "constrain",
+  extra: "property",
+}, "options");
 
 instance.with(fields, options);
 assert.compareArray(actual, expected, "order of operations");

@@ -56,9 +56,9 @@
 #include "SearchPopupMenu.h"
 #include "TextDetectorInterface.h"
 #include "WebCoreKeyboardUIMode.h"
+#include "WebGPU.h"
 #include "WorkerClient.h"
 #include <JavaScriptCore/ConsoleTypes.h>
-#include <pal/graphics/WebGPU/WebGPU.h>
 #include <wtf/Assertions.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
@@ -375,7 +375,7 @@ public:
     WEBCORE_EXPORT virtual RefPtr<GraphicsContextGL> createGraphicsContextGL(const GraphicsContextGLAttributes&) const;
 #endif
 
-    virtual RefPtr<PAL::WebGPU::GPU> createGPUForWebGPU() const { return nullptr; }
+    virtual RefPtr<WebGPU::GPU> createGPUForWebGPU() const { return nullptr; }
 
     virtual RefPtr<ShapeDetection::BarcodeDetector> createBarcodeDetector(const ShapeDetection::BarcodeDetectorOptions&) const { return nullptr; }
     virtual void getBarcodeDetectorSupportedFormats(CompletionHandler<void(Vector<ShapeDetection::BarcodeFormat>&&)>&& completionHandler) const { completionHandler({ }); }
@@ -591,11 +591,6 @@ public:
     virtual void shouldAllowDeviceOrientationAndMotionAccess(LocalFrame&, bool /* mayPrompt */, CompletionHandler<void(DeviceOrientationOrMotionPermissionState)>&& callback) { callback(DeviceOrientationOrMotionPermissionState::Denied); }
 #endif
 
-    virtual void didInsertMenuElement(HTMLMenuElement&) { }
-    virtual void didRemoveMenuElement(HTMLMenuElement&) { }
-    virtual void didInsertMenuItemElement(HTMLMenuItemElement&) { }
-    virtual void didRemoveMenuItemElement(HTMLMenuItemElement&) { }
-
     virtual void configureLoggingChannel(const String&, WTFLogChannelState, WTFLogLevel) { }
 
     virtual bool userIsInteracting() const { return false; }
@@ -626,7 +621,7 @@ public:
 
 #if ENABLE(WEBXR)
     virtual void enumerateImmersiveXRDevices(CompletionHandler<void(const PlatformXR::Instance::DeviceList&)>&& completionHandler) { PlatformXR::Instance::singleton().enumerateImmersiveXRDevices(WTFMove(completionHandler)); }
-    virtual void requestPermissionOnXRSessionFeatures(const SecurityOriginData&, PlatformXR::SessionMode, const PlatformXR::Device::FeatureList& granted, const PlatformXR::Device::FeatureList& /* consentRequired */, const PlatformXR::Device::FeatureList& /* consentOptional */, CompletionHandler<void(std::optional<PlatformXR::Device::FeatureList>&&)>&& completionHandler) { completionHandler(granted); }
+    virtual void requestPermissionOnXRSessionFeatures(const SecurityOriginData&, PlatformXR::SessionMode, const PlatformXR::Device::FeatureList& granted, const PlatformXR::Device::FeatureList& /* consentRequired */, const PlatformXR::Device::FeatureList& /* consentOptional */, const PlatformXR::Device::FeatureList& /* requiredFeaturesRequested */, const PlatformXR::Device::FeatureList& /* optionalFeaturesRequested */, CompletionHandler<void(std::optional<PlatformXR::Device::FeatureList>&&)>&& completionHandler) { completionHandler(granted); }
 #endif
 
 #if ENABLE(TEXT_AUTOSIZING)
@@ -639,7 +634,7 @@ public:
 #endif
 
 #if USE(SYSTEM_PREVIEW)
-    virtual void handleSystemPreview(const URL&, const SystemPreviewInfo&) { }
+    virtual void beginSystemPreview(const URL&, const SecurityOriginData&, const SystemPreviewInfo&, CompletionHandler<void()>&&) { }
 #endif
 
     virtual void requestCookieConsent(CompletionHandler<void(CookieConsentDecisionResult)>&&) = 0;

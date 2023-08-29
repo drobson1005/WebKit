@@ -159,11 +159,8 @@ LocalFrame::LocalFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& frameLoad
     ProcessWarming::initializeNames();
     StaticCSSValuePool::init();
 
-    if (ownerElement) {
-        if (auto* localMainFrame = dynamicDowncast<LocalFrame>(mainFrame()))
-            localMainFrame->selfOnlyRef();
-        ownerElement->setContentFrame(*this);
-    }
+    if (auto* localMainFrame = dynamicDowncast<LocalFrame>(mainFrame()); localMainFrame && ownerElement)
+        localMainFrame->selfOnlyRef();
 
 #ifndef NDEBUG
     frameCounter.increment();
@@ -326,6 +323,16 @@ bool LocalFrame::preventsParentFromBeingComplete() const
 void LocalFrame::changeLocation(FrameLoadRequest&& request)
 {
     loader().changeLocation(WTFMove(request));
+}
+
+void LocalFrame::broadcastFrameRemovalToOtherProcesses()
+{
+    loader().client().broadcastFrameRemovalToOtherProcesses();
+}
+
+void LocalFrame::didFinishLoadInAnotherProcess()
+{
+    loader().provisionalLoadFailedInAnotherProcess();
 }
 
 void LocalFrame::invalidateContentEventRegionsIfNeeded(InvalidateContentEventRegionsReason reason)
@@ -747,7 +754,7 @@ LocalFrame* LocalFrame::frameForWidget(const Widget& widget)
 
     // Assume all widgets are either a FrameView or owned by a RenderWidget.
     // FIXME: That assumption is not right for scroll bars!
-    return dynamicDowncast<LocalFrame>(downcast<LocalFrameView>(widget).frame());
+    return &downcast<LocalFrameView>(widget).frame();
 }
 
 void LocalFrame::clearTimers(LocalFrameView *view, Document *document)
@@ -757,8 +764,7 @@ void LocalFrame::clearTimers(LocalFrameView *view, Document *document)
     view->layoutContext().unscheduleLayout();
     if (auto* timelines = document->timelinesController())
         timelines->suspendAnimations();
-    if (auto* localFrame = dynamicDowncast<LocalFrame>(view->frame()))
-        localFrame->eventHandler().stopAutoscrollTimer();
+    view->frame().eventHandler().stopAutoscrollTimer();
 }
 
 void LocalFrame::clearTimers()

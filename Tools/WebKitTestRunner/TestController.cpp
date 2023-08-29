@@ -49,7 +49,6 @@
 #include <WebKit/WKIconDatabase.h>
 #include <WebKit/WKMediaKeySystemPermissionCallback.h>
 #include <WebKit/WKMessageListener.h>
-#include <WebKit/WKMockDisplay.h>
 #include <WebKit/WKMockMediaDevice.h>
 #include <WebKit/WKNavigationActionRef.h>
 #include <WebKit/WKNavigationResponseRef.h>
@@ -58,7 +57,6 @@
 #include <WebKit/WKNotificationPermissionRequest.h>
 #include <WebKit/WKNumber.h>
 #include <WebKit/WKOpenPanelResultListener.h>
-#include <WebKit/WKPageGroup.h>
 #include <WebKit/WKPageInjectedBundleClient.h>
 #include <WebKit/WKPagePrivate.h>
 #include <WebKit/WKPluginInformation.h>
@@ -317,7 +315,6 @@ static void requestPointerLock(WKPageRef page, const void*)
 static void printFrame(WKPageRef page, WKFrameRef frame, const void*)
 {
     WKPageBeginPrinting(page, frame, WKPrintInfo { 1, 21, 29.7f });
-    WKPageEndPrinting(page);
 }
 
 static bool shouldAllowDeviceOrientationAndMotionAccess(WKPageRef, WKSecurityOriginRef origin, WKFrameInfoRef frame, const void*)
@@ -630,8 +627,7 @@ void TestController::initialize(int argc, const char* argv[])
     WebCoreTestSupport::installMockGamepadProvider();
 #endif
 
-    m_pageGroup.adopt(WKPageGroupCreateWithIdentifier(toWK("WebKitTestRunnerPageGroup").get()));
-
+    m_preferences = adoptWK(WKPreferencesCreate());
     m_eventSenderProxy = makeUnique<EventSenderProxy>(this);
 }
 
@@ -778,7 +774,7 @@ WKRetainPtr<WKPageConfigurationRef> TestController::generatePageConfiguration(co
 
     auto pageConfiguration = adoptWK(WKPageConfigurationCreate());
     WKPageConfigurationSetContext(pageConfiguration.get(), m_context.get());
-    WKPageConfigurationSetPageGroup(pageConfiguration.get(), m_pageGroup.get());
+    WKPageConfigurationSetPreferences(pageConfiguration.get(), m_preferences.get());
     
     if (options.useEphemeralSession()) {
         auto ephemeralDataStore = adoptWK(WKWebsiteDataStoreCreateNonPersistentDataStore());
@@ -1248,6 +1244,8 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options, Re
     clearPrivateClickMeasurement();
 
     WKPageDispatchActivityStateUpdateForTesting(m_mainWebView->page());
+
+    WKPageResetProcessState(m_mainWebView->page());
 
     m_didReceiveServerRedirectForProvisionalNavigation = false;
     m_serverTrustEvaluationCallbackCallsCount = 0;
@@ -1965,6 +1963,9 @@ void TestController::didReceiveSynchronousMessageFromInjectedBundle(WKStringRef 
             m_eventSenderProxy->mouseMoveTo(doubleValue(dictionary, "X"), doubleValue(dictionary, "Y"), stringValue(dictionary, "PointerType"));
             return completionHandler(nullptr);
         }
+
+        if (WKStringIsEqualToUTF8CString(subMessageName, "WaitForDeferredMouseEvents"))
+            return completionHandler(nullptr);
 
 #if PLATFORM(MAC)
         if (WKStringIsEqualToUTF8CString(subMessageName, "MouseForceClick")) {
@@ -3148,7 +3149,7 @@ UniqueRef<PlatformWebView> TestController::platformCreateOtherPage(PlatformWebVi
 
 WKContextRef TestController::platformAdjustContext(WKContextRef context, WKContextConfigurationRef)
 {
-    WKPageGroupSetPreferences(m_pageGroup.get(), adoptWK(WKPreferencesCreate()).get());
+    m_preferences = adoptWK(WKPreferencesCreate());
     return context;
 }
 
@@ -4077,11 +4078,6 @@ WKRetainPtr<WKStringRef> TestController::takeViewPortSnapshot()
     return adoptWK(WKStringCreateWithUTF8CString("not implemented"));
 }
 #endif
-
-void TestController::sendDisplayConfigurationChangedMessageForTesting()
-{
-    WKSendDisplayConfigurationChangedMessageForTesting(platformContext());
-}
 
 void TestController::setServiceWorkerFetchTimeoutForTesting(double seconds)
 {

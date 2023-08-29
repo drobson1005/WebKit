@@ -56,7 +56,7 @@ RefPtr<AccessibilityUIElement> AccessibilityController::focusedElement()
 
     RetainPtr<PlatformUIElement> focus;
     executeOnAXThreadAndWait([&focus] () {
-        focus = static_cast<PlatformUIElement>(WKAccessibilityFocusedObject(0));
+        focus = static_cast<PlatformUIElement>(WKAccessibilityFocusedUIElement());
     });
     if (focus)
         return AccessibilityUIElement::create(focus.get());
@@ -148,10 +148,9 @@ JSRetainPtr<JSStringRef> AccessibilityController::platformName()
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 void AccessibilityController::updateIsolatedTreeMode()
 {
-    // Override to set identifier to VoiceOver so that requests are handled in isolated mode.
+    // Override the client identifier to be kAXClientTypeWebKitTesting which is treated the same as the VoiceOver identifier, and thus requests are handled in isolated tree mode.
     _AXSetClientIdentificationOverride(m_accessibilityIsolatedTreeMode ? (AXClientType)kAXClientTypeWebKitTesting : kAXClientTypeNoActiveRequestFound);
     _AXSSetIsolatedTreeMode(m_accessibilityIsolatedTreeMode ? AXSIsolatedTreeModeSecondaryThread : AXSIsolatedTreeModeOff);
-    m_useMockAXThread = WKAccessibilityCanUseSecondaryAXThread(InjectedBundle::singleton().page()->page());
 }
 #endif
 

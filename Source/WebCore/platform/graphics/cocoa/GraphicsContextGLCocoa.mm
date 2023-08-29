@@ -203,7 +203,7 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
         ASSERT(checkVolatileContextSupportIfDeviceExists(display, "EGL_ANGLE_platform_device_context_volatile_cgl", "EGL_ANGLE_device_cgl", EGL_CGL_CONTEXT_ANGLE));
     }
 
-#if ASSERT_ENABLED && USE(MTLSHAREDEVENT_FOR_XR_FRAME_COMPLETION)
+#if ASSERT_ENABLED && ENABLE(WEBXR)
     const char* displayExtensions = EGL_QueryString(display, EGL_EXTENSIONS);
     ASSERT(strstr(displayExtensions, "EGL_ANGLE_metal_shared_event_sync"));
 #endif
@@ -407,11 +407,8 @@ bool GraphicsContextGLCocoa::platformInitialize()
     }
 #endif // PLATFORM(MAC) || PLATFORM(MACCATALYST)
 #if ENABLE(WEBXR)
-    if (attributes.xrCompatible) {
-        requiredExtensions.append("GL_OES_EGL_image"_s);
-        requiredExtensions.append("GL_EXT_sRGB"_s);
-        requiredExtensions.append("GL_ANGLE_framebuffer_multisample"_s);
-    }
+    if (attributes.xrCompatible && !enableRequiredWebXRExtensions())
+        return false;
 #endif
     if (m_isForWebGL2)
         requiredExtensions.append("GL_ANGLE_framebuffer_multisample"_s);
@@ -555,7 +552,6 @@ void GraphicsContextGLCocoa::updateContextOnDisplayReconfiguration()
 {
     if (m_switchesGPUOnDisplayReconfiguration)
         EGL_HandleGPUSwitchANGLE(m_displayObj);
-    dispatchContextChangedNotification();
 }
 #endif
 
@@ -738,7 +734,10 @@ std::optional<GraphicsContextGL::EGLImageAttachResult> GraphicsContextGLCocoa::c
         return std::nullopt;
 
     // Tell the currently bound texture to use the EGLImage.
-    GL_EGLImageTargetTexture2DOES(target, eglImage);
+    if (target == RENDERBUFFER)
+        GL_EGLImageTargetRenderbufferStorageOES(RENDERBUFFER, eglImage);
+    else
+        GL_EGLImageTargetTexture2DOES(target, eglImage);
 
     GCGLuint textureWidth = [texture width];
     GCGLuint textureHeight = [texture height];
@@ -753,7 +752,7 @@ RetainPtr<id> GraphicsContextGLCocoa::newSharedEventWithMachPort(mach_port_t sha
 
 GCEGLSync GraphicsContextGLCocoa::createEGLSync(ExternalEGLSyncEvent syncEvent)
 {
-    auto [syncEventHandle, signalValue] = syncEvent;
+    auto [syncEventHandle, signalValue] = WTFMove(syncEvent);
     auto sharedEvent = newSharedEventWithMachPort(syncEventHandle.sendRight());
     if (!sharedEvent) {
         LOG(WebGL, "Unable to create a MTLSharedEvent from the syncEvent in createEGLSync.");
@@ -761,6 +760,26 @@ GCEGLSync GraphicsContextGLCocoa::createEGLSync(ExternalEGLSyncEvent syncEvent)
     }
 
     return createEGLSync(sharedEvent.get(), signalValue);
+}
+
+bool GraphicsContextGLCocoa::enableRequiredWebXRExtensions()
+{
+#if ENABLE(WEBXR)
+    String requiredExtensions[] = {
+        "GL_ANGLE_framebuffer_multisample"_str,
+        "GL_ANGLE_framebuffer_blit"_str,
+        "GL_EXT_sRGB"_str,
+        "GL_OES_EGL_image"_str,
+        "GL_OES_rgb8_rgba8"_str
+    };
+
+    for (const auto& ext : requiredExtensions) {
+        if (!supportsExtension(ext))
+            return false;
+        ensureExtensionEnabled(ext);
+    }
+#endif
+    return true;
 }
 
 GCEGLSync GraphicsContextGLCocoa::createEGLSync(id sharedEvent, uint64_t signalValue)
@@ -944,7 +963,7 @@ void GraphicsContextGLCocoa::withDrawingBufferAsNativeImage(Function<void(Native
         // that does the conversion.
         //
         // FIXME: Can the IOSurface be read into a buffer to avoid the read back via GL?
-        auto drawingPixelBuffer = paintRenderingResultsToPixelBuffer();
+        auto drawingPixelBuffer = paintRenderingResultsToPixelBuffer(FlipY::No);
         if (!drawingPixelBuffer)
             return;
 

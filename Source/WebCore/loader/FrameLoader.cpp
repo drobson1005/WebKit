@@ -277,7 +277,7 @@ struct ForbidSynchronousLoadsScope : public PageLevelForbidScope {
 };
 
 class FrameLoader::FrameProgressTracker {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Loader);
 public:
     explicit FrameProgressTracker(LocalFrame& frame)
         : m_frame(frame)
@@ -434,17 +434,22 @@ void FrameLoader::checkContentPolicy(const ResourceResponse& response, PolicyChe
     client().dispatchDecidePolicyForResponse(response, activeDocumentLoader()->request(), identifier, activeDocumentLoader()->downloadAttribute(), WTFMove(function));
 }
 
-bool FrameLoader::upgradeRequestforHTTPSOnlyIfNeeded(const URL& originalURL, ResourceRequest& request) const
+bool FrameLoader::shouldUpgradeRequestforHTTPSOnly(const URL& originalURL, ResourceRequest& request) const
 {
     auto& documentLoader = m_provisionalDocumentLoader ? m_provisionalDocumentLoader : m_documentLoader;
     auto& newURL = request.url();
     const auto& isSameSiteBypassEnabled = (originalURL.isEmpty()
-        || (originalURL.protocolIs("http"_s) && RegistrableDomain(newURL) == RegistrableDomain(originalURL)))
-        && documentLoader->advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnlyExplicitlyBypassedForDomain);
+        || RegistrableDomain(newURL) == RegistrableDomain(originalURL))
+        && documentLoader && documentLoader->advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnlyExplicitlyBypassedForDomain);
 
-    if (documentLoader && documentLoader->advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnly)
+    return documentLoader && documentLoader->advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnly)
         && newURL.protocolIs("http"_s)
-        && !isSameSiteBypassEnabled) {
+        && !isSameSiteBypassEnabled;
+}
+
+bool FrameLoader::upgradeRequestforHTTPSOnlyIfNeeded(const URL& originalURL, ResourceRequest& request) const
+{
+    if (shouldUpgradeRequestforHTTPSOnly(originalURL, request)) {
         FRAMELOADER_RELEASE_LOG(ResourceLoading, "upgradeRequestforHTTPSOnlyIfNeeded: upgrading navigation request");
         request.upgradeToHTTPS();
         // FIXME: Make this timeout adaptive based on network conditions
@@ -1445,6 +1450,11 @@ void FrameLoader::loadURL(FrameLoadRequest&& frameLoadRequest, const String& ref
             openerPolicy = NewFrameOpenerPolicy::Suppress;
         }
 
+        if (m_frame.document()->settingsValues().blobRegistryTopOriginPartitioningEnabled && frameLoadRequest.resourceRequest().url().protocolIsBlob() && !m_frame.document()->securityOrigin().isSameOriginAs(m_frame.document()->topOrigin())) {
+            effectiveFrameName = blankTargetFrameName();
+            openerPolicy = NewFrameOpenerPolicy::Suppress;
+        }
+
         policyChecker().checkNewWindowPolicy(WTFMove(action), WTFMove(request), WTFMove(formState), effectiveFrameName, [this, allowNavigationToInvalidURL, openerPolicy, completionHandler = completionHandlerCaller.release()] (const ResourceRequest& request, WeakPtr<FormState>&& formState, const AtomString& frameName, const NavigationAction& action, ShouldContinuePolicyCheck shouldContinue) mutable {
             continueLoadAfterNewWindowPolicy(request, formState.get(), frameName, action, shouldContinue, allowNavigationToInvalidURL, openerPolicy);
             completionHandler();
@@ -1520,6 +1530,8 @@ void FrameLoader::load(FrameLoadRequest&& request)
             }
         }
     }
+
+    m_provisionalLoadHappeningInAnotherProcess = false;
 
     if (request.shouldCheckNewWindowPolicy()) {
         NavigationAction action { request.requester(), request.resourceRequest(), InitiatedByMainFrame::Unknown, NavigationType::Other, request.shouldOpenExternalURLsPolicy() };
@@ -2075,6 +2087,13 @@ void FrameLoader::clearProvisionalLoad()
     if (m_progressTracker)
         m_progressTracker->progressCompleted();
     setState(FrameState::Complete);
+}
+
+void FrameLoader::provisionalLoadFailedInAnotherProcess()
+{
+    m_provisionalLoadHappeningInAnotherProcess = false;
+    if (auto* localParent = dynamicDowncast<LocalFrame>(m_frame.tree().parent()))
+        localParent->loader().checkLoadComplete();
 }
 
 void FrameLoader::commitProvisionalLoad()
@@ -3260,6 +3279,11 @@ void FrameLoader::loadPostRequest(FrameLoadRequest&& request, const String& refe
             openerPolicy = NewFrameOpenerPolicy::Suppress;
         }
 
+        if (m_frame.document()->settingsValues().blobRegistryTopOriginPartitioningEnabled && request.resourceRequest().url().protocolIsBlob() && !m_frame.document()->securityOrigin().isSameOriginAs(m_frame.document()->topOrigin())) {
+            frameName = blankTargetFrameName();
+            openerPolicy = NewFrameOpenerPolicy::Suppress;
+        }
+
         policyChecker().checkNewWindowPolicy(WTFMove(action), WTFMove(workingResourceRequest), WTFMove(formState), frameName, [this, allowNavigationToInvalidURL, openerPolicy, completionHandler = WTFMove(completionHandler)] (const ResourceRequest& request, WeakPtr<FormState>&& formState, const AtomString& frameName, const NavigationAction& action, ShouldContinuePolicyCheck shouldContinue) mutable {
             continueLoadAfterNewWindowPolicy(request, formState.get(), frameName, action, shouldContinue, allowNavigationToInvalidURL, openerPolicy);
             completionHandler();
@@ -3641,7 +3665,14 @@ void FrameLoader::executeJavaScriptURL(const URL& url, const NavigationAction& a
         ownerDocument->incrementLoadEventDelayCount();
 
     bool didReplaceDocument = false;
-    m_frame.script().executeJavaScriptURL(url, action.requester() ? action.requester()->securityOrigin.ptr() : nullptr, action.shouldReplaceDocumentIfJavaScriptURL(), didReplaceDocument);
+    bool requesterSandboxedFromScripts = action.requester() ? (action.requester()->sandboxFlags & SandboxScripts) : false;
+    if (requesterSandboxedFromScripts) {
+        // FIXME: This message should be moved off the console once a solution to https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
+        // This message is identical to the message in ScriptController::canExecuteScripts.
+        if (auto* document = m_frame.document())
+            document->addConsoleMessage(MessageSource::Security, MessageLevel::Error, "Blocked script execution in '" + action.requester()->url.stringCenterEllipsizedToLength() + "' because the document's frame is sandboxed and the 'allow-scripts' permission is not set.");
+    } else
+        m_frame.script().executeJavaScriptURL(url, action.requester() ? action.requester()->securityOrigin.ptr() : nullptr, action.shouldReplaceDocumentIfJavaScriptURL(), didReplaceDocument);
 
     // We need to communicate that a load happened, even if the JavaScript URL execution didn't end up replacing the document.
     if (auto* document = m_frame.document(); isFirstNavigationInFrame && !didReplaceDocument)
@@ -3682,24 +3713,22 @@ void FrameLoader::continueLoadAfterNavigationPolicy(const ResourceRequest& reque
         if (m_quickRedirectComing)
             clientRedirectCancelledOrFinished(NewLoadInProgress::No);
 
-        if (navigationPolicyDecision == NavigationPolicyDecision::StopAllLoads) {
+        if (navigationPolicyDecision == NavigationPolicyDecision::LoadWillContinueInAnotherProcess) {
             stopAllLoaders();
             m_checkTimer.stop();
         }
 
         setPolicyDocumentLoader(nullptr);
-        if (m_frame.isMainFrame() || navigationPolicyDecision != NavigationPolicyDecision::StopAllLoads)
+        if (m_frame.isMainFrame() || navigationPolicyDecision != NavigationPolicyDecision::LoadWillContinueInAnotherProcess)
             checkCompleted();
         else {
             // Don't call checkCompleted until RemoteFrame::didFinishLoadInAnotherProcess,
             // to prevent onload from happening until iframes finish loading in other processes.
             ASSERT(m_frame.settings().siteIsolationEnabled());
-            // FIXME: This needs to be set back to false if the provisional load in another process fails before it it committed.
-            // When the load is committed, this FrameLoader and its LocalFrame are replaced by a RemoteFrame.
             m_provisionalLoadHappeningInAnotherProcess = true;
         }
 
-        if (navigationPolicyDecision != NavigationPolicyDecision::StopAllLoads)
+        if (navigationPolicyDecision != NavigationPolicyDecision::LoadWillContinueInAnotherProcess)
             checkLoadComplete();
 
         // If the navigation request came from the back/forward menu, and we punt on it, we have the 
@@ -4367,6 +4396,11 @@ RefPtr<LocalFrame> createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame
         features.noopener = true;
     }
 
+    if (openerFrame.document()->settingsValues().blobRegistryTopOriginPartitioningEnabled && request.resourceRequest().url().protocolIsBlob() && !openerFrame.document()->securityOrigin().isSameOriginAs(openerFrame.document()->topOrigin())) {
+        request.setFrameName(blankTargetFrameName());
+        features.noopener = true;
+    }
+
     // Sandboxed frames cannot open new auxiliary browsing contexts.
     if (isDocumentSandboxed(openerFrame, SandboxPopups)) {
         // FIXME: This message should be moved off the console once a solution to https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
@@ -4386,7 +4420,7 @@ RefPtr<LocalFrame> createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame
 
     ShouldOpenExternalURLsPolicy shouldOpenExternalURLsPolicy = shouldOpenExternalURLsPolicyToApply(openerFrame, request);
     NavigationAction action { request.requester(), request.resourceRequest(), request.initiatedByMainFrame(), NavigationType::Other, shouldOpenExternalURLsPolicy };
-    action.setNewFrameOpenerPolicy(features.noopener || features.noreferrer ? NewFrameOpenerPolicy::Suppress : NewFrameOpenerPolicy::Allow);
+    action.setNewFrameOpenerPolicy(features.wantsNoOpener() ? NewFrameOpenerPolicy::Suppress : NewFrameOpenerPolicy::Allow);
     Page* page = oldPage->chrome().createWindow(openerFrame, features, action);
     if (!page)
         return nullptr;
@@ -4405,19 +4439,23 @@ RefPtr<LocalFrame> createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame
 
     if (!frame->page())
         return nullptr;
-    page->chrome().setStatusbarVisible(features.statusBarVisible);
+    if (features.statusBarVisible)
+        page->chrome().setStatusbarVisible(*features.statusBarVisible);
 
     if (!frame->page())
         return nullptr;
-    page->chrome().setScrollbarsVisible(features.scrollbarsVisible);
+    if (features.scrollbarsVisible)
+        page->chrome().setScrollbarsVisible(*features.scrollbarsVisible);
 
     if (!frame->page())
         return nullptr;
-    page->chrome().setMenubarVisible(features.menuBarVisible);
+    if (features.menuBarVisible)
+        page->chrome().setMenubarVisible(*features.menuBarVisible);
 
     if (!frame->page())
         return nullptr;
-    page->chrome().setResizable(features.resizable);
+    if (features.resizable)
+        page->chrome().setResizable(*features.resizable);
 
     // 'x' and 'y' specify the location of the window, while 'width' and 'height'
     // specify the size of the viewport. We can only resize the window, so adjust

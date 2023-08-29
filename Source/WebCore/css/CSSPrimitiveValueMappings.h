@@ -1354,7 +1354,7 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef FOR_EACH
 
 #define TYPE WordBreak
-#define FOR_EACH(CASE) CASE(Normal) CASE(BreakAll) CASE(KeepAll) CASE(BreakWord)
+#define FOR_EACH(CASE) CASE(Normal) CASE(BreakAll) CASE(KeepAll) CASE(BreakWord) CASE(Auto)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH
@@ -1394,13 +1394,17 @@ template<> constexpr TextDirection fromCSSValueID(CSSValueID valueID)
 constexpr CSSValueID toCSSValueID(WritingMode e)
 {
     switch (e) {
-    case WritingMode::TopToBottom:
+    case WritingMode::HorizontalTb:
         return CSSValueHorizontalTb;
-    case WritingMode::RightToLeft:
+    case WritingMode::VerticalRl:
         return CSSValueVerticalRl;
-    case WritingMode::LeftToRight:
+    case WritingMode::VerticalLr:
         return CSSValueVerticalLr;
-    case WritingMode::BottomToTop:
+    case WritingMode::SidewaysRl:
+        return CSSValueSidewaysRl;
+    case WritingMode::SidewaysLr:
+        return CSSValueSidewaysLr;
+    case WritingMode::HorizontalBt:
         return CSSValueHorizontalBt;
     }
     ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
@@ -1415,20 +1419,24 @@ template<> constexpr WritingMode fromCSSValueID(CSSValueID valueID)
     case CSSValueLrTb:
     case CSSValueRl:
     case CSSValueRlTb:
-        return WritingMode::TopToBottom;
+        return WritingMode::HorizontalTb;
     case CSSValueVerticalRl:
     case CSSValueTb:
     case CSSValueTbRl:
-        return WritingMode::RightToLeft;
+        return WritingMode::VerticalRl;
     case CSSValueVerticalLr:
-        return WritingMode::LeftToRight;
+        return WritingMode::VerticalLr;
+    case CSSValueSidewaysLr:
+        return WritingMode::SidewaysLr;
+    case CSSValueSidewaysRl:
+        return WritingMode::SidewaysRl;
     case CSSValueHorizontalBt:
-        return WritingMode::BottomToTop;
+        return WritingMode::HorizontalBt;
     default:
         break;
     }
     ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
-    return WritingMode::TopToBottom;
+    return WritingMode::HorizontalTb;
 }
 
 constexpr CSSValueID toCSSValueID(TextCombine e)
@@ -1945,30 +1953,32 @@ enum LengthConversion {
     CalculatedConversion = 1 << 4
 };
 
-inline bool CSSPrimitiveValue::convertingToLengthRequiresNonNullStyle(int lengthConversion) const
+inline bool CSSPrimitiveValue::convertingToLengthHasRequiredConversionData(int lengthConversion, const CSSToLengthConversionData& conversionData) const
 {
-    // This matches the implementation in CSSPrimitiveValue::computeLengthDouble().
-    //
     // FIXME: We should probably make CSSPrimitiveValue::computeLengthDouble and
     // CSSPrimitiveValue::computeNonCalcLengthDouble (which has the style assertion)
     // return std::optional<double> instead of having this check here.
-    switch (primitiveUnitType()) {
-    case CSSUnitType::CSS_EMS:
-    case CSSUnitType::CSS_EXS:
-    case CSSUnitType::CSS_CHS:
-    case CSSUnitType::CSS_IC:
-    case CSSUnitType::CSS_LHS:
-        return lengthConversion & (FixedIntegerConversion | FixedFloatConversion);
-    case CSSUnitType::CSS_CALC:
-        return m_value.calc->convertingToLengthRequiresNonNullStyle(lengthConversion);
-    default:
-        return false;
-    }
+
+    bool isFixedNumberConversion = lengthConversion & (FixedIntegerConversion | FixedFloatConversion);
+    auto dependencies = computedStyleDependencies();
+    if (!dependencies.rootProperties.isEmpty() && !conversionData.rootStyle())
+        return !isFixedNumberConversion;
+
+    if (!dependencies.properties.isEmpty() && !conversionData.style())
+        return !isFixedNumberConversion;
+
+    if (isViewportPercentageLength() && conversionData.defaultViewportFactor().isEmpty())
+        return !isFixedNumberConversion;
+
+    if (primitiveUnitType() == CSSUnitType::CSS_CALC)
+        return m_value.calc->convertingToLengthHasRequiredConversionData(lengthConversion, conversionData);
+
+    return true;
 }
 
 template<int supported> Length CSSPrimitiveValue::convertToLength(const CSSToLengthConversionData& conversionData) const
 {
-    if (convertingToLengthRequiresNonNullStyle(supported) && !conversionData.style())
+    if (!convertingToLengthHasRequiredConversionData(supported, conversionData))
         return Length(LengthType::Undefined);
     if ((supported & FixedIntegerConversion) && isLength())
         return computeLength<Length>(conversionData);

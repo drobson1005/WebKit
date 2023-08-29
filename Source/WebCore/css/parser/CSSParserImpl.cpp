@@ -59,8 +59,10 @@
 #include "StyleRule.h"
 #include "StyleRuleImport.h"
 #include "StyleSheetContents.h"
+#include "css/CSSValueList.h"
 #include <bitset>
 #include <memory>
+#include <optional>
 
 namespace WebCore {
 
@@ -134,7 +136,7 @@ static Ref<ImmutableStyleProperties> createStyleProperties(ParsedPropertyVector&
     filterProperties(true, parsedProperties, results, unusedEntries, seenProperties, seenCustomProperties);
     filterProperties(false, parsedProperties, results, unusedEntries, seenProperties, seenCustomProperties);
 
-    Ref<ImmutableStyleProperties> result = ImmutableStyleProperties::create(results.data() + unusedEntries, results.size() - unusedEntries, mode);
+    Ref<ImmutableStyleProperties> result = ImmutableStyleProperties::createDeduplicating(results.data() + unusedEntries, results.size() - unusedEntries, mode);
     parsedProperties.clear();
     return result;
 }
@@ -762,7 +764,7 @@ RefPtr<StyleRuleFontFeatureValues> CSSParserImpl::consumeFontFeatureValuesRule(C
     // @font-feature-values <family-name># { <declaration-list> }
 
     auto originalPrelude = prelude;
-    auto fontFamilies = CSSPropertyParserHelpers::consumeFamilyNameList(prelude);
+    auto fontFamilies = CSSPropertyParserHelpers::consumeFamilyNameListRaw(prelude);
     if (fontFamilies.isEmpty() || !prelude.atEnd())
         return nullptr;
     
@@ -811,7 +813,28 @@ RefPtr<StyleRuleFontPaletteValues> CSSParserImpl::consumeFontPaletteValuesRule(C
     auto declarations = consumeDeclarationListInNewNestingContext(block, StyleRuleType::FontPaletteValues);
     auto properties = createStyleProperties(declarations, m_context.mode);
 
-    AtomString fontFamily { properties->getPropertyValue(CSSPropertyFontFamily) };
+    auto fontFamilies = [&] {
+        Vector<AtomString> fontFamilies;
+        auto append = [&] (auto& value) {
+            if (value.isFontFamily())
+                fontFamilies.append(AtomString { value.stringValue() });
+        };
+        auto cssFontFamily = properties->getPropertyCSSValue(CSSPropertyFontFamily);
+        if (!cssFontFamily)
+            return fontFamilies;
+        auto cssPrimitiveFontFamilies = dynamicDowncast<CSSValueList>(*cssFontFamily);
+        if (cssPrimitiveFontFamilies) {
+            for (auto& item : *cssPrimitiveFontFamilies)
+                append(downcast<CSSPrimitiveValue>(item));
+            return fontFamilies;
+        }
+
+        auto cssPrimitiveFontFamily = dynamicDowncast<CSSPrimitiveValue>(*cssFontFamily);
+        if (!cssPrimitiveFontFamily)
+            return fontFamilies;
+        append(*cssPrimitiveFontFamily);
+        return fontFamilies;
+    }();
 
     std::optional<FontPaletteIndex> basePalette;
     if (auto basePaletteValue = properties->getPropertyCSSValue(CSSPropertyBasePalette)) {
@@ -837,7 +860,7 @@ RefPtr<StyleRuleFontPaletteValues> CSSParserImpl::consumeFontPaletteValuesRule(C
         }
     }
 
-    return StyleRuleFontPaletteValues::create(AtomString { name->stringValue() }, fontFamily, WTFMove(basePalette), WTFMove(overrideColors));
+    return StyleRuleFontPaletteValues::create(AtomString { name->stringValue() }, WTFMove(fontFamilies), WTFMove(basePalette), WTFMove(overrideColors));
 }
 
 RefPtr<StyleRuleKeyframes> CSSParserImpl::consumeKeyframesRule(CSSParserTokenRange prelude, CSSParserTokenRange block)

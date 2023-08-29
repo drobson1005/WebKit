@@ -60,12 +60,14 @@ class NetworkSessionCocoa;
 struct SessionWrapper : public CanMakeWeakPtr<SessionWrapper> {
     void initialize(NSURLSessionConfiguration *, NetworkSessionCocoa&, WebCore::StoredCredentialsPolicy, NavigatingToAppBoundDomain);
 
+    void recreateSessionWithUpdatedProxyConfigurations(NetworkSessionCocoa&);
+
     RetainPtr<NSURLSession> session;
     RetainPtr<WKNetworkSessionDelegate> delegate;
-    HashMap<NetworkDataTaskCocoa::TaskIdentifier, NetworkDataTaskCocoa*> dataTaskMap;
+    HashMap<NetworkDataTaskCocoa::TaskIdentifier, ThreadSafeWeakPtr<NetworkDataTaskCocoa>> dataTaskMap;
     HashMap<NetworkDataTaskCocoa::TaskIdentifier, DownloadID> downloadMap;
 #if HAVE(NSURLSESSION_WEBSOCKET)
-    HashMap<NetworkDataTaskCocoa::TaskIdentifier, WebSocketTask*> webSocketDataTaskMap;
+    HashMap<NetworkDataTaskCocoa::TaskIdentifier, WeakPtr<WebSocketTask>> webSocketDataTaskMap;
 #endif
 };
 
@@ -114,10 +116,9 @@ public:
     const String& dataConnectionServiceType() const;
 #endif
 
-    static bool allowsSpecificHTTPSCertificateForHost(const WebCore::AuthenticationChallenge&);
     void setClientAuditToken(const WebCore::AuthenticationChallenge&);
 
-    void continueDidReceiveChallenge(SessionWrapper&, const WebCore::AuthenticationChallenge&, NegotiatedLegacyTLS, NetworkDataTaskCocoa::TaskIdentifier, NetworkDataTaskCocoa*, CompletionHandler<void(WebKit::AuthenticationChallengeDisposition, const WebCore::Credential&)>&&);
+    void continueDidReceiveChallenge(SessionWrapper&, const WebCore::AuthenticationChallenge&, NegotiatedLegacyTLS, NetworkDataTaskCocoa::TaskIdentifier, RefPtr<NetworkDataTaskCocoa>, CompletionHandler<void(WebKit::AuthenticationChallengeDisposition, const WebCore::Credential&)>&&);
 
     SessionWrapper& sessionWrapperForDownloadResume() { return m_defaultSessionSet->sessionWithCredentialStorage; }
 
@@ -146,12 +147,15 @@ public:
     void removeNetworkWebsiteData(std::optional<WallTime>, std::optional<HashSet<WebCore::RegistrableDomain>>&&, CompletionHandler<void()>&&) override;
 
     void removeDataTask(DataTaskIdentifier);
+    void removeBlobDataTask(DataTaskIdentifier);
 
 #if HAVE(NW_PROXY_CONFIG)
     const Vector<RetainPtr<nw_proxy_config_t>> proxyConfigs() const { return m_nwProxyConfigs; }
 
     void clearProxyConfigData() final;
-    void setProxyConfigData(Vector<std::pair<Vector<uint8_t>, UUID>>&&) final;
+    void setProxyConfigData(Vector<std::pair<Vector<uint8_t>, WTF::UUID>>&&) final;
+
+    void applyProxyConfigurationToSessionConfiguration(NSURLSessionConfiguration *);
 #endif
 
 private:
@@ -179,7 +183,7 @@ private:
     void removeWebSocketTask(SessionSet&, WebSocketTask&) final;
 #endif
 
-    void dataTaskWithRequest(WebPageProxyIdentifier, WebCore::ResourceRequest&&, CompletionHandler<void(DataTaskIdentifier)>&&) final;
+    void dataTaskWithRequest(WebPageProxyIdentifier, WebCore::ResourceRequest&&, const std::optional<WebCore::SecurityOriginData>& topOrigin, CompletionHandler<void(DataTaskIdentifier)>&&) final;
     void cancelDataTask(DataTaskIdentifier) final;
     void addWebPageNetworkParameters(WebPageProxyIdentifier, WebPageNetworkParameters&&) final;
     void removeWebPageNetworkParameters(WebPageProxyIdentifier) final;
@@ -210,6 +214,9 @@ private:
     bool m_fastServerTrustEvaluationEnabled { false };
     String m_dataConnectionServiceType;
     bool m_preventsSystemHTTPProxyAuthentication { false };
+
+    class BlobDataTaskClient;
+    HashMap<DataTaskIdentifier, UniqueRef<BlobDataTaskClient>> m_blobDataTasksForAPI;
     HashMap<DataTaskIdentifier, RetainPtr<NSURLSessionDataTask>> m_dataTasksForAPI;
 };
 

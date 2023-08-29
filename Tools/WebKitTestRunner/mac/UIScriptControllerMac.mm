@@ -45,6 +45,7 @@
 #import <WebKit/WKWebViewPrivate.h>
 #import <WebKit/WKWebViewPrivateForTesting.h>
 #import <mach/mach_time.h>
+#import <pal/spi/mac/NSApplicationSPI.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/WorkQueue.h>
 
@@ -316,11 +317,6 @@ void UIScriptControllerMac::copyText(JSStringRef text)
     [pasteboard setString:text->string() forType:NSPasteboardTypeString];
 }
 
-void UIScriptControllerMac::setSpellCheckerResults(JSValueRef results)
-{
-    [[LayoutTestSpellChecker checker] setResultsFromJSValue:results inContext:m_context->jsContext()];
-}
-
 static NSString *const TopLevelEventInfoKey = @"events";
 static NSString *const EventTypeKey = @"type";
 static NSString *const ViewRelativeXPositionKey = @"viewX";
@@ -437,6 +433,11 @@ void UIScriptControllerMac::sendEventStream(JSStringRef eventsJSON, JSValueRef c
 JSRetainPtr<JSStringRef> UIScriptControllerMac::scrollbarStateForScrollingNodeID(unsigned long long scrollingNodeID, bool isVertical) const
 {
     return adopt(JSStringCreateWithCFString((CFStringRef) [webView() _scrollbarStateForScrollingNodeID:scrollingNodeID isVertical:isVertical]));
+}
+
+void UIScriptControllerMac::setAppAccentColor(unsigned short red, unsigned short green, unsigned short blue)
+{
+    NSApp._accentColor = [NSColor colorWithRed:red / 255. green:green / 255. blue:blue / 255. alpha:1];
 }
 
 } // namespace WTR

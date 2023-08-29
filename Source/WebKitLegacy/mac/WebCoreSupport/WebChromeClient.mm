@@ -94,7 +94,8 @@
 #import <wtf/text/WTFString.h>
 
 #if HAVE(WEBGPU_IMPLEMENTATION)
-#import <pal/graphics/WebGPU/Impl/WebGPUCreateImpl.h>
+#import <WebCore/WebGPU.h>
+#import <WebCore/WebGPUCreateImpl.h>
 #endif
 
 #if HAVE(SHAPE_DETECTION_API_IMPLEMENTATION)
@@ -259,14 +260,9 @@ Page* WebChromeClient::createWindow(LocalFrame& frame, const WindowFeatures& fea
     
     if ([delegate respondsToSelector:@selector(webView:createWebViewWithRequest:windowFeatures:)]) {
         auto dictFeatures = adoptNS([[NSMutableDictionary alloc] initWithObjectsAndKeys:
-                                             @(features.menuBarVisible), @"menuBarVisible",
-                                             @(features.statusBarVisible), @"statusBarVisible",
-                                             @(features.toolBarVisible), @"toolBarVisible",
-                                             @(features.scrollbarsVisible), @"scrollbarsVisible",
-                                             @(features.resizable), @"resizable",
-                                             @(features.fullscreen), @"fullscreen",
-                                             @(features.dialog), @"dialog",
-                                             nil]);
+            @(features.wantsPopup()), @"wantsPopup",
+            @(features.hasAdditionalFeatures), @"hasAdditionalFeatures",
+            nil]);
         
         if (features.x)
             [dictFeatures setObject:@(*features.x) forKey:@"x"];
@@ -276,7 +272,23 @@ Page* WebChromeClient::createWindow(LocalFrame& frame, const WindowFeatures& fea
             [dictFeatures setObject:@(*features.width) forKey:@"width"];
         if (features.height)
             [dictFeatures setObject:@(*features.height) forKey:@"height"];
-        
+        if (features.popup)
+            [dictFeatures setObject:@(*features.dialog) forKey:@"popup"];
+        if (features.menuBarVisible)
+            [dictFeatures setObject:@(*features.menuBarVisible) forKey:@"menuBarVisible"];
+        if (features.statusBarVisible)
+            [dictFeatures setObject:@(*features.statusBarVisible) forKey:@"statusBarVisible"];
+        if (features.toolBarVisible)
+            [dictFeatures setObject:@(*features.toolBarVisible) forKey:@"toolBarVisible"];
+        if (features.scrollbarsVisible)
+            [dictFeatures setObject:@(*features.scrollbarsVisible) forKey:@"scrollbarsVisible"];
+        if (features.resizable)
+            [dictFeatures setObject:@(*features.resizable) forKey:@"resizable"];
+        if (features.fullscreen)
+            [dictFeatures setObject:@(*features.fullscreen) forKey:@"fullscreen"];
+        if (features.dialog)
+            [dictFeatures setObject:@(*features.dialog) forKey:@"dialog"];
+
         newWebView = CallUIDelegate(m_webView, @selector(webView:createWebViewWithRequest:windowFeatures:), nil, dictFeatures.get());
     } else if (features.dialog && [delegate respondsToSelector:@selector(webView:createWebViewModalDialogWithRequest:)])
         newWebView = CallUIDelegate(m_webView, @selector(webView:createWebViewModalDialogWithRequest:), nil);
@@ -1160,10 +1172,10 @@ void WebChromeClient::changeUniversalAccessZoomFocus(const WebCore::IntRect& vie
 }
 #endif
 
-RefPtr<PAL::WebGPU::GPU> WebChromeClient::createGPUForWebGPU() const
+RefPtr<WebCore::WebGPU::GPU> WebChromeClient::createGPUForWebGPU() const
 {
 #if HAVE(WEBGPU_IMPLEMENTATION)
-    return PAL::WebGPU::create([](PAL::WebGPU::WorkItem&& workItem) {
+    return WebCore::WebGPU::create([](WebCore::WebGPU::WorkItem&& workItem) {
         callOnMainRunLoop(WTFMove(workItem));
     });
 #else

@@ -93,8 +93,8 @@ public:
     WEBCORE_EXPORT bool shouldAvoidScrollingWhenFocusedContentIsVisible() const;
     WEBCORE_EXPORT bool shouldUseLegacySelectPopoverDismissalBehaviorInDataActivation() const;
     WEBCORE_EXPORT bool shouldIgnoreAriaForFastPathContentObservationCheck() const;
+    WEBCORE_EXPORT bool shouldIgnoreViewportArgumentsToAvoidExcessiveZoom() const;
     WEBCORE_EXPORT bool shouldLayOutAtMinimumWindowWidthWhenIgnoringScalingConstraints() const;
-    WEBCORE_EXPORT bool shouldIgnoreContentObservationForSyntheticClick(bool isFirstSyntheticClickOnPage) const;
     WEBCORE_EXPORT static bool shouldAllowNavigationToCustomProtocolWithoutUserGesture(StringView protocol, const SecurityOriginData& requesterOrigin);
 
     WEBCORE_EXPORT bool needsYouTubeMouseOutQuirk() const;
@@ -119,8 +119,6 @@ public:
     bool shouldEnableLegacyGetUserMediaQuirk() const;
 #endif
 
-    bool shouldDisableElementFullscreenQuirk() const;
-
     bool needsCanPlayAfterSeekedQuirk() const;
 
     bool shouldAvoidPastingImagesAsWebContent() const;
@@ -142,7 +140,6 @@ public:
 #if ENABLE(TRACKING_PREVENTION)
     static bool isMicrosoftTeamsRedirectURL(const URL&);
     static bool hasStorageAccessForAllLoginDomains(const HashSet<RegistrableDomain>&, const RegistrableDomain&);
-    static const String& BBCRadioPlayerURLString();
     WEBCORE_EXPORT static const String& staticRadioPlayerURLString();
     StorageAccessResult requestStorageAccessAndHandleClick(CompletionHandler<void(ShouldDispatchClick)>&&) const;
 #endif
@@ -159,15 +156,23 @@ public:
     bool shouldDisableLazyIframeLoadingQuirk() const;
 
     bool shouldDisableFetchMetadata() const;
-
-#if PLATFORM(COCOA)
-    bool shouldAdvertiseSupportForHLSSubtitleTypes() const;
-#endif
+    bool shouldDisablePushStateFilePathRestrictions() const;
 
     bool shouldDisablePopoverAttributeQuirk() const;
 
     void setNeedsConfigurableIndexedPropertiesQuirk() { m_needsConfigurableIndexedPropertiesQuirk = true; }
     bool needsConfigurableIndexedPropertiesQuirk() const;
+
+    // webkit.org/b/259091.
+    bool needsToCopyUserSelectNoneQuirk() const { return m_needsToCopyUserSelectNoneQuirk; }
+    void setNeedsToCopyUserSelectNoneQuirk() { m_needsToCopyUserSelectNoneQuirk = true; }
+
+    bool shouldEnableCanvas2DAdvancedPrivacyProtectionQuirk() const;
+    String advancedPrivacyProtectionSubstituteDataURLForText(const String&) const;
+
+    bool needsResettingTransitionCancelsRunningTransitionQuirk() const;
+
+    bool shouldStarBeFeaturePolicyDefaultValue() const;
 
 private:
     bool needsQuirks() const;
@@ -188,7 +193,6 @@ private:
     mutable std::optional<bool> m_needsFullscreenDisplayNoneQuirk;
     mutable std::optional<bool> m_shouldAvoidPastingImagesAsWebContent;
 #endif
-    mutable std::optional<bool> m_shouldDisableElementFullscreenQuirk;
 #if ENABLE(TOUCH_EVENTS)
     enum class ShouldDispatchSimulatedMouseEvents : uint8_t {
         Unknown,
@@ -227,10 +231,9 @@ private:
     mutable std::optional<bool> m_shouldNavigatorPluginsBeEmpty;
 #endif
     mutable std::optional<bool> m_shouldDisableLazyIframeLoadingQuirk;
-#if PLATFORM(COCOA)
-    mutable std::optional<bool> m_shouldAdvertiseSupportForHLSSubtitleTypes;
-#endif
     bool m_needsConfigurableIndexedPropertiesQuirk { false };
+    bool m_needsToCopyUserSelectNoneQuirk { false };
+    mutable std::optional<bool> m_shouldStarBeFeaturePolicyDefaultValueQuirk;
 };
 
 } // namespace WebCore

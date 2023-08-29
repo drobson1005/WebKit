@@ -52,6 +52,7 @@
 #include "StorageNamespace.h"
 #include "StorageNamespaceProvider.h"
 #include "TextDetectorInterface.h"
+#include "WebGPU.h"
 #include "WindowFeatures.h"
 #include "WorkerClient.h"
 #include <JavaScriptCore/VM.h>
@@ -197,7 +198,7 @@ Page* Chrome::createWindow(LocalFrame& frame, const WindowFeatures& features, co
     if (!newPage)
         return nullptr;
 
-    if (!features.noopener && !features.noreferrer)
+    if (!features.wantsNoOpener())
         m_page.storageNamespaceProvider().copySessionStorageNamespace(m_page, *newPage);
 
     return newPage;
@@ -565,7 +566,7 @@ RefPtr<GraphicsContextGL> Chrome::createGraphicsContextGL(const GraphicsContextG
 }
 #endif
 
-RefPtr<PAL::WebGPU::GPU> Chrome::createGPUForWebGPU() const
+RefPtr<WebGPU::GPU> Chrome::createGPUForWebGPU() const
 {
     return m_client->createGPUForWebGPU();
 }

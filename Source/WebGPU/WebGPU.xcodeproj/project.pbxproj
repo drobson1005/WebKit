@@ -36,6 +36,9 @@
 		1C5ACAE9273A55FD0095F8D5 /* Sampler.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C5ACAE8273A55FD0095F8D5 /* Sampler.mm */; };
 		1C5ACAEB273A560D0095F8D5 /* TextureView.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C5ACAEA273A560D0095F8D5 /* TextureView.mm */; };
 		1C9F7CDF29762F51006B5BE9 /* PresentationContext.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C9F7CDD29762F51006B5BE9 /* PresentationContext.mm */; };
+		1CA5B4F42A6F28C400E5F297 /* wgslfuzz.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1CA5B4F32A6F28C400E5F297 /* wgslfuzz.cpp */; };
+		1CA5B4FF2A6F2A5800E5F297 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CA5B4FE2A6F2A5800E5F297 /* JavaScriptCore.framework */; };
+		1CA5B5002A6F2A5E00E5F297 /* libwgsl.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CEBD7F22716B2CC00A5254D /* libwgsl.a */; };
 		1CBAB0922718CCA0006080BB /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CBAB0912718CCA0006080BB /* JavaScriptCore.framework */; };
 		1CBD2E972977DAC900BBF52C /* PresentationContextCoreAnimation.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CBD2E932977DAC900BBF52C /* PresentationContextCoreAnimation.mm */; };
 		1CBD2E992977DAC900BBF52C /* PresentationContextIOSurface.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CBD2E952977DAC900BBF52C /* PresentationContextIOSurface.mm */; };
@@ -146,6 +149,8 @@
 		979240C029753B2A0050EA2C /* PhaseTimer.h in Headers */ = {isa = PBXBuildFile; fileRef = 979240BC29753B2A0050EA2C /* PhaseTimer.h */; };
 		979240C829769AC00050EA2C /* EntryPointRewriter.h in Headers */ = {isa = PBXBuildFile; fileRef = 979240C629769AC00050EA2C /* EntryPointRewriter.h */; };
 		979240C929769AC00050EA2C /* EntryPointRewriter.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 979240C729769AC00050EA2C /* EntryPointRewriter.cpp */; };
+		979EDBB12A826B2800B4B7D0 /* GlobalSorting.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 979EDBAF2A826B2800B4B7D0 /* GlobalSorting.cpp */; };
+		979EDBB22A826B2800B4B7D0 /* GlobalSorting.h in Headers */ = {isa = PBXBuildFile; fileRef = 979EDBB02A826B2800B4B7D0 /* GlobalSorting.h */; };
 		97BCD6AE29D7422B00A82577 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CBAB0912718CCA0006080BB /* JavaScriptCore.framework */; };
 		97C36CFE29F1730100CFB379 /* Constraints.h in Headers */ = {isa = PBXBuildFile; fileRef = 97C36CFC29F1730000CFB379 /* Constraints.h */; };
 		97C36CFF29F1730100CFB379 /* Constraints.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 97C36CFD29F1730000CFB379 /* Constraints.cpp */; };
@@ -181,6 +186,13 @@
 /* End PBXBuildRule section */
 
 /* Begin PBXContainerItemProxy section */
+		1CA5B5012A6F2A5E00E5F297 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1CEBD7DA2716AFBA00A5254D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1CEBD7F12716B2CC00A5254D;
+			remoteInfo = WGSL;
+		};
 		1CEBD8272716CACC00A5254D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1CEBD7DA2716AFBA00A5254D /* Project object */;
@@ -191,6 +203,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		1CA5B4EF2A6F28C400E5F297 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 		97FA1A7D29C085740052D650 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -269,6 +290,10 @@
 		1C5ACAEA273A560D0095F8D5 /* TextureView.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = TextureView.mm; sourceTree = "<group>"; };
 		1C9F7CDD29762F51006B5BE9 /* PresentationContext.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = PresentationContext.mm; sourceTree = "<group>"; };
 		1C9F7CDE29762F51006B5BE9 /* PresentationContext.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PresentationContext.h; sourceTree = "<group>"; };
+		1CA5B4F12A6F28C400E5F297 /* wgslfuzz */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = wgslfuzz; sourceTree = BUILT_PRODUCTS_DIR; };
+		1CA5B4F32A6F28C400E5F297 /* wgslfuzz.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = wgslfuzz.cpp; sourceTree = "<group>"; };
+		1CA5B4F92A6F28E500E5F297 /* wgslfuzz.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = wgslfuzz.xcconfig; sourceTree = "<group>"; };
+		1CA5B4FE2A6F2A5800E5F297 /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.0.sdk/System/iOSSupport/System/Library/Frameworks/JavaScriptCore.framework; sourceTree = DEVELOPER_DIR; };
 		1CA7CDB12A2B284A0094071F /* WebGPUInternal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebGPUInternal.h; sourceTree = "<group>"; };
 		1CBAB0912718CCA0006080BB /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = JavaScriptCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		1CBD2E922977DAC900BBF52C /* PresentationContextCoreAnimation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PresentationContextCoreAnimation.h; sourceTree = "<group>"; };
@@ -399,6 +424,8 @@
 		979240BC29753B2A0050EA2C /* PhaseTimer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PhaseTimer.h; sourceTree = "<group>"; };
 		979240C629769AC00050EA2C /* EntryPointRewriter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = EntryPointRewriter.h; sourceTree = "<group>"; };
 		979240C729769AC00050EA2C /* EntryPointRewriter.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = EntryPointRewriter.cpp; sourceTree = "<group>"; };
+		979EDBAF2A826B2800B4B7D0 /* GlobalSorting.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = GlobalSorting.cpp; sourceTree = "<group>"; };
+		979EDBB02A826B2800B4B7D0 /* GlobalSorting.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GlobalSorting.h; sourceTree = "<group>"; };
 		97C36CFC29F1730000CFB379 /* Constraints.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Constraints.h; sourceTree = "<group>"; };
 		97C36CFD29F1730000CFB379 /* Constraints.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = Constraints.cpp; sourceTree = "<group>"; };
 		97E21C8A2A1F5DCC009CEB0E /* ASTDecrementIncrementStatement.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = ASTDecrementIncrementStatement.cpp; sourceTree = "<group>"; };
@@ -415,6 +442,15 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		1CA5B4EE2A6F28C400E5F297 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1CA5B4FF2A6F2A5800E5F297 /* JavaScriptCore.framework in Frameworks */,
+				1CA5B5002A6F2A5E00E5F297 /* libwgsl.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1CEBD7E02716AFBA00A5254D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -464,6 +500,7 @@
 				97FA1A7F29C085740052D650 /* wgslc */,
 				1CEBD7F22716B2CC00A5254D /* libwgsl.a */,
 				1CEBD7E32716AFBA00A5254D /* WebGPU.framework */,
+				1CA5B4F12A6F28C400E5F297 /* wgslfuzz */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -563,6 +600,8 @@
 				978A912B298AB8EE00B37E5E /* ContextProviderInlines.h */,
 				979240C729769AC00050EA2C /* EntryPointRewriter.cpp */,
 				979240C629769AC00050EA2C /* EntryPointRewriter.h */,
+				979EDBAF2A826B2800B4B7D0 /* GlobalSorting.cpp */,
+				979EDBB02A826B2800B4B7D0 /* GlobalSorting.h */,
 				97F547B6298055D90011D79A /* GlobalVariableRewriter.cpp */,
 				97F547B7298055D90011D79A /* GlobalVariableRewriter.h */,
 				338BB2D527B6B68700E066AB /* Lexer.cpp */,
@@ -588,6 +627,7 @@
 				1CEBD8022716BF8200A5254D /* WGSL.cpp */,
 				1CEBD7F72716B34400A5254D /* WGSL.h */,
 				97FA1A8729C085A60052D650 /* wgslc.cpp */,
+				1CA5B4F32A6F28C400E5F297 /* wgslfuzz.cpp */,
 				9776BE7529957E12002D6D93 /* WGSLShaderModule.h */,
 			);
 			path = WGSL;
@@ -601,6 +641,7 @@
 				1CEBD7FC2716B64400A5254D /* WebGPU.xcconfig */,
 				1CEBD7FD2716B64F00A5254D /* WGSL.xcconfig */,
 				97FA1AA229C0BB700052D650 /* wgslc.xcconfig */,
+				1CA5B4F92A6F28E500E5F297 /* wgslfuzz.xcconfig */,
 			);
 			path = Configurations;
 			sourceTree = "<group>";
@@ -612,6 +653,7 @@
 				0D30F93A29F1FBE40055D9F1 /* CoreVideo.framework */,
 				1CEBD82D2716CB1600A5254D /* Foundation.framework */,
 				664C92FC286A66090008D143 /* IOSurface.framework */,
+				1CA5B4FE2A6F2A5800E5F297 /* JavaScriptCore.framework */,
 				1CBAB0912718CCA0006080BB /* JavaScriptCore.framework */,
 				1CEBD8302716CB3800A5254D /* libicucore.tbd */,
 				1CEBD8292716CAE700A5254D /* libWTF.a */,
@@ -803,6 +845,7 @@
 				978A912A298AB60200B37E5E /* ContextProvider.h in Headers */,
 				978A912C298AB8EE00B37E5E /* ContextProviderInlines.h in Headers */,
 				979240C829769AC00050EA2C /* EntryPointRewriter.h in Headers */,
+				979EDBB22A826B2800B4B7D0 /* GlobalSorting.h in Headers */,
 				97F547B9298055D90011D79A /* GlobalVariableRewriter.h in Headers */,
 				338BB2D427B6B66C00E066AB /* Lexer.h in Headers */,
 				978A9126298A4E8400B37E5E /* MangleNames.h in Headers */,
@@ -825,6 +868,24 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
+		1CA5B4F02A6F28C400E5F297 /* wgslfuzz */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1CA5B4F82A6F28C400E5F297 /* Build configuration list for PBXNativeTarget "wgslfuzz" */;
+			buildPhases = (
+				1CA5B4ED2A6F28C400E5F297 /* Sources */,
+				1CA5B4EE2A6F28C400E5F297 /* Frameworks */,
+				1CA5B4EF2A6F28C400E5F297 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1CA5B5022A6F2A5E00E5F297 /* PBXTargetDependency */,
+			);
+			name = wgslfuzz;
+			productName = wgslfuzz;
+			productReference = 1CA5B4F12A6F28C400E5F297 /* wgslfuzz */;
+			productType = "com.apple.product-type.tool";
+		};
 		1CEBD7E22716AFBA00A5254D /* WebGPU */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1CEBD7EA2716AFBA00A5254D /* Build configuration list for PBXNativeTarget "WebGPU" */;
@@ -890,6 +951,9 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1330;
 				TargetAttributes = {
+					1CA5B4F02A6F28C400E5F297 = {
+						CreatedOnToolsVersion = 15.0;
+					};
 					1CEBD7E22716AFBA00A5254D = {
 						CreatedOnToolsVersion = 13.3;
 					};
@@ -917,6 +981,7 @@
 				1CEBD7E22716AFBA00A5254D /* WebGPU */,
 				1CEBD7F12716B2CC00A5254D /* WGSL */,
 				97FA1A7E29C085740052D650 /* wgslc */,
+				1CA5B4F02A6F28C400E5F297 /* wgslfuzz */,
 			);
 		};
 /* End PBXProject section */
@@ -953,6 +1018,14 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1CA5B4ED2A6F28C400E5F297 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1CA5B4F42A6F28C400E5F297 /* wgslfuzz.cpp in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1CEBD7DF2716AFBA00A5254D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1004,6 +1077,7 @@
 				97E21C972A2512F7009CEB0E /* ConstantValue.cpp in Sources */,
 				97C36CFF29F1730100CFB379 /* Constraints.cpp in Sources */,
 				979240C929769AC00050EA2C /* EntryPointRewriter.cpp in Sources */,
+				979EDBB12A826B2800B4B7D0 /* GlobalSorting.cpp in Sources */,
 				97F547B8298055D90011D79A /* GlobalVariableRewriter.cpp in Sources */,
 				338BB2D627B6B68700E066AB /* Lexer.cpp in Sources */,
 				978A9125298A4E8400B37E5E /* MangleNames.cpp in Sources */,
@@ -1031,6 +1105,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		1CA5B5022A6F2A5E00E5F297 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1CEBD7F12716B2CC00A5254D /* WGSL */;
+			targetProxy = 1CA5B5012A6F2A5E00E5F297 /* PBXContainerItemProxy */;
+		};
 		1CEBD8282716CACC00A5254D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 1CEBD7F12716B2CC00A5254D /* WGSL */;
@@ -1039,6 +1118,27 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1CA5B4F52A6F28C400E5F297 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1CA5B4F92A6F28E500E5F297 /* wgslfuzz.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		1CA5B4F62A6F28C400E5F297 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1CA5B4F92A6F28E500E5F297 /* wgslfuzz.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		1CA5B4F72A6F28C400E5F297 /* Production */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1CA5B4F92A6F28E500E5F297 /* wgslfuzz.xcconfig */;
+			buildSettings = {
+			};
+			name = Production;
+		};
 		1CEBD7E82716AFBA00A5254D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1CEBD7FB2716B5B400A5254D /* DebugRelease.xcconfig */;
@@ -1126,6 +1226,16 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1CA5B4F82A6F28C400E5F297 /* Build configuration list for PBXNativeTarget "wgslfuzz" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1CA5B4F52A6F28C400E5F297 /* Debug */,
+				1CA5B4F62A6F28C400E5F297 /* Release */,
+				1CA5B4F72A6F28C400E5F297 /* Production */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Production;
+		};
 		1CEBD7DD2716AFBA00A5254D /* Build configuration list for PBXProject "WebGPU" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

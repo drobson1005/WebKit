@@ -76,11 +76,11 @@
 #include "CSSTimingFunctionValue.h"
 #include "CSSTransformListValue.h"
 #include "CSSUnresolvedColor.h"
+#include "CSSValueKeywords.h"
 #include "CSSValuePair.h"
 #include "CSSValuePool.h"
 #include "CSSVariableData.h"
 #include "CSSVariableParser.h"
-#include "CSSWordBoundaryDetectionValue.h"
 #include "CalculationCategory.h"
 #include "ColorConversion.h"
 #include "ColorInterpolation.h"
@@ -95,7 +95,6 @@
 #include "StyleColor.h"
 #include "TimingFunction.h"
 #include "WebKitFontFamilyNames.h"
-#include "WordBoundaryDetection.h"
 #include <wtf/SortedArrayMap.h>
 #include <wtf/text/StringConcatenateNumbers.h>
 #include <wtf/text/TextStream.h>
@@ -268,7 +267,9 @@ struct IntegerTypeRawKnownTokenTypeFunctionConsumer {
         auto rangeCopy = range;
         if (auto value = consumeCalcRawWithKnownTokenTypeFunction(rangeCopy, CalculationCategory::Number, { }, ValueRange::All)) {
             range = rangeCopy;
-            return clampTo<IntType>(std::round(std::max(value->doubleValue(), computeMinimumValue(integerRange))));
+            // https://drafts.csswg.org/css-values-4/#integers
+            // Rounding to the nearest integer requires rounding in the direction of +∞ when the fractional portion is exactly 0.5.
+            return clampTo<IntType>(std::floor(std::max(value->doubleValue(), computeMinimumValue(integerRange)) + 0.5));
         }
 
         return std::nullopt;
@@ -541,17 +542,22 @@ struct LengthRawKnownTokenTypeDimensionConsumer {
 
         auto unitType = token.unitType();
         switch (unitType) {
-        case CSSUnitType::CSS_QUIRKY_EMS:
+        case CSSUnitType::CSS_QUIRKY_EM:
             if (parserMode != UASheetMode)
                 return std::nullopt;
             FALLTHROUGH;
-        case CSSUnitType::CSS_EMS:
-        case CSSUnitType::CSS_REMS:
-        case CSSUnitType::CSS_LHS:
-        case CSSUnitType::CSS_RLHS:
-        case CSSUnitType::CSS_CHS:
+        case CSSUnitType::CSS_EM:
+        case CSSUnitType::CSS_REM:
+        case CSSUnitType::CSS_LH:
+        case CSSUnitType::CSS_RLH:
+        case CSSUnitType::CSS_CAP:
+        case CSSUnitType::CSS_RCAP:
+        case CSSUnitType::CSS_CH:
+        case CSSUnitType::CSS_RCH:
         case CSSUnitType::CSS_IC:
-        case CSSUnitType::CSS_EXS:
+        case CSSUnitType::CSS_RIC:
+        case CSSUnitType::CSS_EX:
+        case CSSUnitType::CSS_REX:
         case CSSUnitType::CSS_PX:
         case CSSUnitType::CSS_CM:
         case CSSUnitType::CSS_MM:
@@ -802,12 +808,15 @@ struct ResolutionCSSPrimitiveValueWithCalcWithKnownTokenTypeFunctionConsumer {
 
 struct ResolutionCSSPrimitiveValueWithCalcWithKnownTokenTypeDimensionConsumer {
     static constexpr CSSParserTokenType tokenType = DimensionToken;
-    static RefPtr<CSSPrimitiveValue> consume(CSSParserTokenRange& range, const CSSCalcSymbolTable&, ValueRange, CSSParserMode, UnitlessQuirk, UnitlessZeroQuirk)
+    static RefPtr<CSSPrimitiveValue> consume(CSSParserTokenRange& range, const CSSCalcSymbolTable&, ValueRange valueRange, CSSParserMode, UnitlessQuirk, UnitlessZeroQuirk)
     {
         ASSERT(range.peek().type() == DimensionToken);
 
-        if (auto unit = range.peek().unitType(); unit == CSSUnitType::CSS_DPPX || unit == CSSUnitType::CSS_X || unit == CSSUnitType::CSS_DPI || unit == CSSUnitType::CSS_DPCM)
+        if (auto unit = range.peek().unitType(); unit == CSSUnitType::CSS_DPPX || unit == CSSUnitType::CSS_X || unit == CSSUnitType::CSS_DPI || unit == CSSUnitType::CSS_DPCM) {
+            if (valueRange == ValueRange::NonNegative && range.peek().numericValue() < 0)
+                return nullptr;
             return CSSPrimitiveValue::create(range.consumeIncludingWhitespace().numericValue(), unit);
+        }
 
         return nullptr;
     }
@@ -1500,7 +1509,7 @@ RefPtr<CSSPrimitiveValue> consumeTime(CSSParserTokenRange& range, CSSParserMode 
 
 RefPtr<CSSPrimitiveValue> consumeResolution(CSSParserTokenRange& range)
 {
-    return consumeMetaConsumer<ResolutionConsumer>(range, { }, ValueRange::All, CSSParserMode::HTMLStandardMode, UnitlessQuirk::Forbid, UnitlessZeroQuirk::Forbid);
+    return consumeMetaConsumer<ResolutionConsumer>(range, { }, ValueRange::NonNegative, CSSParserMode::HTMLStandardMode, UnitlessQuirk::Forbid, UnitlessZeroQuirk::Forbid);
 }
 
 #if ENABLE(CSS_CONIC_GRADIENTS)
@@ -4482,9 +4491,6 @@ static RefPtr<CSSImageSetOptionValue> consumeImageSetOption(CSSParserTokenRange&
                 return nullptr;
 
             if (optionalArgument->isResolution()) {
-                // ValueRange only clamps calc() expressions so we still need to check for negative "raw" resolutions (e.g. -2x) which are invalid.
-                if (optionalArgument->floatValue() < 0)
-                    return nullptr;
                 resolution = optionalArgument;
                 result->setResolution(optionalArgument.releaseNonNull());
                 continue;
@@ -4879,7 +4885,7 @@ AtomString consumeFamilyNameRaw(CSSParserTokenRange& range)
     return concatenateFamilyName(range);
 }
 
-Vector<AtomString> consumeFamilyNameList(CSSParserTokenRange& range)
+Vector<AtomString> consumeFamilyNameListRaw(CSSParserTokenRange& range)
 {
     Vector<AtomString> result;
     do {
@@ -5513,6 +5519,13 @@ RefPtr<CSSValue> consumeFamilyName(CSSParserTokenRange& range)
     return CSSValuePool::singleton().createFontFamilyValue(familyName);
 }
 
+RefPtr<CSSValue> consumeFamilyNameList(CSSParserTokenRange& range)
+{
+    return consumeCommaSeparatedListWithoutSingleValueOptimization(range, [] (auto& range) {
+        return consumeFamilyName(range);
+    });
+}
+
 static RefPtr<CSSValue> consumeGenericFamily(CSSParserTokenRange& range)
 {
     return consumeIdentRange(range, CSSValueSerif, CSSValueWebkitBody);
@@ -5550,6 +5563,11 @@ RefPtr<CSSValue> consumeCounterIncrement(CSSParserTokenRange& range)
 }
 
 RefPtr<CSSValue> consumeCounterReset(CSSParserTokenRange& range)
+{
+    return consumeCounter(range, 0);
+}
+
+RefPtr<CSSValue> consumeCounterSet(CSSParserTokenRange& range)
 {
     return consumeCounter(range, 0);
 }
@@ -5904,6 +5922,84 @@ static RefPtr<CSSValue> consumeSteps(CSSParserTokenRange& range)
     return CSSStepsTimingFunctionValue::create(*stepsValue, stepPosition);
 }
 
+static RefPtr<CSSValue> consumeLinear(CSSParserTokenRange& range)
+{
+    ASSERT(range.peek().functionId() == CSSValueLinear);
+    auto rangeCopy = range;
+    auto args = consumeFunction(rangeCopy);
+
+    struct Step {
+        double output;
+        std::optional<double> input { std::nullopt };
+    };
+    Vector<Step> steps;
+    auto largestInput = -std::numeric_limits<double>::infinity();
+    bool lastPointIsExtraPoint = false;
+    while (true) {
+        auto output = consumeNumberRaw(args);
+        if (!output)
+            break;
+
+        steps.append({ output->value });
+        lastPointIsExtraPoint = false;
+
+        args.consumeWhitespace();
+        if (auto input = consumePercentRaw(args)) {
+            largestInput = std::max(input->value / 100.0, largestInput);
+            steps.last().input = largestInput;
+
+            args.consumeWhitespace();
+            if (auto extraPoint = consumePercentRaw(args)) {
+                largestInput = std::max(extraPoint->value / 100.0, largestInput);
+                steps.append({ steps.last().output, largestInput });
+                lastPointIsExtraPoint = true;
+            }
+        } else if (steps.size() == 1) {
+            largestInput = 0.0;
+            steps.last().input = largestInput;
+        }
+
+        if (!consumeCommaIncludingWhitespace(args))
+            break;
+    }
+
+    if (!args.atEnd() || steps.size() < 2 || (steps.size() == 2 && lastPointIsExtraPoint))
+        return nullptr;
+
+    if (!lastPointIsExtraPoint && !steps.last().input)
+        steps.last().input = std::max(1.0, largestInput);
+
+    Vector<LinearTimingFunction::Point> points;
+    points.reserveInitialCapacity(steps.size());
+
+    std::optional<size_t> missingInputRunStart;
+    for (size_t i = 0; i <= steps.size(); ++i) {
+        if (i < steps.size() && !steps[i].input) {
+            if (!missingInputRunStart)
+                missingInputRunStart = i;
+            continue;
+        }
+
+        if (missingInputRunStart) {
+            double inputLow = missingInputRunStart > 0 ? *steps[*missingInputRunStart - 1].input : 0.0;
+            double inputHigh = i < steps.size() ? *steps[i].input : std::max(1.0, largestInput);
+            double inputAverage = (inputLow + inputHigh) / (i - *missingInputRunStart + 1);
+            for (size_t j = *missingInputRunStart; j < i; ++j)
+                points.uncheckedAppend({ steps[j].output, inputAverage * (j - *missingInputRunStart + 1) });
+
+            missingInputRunStart = std::nullopt;
+        }
+
+        if (i < steps.size() && steps[i].input)
+            points.uncheckedAppend({ steps[i].output, *steps[i].input });
+    }
+    ASSERT(!missingInputRunStart);
+    ASSERT(points.size() == steps.size());
+
+    range = rangeCopy;
+    return CSSLinearTimingFunctionValue::create(WTFMove(points));
+}
+
 static RefPtr<CSSValue> consumeCubicBezier(CSSParserTokenRange& range)
 {
     ASSERT(range.peek().functionId() == CSSValueCubicBezier);
@@ -5998,13 +6094,23 @@ RefPtr<CSSValue> consumeTimingFunction(CSSParserTokenRange& range, const CSSPars
         break;
     }
 
-    CSSValueID function = range.peek().functionId();
-    if (function == CSSValueCubicBezier)
+    switch (range.peek().functionId()) {
+    case CSSValueLinear:
+        return consumeLinear(range);
+
+    case CSSValueCubicBezier:
         return consumeCubicBezier(range);
-    if (function == CSSValueSteps)
+
+    case CSSValueSteps:
         return consumeSteps(range);
-    if (context.springTimingFunctionEnabled && function == CSSValueSpring)
-        return consumeSpringFunction(range);
+
+    case CSSValueSpring:
+        return context.springTimingFunctionEnabled ? consumeSpringFunction(range) : nullptr;
+
+    default:
+        break;
+    }
+
     return nullptr;
 }
 
@@ -7431,6 +7537,11 @@ bool isSelfPositionOrLeftOrRightKeyword(CSSValueID id)
     return isSelfPositionKeyword(id) || isLeftOrRightKeyword(id);
 }
 
+bool isGridBreadthIdent(CSSValueID id)
+{
+    return identMatches<CSSValueMinContent, CSSValueWebkitMinContent, CSSValueMaxContent, CSSValueWebkitMaxContent, CSSValueAuto>(id);
+}
+
 RefPtr<CSSValue> consumeSelfPositionOverflowPosition(CSSParserTokenRange& range, IsPositionKeyword isPositionKeyword)
 {
     ASSERT(isPositionKeyword);
@@ -7656,7 +7767,7 @@ bool parseGridTemplateAreasRow(StringView gridRowNames, NamedGridAreaMap& gridAr
 static RefPtr<CSSPrimitiveValue> consumeGridBreadth(CSSParserTokenRange& range, CSSParserMode mode)
 {
     const CSSParserToken& token = range.peek();
-    if (identMatches<CSSValueMinContent, CSSValueWebkitMinContent, CSSValueMaxContent, CSSValueWebkitMaxContent, CSSValueAuto>(token.id()))
+    if (isGridBreadthIdent(token.id()))
         return consumeIdent(range);
     if (token.type() == DimensionToken && token.unitType() == CSSUnitType::CSS_FR) {
         if (range.peek().numericValue() < 0)
@@ -8241,12 +8352,29 @@ Vector<FontTechnology> consumeFontTech(CSSParserTokenRange& range, bool singleVa
         if (arg.type() != IdentToken)
             return { };
         auto technology = fromCSSValueID<FontTechnology>(arg.id());
-        if (technology != FontTechnology::Invalid && FontCustomPlatformData::supportsTechnology(technology))
-            technologies.append(technology);
+        if (technology == FontTechnology::Invalid)
+            return { };
+        technologies.append(technology);
     } while (consumeCommaIncludingWhitespace(args) && !singleValue);
     if (!args.atEnd())
         return { };
     return technologies;
+}
+
+static bool isFontFormatKeywordValid(CSSValueID id)
+{
+    switch (id) {
+    case CSSValueCollection:
+    case CSSValueEmbeddedOpentype:
+    case CSSValueOpentype:
+    case CSSValueSvg:
+    case CSSValueTruetype:
+    case CSSValueWoff:
+    case CSSValueWoff2:
+        return true;
+    default:
+        return false;
+    }
 }
 
 String consumeFontFormat(CSSParserTokenRange& range, bool rejectStringValues)
@@ -8257,12 +8385,11 @@ String consumeFontFormat(CSSParserTokenRange& range, bool rejectStringValues)
     auto& arg = args.consumeIncludingWhitespace();
     if (!args.atEnd())
         return nullString();
-    if (arg.type() != IdentToken && (rejectStringValues || arg.type() != StringToken))
-        return nullString();
-    auto format = arg.value().toString();
-    if (arg.type() == IdentToken && !FontCustomPlatformData::supportsFormat(format))
-        return nullString();
-    return format;
+    if (arg.type() == IdentToken && isFontFormatKeywordValid(arg.id()))
+        return arg.value().toString();
+    if (arg.type() == StringToken && !rejectStringValues)
+        return arg.value().toString();
+    return nullString();
 }
 
 // MARK: @font-palette-values
@@ -8507,34 +8634,6 @@ RefPtr<CSSValue> consumeTextAutospace(CSSParserTokenRange& range)
         return value;
     }
     return nullptr;
-}
-
-RefPtr<CSSPrimitiveValue> consumeLang(CSSParserTokenRange& range)
-{
-    // https://drafts.csswg.org/css-text-4/#typedef-word-boundary-detection-lang
-    if (auto ident = consumeCustomIdent(range))
-        return ident;
-    return consumeString(range);
-}
-
-RefPtr<CSSWordBoundaryDetectionValue> consumeWordBoundaryDetection(CSSParserTokenRange& range)
-{
-    // https://drafts.csswg.org/css-text-4/#propdef-word-boundary-detection
-    // normal | auto(<lang>)
-    if (auto value = consumeIdent<CSSValueNormal>(range))
-        return CSSWordBoundaryDetectionValue::create(WordBoundaryDetectionNormal { });
-
-    if (range.peek().functionId() != CSSValueAuto)
-        return nullptr;
-
-    auto args = consumeFunction(range);
-
-    auto lang = consumeLang(args);
-    if (!lang || !args.atEnd())
-        return nullptr;
-
-    ASSERT(lang->isString() || lang->isCustomIdent());
-    return CSSWordBoundaryDetectionValue::create(WordBoundaryDetectionAuto { lang->stringValue() });
 }
 
 } // namespace CSSPropertyParserHelpers

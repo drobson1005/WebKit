@@ -31,12 +31,9 @@
 #include <wtf/CheckedRef.h>
 #include <wtf/WeakPtr.h>
 
-namespace WebCore {
-class ResourceRequest;
-}
-
 namespace WebKit {
 
+class RemotePageProxy;
 class VisitedLinkStore;
 class WebFrameProxy;
 class WebProcessProxy;
@@ -44,16 +41,18 @@ class WebProcessProxy;
 class ProvisionalFrameProxy : public CanMakeWeakPtr<ProvisionalFrameProxy> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    ProvisionalFrameProxy(WebFrameProxy&, Ref<WebProcessProxy>&&, const WebCore::ResourceRequest&);
+    ProvisionalFrameProxy(WebFrameProxy&, WebProcessProxy&, RefPtr<RemotePageProxy>&&);
     ~ProvisionalFrameProxy();
 
     WebProcessProxy& process() { return m_process.get(); }
+    RefPtr<RemotePageProxy> takeRemotePageProxy();
 
     WebCore::LayerHostingContextIdentifier layerHostingContextIdentifier() const { return m_layerHostingContextIdentifier; }
 
 private:
     CheckedRef<WebFrameProxy> m_frame;
     Ref<WebProcessProxy> m_process;
+    RefPtr<RemotePageProxy> m_remotePageProxy;
     Ref<VisitedLinkStore> m_visitedLinkStore;
     WebCore::PageIdentifier m_pageID;
     WebPageProxyIdentifier m_webPageID;

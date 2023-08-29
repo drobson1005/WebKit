@@ -61,6 +61,9 @@ NOT_REFCOUNTED_RECEIVER_ATTRIBUTE = 'NotRefCounted'
 NOT_STREAM_ENCODABLE_ATTRIBUTE = 'NotStreamEncodable'
 NOT_STREAM_ENCODABLE_REPLY_ATTRIBUTE = 'NotStreamEncodableReply'
 STREAM_BATCHED_ATTRIBUTE = 'StreamBatched'
+CAN_DISPATCH_OUT_OF_ORDER_ATTRIBUTE = 'CanDispatchOutOfOrder'
+REPLY_CAN_DISPATCH_OUT_OF_ORDER_ATTRIBUTE = 'ReplyCanDispatchOutOfOrder'
+NOT_USING_IPC_CONNECTION_ATTRIBUTE = 'NotUsingIPCConnection'
 
 attributes_to_generate_validators = {
     "messageAllowedWhenWaitingForSyncReply": [ALLOWEDWHENWAITINGFORSYNCREPLY_ATTRIBUTE, SYNCHRONOUS_ATTRIBUTE, STREAM_ATTRIBUTE],
@@ -136,13 +139,21 @@ def types_that_must_be_moved():
     return [
         'IPC::Connection::Handle',
         'IPC::StreamServerConnection::Handle',
+        'MachSendRight',
+        'std::optional<MachSendRight>',
+        'std::optional<WebKit::SharedVideoFrame::Buffer>',
         'Vector<WebKit::SharedMemory::Handle>',
+        'WebCore::GraphicsContextGL::EGLImageSource',
         'WebKit::ConsumerSharedCARingBuffer::Handle',
+        'WebKit::GPUProcessConnectionParameters',
         'WebKit::ImageBufferBackendHandle',
         'WebKit::ShareableBitmap::Handle',
         'WebKit::ShareableResource::Handle',
         'WebKit::SharedMemory::Handle',
+        'WebKit::SharedVideoFrame',
+        'WebKit::SharedVideoFrame::Buffer',
         'WebKit::UpdateInfo',
+        'WebKit::WebProcessCreationParameters',
         'Win32Handle',
         'std::optional<Win32Handle>'
     ]
@@ -195,6 +206,8 @@ def message_to_struct_declaration(receiver, message):
     result.append('\n')
     result.append('    static IPC::MessageName name() { return IPC::MessageName::%s_%s; }\n' % (receiver.name, message.name))
     result.append('    static constexpr bool isSync = %s;\n' % ('false', 'true')[message.reply_parameters is not None and message.has_attribute(SYNCHRONOUS_ATTRIBUTE)])
+    result.append('    static constexpr bool canDispatchOutOfOrder = %s;\n' % ('false', 'true')[message.has_attribute(CAN_DISPATCH_OUT_OF_ORDER_ATTRIBUTE)])
+    result.append('    static constexpr bool replyCanDispatchOutOfOrder = %s;\n' % ('false', 'true')[message.reply_parameters is not None and message.has_attribute(REPLY_CAN_DISPATCH_OUT_OF_ORDER_ATTRIBUTE)])
     if receiver.has_attribute(STREAM_ATTRIBUTE):
         result.append('    static constexpr bool isStreamEncodable = %s;\n' % ('true', 'false')[message.has_attribute(NOT_STREAM_ENCODABLE_ATTRIBUTE)])
         if message.reply_parameters is not None:
@@ -257,7 +270,6 @@ def serialized_identifiers():
         'WebCore::BroadcastChannelIdentifier',
         'WebCore::DOMCacheIdentifier',
         'WebCore::DictationContext',
-        'WebCore::DisplayList::ItemBufferIdentifier',
         'WebCore::ElementIdentifier',
         'WebCore::FetchIdentifier',
         'WebCore::FileSystemHandleIdentifier',
@@ -295,14 +307,12 @@ def serialized_identifiers():
         'WebKit::ContentWorldIdentifier',
         'WebKit::DataTaskIdentifier',
         'WebKit::DownloadID',
-        'WebKit::FormSubmitListenerIdentifier',
         'WebKit::GeolocationIdentifier',
         'WebKit::GraphicsContextGLIdentifier',
         'WebKit::IPCConnectionTesterIdentifier',
         'WebKit::IPCStreamTesterIdentifier',
         'WebKit::LegacyCustomProtocolID',
         'WebKit::LibWebRTCResolverIdentifier',
-        'WebKit::MDNSRegisterIdentifier',
         'WebKit::MarkSurfacesAsVolatileRequestIdentifier',
         'WebKit::MediaRecorderIdentifier',
         'WebKit::NetworkResourceLoadIdentifier',
@@ -370,6 +380,7 @@ def types_that_cannot_be_forward_declared():
         'WebCore::GraphicsContextGL::EGLImageSource',
         'WebCore::GraphicsContextGLAttributes',
         'WebCore::IntDegrees',
+        'WebCore::MediaAccessDenialReason',
         'WebCore::ModalContainerControlType',
         'WebCore::NativeImageReference',
         'WebCore::PathArc',
@@ -537,21 +548,31 @@ def handler_function(receiver, message):
 
 
 def async_message_statement(receiver, message):
-    dispatch_function_args = ['decoder', 'this', '&%s' % handler_function(receiver, message)]
+    if receiver.has_attribute(NOT_USING_IPC_CONNECTION_ATTRIBUTE) and message.reply_parameters is not None and not message.has_attribute(SYNCHRONOUS_ATTRIBUTE):
+        dispatch_function_args = ['decoder', 'WTFMove(replyHandler)', 'this', '&%s' % handler_function(receiver, message)]
+    else:
+        dispatch_function_args = ['decoder', 'this', '&%s' % handler_function(receiver, message)]
 
     dispatch_function = 'handleMessage'
     if message.reply_parameters is not None and not message.has_attribute(SYNCHRONOUS_ATTRIBUTE):
         dispatch_function += 'Async'
     if message.has_attribute(CALL_WITH_REPLY_ID_ATTRIBUTE):
         dispatch_function += 'WithReplyID'
+    if receiver.has_attribute(NOT_USING_IPC_CONNECTION_ATTRIBUTE):
+        dispatch_function += 'WithoutUsingIPCConnection'
 
-    connection = 'connection'
+    connection = 'connection, '
     if receiver.has_attribute(STREAM_ATTRIBUTE):
-        connection = 'connection.connection()'
+        connection = 'connection.connection(), '
+    if receiver.has_attribute(NOT_USING_IPC_CONNECTION_ATTRIBUTE):
+        connection = ''
 
     result = []
-    result.append('    if (decoder.messageName() == Messages::%s::%s::name())\n' % (receiver.name, message.name))
-    result.append('        return IPC::%s<Messages::%s::%s>(%s, %s);\n' % (dispatch_function, receiver.name, message.name, connection, ', '.join(dispatch_function_args)))
+    if message.runtime_enablement:
+        result.append('    if (decoder.messageName() == Messages::%s::%s::name() && %s)\n' % (receiver.name, message.name, message.runtime_enablement))
+    else:
+        result.append('    if (decoder.messageName() == Messages::%s::%s::name())\n' % (receiver.name, message.name))
+    result.append('        return IPC::%s<Messages::%s::%s>(%s%s);\n' % (dispatch_function, receiver.name, message.name, connection, ', '.join(dispatch_function_args)))
     return result
 
 
@@ -569,7 +590,10 @@ def sync_message_statement(receiver, message):
         maybe_reply_encoder = ', replyEncoder'
 
     result = []
-    result.append('    if (decoder.messageName() == Messages::%s::%s::name())\n' % (receiver.name, message.name))
+    if message.runtime_enablement:
+        result.append('    if (decoder.messageName() == Messages::%s::%s::name() && %s)\n' % (receiver.name, message.name, message.runtime_enablement))
+    else:
+        result.append('    if (decoder.messageName() == Messages::%s::%s::name())\n' % (receiver.name, message.name))
     result.append('        return IPC::%s<Messages::%s::%s>(connection, decoder%s, this, &%s);\n' % (dispatch_function, receiver.name, message.name, maybe_reply_encoder, handler_function(receiver, message)))
     return result
 
@@ -659,54 +683,7 @@ def headers_for_type(type):
         'MediaTime': ['<wtf/MediaTime.h>'],
         'MonotonicTime': ['<wtf/MonotonicTime.h>'],
         'PAL::SessionID': ['<pal/SessionID.h>'],
-        'PAL::WebGPU::AddressMode': ['<pal/graphics/WebGPU/WebGPUAddressMode.h>'],
-        'PAL::WebGPU::BlendFactor': ['<pal/graphics/WebGPU/WebGPUBlendFactor.h>'],
-        'PAL::WebGPU::BlendOperation': ['<pal/graphics/WebGPU/WebGPUBlendOperation.h>'],
-        'PAL::WebGPU::BufferBindingType': ['<pal/graphics/WebGPU/WebGPUBufferBindingType.h>'],
-        'PAL::WebGPU::BufferDynamicOffset': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::BufferUsageFlags': ['<pal/graphics/WebGPU/WebGPUBufferUsage.h>'],
-        'PAL::WebGPU::CanvasCompositingAlphaMode': ['<pal/graphics/WebGPU/WebGPUCanvasCompositingAlphaMode.h>'],
-        'PAL::WebGPU::ColorWriteFlags': ['<pal/graphics/WebGPU/WebGPUColorWrite.h>'],
-        'PAL::WebGPU::CompareFunction': ['<pal/graphics/WebGPU/WebGPUCompareFunction.h>'],
-        'PAL::WebGPU::CompilationMessageType': ['<pal/graphics/WebGPU/WebGPUCompilationMessageType.h>'],
-        'PAL::WebGPU::ComputePassTimestampLocation': ['<pal/graphics/WebGPU/WebGPUComputePassTimestampLocation.h>'],
-        'PAL::WebGPU::CullMode': ['<pal/graphics/WebGPU/WebGPUCullMode.h>'],
-        'PAL::WebGPU::DepthBias': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::DeviceLostReason': ['<pal/graphics/WebGPU/WebGPUDeviceLostReason.h>'],
-        'PAL::WebGPU::ErrorFilter': ['<pal/graphics/WebGPU/WebGPUErrorFilter.h>'],
-        'PAL::WebGPU::FeatureName': ['<pal/graphics/WebGPU/WebGPUFeatureName.h>'],
-        'PAL::WebGPU::FilterMode': ['<pal/graphics/WebGPU/WebGPUFilterMode.h>'],
-        'PAL::WebGPU::FlagsConstant': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::FrontFace': ['<pal/graphics/WebGPU/WebGPUFrontFace.h>'],
-        'PAL::WebGPU::Index32': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::IndexFormat': ['<pal/graphics/WebGPU/WebGPUIndexFormat.h>'],
-        'PAL::WebGPU::IntegerCoordinate': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::LoadOp': ['<pal/graphics/WebGPU/WebGPULoadOp.h>'],
-        'PAL::WebGPU::MapModeFlags': ['<pal/graphics/WebGPU/WebGPUMapMode.h>'],
-        'PAL::WebGPU::PipelineStatisticName': ['<pal/graphics/WebGPU/WebGPUPipelineStatisticName.h>'],
-        'PAL::WebGPU::PowerPreference': ['<pal/graphics/WebGPU/WebGPUPowerPreference.h>'],
-        'PAL::WebGPU::PredefinedColorSpace': ['<pal/graphics/WebGPU/WebGPUPredefinedColorSpace.h>'],
-        'PAL::WebGPU::PrimitiveTopology': ['<pal/graphics/WebGPU/WebGPUPrimitiveTopology.h>'],
-        'PAL::WebGPU::QueryType': ['<pal/graphics/WebGPU/WebGPUQueryType.h>'],
-        'PAL::WebGPU::RenderPassTimestampLocation': ['<pal/graphics/WebGPU/WebGPURenderPassTimestampLocation.h>'],
-        'PAL::WebGPU::SampleMask': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::SamplerBindingType': ['<pal/graphics/WebGPU/WebGPUSamplerBindingType.h>'],
-        'PAL::WebGPU::ShaderStageFlags': ['<pal/graphics/WebGPU/WebGPUShaderStage.h>'],
-        'PAL::WebGPU::SignedOffset32': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::Size32': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::Size64': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::StencilOperation': ['<pal/graphics/WebGPU/WebGPUStencilOperation.h>'],
-        'PAL::WebGPU::StencilValue': ['<pal/graphics/WebGPU/WebGPUIntegralTypes.h>'],
-        'PAL::WebGPU::StorageTextureAccess': ['<pal/graphics/WebGPU/WebGPUStorageTextureAccess.h>'],
-        'PAL::WebGPU::StoreOp': ['<pal/graphics/WebGPU/WebGPUStoreOp.h>'],
-        'PAL::WebGPU::TextureAspect': ['<pal/graphics/WebGPU/WebGPUTextureAspect.h>'],
-        'PAL::WebGPU::TextureDimension': ['<pal/graphics/WebGPU/WebGPUTextureDimension.h>'],
-        'PAL::WebGPU::TextureFormat': ['<pal/graphics/WebGPU/WebGPUTextureFormat.h>'],
-        'PAL::WebGPU::TextureSampleType': ['<pal/graphics/WebGPU/WebGPUTextureSampleType.h>'],
-        'PAL::WebGPU::TextureUsageFlags': ['<pal/graphics/WebGPU/WebGPUTextureUsage.h>'],
-        'PAL::WebGPU::TextureViewDimension': ['<pal/graphics/WebGPU/WebGPUTextureViewDimension.h>'],
-        'PAL::WebGPU::VertexFormat': ['<pal/graphics/WebGPU/WebGPUVertexFormat.h>'],
-        'PAL::WebGPU::VertexStepMode': ['<pal/graphics/WebGPU/WebGPUVertexStepMode.h>'],
+        'PAL::UserInterfaceIdiom': ['<pal/system/ios/UserInterfaceIdiom.h>'],
         'PlatformXR::Device::FrameData': ['<WebCore/PlatformXR.h>'],
         'PlatformXR::ReferenceSpaceType': ['<WebCore/PlatformXR.h>'],
         'PlatformXR::SessionFeature': ['<WebCore/PlatformXR.h>'],
@@ -715,7 +692,7 @@ def headers_for_type(type):
         'Seconds': ['<wtf/Seconds.h>'],
         'String': ['<wtf/text/WTFString.h>'],
         'URL': ['<wtf/URLHash.h>'],
-        'UUID': ['<wtf/UUID.h>'],
+        'WTF::UUID': ['<wtf/UUID.h>'],
         'WallTime': ['<wtf/WallTime.h>'],
         'WebCore::AlternativeTextType': ['<WebCore/AlternativeTextClient.h>'],
         'WebCore::ApplyTrackingPrevention': ['<WebCore/NetworkStorageSession.h>'],
@@ -724,6 +701,7 @@ def headers_for_type(type):
         'WebCore::BackForwardItemIdentifier': ['<WebCore/ProcessQualified.h>', '<WebCore/BackForwardItemIdentifier.h>', '<wtf/ObjectIdentifier.h>'],
         'WebCore::BlendMode': ['<WebCore/GraphicsTypes.h>'],
         'WebCore::BrowsingContextGroupSwitchDecision': ['<WebCore/FrameLoaderTypes.h>'],
+        'WebCore::CaptureSourceError': ['<WebCore/RealtimeMediaSource.h>'],
         'WebCore::CaretAnimatorType': ['<WebCore/CaretAnimator.h>'],
         'WebCore::COEPDisposition': ['<WebCore/CrossOriginEmbedderPolicy.h>'],
         'WebCore::ColorSchemePreference': ['<WebCore/DocumentLoader.h>'],
@@ -733,7 +711,6 @@ def headers_for_type(type):
         'WebCore::CreateNewGroupForHighlight': ['<WebCore/AppHighlight.h>'],
         'WebCore::DiagnosticLoggingDomain': ['<WebCore/DiagnosticLoggingDomain.h>'],
         'WebCore::DictationContext': ['<WebCore/DictationContext.h>'],
-        'WebCore::DisplayList::ItemBufferIdentifier': ['<WebCore/DisplayList.h>'],
         'WebCore::DocumentMarkerLineStyle': ['<WebCore/GraphicsTypes.h>'],
         'WebCore::DOMPasteAccessCategory': ['<WebCore/DOMPasteAccess.h>'],
         'WebCore::DOMPasteAccessResponse': ['<WebCore/DOMPasteAccess.h>'],
@@ -812,8 +789,10 @@ def headers_for_type(type):
         'WebCore::ScrollPinningBehavior': ['<WebCore/ScrollTypes.h>'],
         'WebCore::ScrollbarOrientation': ['<WebCore/ScrollTypes.h>'],
         'WebCore::SecurityPolicyViolationEventInit': ['<WebCore/SecurityPolicyViolationEvent.h>'],
+        'WebCore::SeekTarget': ['<WebCore/MediaPlayer.h>'],
         'WebCore::SelectionDirection': ['<WebCore/VisibleSelection.h>'],
         'WebCore::SelectionGeometry': ['"EditorState.h"'],
+        'WebCore::ServiceWorkerIsInspectable': ['<WebCore/ServiceWorkerTypes.h>'],
         'WebCore::ServiceWorkerJobIdentifier': ['<WebCore/ServiceWorkerTypes.h>'],
         'WebCore::ServiceWorkerOrClientData': ['<WebCore/ServiceWorkerTypes.h>', '<WebCore/ServiceWorkerClientData.h>', '<WebCore/ServiceWorkerData.h>'],
         'WebCore::ServiceWorkerOrClientIdentifier': ['<WebCore/ServiceWorkerTypes.h>'],
@@ -847,6 +826,54 @@ def headers_for_type(type):
         'WebCore::VideoPlaybackQualityMetrics': ['<WebCore/VideoPlaybackQualityMetrics.h>'],
         'WebCore::VideoPresetData': ['<WebCore/VideoPreset.h>'],
         'WebCore::ViewportAttributes': ['<WebCore/ViewportArguments.h>'],
+        'WebCore::WebGPU::AddressMode': ['<WebCore/WebGPUAddressMode.h>'],
+        'WebCore::WebGPU::BlendFactor': ['<WebCore/WebGPUBlendFactor.h>'],
+        'WebCore::WebGPU::BlendOperation': ['<WebCore/WebGPUBlendOperation.h>'],
+        'WebCore::WebGPU::BufferBindingType': ['<WebCore/WebGPUBufferBindingType.h>'],
+        'WebCore::WebGPU::BufferDynamicOffset': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::BufferUsageFlags': ['<WebCore/WebGPUBufferUsage.h>'],
+        'WebCore::WebGPU::CanvasCompositingAlphaMode': ['<WebCore/WebGPUCanvasCompositingAlphaMode.h>'],
+        'WebCore::WebGPU::ColorWriteFlags': ['<WebCore/WebGPUColorWrite.h>'],
+        'WebCore::WebGPU::CompareFunction': ['<WebCore/WebGPUCompareFunction.h>'],
+        'WebCore::WebGPU::CompilationMessageType': ['<WebCore/WebGPUCompilationMessageType.h>'],
+        'WebCore::WebGPU::ComputePassTimestampLocation': ['<WebCore/WebGPUComputePassTimestampLocation.h>'],
+        'WebCore::WebGPU::CullMode': ['<WebCore/WebGPUCullMode.h>'],
+        'WebCore::WebGPU::DepthBias': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::DeviceLostReason': ['<WebCore/WebGPUDeviceLostReason.h>'],
+        'WebCore::WebGPU::ErrorFilter': ['<WebCore/WebGPUErrorFilter.h>'],
+        'WebCore::WebGPU::FeatureName': ['<WebCore/WebGPUFeatureName.h>'],
+        'WebCore::WebGPU::FilterMode': ['<WebCore/WebGPUFilterMode.h>'],
+        'WebCore::WebGPU::FlagsConstant': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::FrontFace': ['<WebCore/WebGPUFrontFace.h>'],
+        'WebCore::WebGPU::Index32': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::IndexFormat': ['<WebCore/WebGPUIndexFormat.h>'],
+        'WebCore::WebGPU::IntegerCoordinate': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::LoadOp': ['<WebCore/WebGPULoadOp.h>'],
+        'WebCore::WebGPU::MapModeFlags': ['<WebCore/WebGPUMapMode.h>'],
+        'WebCore::WebGPU::PipelineStatisticName': ['<WebCore/WebGPUPipelineStatisticName.h>'],
+        'WebCore::WebGPU::PowerPreference': ['<WebCore/WebGPUPowerPreference.h>'],
+        'WebCore::WebGPU::PredefinedColorSpace': ['<WebCore/WebGPUPredefinedColorSpace.h>'],
+        'WebCore::WebGPU::PrimitiveTopology': ['<WebCore/WebGPUPrimitiveTopology.h>'],
+        'WebCore::WebGPU::QueryType': ['<WebCore/WebGPUQueryType.h>'],
+        'WebCore::WebGPU::RenderPassTimestampLocation': ['<WebCore/WebGPURenderPassTimestampLocation.h>'],
+        'WebCore::WebGPU::SampleMask': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::SamplerBindingType': ['<WebCore/WebGPUSamplerBindingType.h>'],
+        'WebCore::WebGPU::ShaderStageFlags': ['<WebCore/WebGPUShaderStage.h>'],
+        'WebCore::WebGPU::SignedOffset32': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::Size32': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::Size64': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::StencilOperation': ['<WebCore/WebGPUStencilOperation.h>'],
+        'WebCore::WebGPU::StencilValue': ['<WebCore/WebGPUIntegralTypes.h>'],
+        'WebCore::WebGPU::StorageTextureAccess': ['<WebCore/WebGPUStorageTextureAccess.h>'],
+        'WebCore::WebGPU::StoreOp': ['<WebCore/WebGPUStoreOp.h>'],
+        'WebCore::WebGPU::TextureAspect': ['<WebCore/WebGPUTextureAspect.h>'],
+        'WebCore::WebGPU::TextureDimension': ['<WebCore/WebGPUTextureDimension.h>'],
+        'WebCore::WebGPU::TextureFormat': ['<WebCore/WebGPUTextureFormat.h>'],
+        'WebCore::WebGPU::TextureSampleType': ['<WebCore/WebGPUTextureSampleType.h>'],
+        'WebCore::WebGPU::TextureUsageFlags': ['<WebCore/WebGPUTextureUsage.h>'],
+        'WebCore::WebGPU::TextureViewDimension': ['<WebCore/WebGPUTextureViewDimension.h>'],
+        'WebCore::WebGPU::VertexFormat': ['<WebCore/WebGPUVertexFormat.h>'],
+        'WebCore::WebGPU::VertexStepMode': ['<WebCore/WebGPUVertexStepMode.h>'],
         'WebCore::WheelEventProcessingSteps': ['<WebCore/ScrollingCoordinatorTypes.h>'],
         'WebCore::WheelScrollGestureState': ['<WebCore/PlatformWheelEvent.h>'],
         'WebCore::WillContinueLoading': ['<WebCore/FrameLoaderTypes.h>'],
@@ -862,7 +889,6 @@ def headers_for_type(type):
         'WebKit::DocumentEditingContextRequest': ['"DocumentEditingContext.h"'],
         'WebKit::FindDecorationStyle': ['"WebFindOptions.h"'],
         'WebKit::FindOptions': ['"WebFindOptions.h"'],
-        'WebKit::FormSubmitListenerIdentifier': ['"IdentifierTypes.h"'],
         'WebKit::GestureRecognizerState': ['"GestureTypes.h"'],
         'WebKit::GestureType': ['"GestureTypes.h"'],
         'WebKit::LastNavigationWasAppInitiated': ['"AppPrivacyReport.h"'],
@@ -1066,7 +1092,7 @@ def generate_message_handler(receiver):
     result.append('#include "JSIPCBinding.h"\n')
     result.append("#endif\n\n")
 
-    result.append('namespace WebKit {\n\n')
+    result.append('namespace %s {\n\n' % receiver.namespace)
 
     async_messages = []
     sync_messages = []
@@ -1111,7 +1137,10 @@ def generate_message_handler(receiver):
         result.append('}\n')
     else:
         receive_variant = receiver.name if receiver.has_attribute(LEGACY_RECEIVER_ATTRIBUTE) else ''
-        result.append('void %s::didReceive%sMessage(IPC::Connection& connection, IPC::Decoder& decoder)\n' % (receiver.name, receive_variant))
+        if receiver.has_attribute(NOT_USING_IPC_CONNECTION_ATTRIBUTE):
+            result.append('void %s::didReceive%sMessageWithReplyHandler(IPC::Decoder& decoder, Function<void(UniqueRef<IPC::Encoder>&&)>&& replyHandler)\n' % (receiver.name, receive_variant))
+        else:
+            result.append('void %s::didReceive%sMessage(IPC::Connection& connection, IPC::Decoder& decoder)\n' % (receiver.name, receive_variant))
         result.append('{\n')
         if not (receiver.has_attribute(NOT_REFCOUNTED_RECEIVER_ATTRIBUTE) or receiver.has_attribute(STREAM_ATTRIBUTE)):
             result.append('    Ref protectedThis { *this };\n')
@@ -1122,7 +1151,8 @@ def generate_message_handler(receiver):
         if (receiver.superclass):
             result.append('    %s::didReceive%sMessage(connection, decoder);\n' % (receiver.superclass, receive_variant))
         else:
-            result.append('    UNUSED_PARAM(connection);\n')
+            if not receiver.has_attribute(NOT_USING_IPC_CONNECTION_ATTRIBUTE):
+                result.append('    UNUSED_PARAM(connection);\n')
             result.append('    UNUSED_PARAM(decoder);\n')
             result.append('#if ENABLE(IPC_TESTING_API)\n')
             result.append('    if (connection.ignoreInvalidMessageForTesting())\n')

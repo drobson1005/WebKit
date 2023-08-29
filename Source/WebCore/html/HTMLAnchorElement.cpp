@@ -56,6 +56,7 @@
 #include "SecurityOrigin.h"
 #include "SecurityPolicy.h"
 #include "Settings.h"
+#include "URLKeepingBlobAlive.h"
 #include "UserGestureIndicator.h"
 #include <wtf/IsoMallocInlines.h>
 #include <wtf/WeakHashMap.h>
@@ -126,8 +127,8 @@ static bool hasNonEmptyBox(RenderBoxModelObject* renderer)
 
     // FIXME: Since all we are checking is whether the rects are empty, could we just
     // pass in 0,0 for the layout point instead of calling localToAbsolute?
-    Vector<IntRect> rects;
-    renderer->absoluteRects(rects, flooredLayoutPoint(renderer->localToAbsolute()));
+    Vector<LayoutRect> rects;
+    renderer->boundingRects(rects, flooredLayoutPoint(renderer->localToAbsolute()));
     for (auto& rect : rects) {
         if (!rect.isEmpty())
             return true;
@@ -338,7 +339,17 @@ AtomString HTMLAnchorElement::target() const
 
 String HTMLAnchorElement::origin() const
 {
-    return SecurityOrigin::create(href()).get().toString();
+    auto url = href();
+    if (!url.isValid())
+        return emptyString();
+    return SecurityOrigin::create(url)->toString();
+}
+
+void HTMLAnchorElement::setProtocol(StringView value)
+{
+    if (auto url = href(); !url.isValid())
+        return;
+    URLDecomposition::setProtocol(value);
 }
 
 String HTMLAnchorElement::text()
@@ -614,7 +625,7 @@ void HTMLAnchorElement::handleClick(Event& event)
             systemPreviewInfo.previewRect = child->boundsInRootViewSpace();
 
         if (auto* page = document().page())
-            page->handleSystemPreview(WTFMove(completedURL), WTFMove(systemPreviewInfo));
+            page->beginSystemPreview(completedURL, document().topOrigin().data(), WTFMove(systemPreviewInfo), [keepBlobAlive = URLKeepingBlobAlive(completedURL, document().topOrigin().data())] { });
         return;
     }
 #endif
@@ -648,7 +659,7 @@ AtomString HTMLAnchorElement::effectiveTarget() const
     auto effectiveTarget = target();
     if (effectiveTarget.isEmpty())
         effectiveTarget = document().baseTarget();
-    return effectiveTarget;
+    return makeTargetBlankIfHasDanglingMarkup(effectiveTarget);
 }
 
 HTMLAnchorElement::EventType HTMLAnchorElement::eventType(Event& event)

@@ -124,13 +124,6 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
         set(WTF_CPU_UNKNOWN 1)
     endif ()
 
-    if (WTF_CPU_X86_64 AND NOT CMAKE_CROSSCOMPILING)
-        include(DetectAVX2)
-        if (AVX2_SUPPORT_FOUND)
-            set(WTF_CPU_HAS_AVX2 1)
-        endif ()
-    endif ()
-
     # -----------------------------------------------------------------------------
     # Determine the operating system
     # -----------------------------------------------------------------------------
@@ -239,6 +232,23 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     if (ENABLE_WEBCORE)
         # TODO Enforce version requirement for gperf
         find_package(Gperf 3.0.1 REQUIRED)
+    endif ()
+
+    # -----------------------------------------------------------------------------
+    # Generate a usable compile_commands.json when using unified builds
+    # -----------------------------------------------------------------------------
+    if (CMAKE_EXPORT_COMPILE_COMMANDS AND ENABLE_UNIFIED_BUILDS)
+        add_custom_target(RewriteCompileCommands
+            ALL
+            BYPRODUCTS DeveloperTools/compile_commands.json
+            DEPENDS "${CMAKE_BINARY_DIR}/compile_commands.json"
+            COMMAND "${PYTHON_EXECUTABLE}"
+                    "${CMAKE_SOURCE_DIR}/Tools/Scripts/rewrite-compile-commands"
+                    "${CMAKE_BINARY_DIR}/compile_commands.json"
+                    "${CMAKE_BINARY_DIR}/DeveloperTools/compile_commands.json"
+                    "${CMAKE_SOURCE_DIR}"
+                    "${CMAKE_BINARY_DIR}"
+        )
     endif ()
 
     # -----------------------------------------------------------------------------

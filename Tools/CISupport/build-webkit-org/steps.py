@@ -371,13 +371,7 @@ class CompileWebKit(shell.Compile, CustomFlagsMixin):
 
     def buildCommandKwargs(self, warnings):
         kwargs = super(CompileWebKit, self).buildCommandKwargs(warnings)
-        # https://bugs.webkit.org/show_bug.cgi?id=239455: The timeout needs to be >20 min to
-        # work around log output delays on slower machines.
-        # https://bugs.webkit.org/show_bug.cgi?id=247506: Only applies to Xcode 12.x.
-        if self.getProperty('fullPlatform') == 'mac-bigsur':
-            kwargs['timeout'] = 60 * 60
-        else:
-            kwargs['timeout'] = 60 * 30
+        kwargs['timeout'] = 60 * 30
         return kwargs
 
     def parseOutputLine(self, line):
@@ -1237,7 +1231,8 @@ class RunBenchmarkTests(shell.Test):
     descriptionDone = ["benchmark tests"]
     command = ["python3", "Tools/Scripts/browserperfdash-benchmark", "--plans-from-config",
                "--config-file", "../../browserperfdash-benchmark-config.txt",
-               "--browser-version", WithProperties("%(archive_revision)s")]
+               "--browser-version", WithProperties("%(archive_revision)s"),
+               "--timestamp-from-repo", "."]
 
     def start(self):
         platform = self.getProperty("platform")
@@ -1534,4 +1529,9 @@ class RebootWithUpdatedCrossTargetImage(shell.ShellCommandNewStyle):
     @defer.inlineCallbacks
     def run(self):
         rc = yield super().run()
-        defer.returnValue(FAILURE)
+        # The command reboot return success when it instructs the machine to reboot,
+        # but the machine can still take a while to stop services and actually reboot.
+        # Retry the build if reboot end sucesfully before the connection is lost.
+        if rc == SUCCESS:
+            self.build.buildFinished(['Rebooting with updated image, retrying build'], RETRY)
+        defer.returnValue(rc)

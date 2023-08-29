@@ -30,6 +30,7 @@
 #include "CSSComputedStyleDeclaration.h"
 #include "ContextDestructionObserver.h"
 #include "Cookie.h"
+#include "DocumentMarker.h"
 #include "EpochTimeStamp.h"
 #include "EventTrackingRegions.h"
 #include "ExceptionOr.h"
@@ -61,6 +62,7 @@ OBJC_CLASS VKCImageAnalysis;
 
 namespace WebCore {
 
+class AccessibilityObject;
 class AbstractRange;
 class AnimationTimeline;
 class ArtworkImageLoader;
@@ -297,6 +299,8 @@ public:
     // For animations testing, we need a way to get at pseudo elements.
     ExceptionOr<RefPtr<Element>> pseudoElement(Element&, const String&);
 
+    double preferredRenderingUpdateInterval();
+
     Node* treeScopeRootNode(Node&);
     Node* parentTreeScope(Node&);
 
@@ -419,6 +423,7 @@ public:
     bool hasGrammarMarker(int from, int length);
     bool hasAutocorrectedMarker(int from, int length);
     bool hasDictationAlternativesMarker(int from, int length);
+    bool hasCorrectionIndicatorMarker(int from, int length);
     void setContinuousSpellCheckingEnabled(bool);
     void setAutomaticQuoteSubstitutionEnabled(bool);
     void setAutomaticLinkDetectionEnabled(bool);
@@ -512,9 +517,13 @@ public:
 
     ExceptionOr<void> garbageCollectDocumentResources() const;
 
+    bool isUnderMemoryWarning();
+    bool isUnderMemoryPressure();
+
+    void beginSimulatedMemoryWarning();
+    void endSimulatedMemoryWarning();
     void beginSimulatedMemoryPressure();
     void endSimulatedMemoryPressure();
-    bool isUnderMemoryPressure();
 
     ExceptionOr<void> insertAuthorCSS(const String&) const;
     ExceptionOr<void> insertUserCSS(const String&) const;
@@ -678,6 +687,7 @@ public:
     void enableMockMediaCapabilities();
 
 #if ENABLE(SPEECH_SYNTHESIS)
+    void simulateSpeechSynthesizerVoiceListChange();
     void enableMockSpeechSynthesizer();
     void enableMockSpeechSynthesizerForMediaElement(HTMLMediaElement&);
     ExceptionOr<void> setSpeechUtteranceDuration(double);
@@ -755,6 +765,7 @@ public:
     ExceptionOr<Ref<DOMRect>> selectionBounds();
     ExceptionOr<RefPtr<StaticRange>> selectedRange();
     void setSelectionWithoutValidation(Ref<Node> baseNode, unsigned baseOffset, RefPtr<Node> extentNode, unsigned extentOffset);
+    void setSelectionFromNone();
 
     ExceptionOr<bool> isPluginUnavailabilityIndicatorObscured(Element&);
     ExceptionOr<String> unavailablePluginReplacementText(Element&);
@@ -787,6 +798,7 @@ public:
     bool isPlayerMuted(const HTMLMediaElement&) const;
     void beginAudioSessionInterruption();
     void endAudioSessionInterruption();
+    void suspendAllMediaBuffering();
 #endif
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
@@ -794,6 +806,8 @@ public:
     ExceptionOr<void> setMockMediaPlaybackTargetPickerState(const String& deviceName, const String& deviceState);
     void mockMediaPlaybackTargetPickerDismissPopup();
 #endif
+
+    bool isMonitoringWirelessRoutes() const;
 
 #if ENABLE(WEB_AUDIO)
     void setAudioContextRestrictions(AudioContext&, StringView restrictionsString);
@@ -891,7 +905,6 @@ public:
 
 #if ENABLE(WEBGL)
     enum class SimulatedWebGLContextEvent {
-        ContextChange,
         GPUStatusFailure,
         Timeout
     };
@@ -1389,10 +1402,16 @@ public:
         
     bool isUsingUISideCompositing() const;
 
+    bool readyToRetrieveComputedRoleOrLabel(Element&) const;
+    String getComputedLabel(Element&) const;
+    String getComputedRole(Element&) const;
+
 private:
     explicit Internals(Document&);
     Document* contextDocument() const;
     LocalFrame* frame() const;
+
+    AccessibilityObject* axObjectForElement(Element&) const;
 
     void updatePageActivityState(OptionSet<ActivityState> statesToChange, bool newValue);
 
@@ -1410,6 +1429,8 @@ private:
     static RefPtr<SharedBuffer> pngDataForTesting();
 
     CachedResource* resourceFromMemoryCache(const String& url);
+
+    bool hasMarkerFor(DocumentMarker::MarkerType, int from, int length);
 
 #if ENABLE(MEDIA_STREAM)
     // RealtimeMediaSource::Observer API

@@ -299,10 +299,9 @@ static IntSize computeMaximumSurfaceSize()
 {
     auto maxSize = IntSize { clampToInteger(IOSurfaceGetPropertyMaximum(kIOSurfaceWidth)), clampToInteger(IOSurfaceGetPropertyMaximum(kIOSurfaceHeight)) };
 
-#if PLATFORM(IOS_FAMILY)
     // On iOS, there's an additional 8K clamp in CA (rdar://101936907).
+    // On some macOS VMs, IOSurfaceGetPropertyMaximum() returns INT_MAX (rdar://113661708).
     maxSize.clampToMaximumSize(fallbackMaxSurfaceDimension());
-#endif
 
     if (maxSize.isZero())
         maxSize = fallbackMaxSurfaceDimension();
@@ -462,13 +461,15 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 std::optional<IOSurface::LockAndContext> IOSurface::createBitmapPlatformContext()
 {
-    IOSurface::Locker locker { *this, IOSurface::Locker::AccessMode::ReadWrite };
+    auto locker = lock<AccessMode::ReadWrite>();
+    if (!locker)
+        return std::nullopt;
     auto configuration = bitmapConfiguration();
     auto size = this->size();
-    auto context = adoptCF(CGBitmapContextCreate(locker.surfaceBaseAddress(), size.width(), size.height(), configuration.bitsPerComponent, bytesPerRow(), colorSpace().platformColorSpace(), configuration.bitmapInfo));
+    auto context = adoptCF(CGBitmapContextCreate(locker->surfaceBaseAddress(), size.width(), size.height(), configuration.bitsPerComponent, bytesPerRow(), colorSpace().platformColorSpace(), configuration.bitmapInfo));
     if (!context)
         return std::nullopt;
-    return LockAndContext { WTFMove(locker), WTFMove(context) };
+    return LockAndContext { WTFMove(*locker), WTFMove(context) };
 }
 
 SetNonVolatileResult IOSurface::state() const

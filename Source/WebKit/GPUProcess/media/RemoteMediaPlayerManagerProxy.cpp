@@ -73,7 +73,7 @@ void RemoteMediaPlayerManagerProxy::createMediaPlayer(MediaPlayerIdentifier iden
     ASSERT(m_gpuConnectionToWebProcess);
     ASSERT(!m_proxies.contains(identifier));
 
-    auto proxy = RemoteMediaPlayerProxy::create(*this, identifier, m_gpuConnectionToWebProcess->connection(), engineIdentifier, WTFMove(proxyConfiguration), m_gpuConnectionToWebProcess->videoFrameObjectHeap(), m_gpuConnectionToWebProcess->webProcessIdentity());
+    auto proxy = RemoteMediaPlayerProxy::create(*this, identifier, Ref { m_gpuConnectionToWebProcess->connection() }, engineIdentifier, WTFMove(proxyConfiguration), Ref { m_gpuConnectionToWebProcess->videoFrameObjectHeap() }, m_gpuConnectionToWebProcess->webProcessIdentity());
     m_proxies.add(identifier, WTFMove(proxy));
 }
 
@@ -97,7 +97,7 @@ void RemoteMediaPlayerManagerProxy::getSupportedTypes(MediaPlayerEnums::MediaEng
         return;
     }
 
-    HashSet<String, ASCIICaseInsensitiveHash> engineTypes;
+    HashSet<String> engineTypes;
     engine->getSupportedTypes(engineTypes);
 
     auto result = WTF::map(engineTypes, [] (auto& type) {
@@ -118,39 +118,6 @@ void RemoteMediaPlayerManagerProxy::supportsTypeAndCodecs(MediaPlayerEnums::Medi
 
     auto result = engine->supportsTypeAndCodecs(parameters);
     completionHandler(result);
-}
-
-void RemoteMediaPlayerManagerProxy::originsInMediaCache(MediaPlayerEnums::MediaEngineIdentifier engineIdentifier, const String&& path, CompletionHandler<void(HashSet<WebCore::SecurityOriginData>&&)>&& completionHandler)
-{
-    auto engine = MediaPlayer::mediaEngine(engineIdentifier);
-    if (!engine) {
-        WTFLogAlways("Failed to find media engine.");
-        completionHandler({ });
-        return;
-    }
-
-    completionHandler(engine->originsInMediaCache(path));
-}
-
-void RemoteMediaPlayerManagerProxy::clearMediaCache(MediaPlayerEnums::MediaEngineIdentifier engineIdentifier, const String&&path, WallTime modifiedSince)
-{
-    auto engine = MediaPlayer::mediaEngine(engineIdentifier);
-    if (!engine) {
-        WTFLogAlways("Failed to find media engine.");
-        return;
-    }
-
-    engine->clearMediaCache(path, modifiedSince);
-}
-
-void RemoteMediaPlayerManagerProxy::clearMediaCacheForOrigins(MediaPlayerEnums::MediaEngineIdentifier engineIdentifier, const String&& path, HashSet<WebCore::SecurityOriginData>&& origins)
-{
-    auto engine = MediaPlayer::mediaEngine(engineIdentifier);
-    if (!engine) {
-        WTFLogAlways("Failed to find media engine.");
-        return;
-    }
-    engine->clearMediaCacheForOrigins(path, origins);
 }
 
 void RemoteMediaPlayerManagerProxy::supportsKeySystem(MediaPlayerEnums::MediaEngineIdentifier engineIdentifier, const String&& keySystem, const String&& mimeType, CompletionHandler<void(bool)>&& completionHandler)

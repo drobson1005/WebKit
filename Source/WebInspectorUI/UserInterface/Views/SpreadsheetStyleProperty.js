@@ -475,6 +475,13 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
         this._cssDocumentationPopover = null;
     }
 
+    // InlineSwatch delegate
+
+    inlineSwatchGetColorVariables(inlineSwatch)
+    {
+        return this._property.ownerStyle.nodeStyles.computedStyle.variablesForType(WI.CSSStyleDeclaration.VariablesGroupType.Colors);
+    }
+
     // Private
 
     _toggle()
@@ -598,7 +605,29 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
                 innerElement.append(item);
         }
 
-        let swatch = new WI.InlineSwatch(type, valueObject, {readOnly: !this._isEditable()});
+        let variableType = null;
+        if (type === WI.InlineSwatch.Type.Variable) {
+            const variableNameStart = 4;
+            const varibleNameEnd = 1;
+            let computedColorCSSVariables = this.property.ownerStyle.nodeStyles.computedStyle.variablesForType(WI.CSSStyleDeclaration.VariablesGroupType.Colors);
+            let valueString = valueObject.toString();
+            for (let variable of computedColorCSSVariables) {
+                let index = valueString.indexOf(variable.name);
+                let match = (!index && variable.name.length === valueString.length)
+                         || (index === variableNameStart && variableNameStart + variable.name.length === valueString.length - varibleNameEnd);
+                if (match) {
+                    variableType = WI.InlineSwatch.Type.Color;
+                    break;
+                }
+            }
+            if (!variableType) {
+                valueObject = () => {
+                    return this._property.ownerStyle.nodeStyles.computedStyle.resolveVariableValue(innerElement.textContent);
+                };
+            }
+        }
+
+        let swatch = new WI.InlineSwatch(type, valueObject, {readOnly: !this._isEditable(), variableType, delegate: this});
 
         swatch.addEventListener(WI.InlineSwatch.Event.ValueChanged, function(event) {
             let value = event.data.value && event.data.value.toString();
@@ -607,16 +636,7 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
 
             innerElement.textContent = value;
             this._handleValueChange();
-
-            if (type === WI.InlineSwatch.Type.Variable)
-                this._renderValue(this._property.rawValue);
         }, this);
-
-        if (type === WI.InlineSwatch.Type.Variable) {
-            swatch.value = () => {
-                return this._property.ownerStyle.nodeStyles.computedStyle.resolveVariableValue(innerElement.textContent);
-            };
-        }
 
         swatch.addEventListener(WI.InlineSwatch.Event.Activated, function(event) {
             this._activeInlineSwatch = swatch;
@@ -794,11 +814,11 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
                 let valueObject;
                 let inlineSwatchType;
                 if (tokenType === "cubic-bezier") {
-                    valueObject = WI.CubicBezier.fromString(text);
-                    inlineSwatchType = WI.InlineSwatch.Type.Bezier;
+                    valueObject = WI.CubicBezierTimingFunction.fromString(text);
+                    inlineSwatchType = WI.InlineSwatch.Type.CubicBezierTimingFunction;
                 } else if (tokenType === "spring") {
-                    valueObject = WI.Spring.fromString(text);
-                    inlineSwatchType = WI.InlineSwatch.Type.Spring;
+                    valueObject = WI.SpringTimingFunction.fromString(text);
+                    inlineSwatchType = WI.InlineSwatch.Type.SpringTimingFunction;
                 }
 
                 if (valueObject)
@@ -807,8 +827,8 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
                     newTokens.pushAll(rawTokens);
 
                 startIndex = NaN;
-            } else if (token.value in WI.CubicBezier.keywordValues)
-                newTokens.push(this._createInlineSwatch(WI.InlineSwatch.Type.Bezier, [token], WI.CubicBezier.fromString(token.value)));
+            } else if (token.value in WI.CubicBezierTimingFunction.keywordValues)
+                newTokens.push(this._createInlineSwatch(WI.InlineSwatch.Type.CubicBezierTimingFunction, [token], WI.CubicBezierTimingFunction.fromString(token.value)));
             else if (isNaN(startIndex))
                 newTokens.push(token);
         }
@@ -940,7 +960,7 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
 
                     let text = rawTokens.reduce((accumulator, token) => accumulator + token.value, "");
                     if (this._property.ownerStyle.nodeStyles.computedStyle.resolveVariableValue(text))
-                        newTokens.push(this._createInlineSwatch(WI.InlineSwatch.Type.Variable, contents));
+                        newTokens.push(this._createInlineSwatch(WI.InlineSwatch.Type.Variable, contents, text));
                     else
                         newTokens.pushAll(contents);
                 } else {

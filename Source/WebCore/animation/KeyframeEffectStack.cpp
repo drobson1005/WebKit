@@ -42,6 +42,7 @@
 #include <wtf/PointerComparison.h>
 
 namespace WebCore {
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(KeyframeEffectStack);
 
 KeyframeEffectStack::KeyframeEffectStack()
 {
@@ -277,8 +278,16 @@ void KeyframeEffectStack::cascadeDidOverrideProperties(const HashSet<AnimatableP
 
 void KeyframeEffectStack::applyPendingAcceleratedActions() const
 {
-    for (auto& effect : m_effects)
-        effect->applyPendingAcceleratedActionsOrUpdateTimingProperties();
+    bool hasActiveAcceleratedEffect = m_effects.containsIf([](const auto& effect) {
+        return effect->canBeAccelerated() && effect->animation()->playState() == WebAnimation::PlayState::Running;
+    });
+
+    for (auto& effect : m_effects) {
+        if (hasActiveAcceleratedEffect)
+            effect->applyPendingAcceleratedActionsOrUpdateTimingProperties();
+        else
+            effect->applyPendingAcceleratedActions();
+    }
 }
 
 } // namespace WebCore

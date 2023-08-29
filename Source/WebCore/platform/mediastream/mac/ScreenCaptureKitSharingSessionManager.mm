@@ -40,30 +40,24 @@
 
 #import <pal/mac/ScreenCaptureKitSoftLink.h>
 
-using namespace WebCore;
+// FIXME: Remove this once it is in a public header.
 
-typedef NS_OPTIONS(NSUInteger, WKSCContentSharingPickerMode) {
-    WKSCContentSharingPickerModeSingleWindow          = 1 << 0,
-    WKSCContentSharingPickerModeMultipleWindows       = 1 << 1,
-    WKSCContentSharingPickerModeSingleApplication     = 1 << 2,
-    WKSCContentSharingPickerModeMultipleApplications  = 1 << 3,
-    WKSCContentSharingPickerModeSingleDisplay         = 1 << 4
-};
-
-@protocol WKSCContentSharingPickerDelegate <NSObject>
-@required
-- (void)contentSharingPicker:(SCContentSharingPicker *)picker didUpdateWithFilter:(SCContentFilter *)filter forStream:(SCStream *)stream;
-- (void)contentSharingPickerDidCancel:(SCContentSharingPicker *)picker forStream:(SCStream *)stream;
-- (void)contentSharingPickerStartDidFailWithError:(NSError *)error;
+#if HAVE(SC_CONTENT_SHARING_PICKER)
+@interface SCContentSharingPicker (SCContentSharingPicker_Pending_Public_API)
+- (void)presentPickerUsingContentStyle:(SCShareableContentStyle)contentStyle;
 @end
+#endif
+
+using namespace WebCore;
 
 @interface WebDisplayMediaPromptHelper : NSObject <SCContentSharingSessionProtocol
 #if HAVE(SC_CONTENT_SHARING_PICKER)
-    , WKSCContentSharingPickerDelegate
+    , SCContentSharingPickerObserver
 #endif
     > {
     WeakPtr<ScreenCaptureKitSharingSessionManager> _callback;
     Vector<RetainPtr<SCContentSharingSession>> _sessions;
+    BOOL _observingPicker;
 }
 
 - (instancetype)initWithCallback:(ScreenCaptureKitSharingSessionManager*)callback;
@@ -74,8 +68,10 @@ typedef NS_OPTIONS(NSUInteger, WKSCContentSharingPickerMode) {
 - (void)sessionDidChangeContent:(SCContentSharingSession *)session;
 - (void)pickerCanceledForSession:(SCContentSharingSession *)session;
 #if HAVE(SC_CONTENT_SHARING_PICKER)
+- (void)startObservingPicker:(SCContentSharingPicker *)session;
+- (void)stopObservingPicker:(SCContentSharingPicker *)session;
 - (void)contentSharingPicker:(SCContentSharingPicker *)picker didUpdateWithFilter:(SCContentFilter *)filter forStream:(SCStream *)stream;
-- (void)contentSharingPickerDidCancel:(SCContentSharingPicker *)picker forStream:(SCStream *)stream;
+- (void)contentSharingPicker:(SCContentSharingPicker *)picker didCancelForStream:(SCStream *)stream;
 - (void)contentSharingPickerStartDidFailWithError:(NSError *)error;
 #endif
 @end
@@ -84,8 +80,10 @@ typedef NS_OPTIONS(NSUInteger, WKSCContentSharingPickerMode) {
 - (instancetype)initWithCallback:(ScreenCaptureKitSharingSessionManager*)callback
 {
     self = [super init];
-    if (self)
+    if (self) {
         _callback = WeakPtr { callback };
+        _observingPicker = NO;
+    }
 
     return self;
 }
@@ -144,7 +142,7 @@ typedef NS_OPTIONS(NSUInteger, WKSCContentSharingPickerMode) {
 }
 
 #if HAVE(SC_CONTENT_SHARING_PICKER)
-- (void)contentSharingPickerDidCancel:(SCContentSharingPicker *)picker forStream:(SCStream *)stream
+- (void)contentSharingPicker:(SCContentSharingPicker *)picker didCancelForStream:(SCStream *)stream
 {
     UNUSED_PARAM(picker);
     RunLoop::main().dispatch([self, protectedSelf = RetainPtr { self }]() mutable {
@@ -167,6 +165,24 @@ typedef NS_OPTIONS(NSUInteger, WKSCContentSharingPickerMode) {
         if (_callback)
             _callback->contentSharingPickerUpdatedFilterForStream(filter.get(), stream.get());
     });
+}
+
+- (void)startObservingPicker:(SCContentSharingPicker *)picker
+{
+    if (_observingPicker)
+        return;
+
+    _observingPicker = YES;
+    [picker addObserver:self];
+}
+
+- (void)stopObservingPicker:(SCContentSharingPicker *)picker
+{
+    if (!_observingPicker)
+        return;
+
+    _observingPicker = NO;
+    [picker removeObserver:self];
 }
 #endif
 
@@ -206,12 +222,13 @@ ScreenCaptureKitSharingSessionManager::ScreenCaptureKitSharingSessionManager()
 
 ScreenCaptureKitSharingSessionManager::~ScreenCaptureKitSharingSessionManager()
 {
+    m_activeSources.clear();
+    cancelPicking();
+
     if (m_promptHelper) {
         [m_promptHelper disconnect];
         m_promptHelper = nullptr;
     }
-
-    cancelPicking();
 }
 
 void ScreenCaptureKitSharingSessionManager::cancelPicking()
@@ -229,7 +246,8 @@ void ScreenCaptureKitSharingSessionManager::cancelPicking()
     if (useSCContentSharingPicker()) {
         SCContentSharingPicker* picker = [PAL::getSCContentSharingPickerClass() sharedPicker];
         picker.active = NO;
-        picker.delegate = nullptr;
+        if (m_activeSources.isEmpty())
+            [m_promptHelper stopObservingPicker:picker];
     }
 #endif
 
@@ -422,24 +440,32 @@ bool ScreenCaptureKitSharingSessionManager::promptWithSCContentSharingPicker(Dis
     ASSERT(useSCContentSharingPicker());
 
     auto configuration = adoptNS([PAL::allocSCContentSharingPickerConfigurationInstance() init]);
+    SCShareableContentStyle shareableContentStyle = SCShareableContentStyleWindow;
     switch (promptType) {
     case DisplayCapturePromptType::Window:
-        [configuration setAllowedPickingModes:(SCContentSharingPickerMode)WKSCContentSharingPickerModeSingleWindow];
+        [configuration setAllowedPickerModes:SCContentSharingPickerModeSingleWindow];
+        shareableContentStyle = SCShareableContentStyleWindow;
         break;
     case DisplayCapturePromptType::Screen:
-        [configuration setAllowedPickingModes:(SCContentSharingPickerMode)WKSCContentSharingPickerModeSingleDisplay];
+        [configuration setAllowedPickerModes:SCContentSharingPickerModeSingleDisplay];
+        shareableContentStyle = SCShareableContentStyleDisplay;
         break;
     case DisplayCapturePromptType::UserChoose:
-        [configuration setAllowedPickingModes:(SCContentSharingPickerMode)(WKSCContentSharingPickerModeSingleWindow | WKSCContentSharingPickerModeSingleDisplay)];
+        [configuration setAllowedPickerModes:SCContentSharingPickerModeSingleWindow | SCContentSharingPickerModeSingleDisplay];
+        shareableContentStyle = SCShareableContentStyleNone;
         break;
     }
 
     SCContentSharingPicker* picker = [PAL::getSCContentSharingPickerClass() sharedPicker];
+    picker.defaultConfiguration = configuration.get();
+    picker.maximumStreamCount = @(std::numeric_limits<unsigned>::max());
     picker.active = YES;
-    picker.maxStreamCount = @(1);
-    picker.configuration = configuration.get();
-    picker.delegate = (id<SCContentSharingPickerDelegate> _Nullable)m_promptHelper.get();
-    [picker present];
+    [m_promptHelper startObservingPicker:picker];
+
+    if (shareableContentStyle != SCShareableContentStyleNone && [picker respondsToSelector:@selector(presentPickerUsingContentStyle:)])
+        [picker presentPickerUsingContentStyle:shareableContentStyle];
+    else
+        [picker present];
 
     return true;
 #else
@@ -483,6 +509,19 @@ static bool operator==(const SCContentFilter* filter, const CaptureDevice& devic
 
     ASSERT_NOT_REACHED();
     return false;
+}
+
+void ScreenCaptureKitSharingSessionManager::cancelPendingSessionForDevice(const CaptureDevice& device)
+{
+    ASSERT(isMainThread());
+
+    if (m_pendingContentFilter.get() != device) {
+        RELEASE_LOG_ERROR(WebRTC, "ScreenCaptureKitSharingSessionManager::createSessionSourceForDevice - unknown capture device.");
+        return;
+    }
+
+    m_pendingContentFilter = nullptr;
+    cancelPicking();
 }
 
 RefPtr<ScreenCaptureSessionSource> ScreenCaptureKitSharingSessionManager::createSessionSourceForDevice(WeakPtr<ScreenCaptureSessionSource::Observer> observer, const CaptureDevice& device, SCStreamConfiguration* configuration, SCStreamDelegate* delegate)
@@ -530,13 +569,12 @@ void ScreenCaptureKitSharingSessionManager::cleanupSessionSource(ScreenCaptureSe
         return;
     }
 
-    auto activeSource = m_activeSources[index];
     m_activeSources.remove(index);
 
-    if (!activeSource)
-        return;
+    if (!promptingInProgress())
+        cancelPicking();
 
-    auto sharingSession = activeSource->sharingSession();
+    auto sharingSession = source.sharingSession();
     if (!sharingSession)
         return;
 

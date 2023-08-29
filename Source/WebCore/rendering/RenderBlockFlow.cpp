@@ -395,7 +395,7 @@ bool RenderBlockFlow::recomputeLogicalWidthAndColumnWidth()
 LayoutUnit RenderBlockFlow::columnGap() const
 {
     if (style().columnGap().isNormal())
-        return style().fontDescription().computedPixelSize(); // "1em" is recommended as the normal gap setting. Matches <p> margins.
+        return LayoutUnit(style().fontDescription().computedSize()); // "1em" is recommended as the normal gap setting. Matches <p> margins.
     return valueForLength(style().columnGap().length(), availableLogicalWidth());
 }
 
@@ -4998,8 +4998,6 @@ LayoutUnit RenderBlockFlow::blockFormattingContextInFlowBlockLevelContentHeight(
     // Child's margin box starting location + border box height + margin after size
     return logicalMarginBoxTopForChild(*lastChild) + logicalMarginBoxHeightForChild(*lastChild);
 }
-
-
 
 }
 // namespace WebCore

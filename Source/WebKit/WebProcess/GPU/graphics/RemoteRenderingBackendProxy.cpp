@@ -98,6 +98,27 @@ void RemoteRenderingBackendProxy::ensureGPUProcessConnection()
         });
     }
 }
+template<typename T>
+auto RemoteRenderingBackendProxy::send(T&& message)
+{
+    auto result = streamConnection().send(WTFMove(message), renderingBackendIdentifier(), defaultTimeout);
+    if (UNLIKELY(result != IPC::Error::NoError)) {
+        RELEASE_LOG(RemoteLayerBuffers, "[pageProxyID=%" PRIu64 ", webPageID=%" PRIu64 ", renderingBackend=%" PRIu64 "] RemoteRenderingBackendProxy::send - failed, name:%" PUBLIC_LOG_STRING ", error:%" PUBLIC_LOG_STRING,
+            m_parameters.pageProxyID.toUInt64(), m_parameters.pageID.toUInt64(), m_parameters.identifier.toUInt64(), IPC::description(T::name()), IPC::errorAsString(result));
+    }
+    return result;
+}
+
+template<typename T>
+auto RemoteRenderingBackendProxy::sendSync(T&& message)
+{
+    auto result = streamConnection().sendSync(WTFMove(message), renderingBackendIdentifier(), defaultTimeout);
+    if (UNLIKELY(!result.succeeded())) {
+        RELEASE_LOG(RemoteLayerBuffers, "[pageProxyID=%" PRIu64 ", webPageID=%" PRIu64 ", renderingBackend=%" PRIu64 "] RemoteRenderingBackendProxy::sendSync - failed, name:%" PUBLIC_LOG_STRING ", error:%" PUBLIC_LOG_STRING,
+            m_parameters.pageProxyID.toUInt64(), m_parameters.pageID.toUInt64(), m_parameters.identifier.toUInt64(), IPC::description(T::name()), IPC::errorAsString(result.error));
+    }
+    return result;
+}
 
 void RemoteRenderingBackendProxy::didClose(IPC::Connection&)
 {
@@ -260,21 +281,19 @@ void RemoteRenderingBackendProxy::cacheDecomposedGlyphs(Ref<DecomposedGlyphs>&& 
 
 void RemoteRenderingBackendProxy::cacheGradient(Ref<Gradient>&& gradient)
 {
-    auto renderingResourceIdentifier = gradient->renderingResourceIdentifier();
-    send(Messages::RemoteRenderingBackend::CacheGradient(WTFMove(gradient), renderingResourceIdentifier));
+    send(Messages::RemoteRenderingBackend::CacheGradient(WTFMove(gradient)));
 }
 
 void RemoteRenderingBackendProxy::cacheFilter(Ref<Filter>&& filter)
 {
-    auto renderingResourceIdentifier = filter->renderingResourceIdentifier();
-    send(Messages::RemoteRenderingBackend::CacheFilter(WTFMove(filter), renderingResourceIdentifier));
+    send(Messages::RemoteRenderingBackend::CacheFilter(WTFMove(filter)));
 }
 
-void RemoteRenderingBackendProxy::releaseAllRemoteResources()
+void RemoteRenderingBackendProxy::releaseAllDrawingResources()
 {
     if (!m_streamConnection)
         return;
-    send(Messages::RemoteRenderingBackend::ReleaseAllResources());
+    send(Messages::RemoteRenderingBackend::ReleaseAllDrawingResources());
 }
 
 void RemoteRenderingBackendProxy::releaseRenderingResource(RenderingResourceIdentifier renderingResourceIdentifier)
@@ -357,10 +376,10 @@ auto RemoteRenderingBackendProxy::prepareBuffersForDisplay(const Vector<LayerPre
         if (!identifier)
             return nullptr;
 
-        auto* buffer = m_remoteResourceCacheProxy.cachedImageBuffer(*identifier);
+        auto buffer = m_remoteResourceCacheProxy.cachedImageBuffer(*identifier);
         if (!buffer)
             return nullptr;
-            
+
         if (handle) {
             if (auto* backend = buffer->ensureBackendCreated()) {
                 auto* sharing = backend->toBackendSharing();
@@ -368,7 +387,7 @@ auto RemoteRenderingBackendProxy::prepareBuffersForDisplay(const Vector<LayerPre
                     downcast<ImageBufferBackendHandleSharing>(*sharing).setBackendHandle(WTFMove(*handle));
             }
         }
-        
+
         if (isFrontBuffer) {
             // We know the GPU Process always sets the new front buffer to be non-volatile.
             buffer->setVolatilityState(VolatilityState::NonVolatile);
@@ -436,7 +455,7 @@ void RemoteRenderingBackendProxy::didPaintLayers()
 bool RemoteRenderingBackendProxy::dispatchMessage(IPC::Connection& connection, IPC::Decoder& decoder)
 {
     if (decoder.messageReceiverName() == Messages::RemoteImageBufferProxy::messageReceiverName()) {
-        auto* imageBuffer = m_remoteResourceCacheProxy.cachedImageBuffer(RenderingResourceIdentifier { decoder.destinationID() });
+        auto imageBuffer = m_remoteResourceCacheProxy.cachedImageBuffer(RenderingResourceIdentifier { decoder.destinationID() });
         if (imageBuffer)
             imageBuffer->didReceiveMessage(connection, decoder);
         // Messages to already removed instances are ok.

@@ -99,10 +99,6 @@ public:
         : m_element(&element)
         , m_parentStyle(parentStyle)
     {
-        bool resetStyleInheritance = hasShadowRootParent(element) && downcast<ShadowRoot>(element.parentNode())->resetStyleInheritance();
-        if (resetStyleInheritance)
-            m_parentStyle = nullptr;
-
         auto& document = element.document();
         auto* documentElement = document.documentElement();
         if (!documentElement || documentElement == &element)
@@ -147,6 +143,7 @@ Resolver::Resolver(Document& document, ScopeType scopeType)
     : m_document(document)
     , m_scopeType(scopeType)
     , m_ruleSets(*this)
+    , m_matchedDeclarationsCache(*this)
     , m_matchAuthorAndUserStyles(settings().authorAndUserStylesEnabled())
 {
     initialize();
@@ -226,11 +223,6 @@ void Resolver::addKeyframeStyle(Ref<StyleRuleKeyframes>&& rule)
     document().keyframesRuleDidChange(animationName);
 }
 
-static inline bool isAtShadowBoundary(const Element& element)
-{
-    return is<ShadowRoot>(element.parentNode());
-}
-
 BuilderContext Resolver::builderContext(const State& state)
 {
     return {
@@ -263,7 +255,7 @@ ResolvedStyle Resolver::styleForElement(const Element& element, const Resolution
         style.setIsLink(true);
         InsideLink linkState = document().visitedLinkState().determineLinkState(element);
         if (linkState != InsideLink::NotInside) {
-            bool forceVisited = InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassVisited);
+            bool forceVisited = InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassType::Visited);
             if (forceVisited)
                 linkState = InsideLink::InsideVisited;
         }
@@ -606,7 +598,7 @@ void Resolver::clearCachedDeclarationsAffectedByViewportUnits()
 void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResult)
 {
     unsigned cacheHash = MatchedDeclarationsCache::computeHash(matchResult);
-    auto includedProperties = PropertyCascade::IncludedProperties::All;
+    auto includedProperties = PropertyCascade::allProperties();
 
     auto& style = *state.style();
     auto& parentStyle = *state.parentStyle();
@@ -619,7 +611,10 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
         // element context. This is fast and saves memory by reusing the style data structures.
         style.copyNonInheritedFrom(*cacheEntry->renderStyle);
 
-        if (parentStyle.inheritedEqual(*cacheEntry->parentRenderStyle) && !isAtShadowBoundary(element)) {
+        bool hasExplicitlyInherited = cacheEntry->renderStyle->hasExplicitlyInheritedProperties();
+        bool inheritedStyleEqual = parentStyle.inheritedEqual(*cacheEntry->parentRenderStyle);
+
+        if (inheritedStyleEqual && !hasExplicitlyInherited) {
             InsideLink linkStatus = state.style()->insideLink();
             // If the cache item parent style has identical inherited properties to the current parent style then the
             // resulting style will be identical too. We copy the inherited properties over from the cache and are done.
@@ -634,7 +629,12 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
             return;
         }
 
-        includedProperties = PropertyCascade::IncludedProperties::InheritedOnly;
+        if (!inheritedStyleEqual)
+            includedProperties.add(PropertyCascade::PropertyType::Inherited);
+        if (hasExplicitlyInherited)
+            includedProperties.add(PropertyCascade::PropertyType::ExplicitlyInherited);
+        if (!inheritedStyleEqual && !parentStyle.inheritedCustomPropertiesEqual(*cacheEntry->parentRenderStyle))
+            includedProperties.add(PropertyCascade::PropertyType::VariableReference);
     }
 
     if (elementTypeHasAppearanceFromUAStyle(element)) {

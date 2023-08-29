@@ -284,18 +284,11 @@ MediaTime MediaPlayerPrivateRemote::currentMediaTime() const
     return std::min(std::max(calculatedCurrentTime, MediaTime::zeroTime()), durationMediaTime());
 }
 
-void MediaPlayerPrivateRemote::seek(const MediaTime& time)
+void MediaPlayerPrivateRemote::seekToTarget(const WebCore::SeekTarget& target)
 {
     m_seeking = true;
-    m_cachedMediaTime = time;
-    connection().send(Messages::RemoteMediaPlayerProxy::Seek(time), m_id);
-}
-
-void MediaPlayerPrivateRemote::seekWithTolerance(const MediaTime& time, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance)
-{
-    m_seeking = true;
-    m_cachedMediaTime = time;
-    connection().send(Messages::RemoteMediaPlayerProxy::SeekWithTolerance(time, negativeTolerance, positiveTolerance), m_id);
+    m_cachedMediaTime = target.time;
+    connection().send(Messages::RemoteMediaPlayerProxy::SeekToTarget(target), m_id);
 }
 
 bool MediaPlayerPrivateRemote::didLoadingProgress() const
@@ -368,7 +361,8 @@ void MediaPlayerPrivateRemote::muteChanged(bool muted)
 
 void MediaPlayerPrivateRemote::timeChanged(RemoteMediaPlayerState&& state)
 {
-    m_seeking = false;
+    if (!state.seeking)
+        m_seeking = false;
     updateCachedState(WTFMove(state));
     if (auto player = m_player.get())
         player->timeChanged();
@@ -379,6 +373,11 @@ void MediaPlayerPrivateRemote::durationChanged(RemoteMediaPlayerState&& state)
     updateCachedState(WTFMove(state));
     if (auto player = m_player.get())
         player->durationChanged();
+}
+
+bool MediaPlayerPrivateRemote::seeking() const
+{
+    return m_seeking;
 }
 
 void MediaPlayerPrivateRemote::rateChanged(double rate)
@@ -841,8 +840,9 @@ PlatformLayer* MediaPlayerPrivateRemote::platformLayer() const
 {
 #if PLATFORM(COCOA)
     if (!m_videoLayer && m_layerHostingContextID) {
-        m_videoLayer = createVideoLayerRemote(const_cast<MediaPlayerPrivateRemote*>(this), m_layerHostingContextID, m_videoFullscreenGravity, expandedIntSize(m_videoInlineSize));
-        m_videoLayerManager->setVideoLayer(m_videoLayer.get(), expandedIntSize(m_videoInlineSize));
+        auto expandedVideoLayerSize = expandedIntSize(videoLayerSize());
+        m_videoLayer = createVideoLayerRemote(const_cast<MediaPlayerPrivateRemote*>(this), m_layerHostingContextID, m_videoFullscreenGravity, expandedVideoLayerSize);
+        m_videoLayerManager->setVideoLayer(m_videoLayer.get(), expandedVideoLayerSize);
     }
     return m_videoLayerManager->videoInlineLayer();
 #else
@@ -987,14 +987,6 @@ void MediaPlayerPrivateRemote::setPresentationSize(const IntSize& size)
 {
     connection().send(Messages::RemoteMediaPlayerProxy::SetPresentationSize(size), m_id);
 }
-
-#if PLATFORM(COCOA)
-void MediaPlayerPrivateRemote::setVideoInlineSizeFenced(const FloatSize& size, const WTF::MachSendRight& machSendRight)
-{
-    connection().send(Messages::RemoteMediaPlayerProxy::SetVideoInlineSizeFenced(size, machSendRight), m_id);
-    m_videoInlineSize = size;
-}
-#endif
 
 void MediaPlayerPrivateRemote::paint(GraphicsContext& context, const FloatRect& rect)
 {

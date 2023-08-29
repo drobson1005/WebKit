@@ -105,6 +105,14 @@ struct ShadowRootInit;
 using ElementName = NodeName;
 using ExplicitlySetAttrElementsMap = HashMap<QualifiedName, Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>>>;
 
+// https://drafts.csswg.org/css-contain/#relevant-to-the-user
+enum class ContentRelevancy : uint8_t {
+    OnScreen = 1 << 0,
+    Focused = 1 << 1,
+    IsInTopLayer = 1 << 2,
+    // FIXME: add Selected (see https://bugs.webkit.org/show_bug.cgi?id=258194).
+};
+
 namespace Style {
 class Resolver;
 enum class Change : uint8_t;
@@ -197,7 +205,7 @@ public:
 
     void scrollBy(const ScrollToOptions&);
     void scrollBy(double x, double y);
-    virtual void scrollTo(const ScrollToOptions&, ScrollClamping = ScrollClamping::Clamped, ScrollSnapPointSelectionMethod = ScrollSnapPointSelectionMethod::Closest);
+    virtual void scrollTo(const ScrollToOptions&, ScrollClamping = ScrollClamping::Clamped, ScrollSnapPointSelectionMethod = ScrollSnapPointSelectionMethod::Closest, std::optional<FloatSize> originalScrollDelta = std::nullopt);
     void scrollTo(double x, double y);
 
     // These are only used by WebKitLegacy DOM API.
@@ -727,6 +735,13 @@ public:
     ExplicitlySetAttrElementsMap& explicitlySetAttrElementsMap();
     ExplicitlySetAttrElementsMap* explicitlySetAttrElementsMapIfExists() const;
 
+    bool isRelevantToUser() const;
+
+    void contentVisibilityViewportChange(bool);
+
+    std::optional<OptionSet<ContentRelevancy>> contentRelevancy() const;
+    void setContentRelevancy(OptionSet<ContentRelevancy>);
+
 protected:
     Element(const QualifiedName&, Document&, ConstructionType);
 
@@ -752,6 +767,8 @@ protected:
     void ensureFormAssociatedCustomElement();
 
     void updateLabel(TreeScope&, const AtomString& oldForAttributeValue, const AtomString& newForAttributeValue);
+
+    static AtomString makeTargetBlankIfHasDanglingMarkup(const AtomString& target);
 
 private:
     LocalFrame* documentFrameWithNonNullView() const;

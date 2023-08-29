@@ -84,6 +84,7 @@
 #include "RenderView.h"
 #include "RenderWidget.h"
 #include "RenderedPosition.h"
+#include "RuntimeApplicationChecks.h"
 #include "Settings.h"
 #include "TextCheckerClient.h"
 #include "TextCheckingHelper.h"
@@ -105,6 +106,11 @@ using namespace HTMLNames;
 AccessibilityObject::~AccessibilityObject()
 {
     ASSERT(isDetached());
+}
+
+inline ProcessID AccessibilityObject::processID() const
+{
+    return presentingApplicationPID();
 }
 
 void AccessibilityObject::detachRemoteParts(AccessibilityDetachmentType detachmentType)
@@ -405,39 +411,32 @@ std::optional<SimpleRange> AccessibilityObject::misspellingRange(const SimpleRan
     return std::nullopt;
 }
 
-bool AccessibilityObject::isNodeForComposition(const Editor& editor) const
-{
-    WeakPtr compositionNode = editor.compositionNode();
-    if (!compositionNode)
-        return false;
-
-    WeakPtr cache = axObjectCache();
-    if (!cache)
-        return false;
-
-    if (auto* compositionObject = cache->textCompositionObjectForNode(*compositionNode))
-        return compositionObject->objectID() == objectID();
-
-    return false;
-}
-
-std::optional<CharacterRange> AccessibilityObject::textInputMarkedRange() const
+AXTextMarkerRange AccessibilityObject::textInputMarkedTextMarkerRange() const
 {
     WeakPtr node = this->node();
     if (!node)
-        return std::nullopt;
+        return { };
 
     auto* frame = node->document().frame();
     if (!frame)
-        return std::nullopt;
+        return { };
+
+    auto* cache = axObjectCache();
+    if (!cache)
+        return { };
 
     auto& editor = frame->editor();
-    auto range = editor.compositionRange();
-    if (!range || !isNodeForComposition(editor))
-        return std::nullopt;
+    auto* object = cache->getOrCreate(editor.compositionNode());
+    if (!object)
+        return { };
 
-    auto scope = makeRangeSelectingNodeContents(*node);
-    return characterRange(scope, *range);
+    if (auto* observableObject = object->observableObject())
+        object = observableObject;
+
+    if (object->objectID() != objectID())
+        return { };
+
+    return { editor.compositionRange() };
 }
 
 unsigned AccessibilityObject::blockquoteLevel() const
@@ -573,10 +572,7 @@ static void appendAccessibilityObject(RefPtr<AXCoreObject> object, Accessibility
         auto* frameView = dynamicDowncast<LocalFrameView>(widget);
         if (!frameView)
             return;
-        auto* localFrame = dynamicDowncast<LocalFrame>(frameView->frame());
-        if (!localFrame)
-            return;
-        auto* document = localFrame->document();
+        auto* document = frameView->frame().document();
         if (!document || !document->hasLivingRenderTree())
             return;
         
@@ -626,8 +622,11 @@ void AccessibilityObject::insertChild(AXCoreObject* newChild, unsigned index, De
 
     auto* displayContentsParent = child->displayContentsParent();
     // To avoid double-inserting a child of a `display: contents` element, only insert if `this` is the rightful parent.
-    if (displayContentsParent && displayContentsParent != this)
+    if (displayContentsParent && displayContentsParent != this) {
+        // Make sure the display:contents parent object knows it has a child it needs to add.
+        displayContentsParent->setNeedsToUpdateChildren();
         return;
+    }
 
     auto thisAncestorFlags = computeAncestorFlags();
     child->initializeAncestorFlags(thisAncestorFlags);
@@ -1337,6 +1336,13 @@ Document* AccessibilityObject::topDocument() const
     return &document()->topDocument();
 }
 
+RenderView* AccessibilityObject::topRenderer() const
+{
+    if (auto* topDocument = this->topDocument())
+        return topDocument->renderView();
+    return nullptr;
+}
+
 String AccessibilityObject::language() const
 {
     const AtomString& lang = getAttribute(langAttr);
@@ -1355,7 +1361,65 @@ String AccessibilityObject::language() const
     
     return parent->language();
 }
+
+VisiblePosition AccessibilityObject::visiblePositionForPoint(const IntPoint& point) const
+{
+    // convert absolute point to view coordinates
+    RenderView* renderView = topRenderer();
+    if (!renderView)
+        return VisiblePosition();
+
+#if PLATFORM(MAC)
+    auto* frameView = &renderView->frameView();
+#endif
+
+    Node* innerNode = nullptr;
+
+    // Locate the node containing the point
+    // FIXME: Remove this loop and instead add HitTestRequest::Type::AllowVisibleChildFrameContentOnly to the hit test request type.
+    LayoutPoint pointResult;
+    while (1) {
+        LayoutPoint pointToUse;
+#if PLATFORM(MAC)
+        pointToUse = frameView->screenToContents(point);
+#else
+        pointToUse = point;
+#endif
+        constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active };
+        HitTestResult result { pointToUse };
+        renderView->document().hitTest(hitType, result);
+        innerNode = result.innerNode();
+        if (!innerNode)
+            return VisiblePosition();
+
+        RenderObject* renderer = innerNode->renderer();
+        if (!renderer)
+            return VisiblePosition();
+
+        pointResult = result.localPoint();
+
+        // done if hit something other than a widget
+        if (!is<RenderWidget>(*renderer))
+            break;
+
+        // descend into widget (FRAME, IFRAME, OBJECT...)
+        auto* widget = downcast<RenderWidget>(*renderer).widget();
+        auto* frameView = dynamicDowncast<LocalFrameView>(widget);
+        if (!frameView)
+            break;
+        auto* document = frameView->frame().document();
+        if (!document)
+            break;
+
+        renderView = document->renderView();
+#if PLATFORM(MAC)
+        frameView = downcast<LocalFrameView>(widget);
+#endif
+    }
     
+    return innerNode->renderer()->positionForPoint(pointResult, nullptr);
+}
+
 VisiblePositionRange AccessibilityObject::visiblePositionRangeForUnorderedPositions(const VisiblePosition& visiblePos1, const VisiblePosition& visiblePos2) const
 {
     if (visiblePos1.isNull() || visiblePos2.isNull())
@@ -1616,36 +1680,23 @@ Vector<RetainPtr<id>> AccessibilityObject::modelElementChildren()
 static RenderListItem* renderListItemContainerForNode(Node* node)
 {
     for (; node; node = node->parentNode()) {
-        RenderBoxModelObject* renderer = node->renderBoxModelObject();
-        if (is<RenderListItem>(renderer))
-            return downcast<RenderListItem>(renderer);
+        if (auto* listItem = dynamicDowncast<RenderListItem>(node->renderBoxModelObject()))
+            return listItem;
     }
     return nullptr;
 }
 
-static StringView listMarkerTextForNode(Node* node)
-{
-    RenderListItem* listItem = renderListItemContainerForNode(node);
-    if (!listItem)
-        return { };
-    
-    // If this is in a list item, we need to manually add the text for the list marker
-    // because a RenderListMarker does not have a Node equivalent and thus does not appear
-    // when iterating text.
-    return listItem->markerTextWithSuffix();
-}
-
-// Returns the text associated with a list marker if this node is contained within a list item.
+// Returns the text representing a list marker if node is contained within a list item.
 StringView AccessibilityObject::listMarkerTextForNodeAndPosition(Node* node, const VisiblePosition& visiblePositionStart)
 {
     auto* listItem = renderListItemContainerForNode(node);
     if (!listItem)
         return { };
+
     // Only include the list marker if the range includes the line start (where the marker would be), and is in the same line as the marker.
     if (!isStartOfLine(visiblePositionStart) || !inSameLine(visiblePositionStart, firstPositionInNode(&listItem->element())))
         return { };
-
-    return listMarkerTextForNode(node);
+    return listItem->markerTextWithSuffix();
 }
 
 String AccessibilityObject::stringForRange(const SimpleRange& range) const
@@ -1658,12 +1709,12 @@ String AccessibilityObject::stringForRange(const SimpleRange& range) const
     for (; !it.atEnd(); it.advance()) {
         // non-zero length means textual node, zero length means replaced node (AKA "attachments" in AX)
         if (it.text().length()) {
-            // Add a textual representation for list marker text.
+            // If this is in a list item, we need to add the text for the list marker
+            // because a RenderListMarker does not have a Node equivalent and thus does not appear
+            // when iterating text.
             // Don't add list marker text for new line character.
-            if (it.text().length() != 1 || !deprecatedIsSpaceOrNewline(it.text()[0])) {
-                // FIXME: Seems like the position should be based on it.range(), not range.
-                builder.append(listMarkerTextForNodeAndPosition(it.node(), VisiblePosition(makeDeprecatedLegacyPosition(range.start))));
-            }
+            if (it.text().length() != 1 || !deprecatedIsSpaceOrNewline(it.text()[0]))
+                builder.append(listMarkerTextForNodeAndPosition(it.node(), makeDeprecatedLegacyPosition(it.range().start)));
             it.appendTextToStringBuilder(builder);
         } else {
             if (replacedNodeNeedsCharacter(it.node()))
@@ -1987,11 +2038,7 @@ Document* AccessibilityObject::document() const
     if (!frameView)
         return nullptr;
 
-    auto* localFrame = dynamicDowncast<LocalFrame>(frameView->frame());
-    if (!localFrame)
-        return nullptr;
-
-    return localFrame->document();
+    return frameView->frame().document();
 }
     
 Page* AccessibilityObject::page() const

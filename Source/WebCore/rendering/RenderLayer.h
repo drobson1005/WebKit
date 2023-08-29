@@ -512,7 +512,6 @@ public:
         return m_enclosingPaginationLayer.get();
     }
 
-    void setReferenceBoxForPathOperations();
     void updateTransform();
     
 #if ENABLE(CSS_COMPOSITING)
@@ -786,7 +785,6 @@ public:
     bool hasNotIsolatedBlendingDescendantsStatusDirty() const { return false; }
 #endif
 
-    bool shouldPaintUsingCompositeCopy() const { return m_shouldPaintUsingCompositeCopy; }
     bool isComposited() const { return m_backing != nullptr; }
     bool hasCompositingDescendant() const { return m_hasCompositingDescendant; }
     bool hasCompositedMask() const;
@@ -1144,8 +1142,6 @@ private:
     
     bool computeHasVisibleContent() const;
 
-    void setShouldPaintUsingCompositeCopy(bool copy) { m_shouldPaintUsingCompositeCopy = copy; }
-
     bool has3DTransformedDescendant() const { return m_has3DTransformedDescendant; }
     bool has3DTransformedAncestor() const { return m_has3DTransformedAncestor; }
 
@@ -1251,7 +1247,6 @@ private:
     bool m_has3DTransformedAncestor : 1;
 
     bool m_insideSVGForeignObject : 1;
-    bool m_shouldPaintUsingCompositeCopy : 1;
     bool m_isHiddenByOverflowTruncation : 1 { false };
 
     unsigned m_indirectCompositingReason : 4; // IndirectCompositingReason

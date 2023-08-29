@@ -123,14 +123,16 @@ for (var i = 0; i < 10000; i++){
 }
 
 function loo() { 
-    let h = 20; 
-    // FIXME: This should throw SyntaxError.
-    // https://bugs.webkit.org/show_bug.cgi?id=258507
-    eval("var h; if (false) { function h() { } }"); 
-    return h; 
-}
+    let error;
+    try {
+        let h = 20;
+        eval("var h; if (false) { function h() { } }");
+    } catch (e) {
+        error = e;
+    }
 
-assert(loo(), 20);
+    assert(`${error}`, "SyntaxError: Can't create duplicate variable in eval: 'h'", "#13");
+}
 
 for (var i = 0; i < 10000; i++) {
     loo();

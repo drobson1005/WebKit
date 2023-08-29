@@ -237,7 +237,12 @@ static RefPtr<CSSCalcExpressionNode> createCSS(const CalcExpressionNode& node, c
             return CSSCalcOperationNode::createHypot(WTFMove(children));
         }
         case CalcOperator::Mod:
-        case CalcOperator::Rem:
+        case CalcOperator::Rem: {
+            auto children = createCSS(operationChildren, style);
+            if (children.size() != 2)
+                return nullptr;
+            return CSSCalcOperationNode::createStep(op, WTFMove(children));
+        }
         case CalcOperator::Round:
         case CalcOperator::Nearest:
         case CalcOperator::ToZero:
@@ -334,7 +339,10 @@ bool CSSCalcValue::equals(const CSSCalcValue& other) const
 
 inline double CSSCalcValue::clampToPermittedRange(double value) const
 {
-    if (primitiveType() == CSSUnitType::CSS_DEG && (isnan(value) || isinf(value)))
+    value = CSSCalcOperationNode::convertToTopLevelValue(value);
+    // If an <angle> must be converted due to exceeding the implementation-defined range of supported values,
+    // it must be clamped to the nearest supported multiple of 360deg.
+    if (primitiveType() == CSSUnitType::CSS_DEG && std::isinf(value))
         return 0;
     return m_shouldClampToNonNegative && value < 0 ? 0 : value;
 }
@@ -349,9 +357,9 @@ double CSSCalcValue::computeLengthPx(const CSSToLengthConversionData& conversion
     return clampToPermittedRange(m_expression->computeLengthPx(conversionData));
 }
 
-bool CSSCalcValue::convertingToLengthRequiresNonNullStyle(int lengthConversion) const
+bool CSSCalcValue::convertingToLengthHasRequiredConversionData(int lengthConversion, const CSSToLengthConversionData& conversionData) const
 {
-    return m_expression->convertingToLengthRequiresNonNullStyle(lengthConversion);
+    return m_expression->convertingToLengthHasRequiredConversionData(lengthConversion, conversionData);
 }
 
 bool CSSCalcValue::isCalcFunction(CSSValueID functionId)

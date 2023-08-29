@@ -87,6 +87,7 @@
 #include "LocalFrameLoaderClient.h"
 #include "LocalFrameView.h"
 #include "Logging.h"
+#include "MotionPath.h"
 #include "OverflowEvent.h"
 #include "OverlapTestRequestClient.h"
 #include "Page.h"
@@ -337,7 +338,6 @@ RenderLayer::RenderLayer(RenderLayerModelObject& renderer)
     , m_hasTransformedAncestor(false)
     , m_has3DTransformedAncestor(false)
     , m_insideSVGForeignObject(false)
-    , m_shouldPaintUsingCompositeCopy(false)
     , m_indirectCompositingReason(static_cast<unsigned>(IndirectCompositingReason::None))
     , m_viewportConstrainedNotCompositedReason(NoNotCompositedReason)
 #if ASSERT_ENABLED
@@ -887,11 +887,6 @@ bool RenderLayer::paintsWithFilters() const
     if (!hasFilter())
         return false;
 
-    // The SVG rendering codepath should've already applied the filter to the SVG root,
-    // so do not apply the filter again.
-    if (renderer().isSVGRootOrLegacySVGRoot())
-        return false;
-
     if (RenderLayerFilters::isIdentity(renderer()))
         return false;
 
@@ -1336,31 +1331,6 @@ void RenderLayer::updateTransformFromStyle(TransformationMatrix& transform, cons
     makeMatrixRenderable(transform, canRender3DTransforms());
 }
 
-void RenderLayer::setReferenceBoxForPathOperations()
-{
-    auto pathOperation = renderer().style().offsetPath();
-    if (!pathOperation)
-        return;
-    if (is<BoxPathOperation>(pathOperation)) {
-        auto& boxPathOperation = downcast<BoxPathOperation>(*pathOperation);
-        auto pathReferenceBoxRect = snapRectToDevicePixelsIfNeeded(renderer().referenceBoxRect(boxPathOperation.referenceBox()), renderer());
-        boxPathOperation.setPathForReferenceRect(FloatRoundedRect { pathReferenceBoxRect });
-    } else if (is<RayPathOperation>(pathOperation)) {
-        if (const auto* containingBlock = renderer().containingBlock()) {
-            auto& rayPathOperation = downcast<RayPathOperation>(*pathOperation);
-            auto pathReferenceBoxRect = snapRectToDevicePixelsIfNeeded(containingBlock->transformReferenceBoxRect(containingBlock->style()), renderer());
-            if (!pathReferenceBoxRect.width())
-                pathReferenceBoxRect.setWidth(pathReferenceBoxRect.height());
-            if (!pathReferenceBoxRect.height())
-                pathReferenceBoxRect.setHeight(pathReferenceBoxRect.width());
-            rayPathOperation.setContainingBlockReferenceRect(pathReferenceBoxRect);
-            auto left = renderer().style().left();
-            auto top = renderer().style().top();
-            rayPathOperation.setStartingPosition(FloatPoint(left.isPercent() ? left.value() / 100 * pathReferenceBoxRect.width() : left.value(), top.isPercent() ? top.value() / 100 * pathReferenceBoxRect.height() : top.value()));
-        }
-    }
-}
-
 void RenderLayer::updateTransform()
 {
     bool hasTransform = renderer().isTransformed();
@@ -1379,7 +1349,6 @@ void RenderLayer::updateTransform()
     
     if (hasTransform) {
         m_transform->makeIdentity();
-        setReferenceBoxForPathOperations();
         updateTransformFromStyle(*m_transform, renderer().style(), RenderStyle::allTransformOperations());
     }
 
@@ -3296,6 +3265,9 @@ void RenderLayer::paintLayerContents(GraphicsContext& context, const LayerPainti
         }
         GraphicsContext& currentContext = filterContext ? *filterContext : context;
 
+        if (filterContext)
+            localPaintingInfo.paintBehavior.add(PaintBehavior::DontShowVisitedLinks);
+
         // If this layer's renderer is a child of the subtreePaintRoot, we render unconditionally, which
         // is done by passing a nil subtreePaintRoot down to our renderer (as if no subtreePaintRoot was ever set).
         // Otherwise, our renderer tree may or may not contain the subtreePaintRoot root, so we pass that root along
@@ -3461,7 +3433,7 @@ void RenderLayer::paintList(LayerList layerIterator, GraphicsContext& context, c
     if (layerIterator.begin() == layerIterator.end())
         return;
 
-    if (!hasSelfPaintingLayerDescendant() || renderer().shouldSkipContent())
+    if (!hasSelfPaintingLayerDescendant() || renderer().isSkippedContentRoot())
         return;
 
 #if ASSERT_ENABLED
@@ -3729,6 +3701,9 @@ void RenderLayer::paintForegroundForFragments(const LayerFragments& layerFragmen
     constexpr OptionSet<PaintBehavior> flagsToCopy { PaintBehavior::ExcludeSelection, PaintBehavior::Snapshotting, PaintBehavior::DefaultAsynchronousImageDecode, PaintBehavior::CompositedOverflowScrollContent, PaintBehavior::ForceSynchronousImageDecode };
     localPaintBehavior.add(localPaintingInfo.paintBehavior & flagsToCopy);
 
+    if (localPaintingInfo.paintBehavior & PaintBehavior::DontShowVisitedLinks)
+        localPaintBehavior.add(PaintBehavior::DontShowVisitedLinks);
+
     GraphicsContextStateSaver stateSaver(context, false);
     RegionContextStateSaver regionContextStateSaver(localPaintingInfo.regionContext);
 
@@ -3903,8 +3878,7 @@ bool RenderLayer::hitTest(const HitTestRequest& request, const HitTestLocation& 
         if (settings.visualViewportEnabled() && settings.clientCoordinatesRelativeToLayoutViewport()) {
             auto& frameView = renderer().view().frameView();
             LayoutRect absoluteLayoutViewportRect = frameView.layoutViewportRect();
-            auto* localFrame = dynamicDowncast<LocalFrame>(frameView.frame());
-            auto scaleFactor = localFrame ? localFrame->frameScaleFactor() : 1.0f;
+            auto scaleFactor = frameView.frame().frameScaleFactor();
             if (scaleFactor > 1)
                 absoluteLayoutViewportRect.scale(scaleFactor);
             hitTestArea.intersect(absoluteLayoutViewportRect);
@@ -4931,8 +4905,8 @@ FloatRect RenderLayer::absoluteBoundingBoxForPainting() const
 LayoutRect RenderLayer::overlapBounds() const
 {
     if (overlapBoundsIncludeChildren())
-        return calculateLayerBounds(this, { }, defaultCalculateLayerBoundsFlags() | IncludeFilterOutsets);
-    
+        return calculateLayerBounds(this, { }, { UseLocalClipRectIfPossible, IncludeFilterOutsets, UseFragmentBoxesExcludingCompositing });
+
     return localBoundingBox();
 }
 
@@ -5580,8 +5554,9 @@ void RenderLayer::updateFiltersAfterStyleChange(StyleDifference diff, const Rend
         return;
     }
 
-    // Add the filter as a client to this renderer.
-    if (renderer().style().filter().hasReferenceFilter()) {
+    // Add the filter as a client to this renderer, unless we are a RenderLayer accommodating
+    // an SVG. In that case it takes care of its own resource management for filters.
+    if (renderer().style().filter().hasReferenceFilter() && !renderer().isSVGRootOrLegacySVGRoot()) {
         ensureLayerFilters();
         m_filters->updateReferenceFilterClients(renderer().style().filter());
     } else if (m_filters)
@@ -5812,6 +5787,7 @@ TextStream& operator<<(TextStream& ts, PaintBehavior behavior)
     case PaintBehavior::EventRegionIncludeForeground: ts << "EventRegionIncludeForeground"; break;
     case PaintBehavior::EventRegionIncludeBackground: ts << "EventRegionIncludeBackground"; break;
     case PaintBehavior::Snapshotting: ts << "Snapshotting"; break;
+    case PaintBehavior::DontShowVisitedLinks: ts << "DontShowVisitedLinks"; break;
     }
 
     return ts;
@@ -5945,7 +5921,7 @@ static void outputPaintOrderTreeRecursive(TextStream& stream, const WebCore::Ren
 
     if (layer.isComposited()) {
         auto& backing = *layer.backing();
-        stream << " (layerID " << backing.graphicsLayer()->primaryLayerID() << ")";
+        stream << " (layerID " << backing.graphicsLayer()->primaryLayerID().object() << ")";
         
         if (layer.indirectCompositingReason() != WebCore::IndirectCompositingReason::None)
             stream << " " << layer.indirectCompositingReason();

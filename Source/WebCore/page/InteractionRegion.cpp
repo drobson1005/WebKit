@@ -112,12 +112,12 @@ static bool shouldAllowAccessibilityRoleAsPointerCursorReplacement(const Element
     }
 }
 
-static bool elementMatchesHoverRules(Element& element)
+bool elementMatchesHoverRules(Element& element)
 {
     bool foundHoverRules = false;
     bool initialValue = element.isUserActionElement() && element.document().userActionElements().isHovered(element);
 
-    for (auto key : Style::makePseudoClassInvalidationKeys(CSSSelector::PseudoClassHover, element)) {
+    for (auto key : Style::makePseudoClassInvalidationKeys(CSSSelector::PseudoClassType::Hover, element)) {
         auto& ruleSets = element.styleResolver().ruleSets();
         auto* invalidationRuleSets = ruleSets.pseudoClassInvalidationRuleSets(key);
         if (!invalidationRuleSets)
@@ -148,10 +148,16 @@ static bool shouldAllowNonPointerCursorForElement(const Element& element)
         return true;
 #endif
 
+    if (is<HTMLTextFormControlElement>(element))
+        return !element.focused();
+
     if (is<HTMLFormControlElement>(element))
         return true;
 
     if (is<SliderThumbElement>(element))
+        return true;
+
+    if (is<HTMLAnchorElement>(element))
         return true;
 
     if (shouldAllowAccessibilityRoleAsPointerCursorReplacement(element))
@@ -170,7 +176,12 @@ static bool isOverlay(const RenderElement& renderer)
 
     if (auto* renderBox = dynamicDowncast<RenderBox>(renderer)) {
         auto refContentBox = renderBox->absoluteContentBox();
+        auto lastRenderer = renderBox;
         for (auto& ancestor : ancestorsOfType<RenderBox>(renderer)) {
+            // We don't want to occlude any previous siblings.
+            if (ancestor.firstChild() != lastRenderer)
+                return false;
+            lastRenderer = &ancestor;
             if (ancestor.absoluteContentBox() != refContentBox)
                 return false;
             if (ancestor.isFixedPositioned())
@@ -241,7 +252,7 @@ std::optional<InteractionRegion> interactionRegionForRenderedRegion(RenderObject
     // FIXME: Consider also allowing elements that only receive touch events.
     bool hasListener = renderer.style().eventListenerRegionTypes().contains(EventListenerRegionType::MouseClick);
     bool hasPointer = cursorTypeForElement(*matchedElement) == CursorType::Pointer || shouldAllowNonPointerCursorForElement(*matchedElement);
-    bool isTooBigForInteraction = checkedRegionArea.value() > frameViewArea / 2;
+    bool isTooBigForInteraction = checkedRegionArea.value() > frameViewArea / 3;
 
     auto elementIdentifier = matchedElement->identifier();
 
@@ -285,7 +296,7 @@ std::optional<InteractionRegion> interactionRegionForRenderedRegion(RenderObject
     float borderRadius = 0;
     OptionSet<InteractionRegion::CornerMask> maskedCorners;
 
-    if (auto* renderBox = dynamicDowncast<RenderBox>(regionRenderer)) {
+    if (const auto& renderBox = dynamicDowncast<RenderBox>(regionRenderer)) {
         auto borderRadii = renderBox->borderRadii();
         auto minRadius = borderRadii.minimumRadius();
         auto maxRadius = borderRadii.maximumRadius();
@@ -304,14 +315,6 @@ std::optional<InteractionRegion> interactionRegionForRenderedRegion(RenderObject
         } else {
             // We default to the minimum radius applied uniformly to all corners.
             borderRadius = minRadius;
-        }
-
-        auto* input = dynamicDowncast<HTMLInputElement>(matchedElement);
-        if (input && input->containerElement()) {
-            auto borderBoxRect = renderBox->borderBoxRect();
-            auto contentBoxRect = renderBox->contentBoxRect();
-            bounds.move(IntSize(borderBoxRect.location() - contentBoxRect.location()));
-            bounds.expand(IntSize(borderBoxRect.size() - contentBoxRect.size()));
         }
     }
 

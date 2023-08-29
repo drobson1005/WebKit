@@ -39,7 +39,6 @@
 #include "JSIPCBinding.h"
 #include "LegacyCustomProtocolID.h"
 #include "LibWebRTCResolverIdentifier.h"
-#include "MDNSRegisterIdentifier.h"
 #include "MarkSurfacesAsVolatileRequestIdentifier.h"
 #include "MediaRecorderIdentifier.h"
 #include "NetworkResourceLoadIdentifier.h"
@@ -91,7 +90,6 @@
 #include <WebCore/BroadcastChannelIdentifier.h>
 #include <WebCore/DOMCacheIdentifier.h>
 #include <WebCore/DictationContext.h>
-#include <WebCore/DisplayList.h>
 #include <WebCore/ElementIdentifier.h>
 #include <WebCore/FetchIdentifier.h>
 #include <WebCore/FileSystemHandleIdentifier.h>
@@ -129,6 +127,7 @@
 #if (ENABLE(WEBKIT2) && (NESTED_MASTER_CONDITION || MASTER_OR && MASTER_AND))
 #include "TestWithoutAttributesMessages.h" // NOLINT
 #endif
+#include "TestWithoutUsingIPCConnectionMessages.h" // NOLINT
 #include "TestWithIfMessageMessages.h" // NOLINT
 #include "TestWithSemaphoreMessages.h" // NOLINT
 #include "TestWithImageDataMessages.h" // NOLINT
@@ -137,6 +136,7 @@
 #include "TestWithStreamBufferMessages.h" // NOLINT
 #include "TestWithCVPixelBufferMessages.h" // NOLINT
 #include "TestWithStreamServerConnectionHandleMessages.h" // NOLINT
+#include "TestWithEnabledIfMessages.h" // NOLINT
 
 namespace IPC {
 
@@ -281,6 +281,18 @@ std::optional<JSC::JSValue> jsValueForArguments(JSC::JSGlobalObject* globalObjec
         return jsValueForDecodedMessage<MessageName::TestWithoutAttributes_ExperimentalOperation>(globalObject, decoder);
 #endif
 #endif
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgument:
+        return jsValueForDecodedMessage<MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgument>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndEmptyReply:
+        return jsValueForDecodedMessage<MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndEmptyReply>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndReplyWithArgument:
+        return jsValueForDecodedMessage<MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndReplyWithArgument>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgument:
+        return jsValueForDecodedMessage<MessageName::TestWithoutUsingIPCConnection_MessageWithArgument>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndEmptyReply:
+        return jsValueForDecodedMessage<MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndEmptyReply>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndReplyWithArgument:
+        return jsValueForDecodedMessage<MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndReplyWithArgument>(globalObject, decoder);
 #if PLATFORM(COCOA)
     case MessageName::TestWithIfMessage_LoadURL:
         return jsValueForDecodedMessage<MessageName::TestWithIfMessage_LoadURL>(globalObject, decoder);
@@ -325,6 +337,10 @@ std::optional<JSC::JSValue> jsValueForArguments(JSC::JSGlobalObject* globalObjec
 #endif
     case MessageName::TestWithStreamServerConnectionHandle_SendStreamServerConnection:
         return jsValueForDecodedMessage<MessageName::TestWithStreamServerConnectionHandle_SendStreamServerConnection>(globalObject, decoder);
+    case MessageName::TestWithEnabledIf_AlwaysEnabled:
+        return jsValueForDecodedMessage<MessageName::TestWithEnabledIf_AlwaysEnabled>(globalObject, decoder);
+    case MessageName::TestWithEnabledIf_OnlyEnabledIfFeatureEnabled:
+        return jsValueForDecodedMessage<MessageName::TestWithEnabledIf_OnlyEnabledIfFeatureEnabled>(globalObject, decoder);
     default:
         break;
     }
@@ -380,6 +396,14 @@ std::optional<JSC::JSValue> jsValueForReplyArguments(JSC::JSGlobalObject* global
         return jsValueForDecodedMessageReply<MessageName::TestWithoutAttributes_InterpretKeyEvent>(globalObject, decoder);
 #endif
 #endif
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndEmptyReply:
+        return jsValueForDecodedMessageReply<MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndEmptyReply>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndReplyWithArgument:
+        return jsValueForDecodedMessageReply<MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndReplyWithArgument>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndEmptyReply:
+        return jsValueForDecodedMessageReply<MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndEmptyReply>(globalObject, decoder);
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndReplyWithArgument:
+        return jsValueForDecodedMessageReply<MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndReplyWithArgument>(globalObject, decoder);
     case MessageName::TestWithSemaphore_ReceiveSemaphore:
         return jsValueForDecodedMessageReply<MessageName::TestWithSemaphore_ReceiveSemaphore>(globalObject, decoder);
     case MessageName::TestWithImageData_ReceiveImageData:
@@ -412,7 +436,6 @@ Vector<ASCIILiteral> serializedIdentifiers()
     static_assert(sizeof(uint64_t) == sizeof(WebCore::BroadcastChannelIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebCore::DOMCacheIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebCore::DictationContext));
-    static_assert(sizeof(uint64_t) == sizeof(WebCore::DisplayList::ItemBufferIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebCore::ElementIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebCore::FetchIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebCore::FileSystemHandleIdentifier));
@@ -450,14 +473,12 @@ Vector<ASCIILiteral> serializedIdentifiers()
     static_assert(sizeof(uint64_t) == sizeof(WebKit::ContentWorldIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::DataTaskIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::DownloadID));
-    static_assert(sizeof(uint64_t) == sizeof(WebKit::FormSubmitListenerIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::GeolocationIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::GraphicsContextGLIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::IPCConnectionTesterIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::IPCStreamTesterIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::LegacyCustomProtocolID));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::LibWebRTCResolverIdentifier));
-    static_assert(sizeof(uint64_t) == sizeof(WebKit::MDNSRegisterIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::MarkSurfacesAsVolatileRequestIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::MediaRecorderIdentifier));
     static_assert(sizeof(uint64_t) == sizeof(WebKit::NetworkResourceLoadIdentifier));
@@ -512,7 +533,6 @@ Vector<ASCIILiteral> serializedIdentifiers()
         "WebCore::BroadcastChannelIdentifier"_s,
         "WebCore::DOMCacheIdentifier"_s,
         "WebCore::DictationContext"_s,
-        "WebCore::DisplayList::ItemBufferIdentifier"_s,
         "WebCore::ElementIdentifier"_s,
         "WebCore::FetchIdentifier"_s,
         "WebCore::FileSystemHandleIdentifier"_s,
@@ -550,14 +570,12 @@ Vector<ASCIILiteral> serializedIdentifiers()
         "WebKit::ContentWorldIdentifier"_s,
         "WebKit::DataTaskIdentifier"_s,
         "WebKit::DownloadID"_s,
-        "WebKit::FormSubmitListenerIdentifier"_s,
         "WebKit::GeolocationIdentifier"_s,
         "WebKit::GraphicsContextGLIdentifier"_s,
         "WebKit::IPCConnectionTesterIdentifier"_s,
         "WebKit::IPCStreamTesterIdentifier"_s,
         "WebKit::LegacyCustomProtocolID"_s,
         "WebKit::LibWebRTCResolverIdentifier"_s,
-        "WebKit::MDNSRegisterIdentifier"_s,
         "WebKit::MarkSurfacesAsVolatileRequestIdentifier"_s,
         "WebKit::MediaRecorderIdentifier"_s,
         "WebKit::NetworkResourceLoadIdentifier"_s,
@@ -859,6 +877,24 @@ std::optional<Vector<ArgumentDescription>> messageArgumentDescriptions(MessageNa
         };
 #endif
 #endif
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgument:
+        return Vector<ArgumentDescription> { };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndEmptyReply:
+        return Vector<ArgumentDescription> { };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndReplyWithArgument:
+        return Vector<ArgumentDescription> { };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgument:
+        return Vector<ArgumentDescription> {
+            { "argument", "String", nullptr, false },
+        };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndEmptyReply:
+        return Vector<ArgumentDescription> {
+            { "argument", "String", nullptr, false },
+        };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndReplyWithArgument:
+        return Vector<ArgumentDescription> {
+            { "argument", "String", nullptr, false },
+        };
 #if PLATFORM(COCOA)
     case MessageName::TestWithIfMessage_LoadURL:
         return Vector<ArgumentDescription> {
@@ -929,6 +965,14 @@ std::optional<Vector<ArgumentDescription>> messageArgumentDescriptions(MessageNa
     case MessageName::TestWithStreamServerConnectionHandle_SendStreamServerConnection:
         return Vector<ArgumentDescription> {
             { "handle", "IPC::StreamServerConnection::Handle", nullptr, false },
+        };
+    case MessageName::TestWithEnabledIf_AlwaysEnabled:
+        return Vector<ArgumentDescription> {
+            { "url", "String", nullptr, false },
+        };
+    case MessageName::TestWithEnabledIf_OnlyEnabledIfFeatureEnabled:
+        return Vector<ArgumentDescription> {
+            { "url", "String", nullptr, false },
         };
     default:
         break;
@@ -1012,6 +1056,18 @@ std::optional<Vector<ArgumentDescription>> messageReplyArgumentDescriptions(Mess
         };
 #endif
 #endif
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndEmptyReply:
+        return Vector<ArgumentDescription> { };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithoutArgumentAndReplyWithArgument:
+        return Vector<ArgumentDescription> {
+            { "reply", "String", nullptr, false },
+        };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndEmptyReply:
+        return Vector<ArgumentDescription> { };
+    case MessageName::TestWithoutUsingIPCConnection_MessageWithArgumentAndReplyWithArgument:
+        return Vector<ArgumentDescription> {
+            { "reply", "String", nullptr, false },
+        };
     case MessageName::TestWithSemaphore_ReceiveSemaphore:
         return Vector<ArgumentDescription> {
             { "r0", "IPC::Semaphore", nullptr, false },

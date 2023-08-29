@@ -55,6 +55,7 @@
 #include "LayoutIntegrationLineLayout.h"
 #include "LocalFrame.h"
 #include "LocalFrameView.h"
+#include "MotionPath.h"
 #include "Page.h"
 #include "PaintInfo.h"
 #include "RenderBlockInlines.h"
@@ -254,6 +255,19 @@ static RenderBlockFlow* outermostBlockContainingFloatingObject(RenderBox& box)
     return parentBlock;
 }
 
+void RenderBox::removeFloatingAndInvalidateForLayout()
+{
+    ASSERT(isFloating());
+
+    if (renderTreeBeingDestroyed())
+        return;
+
+    if (auto* ancestor = outermostBlockContainingFloatingObject(*this)) {
+        ancestor->markSiblingsWithFloatsForLayout(this);
+        ancestor->markAllDescendantsWithFloatsForLayout(this, false);
+    }
+}
+
 void RenderBox::removeFloatingOrPositionedChildFromBlockLists()
 {
     ASSERT(isFloatingOrOutOfFlowPositioned());
@@ -261,12 +275,8 @@ void RenderBox::removeFloatingOrPositionedChildFromBlockLists()
     if (renderTreeBeingDestroyed())
         return;
 
-    if (isFloating()) {
-        if (RenderBlockFlow* parentBlock = outermostBlockContainingFloatingObject(*this)) {
-            parentBlock->markSiblingsWithFloatsForLayout(this);
-            parentBlock->markAllDescendantsWithFloatsForLayout(this, false);
-        }
-    }
+    if (isFloating())
+        removeFloatingAndInvalidateForLayout();
 
     if (isOutOfFlowPositioned())
         RenderBlock::removePositionedObject(*this);
@@ -355,6 +365,13 @@ void RenderBox::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle
             scrollableArea->setPostLayoutScrollPosition(scrollPosition);
         }
     }
+
+#if ENABLE(DARK_MODE_CSS)
+    if (layer() && oldStyle && oldStyle->colorScheme() != newStyle.colorScheme()) {
+        if (auto* scrollableArea = layer()->scrollableArea())
+            scrollableArea->invalidateScrollbars();
+    }
+#endif
 
     // Our opaqueness might have changed without triggering layout.
     if (diff >= StyleDifference::Repaint && diff <= StyleDifference::RepaintLayer) {
@@ -604,9 +621,9 @@ void RenderBox::setScrollPosition(const ScrollPosition& position, const ScrollPo
     scrollableArea->setScrollPosition(position, options);
 }
 
-void RenderBox::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accumulatedOffset) const
+void RenderBox::boundingRects(Vector<LayoutRect>& rects, const LayoutPoint& accumulatedOffset) const
 {
-    rects.append(snappedIntRect(accumulatedOffset, size()));
+    rects.append({ accumulatedOffset, size() });
 }
 
 void RenderBox::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) const
@@ -621,7 +638,7 @@ void RenderBox::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) const
 
 void RenderBox::applyTransform(TransformationMatrix& t, const RenderStyle& style, const FloatRect& boundingBox, OptionSet<RenderStyle::TransformOperationOption> options) const
 {
-    style.applyTransform(t, boundingBox, options);
+    style.applyTransform(t, TransformOperationData(boundingBox, this), options);
 }
 
 void RenderBox::constrainLogicalMinMaxSizesByAspectRatio(LayoutUnit& computedMinSize, LayoutUnit& computedMaxSize, LayoutUnit computedSize, MinimumSizeIsAutomaticContentBased minimumSizeType, ConstrainDimension dimension) const
@@ -1811,7 +1828,7 @@ bool RenderBox::foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect, u
     if (!maxDepthToTest)
         return false;
 
-    if (shouldSkipContent())
+    if (isSkippedContentRoot())
         return false;
 
     for (auto& childBox : childrenOfType<RenderBox>(*this)) {
@@ -3074,20 +3091,20 @@ RenderBoxFragmentInfo* RenderBox::renderBoxFragmentInfo(RenderFragmentContainer*
 static bool shouldFlipBeforeAfterMargins(const RenderStyle& containingBlockStyle, const RenderStyle* childStyle)
 {
     ASSERT(containingBlockStyle.isHorizontalWritingMode() != childStyle->isHorizontalWritingMode());
-    WritingMode childWritingMode = childStyle->writingMode();
+    auto childBlockFlowDirection = childStyle->blockFlowDirection();
     bool shouldFlip = false;
-    switch (containingBlockStyle.writingMode()) {
-    case WritingMode::TopToBottom:
-        shouldFlip = (childWritingMode == WritingMode::RightToLeft);
+    switch (containingBlockStyle.blockFlowDirection()) {
+    case BlockFlowDirection::TopToBottom:
+        shouldFlip = (childBlockFlowDirection == BlockFlowDirection::RightToLeft);
         break;
-    case WritingMode::BottomToTop:
-        shouldFlip = (childWritingMode == WritingMode::RightToLeft);
+    case BlockFlowDirection::BottomToTop:
+        shouldFlip = (childBlockFlowDirection == BlockFlowDirection::RightToLeft);
         break;
-    case WritingMode::RightToLeft:
-        shouldFlip = (childWritingMode == WritingMode::BottomToTop);
+    case BlockFlowDirection::RightToLeft:
+        shouldFlip = (childBlockFlowDirection == BlockFlowDirection::BottomToTop);
         break;
-    case WritingMode::LeftToRight:
-        shouldFlip = (childWritingMode == WritingMode::BottomToTop);
+    case BlockFlowDirection::LeftToRight:
+        shouldFlip = (childBlockFlowDirection == BlockFlowDirection::BottomToTop);
         break;
     }
 
@@ -5283,14 +5300,14 @@ LayoutRect RenderBox::visualOverflowRectForPropagation(const RenderStyle* parent
     // If the writing modes of the child and parent match, then we don't have to 
     // do anything fancy. Just return the result.
     LayoutRect rect = visualOverflowRect();
-    if (parentStyle->writingMode() == style().writingMode())
+    if (parentStyle->blockFlowDirection() == style().blockFlowDirection())
         return rect;
     
     // We are putting ourselves into our parent's coordinate space.  If there is a flipped block mismatch
     // in a particular axis, then we have to flip the rect along that axis.
-    if (style().writingMode() == WritingMode::RightToLeft || parentStyle->writingMode() == WritingMode::RightToLeft)
+    if (style().blockFlowDirection() == BlockFlowDirection::RightToLeft || parentStyle->blockFlowDirection() == BlockFlowDirection::RightToLeft)
         rect.setX(width() - rect.maxX());
-    else if (style().writingMode() == WritingMode::BottomToTop || parentStyle->writingMode() == WritingMode::BottomToTop)
+    else if (style().blockFlowDirection() == BlockFlowDirection::BottomToTop || parentStyle->blockFlowDirection() == BlockFlowDirection::BottomToTop)
         rect.setY(height() - rect.maxY());
 
     return rect;
@@ -5351,14 +5368,14 @@ LayoutRect RenderBox::layoutOverflowRectForPropagation(const RenderStyle* parent
     
     // If the writing modes of the child and parent match, then we don't have to 
     // do anything fancy. Just return the result.
-    if (parentStyle->writingMode() == style().writingMode())
+    if (parentStyle->blockFlowDirection() == style().blockFlowDirection())
         return rect;
     
     // We are putting ourselves into our parent's coordinate space.  If there is a flipped block mismatch
     // in a particular axis, then we have to flip the rect along that axis.
-    if (style().writingMode() == WritingMode::RightToLeft || parentStyle->writingMode() == WritingMode::RightToLeft)
+    if (style().blockFlowDirection() == BlockFlowDirection::RightToLeft || parentStyle->blockFlowDirection() == BlockFlowDirection::RightToLeft)
         rect.setX(width() - rect.maxX());
-    else if (style().writingMode() == WritingMode::BottomToTop || parentStyle->writingMode() == WritingMode::BottomToTop)
+    else if (style().blockFlowDirection() == BlockFlowDirection::BottomToTop || parentStyle->blockFlowDirection() == BlockFlowDirection::BottomToTop)
         rect.setY(height() - rect.maxY());
 
     return rect;
@@ -5676,7 +5693,7 @@ std::optional<LayoutUnit> RenderBox::explicitIntrinsicInnerWidth() const
     if (style().containIntrinsicWidthType() == ContainIntrinsicSizeType::None)
         return std::nullopt;
 
-    if (element() && style().containIntrinsicWidthHasAuto() && shouldSkipContent()) {
+    if (element() && style().containIntrinsicWidthHasAuto() && isSkippedContentRoot()) {
         if (auto width = isHorizontalWritingMode() ? element()->lastRememberedLogicalWidth() : element()->lastRememberedLogicalHeight())
             return width;
     }
@@ -5695,7 +5712,7 @@ std::optional<LayoutUnit> RenderBox::explicitIntrinsicInnerHeight() const
     if (style().containIntrinsicHeightType() == ContainIntrinsicSizeType::None)
         return std::nullopt;
 
-    if (element() && style().containIntrinsicHeightHasAuto() && shouldSkipContent()) {
+    if (element() && style().containIntrinsicHeightHasAuto() && isSkippedContentRoot()) {
         if (auto height = isHorizontalWritingMode() ? element()->lastRememberedLogicalHeight() : element()->lastRememberedLogicalWidth())
             return height;
     }

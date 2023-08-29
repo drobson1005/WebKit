@@ -57,10 +57,6 @@
 #import <QuartzCore/CAFenceHandle.h>
 #endif
 
-#if PLATFORM(VISION)
-#import <QuartzCore/CARemoteEffectPrivate.h>
-#endif
-
 #endif // __OBJC__
 
 #else
@@ -157,10 +153,6 @@ typedef struct _CARenderContext CARenderContext;
 @property (getter=isSeparated) BOOL separated;
 #endif
 @property BOOL toneMapToStandardDynamicRange;
-#if PLATFORM(VISION)
-@property (nonatomic) CGFloat sizeMultiplier;
-@property (nonatomic, copy) void (^effectGroupConfigurator)(CARemoteEffectGroup *group);
-#endif
 @end
 
 #if ENABLE(FILTERS_LEVEL_2)
@@ -229,9 +221,8 @@ typedef enum {
 #endif
 
 @interface CALayer ()
-#if HAVE(CALAYER_USES_WEBKIT_BEHAVIOR)
 @property BOOL usesWebKitBehavior;
-#endif
+@property BOOL sortsSublayers;
 @property CGRect contentsDirtyRect;
 @end
 

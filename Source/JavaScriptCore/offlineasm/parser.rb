@@ -359,7 +359,9 @@ class Parser
     
     def parseVariable
         if isRegister(@tokens[@idx])
-            if @tokens[@idx] =~ FPR_PATTERN || @tokens[@idx] =~ WASM_FPR_PATTERN
+            if @tokens[@idx] =~ VEC_PATTERN
+                result = VecRegisterID.forName(@tokens[@idx].codeOrigin, @tokens[@idx].string)
+            elsif @tokens[@idx] =~ FPR_PATTERN || @tokens[@idx] =~ WASM_FPR_PATTERN
                 result = FPRegisterID.forName(@tokens[@idx].codeOrigin, @tokens[@idx].string)
             else
                 result = RegisterID.forName(@tokens[@idx].codeOrigin, @tokens[@idx].string)
@@ -715,6 +717,14 @@ class Parser
                 name = @tokens[@idx].string
                 @idx += 1
                 Label.setAsGlobal(codeOrigin, name)
+            elsif @tokens[@idx] == "unalignedglobal"
+                codeOrigin = @tokens[@idx].codeOrigin
+                @idx += 1
+                skipNewLine
+                parseError unless isLabel(@tokens[@idx])
+                name = @tokens[@idx].string
+                @idx += 1
+                Label.setAsUnalignedGlobal(codeOrigin, name)
             elsif isInstruction @tokens[@idx]
                 codeOrigin = @tokens[@idx].codeOrigin
                 name = @tokens[@idx].string

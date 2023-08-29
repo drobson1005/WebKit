@@ -29,11 +29,10 @@
 #include "NetworkDataTask.h"
 #include "NetworkLoadClient.h"
 #include "NetworkLoadParameters.h"
-#include <WebCore/AuthenticationChallenge.h>
-#include <wtf/CompletionHandler.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
+class AuthenticationChallenge;
 class BlobRegistryImpl;
 }
 
@@ -45,7 +44,7 @@ class NetworkProcess;
 class NetworkLoad final : private NetworkDataTaskClient {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    NetworkLoad(NetworkLoadClient&, WebCore::BlobRegistryImpl*, NetworkLoadParameters&&, NetworkSession&);
+    NetworkLoad(NetworkLoadClient&, NetworkLoadParameters&&, NetworkSession&);
     NetworkLoad(NetworkLoadClient&, NetworkSession&, const Function<RefPtr<NetworkDataTask>(NetworkDataTaskClient&)>&);
     ~NetworkLoad();
 
@@ -100,6 +99,7 @@ private:
     RefPtr<NetworkDataTask> m_task;
     WeakPtr<NetworkLoadScheduler> m_scheduler;
 
+    // FIXME: Deduplicate this with NetworkDataTask's m_previousRequest.
     WebCore::ResourceRequest m_currentRequest; // Updated on redirects.
 };
 

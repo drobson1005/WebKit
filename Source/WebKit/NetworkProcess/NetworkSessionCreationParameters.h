@@ -58,7 +58,7 @@ struct NetworkSessionCreationParameters {
     static std::optional<NetworkSessionCreationParameters> decode(IPC::Decoder&);
     
     PAL::SessionID sessionID { PAL::SessionID::defaultSessionID() };
-    Markable<UUID> dataStoreIdentifier;
+    Markable<WTF::UUID> dataStoreIdentifier;
     String boundInterfaceIdentifier;
     AllowsCellularAccess allowsCellularAccess { AllowsCellularAccess::Yes };
 #if PLATFORM(COCOA)
@@ -135,6 +135,7 @@ struct NetworkSessionCreationParameters {
     String serviceWorkerRegistrationDirectory;
     SandboxExtension::Handle serviceWorkerRegistrationDirectoryExtensionHandle;
     bool serviceWorkerProcessTerminationDelayEnabled { true };
+    bool inspectionForServiceWorkersAllowed { true };
 #endif
 
     ResourceLoadStatisticsParameters resourceLoadStatisticsParameters;

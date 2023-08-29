@@ -121,12 +121,12 @@ public:
     static Ref<WebsiteDataStore> defaultDataStore();
     static bool defaultDataStoreExists();
     static void deleteDefaultDataStoreForTesting();
-    static RefPtr<WebsiteDataStore> existingDataStoreForIdentifier(const UUID&);
+    static RefPtr<WebsiteDataStore> existingDataStoreForIdentifier(const WTF::UUID&);
     
     static Ref<WebsiteDataStore> createNonPersistent();
     static Ref<WebsiteDataStore> create(Ref<WebsiteDataStoreConfiguration>&&, PAL::SessionID);
 #if PLATFORM(COCOA)
-    static Ref<WebsiteDataStore> dataStoreForIdentifier(const UUID&);
+    static Ref<WebsiteDataStore> dataStoreForIdentifier(const WTF::UUID&);
 #endif
 
     WebsiteDataStore(Ref<WebsiteDataStoreConfiguration>&&, PAL::SessionID);
@@ -291,7 +291,9 @@ public:
 
     static void setCachedProcessSuspensionDelayForTesting(Seconds);
 
+#if !PLATFORM(COCOA)
     void allowSpecificHTTPSCertificateForHost(const WebCore::CertificateInfo&, const String& host);
+#endif
     void allowTLSCertificateChainForLocalPCMTesting(const WebCore::CertificateInfo&);
 
     DeviceIdHashSaltStorage& deviceIdHashSaltStorage() { return m_deviceIdHashSaltStorage.get(); }
@@ -359,9 +361,9 @@ public:
 #endif
 
 #if PLATFORM(COCOA)
-    static void fetchAllDataStoreIdentifiers(CompletionHandler<void(Vector<UUID>&&)>&&);
-    static void removeDataStoreWithIdentifier(const UUID& identifier, CompletionHandler<void(const String&)>&&);
-    static String defaultWebsiteDataStoreDirectory(const UUID& identifier);
+    static void fetchAllDataStoreIdentifiers(CompletionHandler<void(Vector<WTF::UUID>&&)>&&);
+    static void removeDataStoreWithIdentifier(const WTF::UUID& identifier, CompletionHandler<void(const String&)>&&);
+    static String defaultWebsiteDataStoreDirectory(const WTF::UUID& identifier);
     static String defaultCookieStorageFile(const String& baseDataDirectory = nullString());
     static String defaultSearchFieldHistoryDirectory(const String& baseDataDirectory = nullString());
 #endif
@@ -432,9 +434,9 @@ public:
     void countNonDefaultSessionSets(CompletionHandler<void(size_t)>&&);
 
     void showServiceWorkerNotification(IPC::Connection&, const WebCore::NotificationData&);
-    void cancelServiceWorkerNotification(const UUID& notificationID);
-    void clearServiceWorkerNotification(const UUID& notificationID);
-    void didDestroyServiceWorkerNotification(const UUID& notificationID);
+    void cancelServiceWorkerNotification(const WTF::UUID& notificationID);
+    void clearServiceWorkerNotification(const WTF::UUID& notificationID);
+    void didDestroyServiceWorkerNotification(const WTF::UUID& notificationID);
 
     bool hasClientGetDisplayedNotifications() const;
     void getNotifications(const URL& registrationalURL, CompletionHandler<void(Vector<WebCore::NotificationData>&&)>&&);
@@ -446,6 +448,13 @@ public:
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
     void setEmulatedConditions(std::optional<int64_t>&& bytesPerSecondLimit);
+#endif
+
+    void addPage(WebPageProxy&);
+    void removePage(WebPageProxy&);
+
+#if ENABLE(SERVICE_WORKER)
+    void updateServiceWorkerInspectability();
 #endif
 
     HashSet<RefPtr<WebProcessPool>> processPools(size_t limit = std::numeric_limits<size_t>::max()) const;
@@ -462,7 +471,7 @@ public:
 
 #if HAVE(NW_PROXY_CONFIG)
     void clearProxyConfigData();
-    void setProxyConfigData(Vector<std::pair<Vector<uint8_t>, UUID>>&&);
+    void setProxyConfigData(Vector<std::pair<Vector<uint8_t>, WTF::UUID>>&&);
 #endif
     void setCompletionHandlerForRemovalFromNetworkProcess(CompletionHandler<void(String&&)>&&);
     
@@ -483,6 +492,7 @@ private:
 
     WebsiteDataStore();
     static WorkQueue& websiteDataStoreIOQueue();
+    Ref<NetworkProcessProxy> protectedNetworkProcess() const;
 
     // FIXME: Only Cocoa ports respect ShouldCreateDirectory, so you cannot rely on it to create
     // directories. This is confusing.
@@ -560,6 +570,7 @@ private:
 #endif
 
     WeakHashSet<WebProcessProxy> m_processes;
+    WeakHashSet<WebPageProxy> m_pages;
 
     bool m_isTrackingPreventionStateExplicitlySet { false };
 
@@ -590,6 +601,8 @@ private:
 
     RefPtr<WebPreferences> m_serviceWorkerOverridePreferences;
     CompletionHandler<void(String&&)> m_completionHandlerForRemovalFromNetworkProcess;
+
+    bool m_inspectionForServiceWorkersAllowed { true };
 };
 
 }

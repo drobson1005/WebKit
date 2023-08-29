@@ -90,6 +90,7 @@ void JSModuleLoader::finishCreation(JSGlobalObject* globalObject, VM& vm)
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().requestFetchPublicName(), moduleLoaderRequestFetchCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().requestInstantiatePublicName(), moduleLoaderRequestInstantiateCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().requestSatisfyPublicName(), moduleLoaderRequestSatisfyCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
+    JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().requestSatisfyUtilPublicName(), moduleLoaderRequestSatisfyUtilCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().linkPublicName(), moduleLoaderLinkCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().moduleEvaluationPublicName(), moduleLoaderModuleEvaluationCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().asyncModuleEvaluationPublicName(), moduleLoaderAsyncModuleEvaluationCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
@@ -371,8 +372,10 @@ JSC_DEFINE_HOST_FUNCTION(moduleLoaderParseModule, (JSGlobalObject* globalObject,
     RETURN_IF_EXCEPTION(scope, JSValue::encode(promise->rejectWithCaughtException(globalObject, scope)));
 
     auto result = moduleAnalyzer.analyze(*moduleProgramNode);
-    if (!result)
-        RELEASE_AND_RETURN(scope, JSValue::encode(rejectWithError(createTypeError(globalObject, result.error()))));
+    if (!result) {
+        auto [ errorType, message ] = WTFMove(result.error());
+        RELEASE_AND_RETURN(scope, JSValue::encode(rejectWithError(createError(globalObject, errorType, message))));
+    }
 
     scope.release();
     promise->resolve(globalObject, result.value());
@@ -409,8 +412,8 @@ JSC_DEFINE_HOST_FUNCTION(moduleLoaderRequestedModuleParameters, (JSGlobalObject*
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
     size_t i = 0;
     for (auto& request : moduleRecord->requestedModules()) {
-        if (request.m_assertions)
-            result->putDirectIndex(globalObject, i++, JSScriptFetchParameters::create(vm, vm.scriptFetchParametersStructure.get(), *request.m_assertions));
+        if (request.m_attributes)
+            result->putDirectIndex(globalObject, i++, JSScriptFetchParameters::create(vm, vm.scriptFetchParametersStructure.get(), *request.m_attributes));
         else
             result->putDirectIndex(globalObject, i++, jsUndefined());
         RETURN_IF_EXCEPTION(scope, encodedJSValue());

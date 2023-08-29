@@ -90,7 +90,6 @@ std::unique_ptr<ImageBufferIOSurfaceBackend> ImageBufferIOSurfaceBackend::create
         return nullptr;
 
     CGContextClearRect(cgContext.get(), FloatRect(FloatPoint::zero(), backendSize));
-    CGContextFlush(cgContext.get());
 
     return makeUnique<ImageBufferIOSurfaceBackend>(parameters, WTFMove(surface), WTFMove(cgContext), displayID, creationContext.surfacePool);
 }
@@ -130,10 +129,10 @@ void ImageBufferIOSurfaceBackend::flushContext()
 
 bool ImageBufferIOSurfaceBackend::flushContextDraws()
 {
-    if (!m_context)
+    bool contextNeedsFlush = m_context && m_context->consumeHasDrawn();
+    if (!contextNeedsFlush && !m_needsFirstFlush)
         return false;
-    if (!m_context->consumeHasDrawn())
-        return false;
+    m_needsFirstFlush = false;
     CGContextFlush(ensurePlatformContext());
     return true;
 }
@@ -199,15 +198,15 @@ RefPtr<NativeImage> ImageBufferIOSurfaceBackend::sinkIntoNativeImage()
 void ImageBufferIOSurfaceBackend::getPixelBuffer(const IntRect& srcRect, PixelBuffer& destination)
 {
     const_cast<ImageBufferIOSurfaceBackend*>(this)->prepareForExternalRead();
-    IOSurface::Locker lock(*m_surface);
-    ImageBufferBackend::getPixelBuffer(srcRect, lock.surfaceBaseAddress(), destination);
+    if (auto lock = m_surface->lock<IOSurface::AccessMode::ReadOnly>())
+        ImageBufferBackend::getPixelBuffer(srcRect, lock->surfaceBaseAddress(), destination);
 }
 
 void ImageBufferIOSurfaceBackend::putPixelBuffer(const PixelBuffer& pixelBuffer, const IntRect& srcRect, const IntPoint& destPoint, AlphaPremultiplication destFormat)
 {
     prepareForExternalWrite();
-    IOSurface::Locker lock(*m_surface, IOSurface::Locker::AccessMode::ReadWrite);
-    ImageBufferBackend::putPixelBuffer(pixelBuffer, srcRect, destPoint, destFormat, lock.surfaceBaseAddress());
+    if (auto lock = m_surface->lock<IOSurface::AccessMode::ReadWrite>())
+        ImageBufferBackend::putPixelBuffer(pixelBuffer, srcRect, destPoint, destFormat, lock->surfaceBaseAddress());
 }
 
 IOSurface* ImageBufferIOSurfaceBackend::surface()

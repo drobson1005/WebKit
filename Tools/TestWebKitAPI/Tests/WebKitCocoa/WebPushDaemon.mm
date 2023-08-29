@@ -454,7 +454,7 @@ self.addEventListener("notificationclick", () => {
 class WebPushDTestWebView {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    WebPushDTestWebView(const String& pushPartition, const std::optional<UUID>& dataStoreIdentifier, WKProcessPool *processPool, TestNotificationProvider& notificationProvider)
+    WebPushDTestWebView(const String& pushPartition, const std::optional<WTF::UUID>& dataStoreIdentifier, WKProcessPool *processPool, TestNotificationProvider& notificationProvider)
         : m_pushPartition(pushPartition)
         , m_dataStoreIdentifier(dataStoreIdentifier)
         , m_notificationProvider(notificationProvider)
@@ -530,7 +530,7 @@ public:
         TestWebKitAPI::Util::run(&ready);
     }
 
-    std::optional<UUID> dataStoreIdentifier() { return m_dataStoreIdentifier; }
+    std::optional<WTF::UUID> dataStoreIdentifier() { return m_dataStoreIdentifier; }
 
     const String& origin() { return m_origin; }
 
@@ -719,7 +719,7 @@ public:
 
 private:
     String m_pushPartition;
-    Markable<UUID> m_dataStoreIdentifier;
+    Markable<WTF::UUID> m_dataStoreIdentifier;
     String m_origin;
     RetainPtr<NSURL> m_url;
     RetainPtr<WKWebsiteDataStore> m_dataStore;
@@ -746,16 +746,16 @@ public:
         auto webView = makeUniqueRef<WebPushDTestWebView>(emptyString(), std::nullopt, processPool.get(), *m_notificationProvider);
         m_webViews.append(WTFMove(webView));
 
-        auto webViewWithIdentifier1 = makeUniqueRef<WebPushDTestWebView>(emptyString(), UUID::parse("0bf5053b-164c-4b7d-8179-832e6bf158df"_s), processPool.get(), *m_notificationProvider);
+        auto webViewWithIdentifier1 = makeUniqueRef<WebPushDTestWebView>(emptyString(), WTF::UUID::parse("0bf5053b-164c-4b7d-8179-832e6bf158df"_s), processPool.get(), *m_notificationProvider);
         m_webViews.append(WTFMove(webViewWithIdentifier1));
 
-        auto webViewWithIdentifier2 = makeUniqueRef<WebPushDTestWebView>(emptyString(), UUID::parse("940e7729-738e-439f-a366-1a8719e23b2d"_s), processPool.get(), *m_notificationProvider);
+        auto webViewWithIdentifier2 = makeUniqueRef<WebPushDTestWebView>(emptyString(), WTF::UUID::parse("940e7729-738e-439f-a366-1a8719e23b2d"_s), processPool.get(), *m_notificationProvider);
         m_webViews.append(WTFMove(webViewWithIdentifier2));
 
         auto webViewWithPartition = makeUniqueRef<WebPushDTestWebView>("testPartition"_s, std::nullopt, processPool.get(), *m_notificationProvider);
         m_webViews.append(WTFMove(webViewWithPartition));
 
-        auto webViewWithPartitionAndIdentifier = makeUniqueRef<WebPushDTestWebView>("testPartition"_s, UUID::parse("940e7729-738e-439f-a366-1a8719e23b2d"_s), processPool.get(), *m_notificationProvider);
+        auto webViewWithPartitionAndIdentifier = makeUniqueRef<WebPushDTestWebView>("testPartition"_s, WTF::UUID::parse("940e7729-738e-439f-a366-1a8719e23b2d"_s), processPool.get(), *m_notificationProvider);
         m_webViews.append(WTFMove(webViewWithPartitionAndIdentifier));
     }
 
@@ -1185,170 +1185,6 @@ TEST_F(WebPushDTest, NotificationClickExtendsITPCleanupTimerBy30Days)
     v->assertPushEventFails(61);
     EXPECT_FALSE(v->hasPushSubscription());
 }
-
-#if ENABLE(INSTALL_COORDINATION_BUNDLES)
-#if USE(APPLE_INTERNAL_SDK)
-static void showNotificationsViaWebPushDInsteadOfUIProcess(WKWebViewConfiguration *configuration)
-{
-    [configuration.preferences _setNotificationsEnabled:YES];
-    for (_WKFeature *feature in [WKPreferences _features]) {
-        if ([feature.key isEqualToString:@"BuiltInNotificationsEnabled"]) {
-            [configuration.preferences _setEnabled:YES forInternalDebugFeature:feature];
-            break;
-        }
-    }
-}
-
-TEST(WebPushD, PermissionManagement)
-{
-    NSURL *tempDirectory = setUpTestWebPushD();
-
-    auto dataStoreConfiguration = adoptNS([_WKWebsiteDataStoreConfiguration new]);
-    dataStoreConfiguration.get().webPushMachServiceName = @"org.webkit.webpushtestdaemon.service";
-    dataStoreConfiguration.get().webPushDaemonUsesMockBundlesForTesting = YES;
-    auto dataStore = adoptNS([[WKWebsiteDataStore alloc] _initWithConfiguration:dataStoreConfiguration.get()]);
-
-    auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
-    configuration.get().websiteDataStore = dataStore.get();
-    showNotificationsViaWebPushDInsteadOfUIProcess(configuration.get());
-
-    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration.get()]);
-    auto uiDelegate = adoptNS([[NotificationPermissionDelegate alloc] init]);
-    [webView setUIDelegate:uiDelegate.get()];
-    [webView synchronouslyLoadHTMLString:@"" baseURL:[NSURL URLWithString:@"https://example.org"]];
-    [webView evaluateJavaScript:@"Notification.requestPermission().then(() => { alert('done') })" completionHandler:nil];
-    TestWebKitAPI::Util::run(&alertReceived);
-
-    static bool originOperationDone = false;
-    static RetainPtr<WKSecurityOrigin> origin;
-    [dataStore _getOriginsWithPushAndNotificationPermissions:^(NSSet<WKSecurityOrigin *> *origins) {
-        EXPECT_EQ([origins count], 1u);
-        origin = [origins anyObject];
-        originOperationDone = true;
-    }];
-
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-    EXPECT_WK_STREQ(origin.get().protocol, "https");
-    EXPECT_WK_STREQ(origin.get().host, "example.org");
-
-    // If we failed to retrieve an expected origin, we will have failed the above checks
-    if (!origin) {
-        cleanUpTestWebPushD(tempDirectory);
-        return;
-    }
-
-    originOperationDone = false;
-    [dataStore _deletePushAndNotificationRegistration:origin.get() completionHandler:^(NSError *error) {
-        EXPECT_FALSE(!!error);
-        originOperationDone = true;
-    }];
-
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-    originOperationDone = false;
-    [dataStore _getOriginsWithPushAndNotificationPermissions:^(NSSet<WKSecurityOrigin *> *origins) {
-        EXPECT_EQ([origins count], 0u);
-        originOperationDone = true;
-    }];
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-    cleanUpTestWebPushD(tempDirectory);
-}
-
-static void deleteAllRegistrationsForDataStore(WKWebsiteDataStore *dataStore)
-{
-    __block bool originOperationDone = false;
-    __block RetainPtr<NSSet<WKSecurityOrigin *>> originSet;
-    [dataStore _getOriginsWithPushAndNotificationPermissions:^(NSSet<WKSecurityOrigin *> *origins) {
-        originSet = origins;
-        originOperationDone = true;
-    }];
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-    if (![originSet count])
-        return;
-
-    __block size_t deletedOrigins = 0;
-    originOperationDone = false;
-    for (WKSecurityOrigin *origin in originSet.get()) {
-        [dataStore _deletePushAndNotificationRegistration:origin completionHandler:^(NSError *error) {
-            EXPECT_FALSE(!!error);
-            if (++deletedOrigins == [originSet count])
-                originOperationDone = true;
-        }];
-    }
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-    originOperationDone = false;
-    [dataStore _getOriginsWithPushAndNotificationPermissions:^(NSSet<WKSecurityOrigin *> *origins) {
-        EXPECT_EQ([origins count], 0u);
-        originOperationDone = true;
-    }];
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-}
-
-static const char* mainBytes = R"WEBPUSHRESOURCE(
-<script>
-    Notification.requestPermission().then(() => { alert("done") })
-</script>
-)WEBPUSHRESOURCE";
-
-TEST(WebPushD, InstallCoordinationBundles)
-{
-    NSURL *tempDirectory = setUpTestWebPushD();
-
-    auto dataStoreConfiguration = adoptNS([_WKWebsiteDataStoreConfiguration new]);
-    dataStoreConfiguration.get().webPushMachServiceName = @"org.webkit.webpushtestdaemon.service";
-    auto dataStore = adoptNS([[WKWebsiteDataStore alloc] _initWithConfiguration:dataStoreConfiguration.get()]);
-
-    deleteAllRegistrationsForDataStore(dataStore.get());
-
-    auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
-    configuration.get().websiteDataStore = dataStore.get();
-    enableNotifications(configuration.get());
-
-    auto handler = adoptNS([[TestURLSchemeHandler alloc] init]);
-    [configuration setURLSchemeHandler:handler.get() forURLScheme:@"testing"];
-
-    [handler setStartURLSchemeTaskHandler:^(WKWebView *, id<WKURLSchemeTask> task) {
-        auto response = adoptNS([[NSURLResponse alloc] initWithURL:task.request.URL MIMEType:@"text/html" expectedContentLength:0 textEncodingName:nil]);
-        [task didReceiveResponse:response.get()];
-        [task didReceiveData:[NSData dataWithBytes:mainBytes length:strlen(mainBytes)]];
-        [task didFinish];
-    }];
-
-    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration.get()]);
-    auto uiDelegate = adoptNS([[NotificationPermissionDelegate alloc] init]);
-    [webView setUIDelegate:uiDelegate.get()];
-
-    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"testing://main/index.html"]]];
-    TestWebKitAPI::Util::run(&alertReceived);
-
-    alertReceived = false;
-    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"testing://secondary/index.html"]]];
-    TestWebKitAPI::Util::run(&alertReceived);
-
-    static bool originOperationDone = false;
-    static RetainPtr<NSSet<WKSecurityOrigin *>> origins;
-    [dataStore _getOriginsWithPushAndNotificationPermissions:^(NSSet<WKSecurityOrigin *> *rawOrigins) {
-        EXPECT_EQ([rawOrigins count], 2u);
-        origins = rawOrigins;
-        originOperationDone = true;
-    }];
-    TestWebKitAPI::Util::run(&originOperationDone);
-
-    for (WKSecurityOrigin *origin in origins.get()) {
-        EXPECT_TRUE([origin.protocol isEqualToString:@"testing"]);
-        EXPECT_TRUE([origin.host isEqualToString:@"main"] || [origin.host isEqualToString:@"secondary"]);
-    }
-
-    deleteAllRegistrationsForDataStore(dataStore.get());
-    cleanUpTestWebPushD(tempDirectory);
-}
-#endif // #if USE(APPLE_INTERNAL_SDK)
-#endif // ENABLE(INSTALL_COORDINATION_BUNDLES)
 
 } // namespace TestWebKitAPI
 

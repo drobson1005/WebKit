@@ -487,6 +487,10 @@ using namespace WebCore;
 #define NSAccessibilityTextInputMarkedRangeAttribute @"AXTextInputMarkedRange"
 #endif
 
+#ifndef NSAccessibilityTextInputMarkedTextMarkerRangeAttribute
+#define NSAccessibilityTextInputMarkedTextMarkerRangeAttribute @"AXTextInputMarkedTextMarkerRange"
+#endif
+
 @implementation WebAccessibilityObjectWrapper
 
 - (void)detach
@@ -918,6 +922,7 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
         NSAccessibilityEditableAncestorAttribute,
         NSAccessibilityHighestEditableAncestorAttribute,
         NSAccessibilityTextInputMarkedRangeAttribute,
+        NSAccessibilityTextInputMarkedTextMarkerRangeAttribute,
     ];
     static NeverDestroyed spinButtonCommonAttributes = [] {
         auto tempArray = adoptNS([[NSMutableArray alloc] initWithArray:attributes.get().get()]);
@@ -2248,8 +2253,14 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
         return [NSNumber numberWithBool: backingObject->isIndeterminate()];
 
     if ([attributeName isEqualToString:NSAccessibilityTextInputMarkedRangeAttribute]) {
-        auto range = backingObject->textInputMarkedRange();
-        return range ? [NSValue valueWithRange:*range] : nil;
+        auto range = backingObject->textInputMarkedTextMarkerRange();
+        auto nsRange = range.nsRange();
+        return range && nsRange ? [NSValue valueWithRange:*nsRange] : nil;
+    }
+
+    if ([attributeName isEqualToString:NSAccessibilityTextInputMarkedTextMarkerRangeAttribute]) {
+        auto range = backingObject->textInputMarkedTextMarkerRange();
+        return range ? range.platformData().bridgingAutorelease() : nil;
     }
 
     return nil;
@@ -2779,10 +2790,15 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 // object that is specified by the given range.
 - (NSAttributedString *)attributedStringForNSRange:(const NSRange&)range
 {
+    if (!range.length)
+        return nil;
+
     auto* backingObject = self.axBackingObject;
     if (!backingObject)
         return nil;
-    return backingObject->attributedStringForTextMarkerRange(backingObject->textMarkerRangeForNSRange(range), AXCoreObject::SpellCheck::Yes).autorelease();
+
+    auto attributedString = backingObject->attributedStringForTextMarkerRange(backingObject->textMarkerRangeForNSRange(range), AXCoreObject::SpellCheck::Yes);
+    return [attributedString length] ? attributedString.autorelease() : nil;
 }
 
 - (NSInteger)_indexForTextMarker:(AXTextMarkerRef)markerRef
@@ -3395,39 +3411,14 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
         return nil;
     }
 
-    if ([attribute isEqualToString:AXTextMarkerRangeForTextMarkersAttribute]) {
+    if ([attribute isEqualToString:AXTextMarkerRangeForTextMarkersAttribute]
+        || [attribute isEqualToString:AXTextMarkerRangeForUnorderedTextMarkersAttribute]) {
         if (array.count < 2
             || !AXObjectIsTextMarker([array objectAtIndex:0])
             || !AXObjectIsTextMarker([array objectAtIndex:1]))
             return nil;
 
         return AXTextMarkerRange { { (AXTextMarkerRef)[array objectAtIndex:0] }, { (AXTextMarkerRef)[array objectAtIndex:1] } }.platformData().bridgingAutorelease();
-    }
-
-    if ([attribute isEqualToString:AXTextMarkerRangeForUnorderedTextMarkersAttribute]) {
-        if (array.count < 2
-            || !AXObjectIsTextMarker([array objectAtIndex:0])
-            || !AXObjectIsTextMarker([array objectAtIndex:1]))
-            return nil;
-
-        AXTextMarkerRef textMarker1 = (AXTextMarkerRef)[array objectAtIndex:0];
-        AXTextMarkerRef textMarker2 = (AXTextMarkerRef)[array objectAtIndex:1];
-
-        return Accessibility::retrieveAutoreleasedValueFromMainThread<id>([textMarker1 = retainPtr(textMarker1), textMarker2 = retainPtr(textMarker2), protectedSelf = retainPtr(self)] () -> RetainPtr<id> {
-            auto* backingObject = protectedSelf.get().axBackingObject;
-            if (!backingObject)
-                return nil;
-
-            auto* cache = backingObject->axObjectCache();
-            if (!cache)
-                return nil;
-
-            auto characterOffset1 = characterOffsetForTextMarker(cache, textMarker1.get());
-            auto characterOffset2 = characterOffsetForTextMarker(cache, textMarker2.get());
-            auto range = cache->rangeForUnorderedCharacterOffsets(characterOffset1, characterOffset2);
-
-            return (id)textMarkerRangeFromRange(cache, range);
-        });
     }
 
     if ([attribute isEqualToString:AXNextTextMarkerForTextMarkerAttribute]) {
@@ -3700,6 +3691,14 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     return [super accessibilityArrayAttributeCount:attribute];
 }
 ALLOW_DEPRECATED_DECLARATIONS_END
+
+// Implement this for performance reasons, as the default AppKit implementation will iterate upwards
+// until it finds something that responds to this method.
+- (pid_t)accessibilityPresenterProcessIdentifier
+{
+    RefPtr<AXCoreObject> backingObject = self.axBackingObject;
+    return backingObject ? backingObject->processID() : 0;
+}
 
 - (NSArray *)accessibilityArrayAttributeValues:(NSString *)attribute index:(NSUInteger)index maxCount:(NSUInteger)maxCount
 {

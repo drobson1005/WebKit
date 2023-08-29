@@ -112,6 +112,7 @@ public:
     void end()
     {
         m_isStopped = true;
+        m_isEnded = true;
         m_source->requestToEnd(*this);
     }
 
@@ -280,10 +281,10 @@ private:
         return m_rotationSession->rotate(videoFrame, rotation, ImageRotationSessionVT::IsCGImageCompatible::No);
     }
 
-    bool preventSourceFromStopping()
+    bool preventSourceFromEnding()
     {
-        // Do not allow the source to stop if we are still using it.
-        return !m_isStopped;
+        // Do not allow the source to end if we are still using it.
+        return !m_isEnded;
     }
 
     RealtimeMediaSourceIdentifier m_id;
@@ -294,6 +295,7 @@ private:
     std::unique_ptr<ProducerSharedCARingBuffer> m_ringBuffer;
     std::optional<CAAudioStreamDescription> m_description;
     bool m_isStopped { false };
+    bool m_isEnded { false };
     std::unique_ptr<ImageRotationSessionVT> m_rotationSession;
     bool m_shouldApplyRotation { false };
     std::unique_ptr<IPC::Semaphore> m_captureSemaphore;
@@ -386,7 +388,7 @@ CaptureSourceOrError UserMediaCaptureManagerProxy::createCameraSource(const Capt
 void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstraints(RealtimeMediaSourceIdentifier id, const CaptureDevice& device, WebCore::MediaDeviceHashSalts&& hashSalts, const MediaConstraints& mediaConstraints, bool shouldUseGPUProcessRemoteFrames, PageIdentifier pageIdentifier, CreateSourceCallback&& completionHandler)
 {
     if (!m_connectionProxy->willStartCapture(device.type())) {
-        completionHandler("Request is not allowed"_s, { }, { });
+        completionHandler({ "Request is not allowed"_s, WebCore::MediaAccessDenialReason::PermissionDenied }, { }, { });
         return;
     }
 
@@ -412,7 +414,7 @@ void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstrai
     }
 
     if (!sourceOrError) {
-        completionHandler(WTFMove(sourceOrError.errorMessage), { }, { });
+        completionHandler(WTFMove(sourceOrError.error), { }, { });
         return;
     }
 
@@ -422,12 +424,13 @@ void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstrai
 #endif
 
     ASSERT(!m_proxies.contains(id));
-    auto proxy = makeUnique<SourceProxy>(id, m_connectionProxy->connection(), ProcessIdentity { m_connectionProxy->resourceOwner() }, WTFMove(source), shouldUseGPUProcessRemoteFrames ? m_connectionProxy->remoteVideoFrameObjectHeap() : nullptr);
+    Ref connection = m_connectionProxy->connection();
+    RefPtr remoteVideoFrameObjectHeap = shouldUseGPUProcessRemoteFrames ? m_connectionProxy->remoteVideoFrameObjectHeap() : nullptr;
+    auto proxy = makeUnique<SourceProxy>(id, WTFMove(connection), ProcessIdentity { m_connectionProxy->resourceOwner() }, WTFMove(source), WTFMove(remoteVideoFrameObjectHeap));
 
     if (constraints && proxy->source().type() == RealtimeMediaSource::Type::Video) {
-        auto result = proxy->applyConstraints(*constraints);
-        if (result) {
-            completionHandler(WTFMove(result->message), { }, { });
+        if (auto result = proxy->applyConstraints(*constraints)) {
+            completionHandler({ WTFMove(result->badConstraint), WebCore::MediaAccessDenialReason::InvalidConstraint }, { }, { });
             return;
         }
     }
@@ -453,7 +456,7 @@ void UserMediaCaptureManagerProxy::startProducingData(RealtimeMediaSourceIdentif
 #if ENABLE(APP_PRIVACY_REPORT)
     m_connectionProxy->setTCCIdentity();
 #endif
-    m_connectionProxy->startProducingData(proxy->source().type());
+    m_connectionProxy->startProducingData(proxy->source().deviceType());
     proxy->start();
 }
 
@@ -501,7 +504,9 @@ void UserMediaCaptureManagerProxy::clone(RealtimeMediaSourceIdentifier clonedID,
         if (sourceClone->deviceType() == WebCore::CaptureDevice::DeviceType::Camera)
             m_pageSources.ensure(pageIdentifier, [] { return PageSources { }; }).iterator->value.cameraSources.add(sourceClone.get());
 
-        auto cloneProxy = makeUnique<SourceProxy>(newSourceID, m_connectionProxy->connection(), ProcessIdentity { m_connectionProxy->resourceOwner() }, WTFMove(sourceClone), m_connectionProxy->remoteVideoFrameObjectHeap());
+        Ref connection = m_connectionProxy->connection();
+        RefPtr remoteVideoFrameObjectHeap = m_connectionProxy->remoteVideoFrameObjectHeap();
+        auto cloneProxy = makeUnique<SourceProxy>(newSourceID, WTFMove(connection), ProcessIdentity { m_connectionProxy->resourceOwner() }, WTFMove(sourceClone), WTFMove(remoteVideoFrameObjectHeap));
         cloneProxy->copySettings(*proxy);
         m_proxies.add(newSourceID, WTFMove(cloneProxy));
     }

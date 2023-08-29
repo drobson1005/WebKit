@@ -279,7 +279,7 @@ static OptionSet<AvoidanceReason> canUseForStyle(const RenderElement& renderer, 
 {
     auto& style = renderer.style();
     OptionSet<AvoidanceReason> reasons;
-    if (style.writingMode() == WritingMode::BottomToTop)
+    if (style.writingMode() == WritingMode::HorizontalBt)
         SET_REASON_AND_RETURN_IF_NEEDED(FlowHasUnsupportedWritingMode, reasons, includeReasons);
     if (!renderer.style().marginTrim().isEmpty())
         SET_REASON_AND_RETURN_IF_NEEDED(FlowHasMarginTrim, reasons, includeReasons);
@@ -348,9 +348,6 @@ static OptionSet<AvoidanceReason> canUseForChild(const RenderBlockFlow& flow, co
     }
 
     auto& renderer = downcast<RenderElement>(child);
-    if (renderer.isSVGRootOrLegacySVGRoot())
-        SET_REASON_AND_RETURN_IF_NEEDED(ContentIsSVG, reasons, includeReasons);
-
 #if !ALLOW_RUBY
     if (renderer.isRubyRun())
         SET_REASON_AND_RETURN_IF_NEEDED(ContentIsRuby, reasons, includeReasons);
@@ -502,6 +499,8 @@ bool shouldInvalidateLineLayoutPathAfterChangeFor(const RenderBlockFlow& rootBlo
         // Single mutation only atm.
         return true;
     }
+    if (renderer.style().textWrap() == TextWrap::Balance)
+        return true;
 
     auto rootHasNonSupportedRenderer = [&] {
         for (auto* sibling = rootBlockContainer.firstChild(); sibling; sibling = sibling->nextSibling()) {

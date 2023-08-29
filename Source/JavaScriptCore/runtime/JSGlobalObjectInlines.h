@@ -37,7 +37,9 @@
 #include "JSWeakObjectMapRefInternal.h"
 #include "LinkTimeConstant.h"
 #include "ObjectPrototype.h"
+#include "ParserModes.h"
 #include "StrongInlines.h"
+#include "StructureInlines.h"
 #include <wtf/Hasher.h>
 
 namespace JSC {
@@ -302,7 +304,11 @@ inline JSArray* constructArrayNegativeIndexed(JSGlobalObject* globalObject, Arra
     auto scope = DECLARE_THROW_SCOPE(vm);
     Structure* structure = globalObject->arrayStructureForProfileDuringAllocation(globalObject, profile, newTarget);
     RETURN_IF_EXCEPTION(scope, nullptr);
-    return ArrayAllocationProfile::updateLastAllocationFor(profile, constructArrayNegativeIndexed(globalObject, structure, values, length));
+    scope.release();
+    JSArray* array = constructArrayNegativeIndexed(globalObject, structure, values, length);
+    if (UNLIKELY(!array))
+        return nullptr;
+    return ArrayAllocationProfile::updateLastAllocationFor(profile, array);
 }
 
 inline OptionSet<CodeGenerationMode> JSGlobalObject::defaultCodeGenerationMode() const

@@ -702,6 +702,7 @@ jit/TagRegistersMode.cpp
 jit/ThunkGenerators.cpp
 jit/Width.cpp
 
+llint/InPlaceInterpreter.cpp
 llint/LLIntCLoop.cpp
 llint/LLIntData.cpp
 llint/LLIntEntrypoint.cpp
@@ -971,6 +972,8 @@ runtime/MemoryMode.cpp
 runtime/MemoryStatistics.cpp
 runtime/ModuleProgramExecutable.cpp
 runtime/NarrowingNumberPredictionFuzzerAgent.cpp
+runtime/NativeCallee.cpp
+runtime/NativeCalleeRegistry.cpp
 runtime/NativeErrorConstructor.cpp
 runtime/NativeErrorPrototype.cpp
 runtime/NativeExecutable.cpp
@@ -1108,19 +1111,22 @@ wasm/WasmBinding.cpp
 wasm/WasmBranchHintsSectionParser.cpp
 wasm/WasmCallee.cpp
 wasm/WasmCalleeGroup.cpp
-wasm/WasmCalleeRegistry.cpp
 wasm/WasmCallingConvention.cpp
 wasm/WasmCompilationMode.cpp
+wasm/WasmConstExprGenerator.cpp
 wasm/WasmContext.cpp
 wasm/WasmEntryPlan.cpp
 wasm/WasmFaultSignalHandler.cpp
 wasm/WasmFormat.cpp
 wasm/WasmFunctionCodeBlockGenerator.cpp
+wasm/WasmFunctionIPIntMetadataGenerator.cpp
 wasm/WasmGlobal.cpp
 wasm/WasmHandlerInfo.cpp
 wasm/WasmIndexOrName.cpp
 wasm/WasmInstance.cpp
 wasm/WasmInstance.h
+wasm/WasmIPIntGenerator.cpp
+wasm/WasmIPIntPlan.cpp
 wasm/WasmLLIntGenerator.cpp
 wasm/WasmLLIntPlan.cpp
 wasm/WasmLLIntTierUpCounter.cpp

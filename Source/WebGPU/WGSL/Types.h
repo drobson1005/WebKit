@@ -26,6 +26,7 @@
 #pragma once
 
 #include "ASTForward.h"
+#include "ASTTypeName.h"
 #include <wtf/HashMap.h>
 #include <wtf/Markable.h>
 #include <wtf/PrintStream.h>
@@ -33,6 +34,7 @@
 
 namespace WGSL {
 
+class TypeChecker;
 struct Type;
 
 enum class AddressSpace : uint8_t {
@@ -124,6 +126,11 @@ struct Reference {
     const Type* element;
 };
 
+struct TypeConstructor {
+    ASCIILiteral name;
+    std::function<const Type*(AST::ParameterizedTypeName&)> construct;
+};
+
 struct Bottom {
 };
 
@@ -138,6 +145,7 @@ struct Type : public std::variant<
     Types::Function,
     Types::Texture,
     Types::Reference,
+    Types::TypeConstructor,
     Types::Bottom
 > {
     using std::variant<
@@ -149,6 +157,7 @@ struct Type : public std::variant<
         Types::Function,
         Types::Texture,
         Types::Reference,
+        Types::TypeConstructor,
         Types::Bottom
         >::variant;
     void dump(PrintStream&) const;
@@ -167,11 +176,24 @@ bool isPrimitiveReference(const Type*, Types::Primitive::Kind);
 
 namespace WTF {
 
-template<> class StringTypeAdapter<WGSL::Type, void> : public StringTypeAdapter<String, void> {
+template<> class StringTypeAdapter<WGSL::Type, void> {
 public:
     StringTypeAdapter(const WGSL::Type& type)
-        : StringTypeAdapter<String, void> { type.toString() }
-    { }
+        : m_string { type.toString() }
+    {
+    }
+
+    unsigned length() const { return m_string.length(); }
+    bool is8Bit() const { return m_string.is8Bit(); }
+    template<typename CharacterType>
+    void writeTo(CharacterType* destination) const
+    {
+        StringView { m_string }.getCharacters(destination);
+        WTF_STRINGTYPEADAPTER_COPIED_WTF_STRING();
+    }
+
+private:
+    String const m_string;
 };
 
 } // namespace WTF

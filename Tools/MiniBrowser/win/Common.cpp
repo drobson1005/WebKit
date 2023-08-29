@@ -61,14 +61,6 @@ void computeFullDesktopFrame()
     s_windowSize.cy = scaleFactor * (desktop.bottom - desktop.top);
 }
 
-BOOL WINAPI DllMain(HINSTANCE dllInstance, DWORD reason, LPVOID)
-{
-    if (reason == DLL_PROCESS_ATTACH)
-        hInst = dllInstance;
-
-    return TRUE;
-}
-
 bool getAppDataFolder(_bstr_t& directory)
 {
     wchar_t appDataDirectory[MAX_PATH];
@@ -83,6 +75,18 @@ bool getAppDataFolder(_bstr_t& directory)
 
     directory = _bstr_t(appDataDirectory) + L"\\" + ::PathFindFileNameW(executablePath);
 
+    return true;
+}
+
+bool getKnownFolderPath(REFKNOWNFOLDERID id, std::wstring& knownFolderPath)
+{
+    PWSTR path = nullptr;
+
+    if (FAILED(SHGetKnownFolderPath(id, KF_FLAG_CREATE, 0, &path)))
+        return false;
+
+    knownFolderPath = std::wstring(path);
+    CoTaskMemFree(path);
     return true;
 }
 

@@ -323,10 +323,6 @@ void MediaElementSession::clientDataBufferingTimerFired()
 
     updateClientDataBuffering();
 
-#if PLATFORM(IOS_FAMILY)
-    PlatformMediaSessionManager::sharedManager().configureWireLessTargetMonitoring();
-#endif
-
     if (state() != Playing || !m_element.elementIsHidden())
         return;
 
@@ -341,6 +337,10 @@ void MediaElementSession::updateClientDataBuffering()
         m_clientDataBufferingTimer.stop();
 
     m_element.setBufferingPolicy(preferredBufferingPolicy());
+
+#if PLATFORM(IOS_FAMILY)
+    PlatformMediaSessionManager::sharedManager().configureWirelessTargetMonitoring();
+#endif
 }
 
 void MediaElementSession::addBehaviorRestriction(BehaviorRestrictions restrictions)
@@ -770,7 +770,7 @@ void MediaElementSession::setHasPlaybackTargetAvailabilityListeners(bool hasList
 
 #if PLATFORM(IOS_FAMILY)
     m_hasPlaybackTargetAvailabilityListeners = hasListeners;
-    PlatformMediaSessionManager::sharedManager().configureWireLessTargetMonitoring();
+    PlatformMediaSessionManager::sharedManager().configureWirelessTargetMonitoring();
 #else
     UNUSED_PARAM(hasListeners);
     m_element.document().playbackTargetPickerClientStateDidChange(*this, m_element.mediaState());
@@ -1153,14 +1153,14 @@ static bool processRemoteControlCommandIfPlayingMediaStreams(Document& document,
     mutedState.add(WebCore::MediaProducerMutedState::ScreenCaptureIsMuted);
 
     switch (commandType) {
-    case PlatformMediaSession::PlayCommand:
+    case PlatformMediaSession::RemoteControlCommandType::PlayCommand:
         page->setMuted({ });
         return true;
-    case PlatformMediaSession::StopCommand:
-    case PlatformMediaSession::PauseCommand:
+    case PlatformMediaSession::RemoteControlCommandType::StopCommand:
+    case PlatformMediaSession::RemoteControlCommandType::PauseCommand:
         page->setMuted(mutedState);
         return true;
-    case PlatformMediaSession::TogglePlayPauseCommand:
+    case PlatformMediaSession::RemoteControlCommandType::TogglePlayPauseCommand:
         if (page->mutedState().containsAny(mutedState))
             page->setMuted({ });
         else
@@ -1187,27 +1187,27 @@ void MediaElementSession::didReceiveRemoteControlCommand(RemoteControlCommandTyp
 
     MediaSessionActionDetails actionDetails;
     switch (commandType) {
-    case NoCommand:
+    case RemoteControlCommandType::NoCommand:
         return;
-    case PlayCommand:
+    case RemoteControlCommandType::PlayCommand:
         actionDetails.action = MediaSessionAction::Play;
         break;
-    case PauseCommand:
+    case RemoteControlCommandType::PauseCommand:
         actionDetails.action = MediaSessionAction::Pause;
         break;
-    case StopCommand:
+    case RemoteControlCommandType::StopCommand:
         actionDetails.action = MediaSessionAction::Stop;
         break;
-    case TogglePlayPauseCommand:
+    case RemoteControlCommandType::TogglePlayPauseCommand:
         actionDetails.action = m_element.paused() ? MediaSessionAction::Play : MediaSessionAction::Pause;
         break;
-    case BeginScrubbingCommand:
+    case RemoteControlCommandType::BeginScrubbingCommand:
         m_isScrubbing = true;
         return;
-    case EndScrubbingCommand:
+    case RemoteControlCommandType::EndScrubbingCommand:
         m_isScrubbing = false;
         return;
-    case SeekToPlaybackPositionCommand:
+    case RemoteControlCommandType::SeekToPlaybackPositionCommand:
         ASSERT(argument.time);
         if (!argument.time)
             return;
@@ -1215,26 +1215,26 @@ void MediaElementSession::didReceiveRemoteControlCommand(RemoteControlCommandTyp
         actionDetails.seekTime = argument.time.value();
         actionDetails.fastSeek = m_isScrubbing;
         break;
-    case SkipForwardCommand:
+    case RemoteControlCommandType::SkipForwardCommand:
         if (argument.time)
             actionDetails.seekOffset = argument.time.value();
         actionDetails.action = MediaSessionAction::Seekforward;
         break;
-    case SkipBackwardCommand:
+    case RemoteControlCommandType::SkipBackwardCommand:
         if (argument.time)
             actionDetails.seekOffset = argument.time.value();
         actionDetails.action = MediaSessionAction::Seekbackward;
         break;
-    case NextTrackCommand:
+    case RemoteControlCommandType::NextTrackCommand:
         actionDetails.action = MediaSessionAction::Nexttrack;
         break;
-    case PreviousTrackCommand:
+    case RemoteControlCommandType::PreviousTrackCommand:
         actionDetails.action = MediaSessionAction::Previoustrack;
         break;
-    case BeginSeekingBackwardCommand:
-    case EndSeekingBackwardCommand:
-    case BeginSeekingForwardCommand:
-    case EndSeekingForwardCommand:
+    case RemoteControlCommandType::BeginSeekingBackwardCommand:
+    case RemoteControlCommandType::EndSeekingBackwardCommand:
+    case RemoteControlCommandType::BeginSeekingForwardCommand:
+    case RemoteControlCommandType::EndSeekingForwardCommand:
         ASSERT_NOT_REACHED();
         return;
     }

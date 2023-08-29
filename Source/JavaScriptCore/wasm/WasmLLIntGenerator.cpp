@@ -723,9 +723,12 @@ auto LLIntGenerator::callInformationForCaller(const FunctionSignature& signature
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
         case TypeKind::I31ref:
         case TypeKind::Rec:
         case TypeKind::Sub:
+        case TypeKind::Subfinal:
             RELEASE_ASSERT_NOT_REACHED();
         }
     }
@@ -763,9 +766,12 @@ auto LLIntGenerator::callInformationForCaller(const FunctionSignature& signature
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
         case TypeKind::I31ref:
         case TypeKind::Rec:
         case TypeKind::Sub:
+        case TypeKind::Subfinal:
             RELEASE_ASSERT_NOT_REACHED();
         }
     }
@@ -833,9 +839,12 @@ auto LLIntGenerator::callInformationForCallee(const FunctionSignature& signature
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
         case TypeKind::I31ref:
         case TypeKind::Rec:
         case TypeKind::Sub:
+        case TypeKind::Subfinal:
             RELEASE_ASSERT_NOT_REACHED();
         }
     }
@@ -899,9 +908,12 @@ auto LLIntGenerator::addArguments(const TypeDefinition& signature) -> PartialRes
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
         case TypeKind::I31ref:
         case TypeKind::Rec:
         case TypeKind::Sub:
+        case TypeKind::Subfinal:
             RELEASE_ASSERT_NOT_REACHED();
         }
     }
@@ -1247,7 +1259,7 @@ auto LLIntGenerator::addThrow(unsigned exceptionIndex, Vector<ExpressionType>& a
     // delayed moves, but the wasm_throw opcode expects all the arguments to be contiguous
     // in the stack. The reason we don't call materializeConstantsAndLocals here is that
     // it expects a stack, not a vector of ExpressionType arguments.
-    walkExpressionStack(args, [&](VirtualRegister& arg, VirtualRegister slot) {
+    walkExpressionStack(args, m_stackSize + args.size(), [&](VirtualRegister& arg, VirtualRegister slot) {
         if (arg == slot)
             return;
         WasmMov::emit(this, slot, arg);

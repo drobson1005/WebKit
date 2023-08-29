@@ -31,6 +31,7 @@
 
 #include "JSCJSValueInlines.h"
 #include "WasmBranchHintsSectionParser.h"
+#include "WasmConstExprGenerator.h"
 #include "WasmMemoryInformation.h"
 #include "WasmNameSectionParser.h"
 #include "WasmOps.h"
@@ -84,12 +85,13 @@ auto SectionParser::parseType() -> PartialResult
             WASM_FAIL_IF_HELPER_FAILS(parseRecursionGroup(i, signature));
             break;
         }
-        case TypeKind::Sub: {
+        case TypeKind::Sub:
+        case TypeKind::Subfinal: {
             if (!Options::useWebAssemblyGC())
                 return fail(i, "th type failed to parse because sub types are not enabled");
 
             Vector<TypeIndex> empty;
-            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, empty));
+            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, empty, static_cast<TypeKind>(typeKind) == TypeKind::Subfinal));
             break;
         }
         default:
@@ -116,13 +118,13 @@ auto SectionParser::parseType() -> PartialResult
                     TypeInformation::registerCanonicalRTTForType(projection->index());
                     m_info->rtts.uncheckedAppend(TypeInformation::getCanonicalRTT(projection->index()));
                     if (signature->is<Subtype>())
-                        WASM_PARSER_FAIL_IF(!checkSubtypeValidity(projection->unroll(), *group), "structural type is not a subtype of the specified supertype");
+                        WASM_FAIL_IF_HELPER_FAILS(checkSubtypeValidity(projection->unroll(), group));
                     m_info->typeSignatures.uncheckedAppend(projection.releaseNonNull());
                 } else {
                     TypeInformation::registerCanonicalRTTForType(signature->index());
                     m_info->rtts.uncheckedAppend(TypeInformation::getCanonicalRTT(signature->index()));
                     if (signature->is<Subtype>())
-                        WASM_PARSER_FAIL_IF(!checkStructuralSubtype(signature->expand(), TypeInformation::get(signature->as<Subtype>()->superType())), "structural type is not a subtype of the specified supertype");
+                        WASM_FAIL_IF_HELPER_FAILS(checkSubtypeValidity(signature->unroll(), { }));
                     m_info->typeSignatures.uncheckedAppend(signature.releaseNonNull());
                 }
             }
@@ -369,13 +371,16 @@ auto SectionParser::parseGlobal() -> PartialResult
 
         WASM_FAIL_IF_HELPER_FAILS(parseGlobalType(global));
         Type typeForInitOpcode;
-        WASM_FAIL_IF_HELPER_FAILS(parseInitExpr(initOpcode, initialBitsOrImportNumber, initVector, typeForInitOpcode));
+        bool isExtendedConstantExpression;
+        WASM_FAIL_IF_HELPER_FAILS(parseInitExpr(initOpcode, isExtendedConstantExpression, initialBitsOrImportNumber, initVector, global.type, typeForInitOpcode));
         if (typeForInitOpcode.isV128())
             global.initialBits.initialVector = initVector;
         else
             global.initialBits.initialBitsOrImportNumber = initialBitsOrImportNumber;
 
-        if (initOpcode == GetGlobal)
+        if (isExtendedConstantExpression)
+            global.initializationType = GlobalInformation::FromExtendedExpression;
+        else if (initOpcode == GetGlobal)
             global.initializationType = GlobalInformation::FromGlobalImport;
         else if (initOpcode == RefFunc)
             global.initializationType = GlobalInformation::FromRefFunc;
@@ -639,8 +644,9 @@ auto SectionParser::parseCode() -> PartialResult
     return { };
 }
 
-auto SectionParser::parseInitExpr(uint8_t& opcode, uint64_t& bitsOrImportNumber, v128_t& vectorBits, Type& resultType) -> PartialResult
+auto SectionParser::parseInitExpr(uint8_t& opcode, bool& isExtendedConstantExpression, uint64_t& bitsOrImportNumber, v128_t& vectorBits, Type expectedType, Type& resultType) -> PartialResult
 {
+    size_t initialOffset = m_offset;
     WASM_PARSER_FAIL_IF(!parseUInt8(opcode), "can't get init_expr's opcode");
 
     switch (opcode) {
@@ -747,8 +753,26 @@ auto SectionParser::parseInitExpr(uint8_t& opcode, uint64_t& bitsOrImportNumber,
     }
 
     uint8_t endOpcode;
-    WASM_PARSER_FAIL_IF(!parseUInt8(endOpcode), "can't get init_expr's end opcode");
-    WASM_PARSER_FAIL_IF(endOpcode != OpType::End, "init_expr should end with end, ended with ", endOpcode);
+    // Don't consume the opcode byte unless it's an End so that the extended
+    // parsing mode below can consume it if needed.
+    WASM_PARSER_FAIL_IF(offset() >= length(), "can't get init_expr's end opcode");
+    endOpcode = source()[offset()];
+
+    if (endOpcode == OpType::End) {
+        m_offset++;
+        isExtendedConstantExpression = false;
+        return { };
+    }
+    WASM_PARSER_FAIL_IF(!Options::useWebAssemblyExtendedConstantExpressions(), "init_expr should end with end, ended with ", endOpcode);
+
+    // If an End doesn't appear, we have to assume it's an extended constant expression
+    // and use the full Wasm expression parser to validate.
+    size_t initExprOffset;
+    WASM_FAIL_IF_HELPER_FAILS(parseExtendedConstExpr(source() + initialOffset, length() - initialOffset, initialOffset + m_offsetInSource, initExprOffset, m_info, expectedType));
+    m_offset += (initExprOffset - (m_offset - initialOffset));
+    WASM_PARSER_FAIL_IF(!m_info->constantExpressions.tryConstructAndAppend(source() + initialOffset, initExprOffset), "could not allocate memory for init expr");
+    bitsOrImportNumber = m_info->constantExpressions.size() - 1;
+    isExtendedConstantExpression = true;
 
     return { };
 }
@@ -764,12 +788,13 @@ auto SectionParser::validateElementTableIdx(uint32_t tableIndex, TableElementTyp
 auto SectionParser::parseI32InitExpr(std::optional<I32InitExpr>& initExpr, ASCIILiteral failMessage) -> PartialResult
 {
     uint8_t initOpcode;
+    bool isExtendedConstantExpression;
     uint64_t initExprBits;
     Type initExprType;
     v128_t unused;
-    WASM_FAIL_IF_HELPER_FAILS(parseInitExpr(initOpcode, initExprBits, unused, initExprType));
+    WASM_FAIL_IF_HELPER_FAILS(parseInitExpr(initOpcode, isExtendedConstantExpression, initExprBits, unused, Types::I32, initExprType));
     WASM_PARSER_FAIL_IF(!initExprType.isI32(), failMessage);
-    initExpr = makeI32InitExpr(initOpcode, initExprBits);
+    initExpr = makeI32InitExpr(initOpcode, isExtendedConstantExpression, initExprBits);
 
     return { };
 }
@@ -777,26 +802,27 @@ auto SectionParser::parseI32InitExpr(std::optional<I32InitExpr>& initExpr, ASCII
 auto SectionParser::parseFunctionType(uint32_t position, RefPtr<TypeDefinition>& functionSignature) -> PartialResult
 {
     uint32_t argumentCount;
-    WASM_PARSER_FAIL_IF(!parseVarUInt32(argumentCount), "can't get ", position, "th Type's argument count");
-    WASM_PARSER_FAIL_IF(argumentCount > maxFunctionParams, position, "th argument count is too big ", argumentCount, " maximum ", maxFunctionParams);
-    Vector<Type> argumentTypes;
+    WASM_PARSER_FAIL_IF(!parseVarUInt32(argumentCount), "can't get Type's argument count at index ", position);
+    WASM_PARSER_FAIL_IF(argumentCount > maxFunctionParams, "argument count of Type at index ", position, " is too big ", argumentCount, " maximum ", maxFunctionParams);
+    Vector<Type, 16> argumentTypes;
     WASM_PARSER_FAIL_IF(!argumentTypes.tryReserveCapacity(argumentCount), "can't allocate enough memory for Type section's ", position, "th signature");
 
     for (unsigned i = 0; i < argumentCount; ++i) {
         Type argumentType;
         WASM_PARSER_FAIL_IF(!parseValueType(m_info, argumentType), "can't get ", i, "th argument Type");
-        argumentTypes.append(argumentType);
+        argumentTypes.uncheckedAppend(argumentType);
     }
 
     uint32_t returnCount;
-    WASM_PARSER_FAIL_IF(!parseVarUInt32(returnCount), "can't get ", position, "th Type's return count");
+    WASM_PARSER_FAIL_IF(!parseVarUInt32(returnCount), "can't get Type's return count at index ", position);
+    WASM_PARSER_FAIL_IF(returnCount > maxFunctionReturns, "return count of Type at index ", position, " is too big ", returnCount, " maximum ", maxFunctionReturns);
 
-    Vector<Type, 1> returnTypes;
-    WASM_PARSER_FAIL_IF(!returnTypes.tryReserveCapacity(argumentCount), "can't allocate enough memory for Type section's ", position, "th signature");
+    Vector<Type, 16> returnTypes;
+    WASM_PARSER_FAIL_IF(!returnTypes.tryReserveCapacity(returnCount), "can't allocate enough memory for Type section's ", position, "th signature");
     for (unsigned i = 0; i < returnCount; ++i) {
         Type value;
         WASM_PARSER_FAIL_IF(!parseValueType(m_info, value), "can't get ", i, "th Type's return value");
-        returnTypes.append(value);
+        returnTypes.uncheckedAppend(value);
     }
 
     functionSignature = TypeInformation::typeDefinitionForFunction(returnTypes, argumentTypes);
@@ -909,8 +935,9 @@ auto SectionParser::parseRecursionGroup(uint32_t position, RefPtr<TypeDefinition
             WASM_FAIL_IF_HELPER_FAILS(parseArrayType(i, signature));
             break;
         }
-        case TypeKind::Sub: {
-            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, types));
+        case TypeKind::Sub:
+        case TypeKind::Subfinal: {
+            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, types, static_cast<TypeKind>(typeKind) == TypeKind::Subfinal));
             break;
         }
         default:
@@ -943,12 +970,14 @@ auto SectionParser::parseRecursionGroup(uint32_t position, RefPtr<TypeDefinition
         for (uint32_t i = 0; i < typeCount; ++i) {
             const TypeDefinition& def = m_info->typeSignatures[i].get().unroll();
             if (def.is<Subtype>())
-                WASM_PARSER_FAIL_IF(!checkSubtypeValidity(def, *recursionGroup), "structural type is not a subtype of the specified supertype");
+                WASM_FAIL_IF_HELPER_FAILS(checkSubtypeValidity(def, recursionGroup));
         }
     } else {
         if (!firstSignature->hasRecursiveReference()) {
             TypeInformation::registerCanonicalRTTForType(firstSignature->index());
             m_info->rtts.uncheckedAppend(TypeInformation::getCanonicalRTT(firstSignature->index()));
+            if (firstSignature->is<Subtype>())
+                WASM_FAIL_IF_HELPER_FAILS(checkSubtypeValidity(*firstSignature, { }));
             m_info->typeSignatures.uncheckedAppend(firstSignature.releaseNonNull());
         } else {
             RefPtr<TypeDefinition> projection = TypeInformation::typeDefinitionForProjection(recursionGroup->index(), 0);
@@ -956,7 +985,7 @@ auto SectionParser::parseRecursionGroup(uint32_t position, RefPtr<TypeDefinition
             TypeInformation::registerCanonicalRTTForType(projection->index());
             m_info->rtts.uncheckedAppend(TypeInformation::getCanonicalRTT(projection->index()));
             if (firstSignature->is<Subtype>())
-                WASM_PARSER_FAIL_IF(!checkSubtypeValidity(projection->unroll(), *recursionGroup), "structural type is not a subtype of the specified supertype");
+                WASM_FAIL_IF_HELPER_FAILS(checkSubtypeValidity(projection->unroll(), recursionGroup));
             m_info->typeSignatures.uncheckedAppend(projection.releaseNonNull());
         }
     }
@@ -1021,21 +1050,32 @@ bool SectionParser::checkStructuralSubtype(const TypeDefinition& subtype, const 
     return false;
 }
 
-bool SectionParser::checkSubtypeValidity(const TypeDefinition& subtype, const TypeDefinition& recursionGroup)
+auto SectionParser::checkSubtypeValidity(const TypeDefinition& subtype, RefPtr<const TypeDefinition> recursionGroup) -> PartialResult
 {
     ASSERT(subtype.is<Subtype>());
-    ASSERT(recursionGroup.is<RecursionGroup>());
-    TypeIndex superIndex = subtype.as<Subtype>()->superType();
-    for (RecursionGroupCount i = 0; i < recursionGroup.as<RecursionGroup>()->typeCount(); i++) {
-        if (recursionGroup.as<RecursionGroup>()->type(i) == superIndex) {
-            superIndex = TypeInformation::typeDefinitionForProjection(recursionGroup.index(), i)->index();
-            break;
+    ASSERT(!recursionGroup || recursionGroup->is<RecursionGroup>());
+
+    if (subtype.as<Subtype>()->supertypeCount() < 1)
+        return { };
+    TypeIndex superIndex = subtype.as<Subtype>()->firstSuperType();
+
+    if (recursionGroup) {
+        for (RecursionGroupCount i = 0; i < recursionGroup->as<RecursionGroup>()->typeCount(); i++) {
+            if (recursionGroup->as<RecursionGroup>()->type(i) == superIndex) {
+                superIndex = TypeInformation::typeDefinitionForProjection(recursionGroup->index(), i)->index();
+                break;
+            }
         }
     }
-    return checkStructuralSubtype(TypeInformation::get(subtype.as<Subtype>()->underlyingType()), TypeInformation::get(superIndex));
+
+    const TypeDefinition& supertype = TypeInformation::get(superIndex).unroll();
+    WASM_PARSER_FAIL_IF(!supertype.is<Subtype>() || supertype.as<Subtype>()->isFinal(), "cannot declare subtype of final supertype");
+    WASM_PARSER_FAIL_IF(!checkStructuralSubtype(TypeInformation::get(subtype.as<Subtype>()->underlyingType()), supertype), "structural type is not a subtype of the specified supertype");
+
+    return { };
 }
 
-auto SectionParser::parseSubtype(uint32_t position, RefPtr<TypeDefinition>& subtype, Vector<TypeIndex>& recursionGroupTypes) -> PartialResult
+auto SectionParser::parseSubtype(uint32_t position, RefPtr<TypeDefinition>& subtype, Vector<TypeIndex>& recursionGroupTypes, bool isFinal) -> PartialResult
 {
     ASSERT(Options::useWebAssemblyGC());
 
@@ -1078,15 +1118,18 @@ auto SectionParser::parseSubtype(uint32_t position, RefPtr<TypeDefinition>& subt
         return fail("invalid structural type definition for subtype ", typeKind);
     }
 
-    // When no supertypes are specified, we will normalize type definitions to
-    // not have the subtype. This ensures that type shorthands and the full
-    // subtype form are represented in the same way.
-    if (!supertypeCount) {
+    // When no supertypes are specified and the type is not final, we will normalize
+    // type definitions to not have the subtype. This ensures that type shorthands
+    // and the full subtype form are represented in the same way.
+    if (!supertypeCount && isFinal) {
         subtype = underlyingType;
         return { };
     }
 
-    subtype = TypeInformation::typeDefinitionForSubtype(supertypeIndex, TypeInformation::get(*underlyingType));
+    if (supertypeCount > 0)
+        subtype = TypeInformation::typeDefinitionForSubtype({ supertypeIndex }, TypeInformation::get(*underlyingType), isFinal);
+    else
+        subtype = TypeInformation::typeDefinitionForSubtype({ }, TypeInformation::get(*underlyingType), isFinal);
 
     return { };
 }
@@ -1124,6 +1167,8 @@ auto SectionParser::parseElementSegmentVectorOfExpressions(TableElementType tabl
         WASM_PARSER_FAIL_IF((opcode != RefFunc) && (opcode != RefNull), "opcode for exp in element section's should be either ref.func or ref.null ", elementNum, "th element's ", index, "th index");
 
         uint32_t functionIndex;
+        // FIXME: this should also parse other constant expressions
+        //        https://bugs.webkit.org/show_bug.cgi?id=260542
         if (opcode == RefFunc) {
             WASM_PARSER_FAIL_IF(!parseVarUInt32(functionIndex), "can't get Element section's ", elementNum, "th element's ", index, "th index");
             WASM_PARSER_FAIL_IF(functionIndex >= m_info->functionIndexSpaceSize(), "Element section's ", elementNum, "th element's ", index, "th index is ", functionIndex, " which exceeds the function index space size of ", m_info->functionIndexSpaceSize());

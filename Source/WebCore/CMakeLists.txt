@@ -16,6 +16,8 @@ set(WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/Modules/ShapeDetection"
     "${WEBCORE_DIR}/Modules/ShapeDetection/Interfaces"
     "${WEBCORE_DIR}/Modules/WebGPU"
+    "${WEBCORE_DIR}/Modules/WebGPU/InternalAPI"
+    "${WEBCORE_DIR}/Modules/WebGPU/Implementation"
     "${WEBCORE_DIR}/Modules/airplay"
     "${WEBCORE_DIR}/Modules/applepay"
     "${WEBCORE_DIR}/Modules/applepay/paymentrequest"
@@ -28,6 +30,7 @@ set(WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/Modules/compression"
     "${WEBCORE_DIR}/Modules/contact-picker"
     "${WEBCORE_DIR}/Modules/cookie-consent"
+    "${WEBCORE_DIR}/Modules/cookie-store"
     "${WEBCORE_DIR}/Modules/credentialmanagement"
     "${WEBCORE_DIR}/Modules/encryptedmedia"
     "${WEBCORE_DIR}/Modules/encryptedmedia/legacy"
@@ -70,6 +73,7 @@ set(WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/Modules/webdatabase"
     "${WEBCORE_DIR}/Modules/webdriver"
     "${WEBCORE_DIR}/Modules/websockets"
+    "${WEBCORE_DIR}/Modules/webtransport"
     "${WEBCORE_DIR}/Modules/webxr"
     "${WEBCORE_DIR}/accessibility"
     "${WEBCORE_DIR}/accessibility/isolatedtree"
@@ -212,6 +216,7 @@ set(WebCore_IDL_INCLUDES
     Modules/badge
     Modules/cache
     Modules/compression
+    Modules/cookie-store
     Modules/credentialmanagement
     Modules/encryptedmedia/legacy
     Modules/entriesapi
@@ -236,6 +241,7 @@ set(WebCore_IDL_INCLUDES
     Modules/webaudio
     Modules/webdatabase
     Modules/websockets
+    Modules/webtransport
 
     bindings/js
 
@@ -286,6 +292,19 @@ set(WebCore_NON_SVG_IDL_FILES
 
     Modules/cookie-consent/Navigator+CookieConsent.idl
     Modules/cookie-consent/RequestCookieConsentOptions.idl
+
+    Modules/cookie-store/CookieChangeEvent.idl
+    Modules/cookie-store/CookieChangeEventInit.idl
+    Modules/cookie-store/CookieInit.idl
+    Modules/cookie-store/CookieListItem.idl
+    Modules/cookie-store/CookieSameSite.idl
+    Modules/cookie-store/CookieStore.idl
+    Modules/cookie-store/CookieStoreDeleteOptions.idl
+    Modules/cookie-store/CookieStoreGetOptions.idl
+    Modules/cookie-store/CookieStoreManager.idl
+    Modules/cookie-store/ExtendableCookieChangeEvent.idl
+    Modules/cookie-store/ExtendableCookieChangeEventInit.idl
+    Modules/cookie-store/LocalDOMWindow+CookieStore.idl
 
     Modules/credentialmanagement/BasicCredential.idl
     Modules/credentialmanagement/CredentialCreationOptions.idl
@@ -716,10 +735,11 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webauthn/ResidentKeyRequirement.idl
     Modules/webauthn/UserVerificationRequirement.idl
 
+    Modules/webcodecs/AudioSampleFormat.idl
     Modules/webcodecs/AvcEncoderConfig.idl
     Modules/webcodecs/BitrateMode.idl
-    Modules/webcodecs/LatencyMode.idl
     Modules/webcodecs/HardwareAcceleration.idl
+    Modules/webcodecs/LatencyMode.idl
     Modules/webcodecs/PlaneLayout.idl
     Modules/webcodecs/VideoColorPrimaries.idl
     Modules/webcodecs/VideoColorSpace.idl
@@ -728,7 +748,14 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webcodecs/VideoPixelFormat.idl
     Modules/webcodecs/VideoTransferCharacteristics.idl
     Modules/webcodecs/WebCodecsAlphaOption.idl
+    Modules/webcodecs/WebCodecsAudioData.idl
+    Modules/webcodecs/WebCodecsAudioDataOutputCallback.idl
+    Modules/webcodecs/WebCodecsAudioDecoder.idl
+    Modules/webcodecs/WebCodecsAudioDecoderConfig.idl
+    Modules/webcodecs/WebCodecsAudioDecoderSupport.idl
     Modules/webcodecs/WebCodecsCodecState.idl
+    Modules/webcodecs/WebCodecsEncodedAudioChunk.idl
+    Modules/webcodecs/WebCodecsEncodedAudioChunkType.idl
     Modules/webcodecs/WebCodecsEncodedVideoChunk.idl
     Modules/webcodecs/WebCodecsEncodedVideoChunkMetadata.idl
     Modules/webcodecs/WebCodecsEncodedVideoChunkOutputCallback.idl
@@ -742,8 +769,8 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webcodecs/WebCodecsVideoEncoderConfig.idl
     Modules/webcodecs/WebCodecsVideoEncoderEncodeOptions.idl
     Modules/webcodecs/WebCodecsVideoEncoderSupport.idl
-    Modules/webcodecs/WebCodecsVideoFrameOutputCallback.idl
     Modules/webcodecs/WebCodecsVideoFrame.idl
+    Modules/webcodecs/WebCodecsVideoFrameOutputCallback.idl
 
     Modules/webdatabase/Database.idl
     Modules/webdatabase/DatabaseCallback.idl
@@ -761,6 +788,25 @@ set(WebCore_NON_SVG_IDL_FILES
 
     Modules/websockets/CloseEvent.idl
     Modules/websockets/WebSocket.idl
+
+    Modules/webtransport/WebTransport.idl
+    Modules/webtransport/WebTransportBidirectionalStream.idl
+    Modules/webtransport/WebTransportCloseInfo.idl
+    Modules/webtransport/WebTransportCongestionControl.idl
+    Modules/webtransport/WebTransportDatagramDuplexStream.idl
+    Modules/webtransport/WebTransportDatagramStats.idl
+    Modules/webtransport/WebTransportError.idl
+    Modules/webtransport/WebTransportErrorOptions.idl
+    Modules/webtransport/WebTransportErrorSource.idl
+    Modules/webtransport/WebTransportHash.idl
+    Modules/webtransport/WebTransportOptions.idl
+    Modules/webtransport/WebTransportReceiveStream.idl
+    Modules/webtransport/WebTransportReceiveStreamStats.idl
+    Modules/webtransport/WebTransportReliabilityMode.idl
+    Modules/webtransport/WebTransportSendStream.idl
+    Modules/webtransport/WebTransportSendStreamOptions.idl
+    Modules/webtransport/WebTransportSendStreamStats.idl
+    Modules/webtransport/WebTransportStats.idl
 
     accessibility/AccessibilityRole.idl
     accessibility/AriaAttributes.idl
@@ -942,6 +988,7 @@ set(WebCore_NON_SVG_IDL_FILES
     dom/ClipboardEvent.idl
     dom/Comment.idl
     dom/CompositionEvent.idl
+    dom/ContentVisibilityAutoStateChangeEvent.idl
     dom/CustomElementRegistry.idl
     dom/CustomEvent.idl
     dom/DOMException.idl
@@ -1127,7 +1174,6 @@ set(WebCore_NON_SVG_IDL_FILES
     html/HTMLMediaElement+AudioOutput.idl
     html/HTMLMediaElement.idl
     html/HTMLMenuElement.idl
-    html/HTMLMenuItemElement.idl
     html/HTMLMetaElement.idl
     html/HTMLMeterElement.idl
     html/HTMLModElement.idl
@@ -1619,6 +1665,7 @@ list(APPEND WebCore_NON_SVG_IDL_FILES
     Modules/ShapeDetection/LandmarkType.idl
     Modules/ShapeDetection/Point2D.idl
     Modules/ShapeDetection/TextDetector.idl
+
     Modules/WebGPU/GPU.idl
     Modules/WebGPU/GPUAdapter.idl
     Modules/WebGPU/GPUAdapterInfo.idl
@@ -1697,10 +1744,10 @@ list(APPEND WebCore_NON_SVG_IDL_FILES
     Modules/WebGPU/GPUOrigin3DDict.idl
     Modules/WebGPU/GPUOutOfMemoryError.idl
     Modules/WebGPU/GPUPipelineBase.idl
+    Modules/WebGPU/GPUPipelineDescriptorBase.idl
     Modules/WebGPU/GPUPipelineError.idl
     Modules/WebGPU/GPUPipelineErrorInit.idl
     Modules/WebGPU/GPUPipelineErrorReason.idl
-    Modules/WebGPU/GPUPipelineDescriptorBase.idl
     Modules/WebGPU/GPUPipelineLayout.idl
     Modules/WebGPU/GPUPipelineLayoutDescriptor.idl
     Modules/WebGPU/GPUPowerPreference.idl
@@ -1906,23 +1953,31 @@ if (ENABLE_WEBGL)
     list(APPEND WebCore_SOURCES
         html/canvas/ANGLEInstancedArrays.cpp
         html/canvas/EXTBlendMinMax.cpp
+        html/canvas/EXTClipControl.cpp
         html/canvas/EXTColorBufferFloat.cpp
         html/canvas/EXTColorBufferHalfFloat.cpp
+        html/canvas/EXTConservativeDepth.cpp
+        html/canvas/EXTDepthClamp.cpp
         html/canvas/EXTDisjointTimerQuery.cpp
         html/canvas/EXTDisjointTimerQueryWebGL2.cpp
         html/canvas/EXTFloatBlend.cpp
         html/canvas/EXTFragDepth.cpp
         html/canvas/EXTPolygonOffsetClamp.cpp
+        html/canvas/EXTRenderSnorm.cpp
         html/canvas/EXTShaderTextureLOD.cpp
         html/canvas/EXTTextureCompressionBPTC.cpp
         html/canvas/EXTTextureCompressionRGTC.cpp
         html/canvas/EXTTextureFilterAnisotropic.cpp
+        html/canvas/EXTTextureMirrorClampToEdge.cpp
         html/canvas/EXTTextureNorm16.cpp
         html/canvas/EXTsRGB.cpp
         html/canvas/KHRParallelShaderCompile.cpp
+        html/canvas/NVShaderNoperspectiveInterpolation.cpp
         html/canvas/OESDrawBuffersIndexed.cpp
         html/canvas/OESElementIndexUint.cpp
         html/canvas/OESFBORenderMipmap.cpp
+        html/canvas/OESSampleVariables.cpp
+        html/canvas/OESShaderMultisampleInterpolation.cpp
         html/canvas/OESStandardDerivatives.cpp
         html/canvas/OESTextureFloat.cpp
         html/canvas/OESTextureFloatLinear.cpp
@@ -1940,29 +1995,28 @@ if (ENABLE_WEBGL)
         html/canvas/WebGLCompressedTextureS3TC.cpp
         html/canvas/WebGLCompressedTextureS3TCsRGB.cpp
         html/canvas/WebGLContextEvent.cpp
-        html/canvas/WebGLContextGroup.cpp
-        html/canvas/WebGLContextObject.cpp
         html/canvas/WebGLDebugRendererInfo.cpp
         html/canvas/WebGLDebugShaders.cpp
         html/canvas/WebGLDepthTexture.cpp
         html/canvas/WebGLDrawBuffers.cpp
         html/canvas/WebGLDrawInstancedBaseVertexBaseInstance.cpp
-        html/canvas/WebGLExtension.cpp
         html/canvas/WebGLFramebuffer.cpp
         html/canvas/WebGLLoseContext.cpp
         html/canvas/WebGLMultiDraw.cpp
         html/canvas/WebGLMultiDrawInstancedBaseVertexBaseInstance.cpp
         html/canvas/WebGLObject.cpp
+        html/canvas/WebGLPolygonMode.cpp
         html/canvas/WebGLProgram.cpp
         html/canvas/WebGLProvokingVertex.cpp
         html/canvas/WebGLQuery.cpp
+        html/canvas/WebGLRenderSharedExponent.cpp
         html/canvas/WebGLRenderbuffer.cpp
         html/canvas/WebGLRenderingContext.cpp
         html/canvas/WebGLRenderingContextBase.cpp
         html/canvas/WebGLSampler.cpp
         html/canvas/WebGLShader.cpp
         html/canvas/WebGLShaderPrecisionFormat.cpp
-        html/canvas/WebGLSharedObject.cpp
+        html/canvas/WebGLStencilTexturing.cpp
         html/canvas/WebGLSync.cpp
         html/canvas/WebGLTexture.cpp
         html/canvas/WebGLTimerQueryEXT.cpp
@@ -1977,24 +2031,32 @@ endif ()
 list(APPEND WebCore_IDL_FILES
     html/canvas/ANGLEInstancedArrays.idl
     html/canvas/EXTBlendMinMax.idl
+    html/canvas/EXTClipControl.idl
     html/canvas/EXTColorBufferFloat.idl
     html/canvas/EXTColorBufferHalfFloat.idl
+    html/canvas/EXTConservativeDepth.idl
+    html/canvas/EXTDepthClamp.idl
     html/canvas/EXTDisjointTimerQuery.idl
     html/canvas/EXTDisjointTimerQueryWebGL2.idl
     html/canvas/EXTFloatBlend.idl
     html/canvas/EXTFragDepth.idl
     html/canvas/EXTPolygonOffsetClamp.idl
+    html/canvas/EXTRenderSnorm.idl
     html/canvas/EXTShaderTextureLOD.idl
     html/canvas/EXTTextureCompressionBPTC.idl
     html/canvas/EXTTextureCompressionRGTC.idl
     html/canvas/EXTTextureFilterAnisotropic.idl
+    html/canvas/EXTTextureMirrorClampToEdge.idl
     html/canvas/EXTTextureNorm16.idl
     html/canvas/EXTsRGB.idl
     html/canvas/GPUCanvasContext.idl
     html/canvas/KHRParallelShaderCompile.idl
+    html/canvas/NVShaderNoperspectiveInterpolation.idl
     html/canvas/OESDrawBuffersIndexed.idl
     html/canvas/OESElementIndexUint.idl
     html/canvas/OESFBORenderMipmap.idl
+    html/canvas/OESSampleVariables.idl
+    html/canvas/OESShaderMultisampleInterpolation.idl
     html/canvas/OESStandardDerivatives.idl
     html/canvas/OESTextureFloat.idl
     html/canvas/OESTextureFloatLinear.idl
@@ -2023,15 +2085,18 @@ list(APPEND WebCore_IDL_FILES
     html/canvas/WebGLLoseContext.idl
     html/canvas/WebGLMultiDraw.idl
     html/canvas/WebGLMultiDrawInstancedBaseVertexBaseInstance.idl
+    html/canvas/WebGLPolygonMode.idl
     html/canvas/WebGLProgram.idl
     html/canvas/WebGLProvokingVertex.idl
     html/canvas/WebGLQuery.idl
+    html/canvas/WebGLRenderSharedExponent.idl
     html/canvas/WebGLRenderbuffer.idl
     html/canvas/WebGLRenderingContext.idl
     html/canvas/WebGLRenderingContextBase.idl
     html/canvas/WebGLSampler.idl
     html/canvas/WebGLShader.idl
     html/canvas/WebGLShaderPrecisionFormat.idl
+    html/canvas/WebGLStencilTexturing.idl
     html/canvas/WebGLSync.idl
     html/canvas/WebGLTexture.idl
     html/canvas/WebGLTimerQueryEXT.idl
@@ -2396,7 +2461,7 @@ list(APPEND WebCore_SOURCES ${WebCore_DERIVED_SOURCES_DIR}/HTMLEntityTable.cpp)
 
 # Generate HTTP header names
 add_custom_command(
-    OUTPUT ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.cpp ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.gperf ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.h
+    OUTPUT ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.cpp ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.gperf ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.h ${WebCore_DERIVED_SOURCES_DIR}/HTTPHeaderNames.serialization.in
     MAIN_DEPENDENCY ${WEBCORE_DIR}/platform/network/HTTPHeaderNames.in
     DEPENDS ${WEBCORE_DIR}/platform/network/create-http-header-name-table
     WORKING_DIRECTORY ${WebCore_DERIVED_SOURCES_DIR}
@@ -2680,6 +2745,24 @@ list(APPEND WebCore_SOURCES ${WebCore_DERIVED_SOURCES_DIR}/Namespace.cpp)
 WEBKIT_COMPUTE_SOURCES(WebCore)
 
 target_precompile_headers(WebCore PRIVATE WebCorePrefix.h)
+
+list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+    page/ActivityState.serialization.in
+    page/DragActions.serialization.in
+    page/LayoutMilestones.serialization.in
+    page/MediaProducer.serialization.in
+
+    platform/PlatformEvent.serialization.in
+    platform/PlatformScreen.serialization.in
+
+    platform/audio/PlatformMediaSession.serialization.in
+
+    platform/graphics/cocoa/MediaPlaybackTargetContext.serialization.in
+
+    platform/graphics/InbandTextTrackPrivate.serialization.in
+
+    platform/mediastream/MDNSRegisterError.serialization.in
+)
 
 WEBKIT_COPY_FILES(WebCore_CopyPrivateHeaders
     DESTINATION ${WebCore_PRIVATE_FRAMEWORK_HEADERS_DIR}/WebCore

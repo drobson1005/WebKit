@@ -39,8 +39,8 @@
 #include <wtf/ValueCheck.h>
 #include <wtf/VectorTraits.h>
 
-#if ASAN_ENABLED
-extern "C" void __sanitizer_annotate_contiguous_container(const void* begin, const void* end, const void* old_mid, const void* new_mid);
+#if ASAN_ENABLED && __has_include(<sanitizer/asan_interface.h>)
+#include <sanitizer/asan_interface.h>
 #endif
 
 namespace JSC {
@@ -1897,14 +1897,28 @@ inline auto copyToVectorOf(const Collection& collection) -> Vector<DestinationIt
 }
 
 template<typename Collection>
-struct CopyToVectorResult {
+struct CopyOrMoveToVectorResult {
     using Type = typename std::remove_cv<typename CollectionInspector<Collection>::SourceItemType>::type;
 };
 
 template<typename Collection>
-inline auto copyToVector(const Collection& collection) -> Vector<typename CopyToVectorResult<Collection>::Type>
+inline Vector<typename CopyOrMoveToVectorResult<Collection>::Type> copyToVector(const Collection& collection)
 {
-    return copyToVectorOf<typename CopyToVectorResult<Collection>::Type>(collection);
+    return copyToVectorOf<typename CopyOrMoveToVectorResult<Collection>::Type>(collection);
+}
+
+template<typename DestinationItemType, typename Collection>
+inline auto moveToVectorOf(Collection&& collection) -> Vector<DestinationItemType>
+{
+    return WTF::map(collection, [] (auto&& v) -> DestinationItemType {
+        return WTFMove(v);
+    });
+}
+
+template<typename Collection>
+inline Vector<typename CopyOrMoveToVectorResult<Collection>::Type> moveToVector(Collection&& collection)
+{
+    return moveToVectorOf<typename CopyOrMoveToVectorResult<Collection>::Type>(collection);
 }
 
 } // namespace WTF

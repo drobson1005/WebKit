@@ -65,6 +65,8 @@ public:
     static Ref<RemoteSourceBufferProxy> create(GPUConnectionToWebProcess&, RemoteSourceBufferIdentifier, Ref<WebCore::SourceBufferPrivate>&&, RemoteMediaPlayerProxy&);
     virtual ~RemoteSourceBufferProxy();
 
+    void disconnect();
+
 private:
     RemoteSourceBufferProxy(GPUConnectionToWebProcess&, RemoteSourceBufferIdentifier, Ref<WebCore::SourceBufferPrivate>&&, RemoteMediaPlayerProxy&);
 
@@ -111,7 +113,7 @@ private:
     void setTimestampOffset(const MediaTime&);
     void setAppendWindowStart(const MediaTime&);
     void setAppendWindowEnd(const MediaTime&);
-    void seekToTime(const MediaTime&);
+    void seekToTarget(const WebCore::SeekTarget&, CompletionHandler<void(const MediaTime&)>&&);
     void updateTrackIds(Vector<std::pair<TrackPrivateRemoteIdentifier, TrackPrivateRemoteIdentifier>>&&);
     void bufferedSamplesForTrackId(TrackPrivateRemoteIdentifier, CompletionHandler<void(Vector<String>&&)>&&);
     void enqueuedSamplesForTrackID(TrackPrivateRemoteIdentifier, CompletionHandler<void(Vector<String>&&)>&&);

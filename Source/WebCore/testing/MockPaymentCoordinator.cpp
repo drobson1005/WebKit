@@ -101,7 +101,9 @@ MockPaymentCoordinator::~MockPaymentCoordinator()
 
 void MockPaymentCoordinator::dispatchIfShowing(Function<void()>&& function)
 {
-    ASSERT(showCount > hideCount);
+    if (showCount <= hideCount)
+        return;
+
     RunLoop::main().dispatch([currentShowCount = showCount, function = WTFMove(function)]() {
         if (showCount > hideCount && showCount == currentShowCount)
             function();
@@ -112,6 +114,7 @@ bool MockPaymentCoordinator::showPaymentUI(const URL&, const Vector<URL>&, const
 {
     if (request.shippingContact().pkContact())
         m_shippingAddress = request.shippingContact().toApplePayPaymentContact(request.version());
+    m_supportedCountries = request.supportedCountries();
     m_shippingMethods = request.shippingMethods();
     m_requiredBillingContactFields = request.requiredBillingContactFields();
     m_requiredShippingContactFields = request.requiredShippingContactFields();

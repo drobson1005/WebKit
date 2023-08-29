@@ -66,6 +66,7 @@
 #include "EventLoop.h"
 #include "EventNames.h"
 #include "ExtensionStyleSheets.h"
+#include "FilterRenderingMode.h"
 #include "FocusController.h"
 #include "FontCache.h"
 #include "FrameLoader.h"
@@ -161,10 +162,10 @@
 #include "TextResourceDecoder.h"
 #include "UserContentProvider.h"
 #include "UserContentURLPattern.h"
-#include "UserInputBridge.h"
 #include "UserScript.h"
 #include "UserStyleSheet.h"
 #include "ValidationMessageClient.h"
+#include "VisibilityState.h"
 #include "VisitedLinkState.h"
 #include "VisitedLinkStore.h"
 #include "VoidCallback.h"
@@ -173,6 +174,7 @@
 #include "WheelEventDeltaFilter.h"
 #include "WheelEventTestMonitor.h"
 #include "Widget.h"
+#include "WindowEventLoop.h"
 #include "WorkerOrWorkletScriptController.h"
 #include <JavaScriptCore/VM.h>
 #include <wtf/FileSystem.h>
@@ -269,14 +271,14 @@ static constexpr OptionSet<ActivityState> pageInitialActivityState()
     return { ActivityState::IsVisible, ActivityState::IsInWindow };
 }
 
-static Ref<Frame> createMainFrame(Page& page, std::variant<UniqueRef<LocalFrameLoaderClient>, PageConfiguration::RemoteMainFrameCreationParameters>&& frameCreationParameter, FrameIdentifier identifier)
+static Ref<Frame> createMainFrame(Page& page, std::variant<UniqueRef<LocalFrameLoaderClient>, UniqueRef<RemoteFrameClient>>&& client, FrameIdentifier identifier)
 {
-    return switchOn(WTFMove(frameCreationParameter), [&] (UniqueRef<LocalFrameLoaderClient>&& localFrameClient) -> Ref<Frame> {
+    return switchOn(WTFMove(client), [&] (UniqueRef<LocalFrameLoaderClient>&& localFrameClient) -> Ref<Frame> {
         auto localFrame = LocalFrame::createMainFrame(page, WTFMove(localFrameClient), identifier);
         page.addRootFrame(localFrame.get());
         return localFrame;
-    }, [&] (PageConfiguration::RemoteMainFrameCreationParameters&& remoteMainFrameCreationParameters) -> Ref<Frame> {
-        return RemoteFrame::createMainFrame(page, WTFMove(remoteMainFrameCreationParameters.remoteFrameClient), identifier, remoteMainFrameCreationParameters.remoteProcessIdentifier);
+    }, [&] (UniqueRef<RemoteFrameClient>&& remoteFrameClient) -> Ref<Frame> {
+        return RemoteFrame::createMainFrame(page, WTFMove(remoteFrameClient), identifier);
     });
 }
 
@@ -291,7 +293,6 @@ Page::Page(PageConfiguration&& pageConfiguration)
 #if ENABLE(CONTEXT_MENUS)
     , m_contextMenuController(makeUniqueRef<ContextMenuController>(*this, WTFMove(pageConfiguration.contextMenuClient)))
 #endif
-    , m_userInputBridge(makeUniqueRef<UserInputBridge>(*this))
     , m_inspectorController(makeUniqueRef<InspectorController>(*this, WTFMove(pageConfiguration.inspectorClient)))
     , m_pointerCaptureController(makeUniqueRef<PointerCaptureController>(*this))
 #if ENABLE(POINTER_LOCK)
@@ -1685,9 +1686,17 @@ void Page::scheduleRenderingUpdate(OptionSet<RenderingUpdateStep> requestedSteps
 
 void Page::scheduleRenderingUpdateInternal()
 {
-    if (chrome().client().scheduleRenderingUpdate())
-        return;
-    renderingUpdateScheduler().scheduleRenderingUpdate();
+    if (!chrome().client().scheduleRenderingUpdate())
+        renderingUpdateScheduler().scheduleRenderingUpdate();
+
+    auto now = MonotonicTime::now();
+    forEachWindowEventLoop([&](WindowEventLoop& windowEventLoop) {
+        auto interval = preferredRenderingUpdateInterval();
+        auto nextRenderingUpdateTime = m_lastRenderingUpdateTimestamp + interval;
+        if (nextRenderingUpdateTime < now)
+            nextRenderingUpdateTime = now + interval;
+        windowEventLoop.didScheduleRenderingUpdate(*this, nextRenderingUpdateTime);
+    });
 }
 
 void Page::didScheduleRenderingUpdate()
@@ -1743,6 +1752,10 @@ void Page::updateRendering()
     }
 
     m_lastRenderingUpdateTimestamp = MonotonicTime::now();
+
+    forEachWindowEventLoop([&](WindowEventLoop& eventLoop) {
+        eventLoop.didStartRenderingUpdate(*this);
+    });
 
     bool isSVGImagePage = chrome().client().isSVGImageChromeClient();
     if (!isSVGImagePage)
@@ -1821,6 +1834,10 @@ void Page::updateRendering()
             if (!focusedElement->isFocusable())
                 document.setFocusedElement(nullptr);
         }
+    });
+
+    runProcessingStep(RenderingUpdateStep::UpdateContentRelevancy, [] (Document& document) {
+        document.updateRelevancyOfContentVisibilityElements();
     });
 
     runProcessingStep(RenderingUpdateStep::IntersectionObservations, [] (Document& document) {
@@ -2030,8 +2047,10 @@ void Page::renderingUpdateCompleted()
         m_unfulfilledRequestedSteps = { };
     }
 
-    if (!isUtilityPage())
-        m_opportunisticTaskScheduler->reschedule(m_lastRenderingUpdateTimestamp + preferredRenderingUpdateInterval());
+    if (!isUtilityPage()) {
+        auto nextRenderingUpdate = m_lastRenderingUpdateTimestamp + preferredRenderingUpdateInterval();
+        m_opportunisticTaskScheduler->reschedule(nextRenderingUpdate);
+    }
 }
 
 void Page::willStartRenderingUpdateDisplay()
@@ -2270,8 +2289,9 @@ void Page::userStyleSheetLocationChanged()
     if (url.protocolIsData() && url.string().startsWith("data:text/css;charset=utf-8;base64,"_s)) {
         m_didLoadUserStyleSheet = true;
 
-        if (auto styleSheetAsUTF8 = base64Decode(PAL::decodeURLEscapeSequences(StringView(url.string()).substring(35)), Base64DecodeMode::DefaultValidatePaddingAndIgnoreWhitespace))
-            m_userStyleSheet = String::fromUTF8(styleSheetAsUTF8->data(), styleSheetAsUTF8->size());
+        String styleSheetAsBase64 = base64DecodeToString(PAL::decodeURLEscapeSequences(StringView(url.string()).substring(35)), Base64DecodeMode::DefaultValidatePaddingAndIgnoreWhitespace);
+        if (!styleSheetAsBase64.isNull())
+            m_userStyleSheet = styleSheetAsBase64;
     }
 
     forEachDocument([] (Document& document) {
@@ -3050,7 +3070,7 @@ static const double gMaximumUnpaintedAreaRatio = 0.04;
 
 bool Page::isCountingRelevantRepaintedObjects() const
 {
-    return m_isCountingRelevantRepaintedObjects && m_requestedLayoutMilestones.contains(DidHitRelevantRepaintedObjectsAreaThreshold);
+    return m_isCountingRelevantRepaintedObjects && m_requestedLayoutMilestones.contains(LayoutMilestone::DidHitRelevantRepaintedObjectsAreaThreshold);
 }
 
 void Page::startCountingRelevantRepaintedObjects()
@@ -3150,7 +3170,7 @@ void Page::addRelevantRepaintedObject(RenderObject* object, const LayoutRect& ob
         m_isCountingRelevantRepaintedObjects = false;
         resetRelevantPaintedObjectCounter();
         if (auto* frame = dynamicDowncast<LocalFrame>(mainFrame()))
-            frame->loader().didReachLayoutMilestone(DidHitRelevantRepaintedObjectsAreaThreshold);
+            frame->loader().didReachLayoutMilestone(LayoutMilestone::DidHitRelevantRepaintedObjectsAreaThreshold);
     }
 }
 
@@ -3836,6 +3856,27 @@ void Page::forEachFrame(const Function<void(LocalFrame&)>& functor)
         functor(frame);
 }
 
+void Page::forEachWindowEventLoop(const Function<void(WindowEventLoop&)>& functor)
+{
+    HashSet<Ref<WindowEventLoop>> windowEventLoops;
+    WindowEventLoop* lastEventLoop = nullptr;
+    for (const Frame* frame = &mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        auto* localFrame = dynamicDowncast<LocalFrame>(frame);
+        if (!localFrame)
+            continue;
+        auto* document = localFrame->document();
+        if (!document)
+            continue;
+        Ref currentEventLoop = document->windowEventLoop();
+        if (lastEventLoop == currentEventLoop.ptr())
+            continue; // Common and faster than a hash table lookup
+        lastEventLoop = currentEventLoop.ptr();
+        windowEventLoops.add(WTFMove(currentEventLoop));
+    }
+    for (auto& eventLoop : windowEventLoops)
+        functor(eventLoop);
+}
+
 bool Page::allowsLoadFromURL(const URL& url, MainFrameMainResource mainFrameMainResource) const
 {
     if (mainFrameMainResource == MainFrameMainResource::No && !m_loadsSubresources)
@@ -3984,9 +4025,9 @@ void Page::abortApplePayAMSUISession(ApplePayAMSUIPaymentHandler& paymentHandler
 #endif // ENABLE(APPLE_PAY_AMS_UI)
 
 #if USE(SYSTEM_PREVIEW)
-void Page::handleSystemPreview(const URL& url, const SystemPreviewInfo& systemPreviewInfo)
+void Page::beginSystemPreview(const URL& url, const SecurityOriginData& topOrigin, const SystemPreviewInfo& systemPreviewInfo, CompletionHandler<void()>&& completionHandler)
 {
-    chrome().client().handleSystemPreview(url, systemPreviewInfo);
+    chrome().client().beginSystemPreview(url, topOrigin, systemPreviewInfo, WTFMove(completionHandler));
 }
 #endif
 
@@ -4187,6 +4228,7 @@ WTF::TextStream& operator<<(WTF::TextStream& ts, RenderingUpdateStep step)
     case RenderingUpdateStep::Fullscreen: ts << "Fullscreen"; break;
     case RenderingUpdateStep::AnimationFrameCallbacks: ts << "AnimationFrameCallbacks"; break;
     case RenderingUpdateStep::IntersectionObservations: ts << "IntersectionObservations"; break;
+    case RenderingUpdateStep::UpdateContentRelevancy: ts << "UpdateContentRelevancy"; break;
     case RenderingUpdateStep::ResizeObservations: ts << "ResizeObservations"; break;
     case RenderingUpdateStep::Images: ts << "Images"; break;
     case RenderingUpdateStep::WheelEventMonitorCallbacks: ts << "WheelEventMonitorCallbacks"; break;
@@ -4440,7 +4482,15 @@ void Page::didFinishScrolling()
 void Page::addRootFrame(LocalFrame& frame)
 {
     ASSERT(frame.isRootFrame());
+    ASSERT(!m_rootFrames.contains(frame));
     m_rootFrames.add(frame);
+}
+
+void Page::removeRootFrame(LocalFrame& frame)
+{
+    ASSERT(frame.isRootFrame());
+    ASSERT(m_rootFrames.contains(frame));
+    m_rootFrames.remove(frame);
 }
 
 void Page::reloadExecutionContextsForOrigin(const ClientOrigin& origin, std::optional<FrameIdentifier> triggeringFrame) const
@@ -4467,6 +4517,10 @@ void Page::reloadExecutionContextsForOrigin(const ClientOrigin& origin, std::opt
 
 void Page::performOpportunisticallyScheduledTasks(MonotonicTime deadline)
 {
+    TraceScope tracingScope(PerformOpportunisticallyScheduledTasksStart, PerformOpportunisticallyScheduledTasksEnd, (deadline - MonotonicTime::now()).microseconds());
+    forEachWindowEventLoop([&](WindowEventLoop& eventLoop) {
+        eventLoop.opportunisticallyRunIdleCallbacks();
+    });
     commonVM().performOpportunisticallyScheduledTasks(deadline);
 }
 

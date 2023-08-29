@@ -36,6 +36,7 @@
 #include "MediaPlayerIdentifier.h"
 #include "PlatformLayer.h"
 #include "PlatformTextTrack.h"
+#include "ProcessIdentity.h"
 #include "SecurityOriginData.h"
 #include "Timer.h"
 #include "VideoPlaybackQualityMetrics.h"
@@ -141,6 +142,28 @@ struct MediaEngineSupportParameters {
             && decoder.decode(parameters.allowedMediaAudioCodecIDs)
             && decoder.decode(parameters.allowedMediaCaptionFormatTypes);
     }
+};
+
+struct SeekTarget {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+    SeekTarget(const MediaTime& targetTime, const MediaTime& negativeThreshold, const MediaTime& positiveThreshold)
+        : time(targetTime)
+        , negativeThreshold(negativeThreshold)
+        , positiveThreshold(positiveThreshold)
+    {
+    }
+    explicit SeekTarget(const MediaTime& targetTime)
+        : time(targetTime)
+    {
+    }
+    SeekTarget() = default;
+    static SeekTarget zero() { return { MediaTime::zeroTime(), MediaTime::zeroTime(), MediaTime::zeroTime() }; }
+
+    MediaTime time { MediaTime::invalidTime() };
+    MediaTime negativeThreshold { MediaTime::zeroTime() };
+    MediaTime positiveThreshold { MediaTime::zeroTime() };
+
+    String toString() const;
 };
 
 class MediaPlayerClient {
@@ -294,7 +317,8 @@ public:
 
     virtual bool mediaPlayerShouldDisableHDR() const { return false; }
 
-    virtual FloatSize mediaPlayerVideoInlineSize() const { return { }; }
+    virtual FloatSize mediaPlayerVideoLayerSize() const { return { }; }
+    virtual void mediaPlayerVideoLayerSizeDidChange(const FloatSize&) { }
 
 #if !RELEASE_LOG_DISABLED
     virtual const void* mediaPlayerLogIdentifier() { return nullptr; }
@@ -315,7 +339,7 @@ public:
     using MediaPlayerEnums::SupportsType;
     static const MediaPlayerFactory* mediaEngine(MediaPlayerEnums::MediaEngineIdentifier);
     static SupportsType supportsType(const MediaEngineSupportParameters&);
-    static void getSupportedTypes(HashSet<String, ASCIICaseInsensitiveHash>&);
+    static void getSupportedTypes(HashSet<String>&);
     static bool isAvailable();
     static HashSet<SecurityOriginData> originsInMediaCache(const String& path);
     static void clearMediaCache(const String& path, WallTime modifiedSince);
@@ -349,8 +373,9 @@ public:
     using LayerHostingContextIDCallback = CompletionHandler<void(LayerHostingContextID)>;
     void requestHostingContextID(LayerHostingContextIDCallback&&);
     LayerHostingContextID hostingContextID() const;
-    FloatSize videoInlineSize() const;
-    void setVideoInlineSizeFenced(const FloatSize&, const WTF::MachSendRight&);
+    FloatSize videoLayerSize() const;
+    void videoLayerSizeDidChange(const FloatSize&);
+    void setVideoLayerSizeFenced(const FloatSize&, WTF::MachSendRight&&);
 
 #if PLATFORM(IOS_FAMILY)
     NSArray *timedMetadata() const;
@@ -413,14 +438,14 @@ public:
     void queueTaskOnEventLoop(Function<void()>&&);
 
     bool paused() const;
+    void seekToTime(const MediaTime&);
+    void seekWhenPossible(const MediaTime&);
+    void seekToTarget(const SeekTarget&);
     bool seeking() const;
 
     static double invalidTime() { return -1.0;}
     MediaTime duration() const;
     MediaTime currentTime() const;
-    void seek(const MediaTime&);
-    void seekWhenPossible(const MediaTime&);
-    void seekWithTolerance(const MediaTime&, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance);
 
     using CurrentTimeDidChangeCallback = std::function<void(const MediaTime&)>;
     bool setCurrentTimeDidChangeCallback(CurrentTimeDidChangeCallback&&);
@@ -719,6 +744,8 @@ public:
 
     bool requiresRemotePlayback() const { return m_requiresRemotePlayback; }
 
+    void setResourceOwner(const ProcessIdentity&);
+
 private:
     MediaPlayer(MediaPlayerClient&);
     MediaPlayer(MediaPlayerClient&, MediaPlayerEnums::MediaEngineIdentifier);
@@ -767,6 +794,7 @@ private:
     bool m_isGatheringVideoFrameMetadata { false };
     bool m_requiresRemotePlayback { false };
     String m_lastErrorMessage;
+    ProcessIdentity m_processIdentity;
 };
 
 class MediaPlayerFactory {
@@ -777,7 +805,7 @@ public:
 
     virtual MediaPlayerEnums::MediaEngineIdentifier identifier() const  = 0;
     virtual std::unique_ptr<MediaPlayerPrivateInterface> createMediaEnginePlayer(MediaPlayer*) const = 0;
-    virtual void getSupportedTypes(HashSet<String, ASCIICaseInsensitiveHash>&) const = 0;
+    virtual void getSupportedTypes(HashSet<String>&) const = 0;
     virtual MediaPlayer::SupportsType supportsTypeAndCodecs(const MediaEngineSupportParameters&) const = 0;
 
     virtual HashSet<SecurityOriginData> originsInMediaCache(const String&) const { return { }; }
@@ -816,5 +844,14 @@ inline bool MediaPlayer::hasMediaEngine() const
 }
 
 } // namespace WebCore
+
+namespace WTF {
+
+template<typename> struct LogArgument;
+template<> struct LogArgument<WebCore::SeekTarget> {
+    static String toString(const WebCore::SeekTarget& target) { return target.toString(); }
+};
+
+} // namespace WTF
 
 #endif // ENABLE(VIDEO)

@@ -87,6 +87,11 @@ static void dumpSeparatedLayerProperties(TextStream&, CALayer *) { }
     [_contentView _willBeginTextInteractionInTextInputContext:context];
 }
 
+- (void)selectWordBackwardForTesting
+{
+    [_contentView selectWordBackwardForTesting];
+}
+
 - (void)_didFinishTextInteractionInTextInputContext:(_WKTextInputContext *)context
 {
     [_contentView _didFinishTextInteractionInTextInputContext:context];
@@ -135,6 +140,14 @@ static void dumpSeparatedLayerProperties(TextStream&, CALayer *) { }
         capturedCompletionHandler();
     }];
 }
+
+- (void)applyAutocorrection:(NSString *)newString toString:(NSString *)oldString isCandidate:(BOOL)isCandidate withCompletionHandler:(void (^)(void))completionHandler
+{
+    [_contentView applyAutocorrection:newString toString:oldString isCandidate:isCandidate withCompletionHandler:[capturedCompletionHandler = makeBlockPtr(completionHandler)] (UIWKAutocorrectionRects *rects) {
+        capturedCompletionHandler();
+    }];
+}
+
 
 - (void)dismissFormAccessoryView
 {

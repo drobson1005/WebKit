@@ -277,7 +277,7 @@ private:
     void respondToChangedContents() final { }
     void respondToChangedSelection(LocalFrame*) final { }
     void updateEditorStateAfterLayoutIfEditabilityChanged() final { }
-    void discardedComposition(LocalFrame*) final { }
+    void discardedComposition(const Document&) final { }
     void canceledComposition() final { }
     void didUpdateComposition() final { }
     void didEndEditing() final { }
@@ -605,6 +605,10 @@ void EmptyFrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navig
 {
 }
 
+void EmptyFrameLoaderClient::broadcastFrameRemovalToOtherProcesses()
+{
+}
+
 void EmptyFrameLoaderClient::dispatchWillSendSubmitEvent(Ref<FormState>&&)
 {
 }
@@ -909,6 +913,11 @@ ResourceError EmptyFrameLoaderClient::fileDoesNotExistError(const ResourceRespon
 }
 
 ResourceError EmptyFrameLoaderClient::httpsUpgradeRedirectLoopError(const ResourceRequest&) const
+{
+    return { };
+}
+
+ResourceError EmptyFrameLoaderClient::httpNavigationWithHTTPSOnlyError(const ResourceRequest&) const
 {
     return { };
 }

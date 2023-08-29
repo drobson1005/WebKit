@@ -29,6 +29,7 @@
 #include "BorderPainter.h"
 #include "CachedResourceLoader.h"
 #include "ContentData.h"
+#include "ContentVisibilityDocumentState.h"
 #include "CursorList.h"
 #include "DocumentInlines.h"
 #include "ElementChildIteratorInlines.h"
@@ -795,6 +796,19 @@ void RenderElement::styleWillChange(StyleDifference diff, const RenderStyle& new
     ASSERT(settings().shouldAllowUserInstalledFonts() || newStyle.fontDescription().shouldAllowUserInstalledFonts() == AllowUserInstalledFonts::No);
 
     auto* oldStyle = hasInitializedStyle() ? &style() : nullptr;
+
+    auto updateContentVisibilityDocumentStateIfNeeded = [&] () {
+        if (!element())
+            return;
+        bool contentVisibilityChanged = oldStyle && oldStyle->contentVisibility() != newStyle.contentVisibility();
+        if (contentVisibilityChanged) {
+            if (oldStyle->contentVisibility() == ContentVisibility::Auto)
+                ContentVisibilityDocumentState::unobserve(*element());
+        }
+        if ((contentVisibilityChanged || !oldStyle) && newStyle.contentVisibility() == ContentVisibility::Auto)
+            ContentVisibilityDocumentState::observe(*element());
+    };
+
     if (oldStyle) {
         // If our z-index changes value or our visibility changes,
         // we need to dirty our stacking context's z-order list.
@@ -866,6 +880,8 @@ void RenderElement::styleWillChange(StyleDifference diff, const RenderStyle& new
         setHasTransformRelatedProperty(false);
         setHasReflection(false);
     }
+
+    updateContentVisibilityDocumentStateIfNeeded();
 
     bool hadOutline = oldStyle && oldStyle->hasOutline();
     bool hasOutline = newStyle.hasOutline();
@@ -1081,6 +1097,9 @@ void RenderElement::willBeDestroyed()
 
     if (m_hasPausedImageAnimations)
         view().removeRendererWithPausedImageAnimations(*this);
+
+    if (style().contentVisibility() == ContentVisibility::Auto && element())
+        ContentVisibilityDocumentState::unobserve(*element());
 }
 
 void RenderElement::setNeedsPositionedMovementLayout(const RenderStyle* oldStyle)
@@ -1844,7 +1863,9 @@ void RenderElement::paintFocusRing(const PaintInfo& paintInfo, const RenderStyle
         rect.inflate(outlineOffset);
         pixelSnappedFocusRingRects.append(snapRectToDevicePixels(rect, deviceScaleFactor));
     }
-    Color focusRingColor = usePlatformFocusRingColorForOutlineStyleAuto() ? RenderTheme::singleton().focusRingColor(styleColorOptions()) : style.visitedDependentColorWithColorFilter(CSSPropertyOutlineColor);
+    auto styleOptions = styleColorOptions();
+    styleOptions.add(StyleColorOptions::UseSystemAppearance);
+    auto focusRingColor = usePlatformFocusRingColorForOutlineStyleAuto() ? RenderTheme::singleton().focusRingColor(styleOptions) : style.visitedDependentColorWithColorFilter(CSSPropertyOutlineColor);
     if (useShrinkWrappedFocusRingForOutlineStyleAuto() && style.hasBorderRadius()) {
         Path path = PathUtilities::pathWithShrinkWrappedRectsForOutline(pixelSnappedFocusRingRects, style.border(), outlineOffset, style.direction(), style.writingMode(),
             document().deviceScaleFactor());
@@ -2060,8 +2081,7 @@ static RenderObject::BlockContentHeightType includeNonFixedHeight(const RenderOb
 
 void RenderElement::adjustComputedFontSizesOnBlocks(float size, float visibleWidth)
 {
-    auto* localFrame = dynamicDowncast<LocalFrame>(view().frameView().frame());
-    auto* document = localFrame ? localFrame->document() : nullptr;
+    auto* document = view().frameView().frame().document();
     if (!document)
         return;
 
@@ -2091,8 +2111,7 @@ void RenderElement::adjustComputedFontSizesOnBlocks(float size, float visibleWid
 
 void RenderElement::resetTextAutosizing()
 {
-    auto* localFrame = dynamicDowncast<LocalFrame>(view().frameView().frame());
-    auto* document = localFrame ? localFrame->document() : nullptr;
+    auto* document = view().frameView().frame().document();
     if (!document)
         return;
 
@@ -2244,5 +2263,28 @@ FloatRect RenderElement::referenceBoxRect(CSSBoxType boxType) const
     ASSERT_NOT_REACHED();
     return { };
 }
+
+bool RenderElement::isSkippedContentRoot() const
+{
+    return WebCore::isSkippedContentRoot(style(), element());
+}
+
+bool RenderElement::hasEligibleContainmentForSizeQuery() const
+{
+    if (!shouldApplyLayoutContainment())
+        return false;
+
+    switch (style().containerType()) {
+    case ContainerType::InlineSize:
+        return shouldApplyInlineSizeContainment();
+    case ContainerType::Size:
+        return shouldApplySizeContainment();
+    case ContainerType::Normal:
+        return true;
+    }
+    ASSERT_NOT_REACHED();
+    return false;
+}
+
 
 }

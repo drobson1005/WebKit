@@ -2900,6 +2900,11 @@ void SpeculativeJIT::compile(Node* node)
         break;
     }
 
+    case ArraySpliceExtract: {
+        compileArraySpliceExtract(node);
+        break;
+    }
+
     case ArrayIndexOf: {
         compileArrayIndexOf(node);
         break;
@@ -3100,6 +3105,11 @@ void SpeculativeJIT::compile(Node* node)
         break;
     }
 
+    case StringIndexOf: {
+        compileStringIndexOf(node);
+        break;
+    }
+
     case FunctionToString:
         compileFunctionToString(node);
         break;
@@ -3156,6 +3166,16 @@ void SpeculativeJIT::compile(Node* node)
         
     case NewRegexp: {
         compileNewRegexp(node);
+        break;
+    }
+
+    case NewMap: {
+        compileNewMap(node);
+        break;
+    }
+
+    case NewSet: {
+        compileNewSet(node);
         break;
     }
 

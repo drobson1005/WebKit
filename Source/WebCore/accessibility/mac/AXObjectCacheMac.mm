@@ -127,6 +127,14 @@
 #define kAXDraggingDestinationDragNotAcceptedNotification CFSTR("AXDraggingDestinationDragNotAccepted")
 #endif
 
+#ifndef NSAccessibilityTextInputMarkingSessionBeganNotification
+#define NSAccessibilityTextInputMarkingSessionBeganNotification @"AXTextInputMarkingSessionBegan"
+#endif
+
+#ifndef NSAccessibilityTextInputMarkingSessionEndedNotification
+#define NSAccessibilityTextInputMarkingSessionEndedNotification @"AXTextInputMarkingSessionEnded"
+#endif
+
 // Very large strings can negatively impact the performance of notifications, so this length is chosen to try to fit an average paragraph or line of text, but not allow strings to be large enough to hurt performance.
 static const NSUInteger AXValueChangeTruncationLength = 1000;
 
@@ -312,9 +320,10 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 void AXObjectCache::postPlatformNotification(AXCoreObject* object, AXNotification notification)
 {
-    ASSERT(is<AccessibilityObject>(object));
-    if (!is<AccessibilityObject>(object))
+    if (!is<AccessibilityObject>(object)) {
+        ASSERT_NOT_REACHED();
         return;
+    }
 
     bool skipSystemNotification = false;
     // Some notifications are unique to Safari and do not have NSAccessibility equivalents.
@@ -431,9 +440,17 @@ void AXObjectCache::postPlatformNotification(AXCoreObject* object, AXNotificatio
     case AXDraggingExitedDropZone:
         macNotification = (id)kAXDraggingDestinationDragNotAcceptedNotification;
         break;
+    case AXTextCompositionBegan:
+        macNotification = NSAccessibilityTextInputMarkingSessionBeganNotification;
+        break;
+    case AXTextCompositionEnded:
+        macNotification = NSAccessibilityTextInputMarkingSessionEndedNotification;
+        break;
     default:
         return;
     }
+
+    RefPtr protectedObject = object;
 
 #ifndef NDEBUG
     exerciseIsIgnored(downcast<AccessibilityObject>(*object));
@@ -465,13 +482,14 @@ static void createIsolatedObjectIfNeeded(AXCoreObject& object, std::optional<Pag
 }
 #endif
 
-void AXObjectCache::postTextStateChangePlatformNotification(AXCoreObject* object, const AXTextStateChangeIntent& intent, const VisibleSelection& selection)
+void AXObjectCache::postTextStateChangePlatformNotification(AccessibilityObject* object, const AXTextStateChangeIntent& intent, const VisibleSelection& selection)
 {
     if (!object)
         object = rootWebArea();
 
     if (!object)
         return;
+    RefPtr protectedObject = object;
 
     auto userInfo = adoptNS([[NSMutableDictionary alloc] initWithCapacity:5]);
     if (m_isSynchronizingSelection)
@@ -515,8 +533,8 @@ void AXObjectCache::postTextStateChangePlatformNotification(AXCoreObject* object
 #endif
     }
 
-    if (auto root = rootWebArea()) {
-        AXPostNotificationWithUserInfo(rootWebArea()->wrapper(), NSAccessibilitySelectedTextChangedNotification, userInfo.get());
+    if (RefPtr root = rootWebArea()) {
+        AXPostNotificationWithUserInfo(root->wrapper(), NSAccessibilitySelectedTextChangedNotification, userInfo.get());
         if (root->wrapper() != object->wrapper())
             AXPostNotificationWithUserInfo(object->wrapper(), NSAccessibilitySelectedTextChangedNotification, userInfo.get());
     }
@@ -584,13 +602,14 @@ static void postUserInfoForChanges(AXCoreObject& rootWebArea, AXCoreObject& obje
         AXPostNotificationWithUserInfo(object.wrapper(), NSAccessibilityValueChangedNotification, userInfo.get());
 }
 
-void AXObjectCache::postTextReplacementPlatformNotification(AXCoreObject* object, AXTextEditType deletionType, const String& deletedText, AXTextEditType insertionType, const String& insertedText, const VisiblePosition& position)
+void AXObjectCache::postTextReplacementPlatformNotification(AccessibilityObject* object, AXTextEditType deletionType, const String& deletedText, AXTextEditType insertionType, const String& insertedText, const VisiblePosition& position)
 {
     if (!object)
         object = rootWebArea();
 
     if (!object)
         return;
+    RefPtr protectedObject = object;
 
     auto changes = adoptNS([[NSMutableArray alloc] initWithCapacity:2]);
     if (NSDictionary *change = textReplacementChangeDictionary(*object, deletionType, deletedText, position))
@@ -598,17 +617,18 @@ void AXObjectCache::postTextReplacementPlatformNotification(AXCoreObject* object
     if (NSDictionary *change = textReplacementChangeDictionary(*object, insertionType, insertedText, position))
         [changes addObject:change];
 
-    if (auto* root = rootWebArea())
+    if (RefPtr root = rootWebArea())
         postUserInfoForChanges(*root, *object, changes.get(), m_pageID);
 }
 
-void AXObjectCache::postTextReplacementPlatformNotificationForTextControl(AXCoreObject* object, const String& deletedText, const String& insertedText, HTMLTextFormControlElement& textControl)
+void AXObjectCache::postTextReplacementPlatformNotificationForTextControl(AccessibilityObject* object, const String& deletedText, const String& insertedText, HTMLTextFormControlElement& textControl)
 {
     if (!object)
         object = rootWebArea();
 
     if (!object)
         return;
+    RefPtr protectedObject = object;
 
     auto changes = adoptNS([[NSMutableArray alloc] initWithCapacity:2]);
     if (NSDictionary *change = textReplacementChangeDictionary(*object, AXTextEditTypeDelete, deletedText, textControl))
@@ -616,7 +636,7 @@ void AXObjectCache::postTextReplacementPlatformNotificationForTextControl(AXCore
     if (NSDictionary *change = textReplacementChangeDictionary(*object, AXTextEditTypeInsert, insertedText, textControl))
         [changes addObject:change];
 
-    if (auto* root = rootWebArea())
+    if (RefPtr root = rootWebArea())
         postUserInfoForChanges(*root, *object, changes.get(), m_pageID);
 }
 
@@ -655,26 +675,23 @@ void AXObjectCache::platformPerformDeferredCacheUpdate()
 {
 }
 
-bool AXObjectCache::shouldSpellCheck()
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+static bool isTestAXClientType(AXClientType client)
 {
-    // The only AT that we know can handle deferred spellchecking is VoiceOver.
-    auto client = _AXGetClientForCurrentRequestUntrusted();
-    return client != kAXClientTypeVoiceOver && UNLIKELY(!forceDeferredSpellChecking());
+    return client == kAXClientTypeWebKitTesting || client == kAXClientTypeXCTest;
 }
 
-#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+bool AXObjectCache::isTestClient()
+{
+    return UNLIKELY(isTestAXClientType(_AXGetClientForCurrentRequestUntrusted()));
+}
+
 bool AXObjectCache::clientSupportsIsolatedTree()
 {
     auto client = _AXGetClientForCurrentRequestUntrusted();
     return client == kAXClientTypeVoiceOver
         || UNLIKELY(client == kAXClientTypeWebKitTesting
         || client == kAXClientTypeXCTest);
-}
-
-bool AXObjectCache::isTestClient()
-{
-    auto client = _AXGetClientForCurrentRequestUntrusted();
-    return UNLIKELY(client == kAXClientTypeWebKitTesting || client == kAXClientTypeXCTest);
 }
 
 bool AXObjectCache::isIsolatedTreeEnabled()
@@ -696,21 +713,37 @@ bool AXObjectCache::isIsolatedTreeEnabled()
     return enabled;
 }
 
-void AXObjectCache::initializeSecondaryAXThread()
+void AXObjectCache::initializeAXThreadIfNeeded()
 {
-    // Now that we have created our tree, initialize the secondary thread,
-    // so future requests come in on the other thread.
-    if (_AXSIsolatedTreeModeFunctionIsAvailable() && _AXSIsolatedTreeMode_Soft() == AXSIsolatedTreeModeSecondaryThread)
-        _AXUIElementUseSecondaryAXThread(true);
-}
+    static bool axThreadInitialized = false;
+    if (LIKELY(axThreadInitialized || !isMainThread()))
+        return;
 
-bool AXObjectCache::usedOnAXThread()
-{
-    ASSERT(isIsolatedTreeEnabled());
-    return _AXSIsolatedTreeModeFunctionIsAvailable()
-        && _AXSIsolatedTreeMode_Soft() == AXSIsolatedTreeModeSecondaryThread;
+    if (_AXSIsolatedTreeModeFunctionIsAvailable() && _AXSIsolatedTreeMode_Soft() == AXSIsolatedTreeModeSecondaryThread) {
+        _AXUIElementUseSecondaryAXThread(true);
+        axThreadInitialized = true;
+    }
 }
+#endif // ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+
+bool AXObjectCache::shouldSpellCheck()
+{
+    if (UNLIKELY(forceDeferredSpellChecking()))
+        return false;
+
+    auto client = _AXGetClientForCurrentRequestUntrusted();
+    // The only AT that we know can handle deferred spellchecking is VoiceOver.
+    if (client == kAXClientTypeVoiceOver)
+        return false;
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    if (UNLIKELY(isTestAXClientType(client)))
+        return true;
+    // ITM is currently only ever enabled for VoiceOver, so if it's enabled we can defer spell-checking.
+    return !isIsolatedTreeEnabled();
+#else
+    return true;
 #endif
+}
 
 // TextMarker and TextMarkerRange funcstions.
 // FIXME: TextMarker and TextMarkerRange should become classes wrapping the system objects.

@@ -54,7 +54,6 @@ public:
     void flushContextSync();
     void disconnect();
 
-    static inline constexpr Seconds defaultSendTimeout = 3_s;
 private:
     template<typename T> void send(T&& message);
     template<typename T> void sendSync(T&& message);
@@ -159,7 +158,7 @@ private:
 #endif
 
     WebCore::RenderingResourceIdentifier m_destinationBufferIdentifier;
-    WeakPtr<RemoteImageBufferProxy> m_imageBuffer;
+    ThreadSafeWeakPtr<RemoteImageBufferProxy> m_imageBuffer;
     WeakPtr<RemoteRenderingBackendProxy> m_renderingBackend;
 #if PLATFORM(COCOA) && ENABLE(VIDEO)
     std::unique_ptr<SharedVideoFrameWriter> m_sharedVideoFrameWriter;

@@ -77,6 +77,8 @@
 - (id)objectByEvaluatingJavaScript:(NSString *)script;
 - (id)objectByCallingAsyncFunction:(NSString *)script withArguments:(NSDictionary *)arguments error:(NSError **)errorOut;
 - (unsigned)waitUntilClientWidthIs:(unsigned)expectedClientWidth;
+- (CGRect)elementRectFromSelector:(NSString *)selector;
+- (CGPoint)elementMidpointFromSelector:(NSString *)selector;
 @end
 
 @interface TestMessageHandler : NSObject <WKScriptMessageHandler>
@@ -152,6 +154,7 @@
 - (void)typeCharacter:(char)character modifiers:(NSEventModifierFlags)modifiers;
 - (void)typeCharacter:(char)character;
 - (void)setEventTimestampOffset:(NSTimeInterval)offset;
+@property (nonatomic, readonly) NSArray<NSString *> *collectLogsForNewConnections;
 @property (nonatomic, readonly) NSTimeInterval eventTimestamp;
 @property (nonatomic) BOOL forceWindowToBecomeKey;
 @end

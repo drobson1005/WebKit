@@ -346,10 +346,21 @@ Color RenderThemeMac::platformInactiveListBoxSelectionForegroundColor(OptionSet<
 #endif
 }
 
+inline static Color defaultFocusRingColor(OptionSet<StyleColorOptions> options)
+{
+    // Hardcoded to avoid exposing a user appearance preference to the web for fingerprinting.
+    return {
+        options.contains(StyleColorOptions::UseDarkAppearance) ? SRGBA<uint8_t> { 26, 169, 255 } : SRGBA<uint8_t> { 0, 103, 244 },
+        Color::Flags::Semantic
+    };
+}
+
 Color RenderThemeMac::platformFocusRingColor(OptionSet<StyleColorOptions> options) const
 {
     if (usesTestModeFocusRingColor())
         return oldAquaFocusRingColor();
+    if (!options.contains(StyleColorOptions::UseSystemAppearance))
+        return defaultFocusRingColor(options);
     LocalDefaultSystemAppearance localAppearance(options.contains(StyleColorOptions::UseDarkAppearance));
     // The color is expected to be opaque, since CoreGraphics will apply opacity when drawing (because opacity is normally animated).
     return colorFromCocoaColor([NSColor keyboardFocusIndicatorColor]).opaqueColor();
@@ -460,7 +471,7 @@ Color RenderThemeMac::systemColor(CSSValueID cssValueID, OptionSet<StyleColorOpt
             return systemAppearanceColor(cache.systemActiveLinkColor, @selector(systemRedColor));
 
         // The following colors would expose user appearance preferences to the web, and could be used for fingerprinting.
-        // These should only be available when the web view is wanting the system appearance.
+        // These are available only when the web view opts into the system appearance.
         case CSSValueWebkitFocusRingColor:
         case CSSValueActiveborder:
             return focusRingColor(options);
@@ -666,10 +677,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
         case CSSValueWebkitFocusRingColor:
         case CSSValueActiveborder:
-            // Hardcoded to avoid exposing a user appearance preference to the web for fingerprinting.
-            if (localAppearance.usingDarkAppearance())
-                return { SRGBA<uint8_t> { 26, 169, 255 }, Color::Flags::Semantic };
-            return { SRGBA<uint8_t> { 0, 103, 244 }, Color::Flags::Semantic };
+            return defaultFocusRingColor(options);
 
         case CSSValueAppleSystemControlAccent:
             // Hardcoded to avoid exposing a user appearance preference to the web for fingerprinting.
@@ -862,7 +870,7 @@ bool RenderThemeMac::controlSupportsTints(const RenderObject& o) const
 
 NSControlSize RenderThemeMac::controlSizeForFont(const RenderStyle& style) const
 {
-    int fontSize = style.computedFontPixelSize();
+    auto fontSize = style.computedFontSize();
     if (fontSize >= 21 && ThemeMac::supportsLargeFormControls())
         return NSControlSizeLarge;
     if (fontSize >= 16)
@@ -944,7 +952,7 @@ void RenderThemeMac::setFontFromControlSize(RenderStyle& style, NSControlSize co
 
 NSControlSize RenderThemeMac::controlSizeForSystemFont(const RenderStyle& style) const
 {
-    int fontSize = style.computedFontPixelSize();
+    auto fontSize = style.computedFontSize();
     if (fontSize >= [NSFont systemFontSizeForControlSize:NSControlSizeLarge] && ThemeMac::supportsLargeFormControls())
         return NSControlSizeLarge;
     if (fontSize >= [NSFont systemFontSizeForControlSize:NSControlSizeRegular])
@@ -1107,7 +1115,7 @@ LengthBox RenderThemeMac::popupInternalPaddingBox(const RenderStyle& style, cons
     }
 
     if (style.effectiveAppearance() == StyleAppearance::MenulistButton) {
-        float arrowWidth = baseArrowWidth * (style.computedFontPixelSize() / baseFontSize);
+        float arrowWidth = baseArrowWidth * (style.computedFontSize() / baseFontSize);
         float rightPadding = ceilf(arrowWidth + (arrowPaddingBefore + arrowPaddingAfter + paddingBeforeSeparator) * style.effectiveZoom());
         float leftPadding = styledPopupPaddingLeft * style.effectiveZoom();
         if (style.direction() == TextDirection::RTL)
@@ -1141,7 +1149,7 @@ PopupMenuStyle::PopupMenuSize RenderThemeMac::popupMenuSize(const RenderStyle& s
 
 void RenderThemeMac::adjustMenuListButtonStyle(RenderStyle& style, const Element*) const
 {
-    float fontScale = style.computedFontPixelSize() / baseFontSize;
+    float fontScale = style.computedFontSize() / baseFontSize;
 
     style.resetPadding();
     style.setBorderRadius(IntSize(int(baseBorderRadius + fontScale - 1), int(baseBorderRadius + fontScale - 1))); // FIXME: Round up?

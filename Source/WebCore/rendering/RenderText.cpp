@@ -92,6 +92,7 @@ struct SameSizeAsRenderText : public RenderObject {
     float widths[2];
     std::optional<float> minWidth;
     std::optional<float> maxWidth;
+    std::optional<bool> canUseSimplifiedTextMeasuring;
     String text;
 };
 
@@ -310,8 +311,8 @@ static void initiateFontLoadingByAccessingGlyphDataIfApplicable(const String& te
         fontVariant = NormalVariant;
     }
 #endif
-    for (size_t i = 0; i < textContent.length(); ++i)
-        fontCascade.glyphDataForCharacter(textContent[i], false, fontVariant);
+    for (UChar32 character : StringView(textContent).codePoints())
+        fontCascade.glyphDataForCharacter(character, false, fontVariant);
 }
 
 void RenderText::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
@@ -328,6 +329,8 @@ void RenderText::styleDidChange(StyleDifference diff, const RenderStyle* oldStyl
     const RenderStyle& newStyle = style();
     if (!oldStyle)
         initiateFontLoadingByAccessingGlyphDataIfApplicable(m_text, newStyle.fontCascade());
+    if (oldStyle && oldStyle->fontCascade() != newStyle.fontCascade())
+        m_canUseSimplifiedTextMeasuring = { };
 
     bool needsResetText = false;
     if (!oldStyle) {
@@ -374,11 +377,12 @@ String RenderText::originalText() const
     return m_originalTextDiffersFromRendered ? originalTextMap().get(this) : m_text;
 }
 
-void RenderText::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accumulatedOffset) const
+void RenderText::boundingRects(Vector<LayoutRect>& rects, const LayoutPoint& accumulatedOffset) const
 {
     for (auto& run : InlineIterator::textBoxesFor(*this)) {
-        auto rect = run.visualRectIgnoringBlockDirection();
-        rects.append(enclosingIntRect(FloatRect(accumulatedOffset + rect.location(), rect.size())));
+        auto rect = LayoutRect { run.visualRectIgnoringBlockDirection() };
+        rect.moveBy(accumulatedOffset);
+        rects.append(rect);
     }
 }
 
@@ -1039,16 +1043,18 @@ TextBreakIterator::LineMode::Behavior mapLineBreakToIteratorMode(LineBreak lineB
     return TextBreakIterator::LineMode::Behavior::Default;
 }
 
-TextBreakIterator::ContentAnalysis mapWordBoundaryDetectionToContentAnalysis(const WordBoundaryDetection& wordBoundaryDetection)
+TextBreakIterator::ContentAnalysis mapWordBreakToContentAnalysis(WordBreak wordBreak)
 {
-    // FIXME: Explicit static_cast to work around issue on libstdc++-10. Undo when upgrading GCC from 10 to 11.
-    return WTF::switchOn(static_cast<WordBoundaryDetectionType>(wordBoundaryDetection), [](WordBoundaryDetectionNormal) {
+    switch (wordBreak) {
+    case WordBreak::Normal:
+    case WordBreak::BreakAll:
+    case WordBreak::KeepAll:
+    case WordBreak::BreakWord:
         return TextBreakIterator::ContentAnalysis::Mechanical;
-    }, [](WordBoundaryDetectionManual) {
-        return TextBreakIterator::ContentAnalysis::Mechanical;
-    }, [](const WordBoundaryDetectionAuto&) {
+    case WordBreak::Auto:
         return TextBreakIterator::ContentAnalysis::Linguistic;
-    });
+    }
+    return TextBreakIterator::ContentAnalysis::Mechanical;
 }
 
 void RenderText::computePreferredLogicalWidths(float leadWidth, bool forcedMinMaxWidthComputation)
@@ -1090,7 +1096,7 @@ float RenderText::maxWordFragmentWidth(const RenderStyle& style, const FontCasca
     // and one that measures the single last suffix.
 
     // FIXME: Breaking the string at these places in the middle of words doesn't work with complex text.
-    float minimumFragmentWidthToConsider = font.pixelSize() * 5 / 4 + hyphenWidth(*this, font);
+    float minimumFragmentWidthToConsider = font.size() * 5 / 4 + hyphenWidth(*this, font);
     float maxFragmentWidth = 0;
     for (size_t k = 0; k < hyphenLocations.size(); ++k) {
         int fragmentLength = hyphenLocations[k] - suffixStart;
@@ -1142,7 +1148,7 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Fo
     auto& string = text();
     unsigned length = string.length();
     auto iteratorMode = mapLineBreakToIteratorMode(style.lineBreak());
-    auto contentAnalysis = mapWordBoundaryDetectionToContentAnalysis(style.wordBoundaryDetection());
+    auto contentAnalysis = mapWordBreakToContentAnalysis(style.wordBreak());
     CachedLineBreakIteratorFactory lineBreakIteratorFactory(string, style.computedLocale(), iteratorMode, contentAnalysis);
     bool needsWordSpacing = false;
     bool ignoringSpaces = false;
@@ -1580,7 +1586,8 @@ void RenderText::setRenderedText(const String& newText)
 
     m_containsOnlyASCII = text().containsOnlyASCII();
     m_canUseSimpleFontCodePath = computeCanUseSimpleFontCodePath();
-    
+    m_canUseSimplifiedTextMeasuring = { };
+
     if (m_text != originalText) {
         originalTextMap().set(this, originalText);
         m_originalTextDiffersFromRendered = true;

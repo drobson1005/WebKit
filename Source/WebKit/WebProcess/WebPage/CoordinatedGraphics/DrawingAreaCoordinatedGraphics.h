@@ -87,6 +87,8 @@ private:
     void targetRefreshRateDidChange(unsigned rate) override;
     void displayDidRefresh() override;
     void setDeviceScaleFactor(float) override;
+    void forceUpdate() override;
+    void didDiscardBackingStore() override;
 
 #if PLATFORM(GTK)
     void adjustTransientZoom(double scale, WebCore::FloatPoint origin) override;

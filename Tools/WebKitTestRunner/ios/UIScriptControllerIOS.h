@@ -33,6 +33,8 @@
 typedef struct CGRect CGRect;
 OBJC_CLASS UITextSelectionDisplayInteraction;
 
+@protocol UICoordinateSpace;
+
 namespace WebCore {
 class FloatPoint;
 class FloatRect;
@@ -114,7 +116,10 @@ private:
     JSObjectRef contentVisibleRect() const override;
     JSObjectRef selectionStartGrabberViewRect() const override;
     JSObjectRef selectionEndGrabberViewRect() const override;
+    JSObjectRef selectionEndGrabberViewShapePathDescription() const override;
     JSObjectRef selectionCaretViewRect() const override;
+    JSObjectRef selectionCaretViewRectInGlobalCoordinates() const override;
+    JSObjectRef selectionCaretViewRect(id<UICoordinateSpace>) const;
     JSObjectRef selectionRangeViewRects() const override;
     JSObjectRef inputViewBounds() const override;
     JSRetainPtr<JSStringRef> scrollingTreeAsText() const override;
@@ -148,8 +153,9 @@ private:
     void setAllowsViewportShrinkToFit(bool) override;
     void copyText(JSStringRef) override;
     void installTapGestureOnWindow(JSValueRef) override;
-    void setSpellCheckerResults(JSValueRef) override { }
     void setScrollViewKeyboardAvoidanceEnabled(bool) override;
+
+    bool isZoomingOrScrolling() const final;
 
     bool mayContainEditableElementsInRect(unsigned x, unsigned y, unsigned width, unsigned height) override;
 

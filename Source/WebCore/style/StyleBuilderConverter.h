@@ -48,7 +48,6 @@
 #include "CSSReflectValue.h"
 #include "CSSSubgridValue.h"
 #include "CSSValuePair.h"
-#include "CSSWordBoundaryDetectionValue.h"
 #include "CalcExpressionLength.h"
 #include "CalcExpressionOperation.h"
 #include "CalculationValue.h"
@@ -76,7 +75,7 @@
 #include "TextSpacing.h"
 #include "TouchAction.h"
 #include "TransformFunctions.h"
-#include "WordBoundaryDetection.h"
+#include "WillChangeData.h"
 
 namespace WebCore {
 namespace Style {
@@ -198,7 +197,9 @@ public:
     static GapLength convertGapLength(BuilderState&, const CSSValue&);
 
     static OffsetRotation convertOffsetRotate(BuilderState&, const CSSValue&);
-    static Vector<AtomString> convertContainerName(BuilderState&, const CSSValue&);
+
+    static OptionSet<Containment> convertContain(BuilderState&, const CSSValue&);
+    static Vector<Style::ScopedName> convertContainerName(BuilderState&, const CSSValue&);
 
     static OptionSet<MarginTrimType> convertMarginTrim(BuilderState&, const CSSValue&);
 
@@ -206,8 +207,7 @@ public:
     static TextAutospace convertTextAutospace(BuilderState&, const CSSValue&);
 
     static std::optional<Length> convertBlockStepSize(BuilderState&, const CSSValue&);
-
-    static WordBoundaryDetection convertWordBoundaryDetection(BuilderState&, const CSSValue&);
+    static RefPtr<WillChangeData> convertWillChange(BuilderState&, const CSSValue&);
     
 private:
     friend class BuilderCustom;
@@ -240,7 +240,7 @@ inline Length BuilderConverter::convertLength(const BuilderState& builderState, 
 
     if (primitiveValue.isLength()) {
         Length length = primitiveValue.computeLength<Length>(conversionData);
-        length.setHasQuirk(primitiveValue.primitiveType() == CSSUnitType::CSS_QUIRKY_EMS);
+        length.setHasQuirk(primitiveValue.primitiveType() == CSSUnitType::CSS_QUIRKY_EM);
         return length;
     }
 
@@ -966,7 +966,7 @@ inline float BuilderConverter::convertTextStrokeWidth(BuilderState& builderState
             result *= 3;
         else if (primitiveValue.valueID() == CSSValueThick)
             result *= 5;
-        auto emsValue = CSSPrimitiveValue::create(result, CSSUnitType::CSS_EMS);
+        auto emsValue = CSSPrimitiveValue::create(result, CSSUnitType::CSS_EM);
         width = convertComputedLength<float>(builderState, emsValue);
         break;
     }
@@ -1304,11 +1304,16 @@ inline Vector<GridTrackSize> BuilderConverter::convertGridTrackSizeList(BuilderS
         return trackSizes;
     }
 
-    auto& valueList = downcast<CSSValueList>(value);
     Vector<GridTrackSize> trackSizes;
-    trackSizes.reserveInitialCapacity(valueList.length());
-    for (auto& currentValue : valueList)
-        validateValueAndAppend(trackSizes, currentValue);
+    if (is<CSSValueList>(value))  {
+        auto& valueList = downcast<CSSValueList>(value);
+        trackSizes.reserveInitialCapacity(valueList.length());
+        for (auto& currentValue : valueList)
+            validateValueAndAppend(trackSizes, currentValue);
+    } else {
+        trackSizes.reserveInitialCapacity(1);
+        validateValueAndAppend(trackSizes, value);
+    }
     return trackSizes;
 }
 
@@ -1901,7 +1906,7 @@ inline OffsetRotation BuilderConverter::convertOffsetRotate(BuilderState&, const
     return OffsetRotation(hasAuto, angleInDegrees);
 }
 
-inline Vector<AtomString> BuilderConverter::convertContainerName(BuilderState&, const CSSValue& value)
+inline Vector<Style::ScopedName> BuilderConverter::convertContainerName(BuilderState& state, const CSSValue& value)
 {
     if (is<CSSPrimitiveValue>(value)) {
         ASSERT(value.valueID() == CSSValueNone);
@@ -1910,8 +1915,8 @@ inline Vector<AtomString> BuilderConverter::convertContainerName(BuilderState&, 
     if (!is<CSSValueList>(value))
         return { };
 
-    return WTF::map(downcast<CSSValueList>(value), [](auto& item) {
-        return AtomString { downcast<CSSPrimitiveValue>(item).stringValue() };
+    return WTF::map(downcast<CSSValueList>(value), [&](auto& item) {
+        return Style::ScopedName { AtomString { downcast<CSSPrimitiveValue>(item).stringValue() }, state.styleScopeOrdinal() };
     });
 }
 
@@ -1967,9 +1972,75 @@ inline std::optional<Length> BuilderConverter::convertBlockStepSize(BuilderState
     return convertLength(builderState, value);
 }
 
-inline WordBoundaryDetection BuilderConverter::convertWordBoundaryDetection(BuilderState&, const CSSValue& value)
+inline OptionSet<Containment> BuilderConverter::convertContain(BuilderState&, const CSSValue& value)
 {
-    return downcast<CSSWordBoundaryDetectionValue>(value).value();
+    if (is<CSSPrimitiveValue>(value)) {
+        if (value.valueID() == CSSValueNone)
+            return RenderStyle::initialContainment();
+        if (value.valueID() == CSSValueStrict)
+            return RenderStyle::strictContainment();
+        return RenderStyle::contentContainment();
+    }
+
+    OptionSet<Containment> containment;
+    for (auto& item : downcast<CSSValueList>(value)) {
+        auto& value = downcast<CSSPrimitiveValue>(item);
+        switch (value.valueID()) {
+        case CSSValueSize:
+            containment.add(Containment::Size);
+            break;
+        case CSSValueInlineSize:
+            containment.add(Containment::InlineSize);
+            break;
+        case CSSValueLayout:
+            containment.add(Containment::Layout);
+            break;
+        case CSSValuePaint:
+            containment.add(Containment::Paint);
+            break;
+        case CSSValueStyle:
+            containment.add(Containment::Style);
+            break;
+        default:
+            ASSERT_NOT_REACHED();
+            break;
+        };
+    }
+    return containment;
+}
+
+inline RefPtr<WillChangeData> BuilderConverter::convertWillChange(BuilderState& builderState, const CSSValue& value)
+{
+    if (value.valueID() == CSSValueAuto)
+        return nullptr;
+
+    auto willChange = WillChangeData::create();
+    auto processSingleValue = [&](const CSSValue& item) {
+        if (!is<CSSPrimitiveValue>(item))
+            return;
+        auto& primitiveValue = downcast<CSSPrimitiveValue>(item);
+        switch (primitiveValue.valueID()) {
+        case CSSValueScrollPosition:
+            willChange->addFeature(WillChangeData::Feature::ScrollPosition);
+            break;
+        case CSSValueContents:
+            willChange->addFeature(WillChangeData::Feature::Contents);
+            break;
+        default:
+            if (primitiveValue.isPropertyID()) {
+                if (!isExposed(primitiveValue.propertyID(), &builderState.document().settings()))
+                    break;
+                willChange->addFeature(WillChangeData::Feature::Property, primitiveValue.propertyID());
+            }
+            break;
+        }
+    };
+    if (is<CSSValueList>(value)) {
+        for (auto& item : downcast<CSSValueList>(value))
+            processSingleValue(item);
+    } else
+        processSingleValue(value);
+    return willChange;
 }
 
 } // namespace Style

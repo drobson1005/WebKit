@@ -684,6 +684,9 @@ void FunctionDefinitionWriter::visit(const Type* type)
         [&](const Function&) {
             RELEASE_ASSERT_NOT_REACHED();
         },
+        [&](const TypeConstructor&) {
+            RELEASE_ASSERT_NOT_REACHED();
+        },
         [&](const Bottom&) {
             RELEASE_ASSERT_NOT_REACHED();
         });
@@ -877,13 +880,50 @@ void FunctionDefinitionWriter::visit(const Type* type, AST::CallExpression& call
         static constexpr std::pair<ComparableASCIILiteral, ASCIILiteral> baseTypesMappings[] {
             { "f32", "float"_s },
             { "i32", "int"_s },
-            { "u32", "unsigned"_s }
+            { "u32", "uint"_s },
+            { "vec2f", "float2"_s },
+            { "vec2i", "int2"_s },
+            { "vec2u", "uint2"_s },
+            { "vec3f", "float3"_s },
+            { "vec3i", "int3"_s },
+            { "vec3u", "uint3"_s },
+            { "vec4f", "float4"_s },
+            { "vec4i", "int4"_s },
+            { "vec4u", "uint4"_s }
         };
         static constexpr SortedArrayMap baseTypes { baseTypesMappings };
 
-        if (AST::ParameterizedTypeName::stringViewToKind(targetName).has_value())
+        // FIXME: in order to remove this hack we need to distinguish in the declarations
+        // file between functions and value constructors
+        static constexpr ComparableASCIILiteral constructorNames[] {
+            "mat2x2",
+            "mat2x3",
+            "mat2x4",
+            "mat3x2",
+            "mat3x3",
+            "mat3x4",
+            "mat4x2",
+            "mat4x3",
+            "mat4x4",
+            "texture_1d",
+            "texture_2d",
+            "texture_2d_array",
+            "texture_3d",
+            "texture_cube",
+            "texture_cube_array",
+            "texture_multisampled_2d",
+            "texturetorage_1d",
+            "texturetorage_2d",
+            "texturetorage_2d_array",
+            "texturetorage_3d",
+            "vec2",
+            "vec3",
+            "vec4",
+        };
+        static constexpr SortedArraySet constructors { constructorNames };
+        if (constructors.contains(targetName)) {
             visit(type);
-        else if (auto mappedName = baseTypes.get(targetName))
+        } else if (auto mappedName = baseTypes.get(targetName))
             m_stringBuilder.append(mappedName);
         else
             m_stringBuilder.append(targetName);
@@ -961,9 +1001,10 @@ void FunctionDefinitionWriter::visit(AST::BinaryExpression& binary)
         break;
 
     case AST::BinaryOperation::LeftShift:
+        m_stringBuilder.append(" << ");
+        break;
     case AST::BinaryOperation::RightShift:
-        // FIXME: Implement these
-        RELEASE_ASSERT_NOT_REACHED();
+        m_stringBuilder.append(" >> ");
         break;
 
     case AST::BinaryOperation::Equal:

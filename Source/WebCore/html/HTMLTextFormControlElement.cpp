@@ -44,12 +44,12 @@
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
+#include "ImmutableStyleProperties.h"
 #include "InlineIteratorBox.h"
 #include "InlineIteratorLineBox.h"
 #include "LayoutDisallowedScope.h"
 #include "LocalFrame.h"
 #include "Logging.h"
-#include "MutableStyleProperties.h"
 #include "NodeTraversal.h"
 #include "Page.h"
 #include "PseudoClassChangeInvalidation.h"
@@ -188,7 +188,7 @@ void HTMLTextFormControlElement::updatePlaceholderVisibility()
     if (m_isPlaceholderVisible == newIsPlaceholderVisible)
         return;
 
-    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassPlaceholderShown, newIsPlaceholderVisible);
+    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassType::PlaceholderShown, newIsPlaceholderVisible);
     m_isPlaceholderVisible = newIsPlaceholderVisible;
 
     if (RefPtr placeholder = placeholderElement())

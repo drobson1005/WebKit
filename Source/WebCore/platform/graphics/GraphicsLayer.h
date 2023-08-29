@@ -550,7 +550,7 @@ public:
     virtual void setContentsToPlatformLayerHost(LayerHostingContextIdentifier) { }
     virtual void setContentsToVideoElement(HTMLVideoElement&, ContentsLayerPurpose) { }
     virtual void setContentsDisplayDelegate(RefPtr<GraphicsLayerContentsDisplayDelegate>&&, ContentsLayerPurpose);
-    WEBCORE_EXPORT virtual RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate();
+    WEBCORE_EXPORT virtual RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate(GraphicsLayerAsyncContentsDisplayDelegate* existing);
 #if ENABLE(MODEL_ELEMENT)
     enum class ModelInteraction : uint8_t { Enabled, Disabled };
     virtual void setContentsToModel(RefPtr<Model>&&, ModelInteraction) { }
@@ -593,7 +593,6 @@ public:
 
     enum class CustomAppearance : uint8_t {
         None,
-        ScrollingOverhang,
         ScrollingShadow
     };
     virtual void setCustomAppearance(CustomAppearance customAppearance) { m_customAppearance = customAppearance; }
@@ -850,7 +849,6 @@ template<> struct EnumTraits<WebCore::GraphicsLayer::CustomAppearance> {
     using values = EnumValues<
         WebCore::GraphicsLayer::CustomAppearance,
         WebCore::GraphicsLayer::CustomAppearance::None,
-        WebCore::GraphicsLayer::CustomAppearance::ScrollingOverhang,
         WebCore::GraphicsLayer::CustomAppearance::ScrollingShadow
     >;
 };

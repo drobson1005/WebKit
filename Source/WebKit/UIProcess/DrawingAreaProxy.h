@@ -52,6 +52,7 @@ using PlatformDisplayID = uint32_t;
 namespace WebKit {
 
 class LayerTreeContext;
+class RemotePageDrawingAreaProxy;
 class WebPageProxy;
 class WebProcessProxy;
 
@@ -69,8 +70,9 @@ public:
     DrawingAreaType type() const { return m_type; }
     DrawingAreaIdentifier identifier() const { return m_identifier; }
 
-    virtual void startReceivingMessages(WebProcessProxy&);
-    virtual void stopReceivingMessages(WebProcessProxy&);
+    void startReceivingMessages(WebProcessProxy&);
+    void stopReceivingMessages(WebProcessProxy&);
+    virtual std::span<IPC::ReceiverName> messageReceiverNames() const;
 
     virtual WebCore::DelegatedScrollingMode delegatedScrollingMode() const;
 
@@ -81,8 +83,6 @@ public:
 
     // FIXME: These should be pure virtual.
     virtual void setBackingStoreIsDiscardable(bool) { }
-
-    virtual void waitForBackingStoreUpdateOnNextPaint() { }
 
     const WebCore::IntSize& size() const { return m_size; }
     bool setSize(const WebCore::IntSize&, const WebCore::IntSize& scrollOffset = { });
@@ -130,6 +130,12 @@ public:
     virtual void viewWillStartLiveResize() { };
     virtual void viewWillEndLiveResize() { };
 
+    // IPC::MessageReceiver
+    void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
+
+    virtual void addRemotePageDrawingAreaProxy(RemotePageDrawingAreaProxy&) { }
+    virtual void removeRemotePageDrawingAreaProxy(RemotePageDrawingAreaProxy&) { }
+
 protected:
     DrawingAreaProxy(DrawingAreaType, WebPageProxy&);
 
@@ -139,9 +145,6 @@ protected:
 
     WebCore::IntSize m_size;
     WebCore::IntSize m_scrollOffset;
-
-    // IPC::MessageReceiver
-    void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
 private:
     virtual void sizeDidChange() = 0;

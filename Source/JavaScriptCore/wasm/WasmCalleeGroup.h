@@ -55,7 +55,8 @@ public:
     friend class CallsiteCollection;
     typedef void CallbackType(Ref<CalleeGroup>&&);
     using AsyncCompilationCallback = RefPtr<WTF::SharedTask<CallbackType>>;
-    static Ref<CalleeGroup> create(VM&, MemoryMode, ModuleInformation&, RefPtr<LLIntCallees>);
+    static Ref<CalleeGroup> createFromLLInt(VM&, MemoryMode, ModuleInformation&, RefPtr<LLIntCallees>);
+    static Ref<CalleeGroup> createFromIPInt(VM&, MemoryMode, ModuleInformation&, RefPtr<IPIntCallees>);
     static Ref<CalleeGroup> createFromExisting(MemoryMode, const CalleeGroup&);
 
     void waitUntilFinished();
@@ -101,6 +102,8 @@ public:
         if (!m_bbqCallees.isEmpty() && m_bbqCallees[calleeIndex])
             return *m_bbqCallees[calleeIndex].get();
 #endif
+        if (Options::useWasmIPInt())
+            return m_ipintCallees->at(calleeIndex).get();
         return m_llintCallees->at(calleeIndex).get();
     }
 
@@ -173,6 +176,7 @@ private:
 #endif
 
     CalleeGroup(VM&, MemoryMode, ModuleInformation&, RefPtr<LLIntCallees>);
+    CalleeGroup(VM&, MemoryMode, ModuleInformation&, RefPtr<IPIntCallees>);
     CalleeGroup(MemoryMode, const CalleeGroup&);
     void setCompilationFinished();
     unsigned m_calleeCount;
@@ -181,6 +185,7 @@ private:
     FixedVector<RefPtr<OMGCallee>> m_omgCallees;
     FixedVector<RefPtr<BBQCallee>> m_bbqCallees;
 #endif
+    RefPtr<IPIntCallees> m_ipintCallees;
     RefPtr<LLIntCallees> m_llintCallees;
     HashMap<uint32_t, RefPtr<JSEntrypointCallee>, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_jsEntrypointCallees;
     FixedVector<CodePtr<WasmEntryPtrTag>> m_wasmIndirectCallEntryPoints;

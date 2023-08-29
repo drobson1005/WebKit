@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2023 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,12 +25,12 @@
 #include "FontCascade.h"
 
 #include "ComplexTextController.h"
+#include "DisplayList.h"
 #include "DisplayListRecorderImpl.h"
 #include "FloatRect.h"
 #include "FontCache.h"
 #include "GlyphBuffer.h"
 #include "GraphicsContext.h"
-#include "InMemoryDisplayList.h"
 #include "LayoutRect.h"
 #include "TextRun.h"
 #include "WidthIterator.h"
@@ -177,7 +177,7 @@ void FontCascade::drawEmphasisMarks(GraphicsContext& context, const TextRun& run
     drawEmphasisMarks(context, glyphBuffer, mark, startPoint);
 }
 
-std::unique_ptr<DisplayList::InMemoryDisplayList> FontCascade::displayListForTextRun(GraphicsContext& context, const TextRun& run, unsigned from, std::optional<unsigned> to, CustomFontNotReadyAction customFontNotReadyAction) const
+std::unique_ptr<DisplayList::DisplayList> FontCascade::displayListForTextRun(GraphicsContext& context, const TextRun& run, unsigned from, std::optional<unsigned> to, CustomFontNotReadyAction customFontNotReadyAction) const
 {
     ASSERT(!context.paintingDisabled());
     unsigned destination = to.value_or(run.length());
@@ -193,7 +193,7 @@ std::unique_ptr<DisplayList::InMemoryDisplayList> FontCascade::displayListForTex
     if (glyphBuffer.isEmpty())
         return nullptr;
 
-    std::unique_ptr<DisplayList::InMemoryDisplayList> displayList = makeUnique<DisplayList::InMemoryDisplayList>();
+    std::unique_ptr<DisplayList::DisplayList> displayList = makeUnique<DisplayList::DisplayList>();
     DisplayList::RecorderImpl recordingContext(*displayList, context.state().cloneForRecording(), { },
         context.getCTM(GraphicsContext::DefinitelyIncludeDeviceScale), context.colorSpace(),
         DisplayList::Recorder::DrawGlyphsMode::DeconstructUsingDrawDecomposedGlyphsCommands);
@@ -330,7 +330,9 @@ GlyphData FontCascade::glyphDataForCharacter(UChar32 c, bool mirror, FontVariant
     if (mirror)
         c = u_charMirror(c);
 
-    return m_fonts->glyphDataForCharacter(c, m_fontDescription, variant);
+    auto emojiPolicy = resolveEmojiPolicy(FontVariantEmoji::Normal, c);
+
+    return m_fonts->glyphDataForCharacter(c, m_fontDescription, variant, emojiPolicy);
 }
 
 // For font families where any of the fonts don't have a valid entry in the OS/2 table
@@ -468,6 +470,13 @@ String FontCascade::normalizeSpaces(const UChar* characters, unsigned length)
     return normalizeSpacesInternal(characters, length);
 }
 
+String FontCascade::normalizeSpaces(StringView stringView)
+{
+    if (stringView.is8Bit())
+        return normalizeSpacesInternal(stringView.characters8(), stringView.length());
+    return normalizeSpacesInternal(stringView.characters16(), stringView.length());
+}
+
 static std::atomic<bool> disableFontSubpixelAntialiasingForTesting = false;
 
 void FontCascade::setDisableFontSubpixelAntialiasingForTesting(bool disable)
@@ -505,14 +514,9 @@ FontCascade::CodePath FontCascade::codePath(const TextRun& run, std::optional<un
     UNUSED_PARAM(to);
 #endif
 
-#if USE(FONT_VARIANT_VIA_FEATURES) || USE(FREETYPE)
-    // Because Font::applyTransforms() doesn't know which features to enable/disable in the simple code path, it can't properly handle feature or variant settings.
     // FIXME: https://bugs.webkit.org/show_bug.cgi?id=150791: @font-face features should also cause this to be complex.
-    if (m_fontDescription.featureSettings().size() > 0 || !m_fontDescription.variantSettings().isAllNormal())
-        return CodePath::Complex;
 
-#else
-
+#if !USE(FONT_VARIANT_VIA_FEATURES) && !USE(FREETYPE)
     if (run.length() > 1 && (enableKerning() || requiresShaping()))
         return CodePath::Complex;
 #endif
@@ -1539,11 +1543,10 @@ int FontCascade::offsetForPositionForComplexText(const TextRun& run, float x, bo
 
 #if !PLATFORM(COCOA) && !USE(HARFBUZZ)
 // FIXME: Unify this with the macOS and iOS implementation.
-const Font* FontCascade::fontForCombiningCharacterSequence(const UChar* characters, size_t length) const
+const Font* FontCascade::fontForCombiningCharacterSequence(StringView stringView) const
 {
-    UChar32 baseCharacter;
-    size_t baseCharacterLength = 0;
-    U16_NEXT(characters, baseCharacterLength, length, baseCharacter);
+    ASSERT(stringView.length() > 0);
+    UChar32 baseCharacter = *stringView.codePoints().begin();
     GlyphData baseCharacterGlyphData = glyphDataForCharacter(baseCharacter, false, NormalVariant);
 
     if (!baseCharacterGlyphData.glyph)
@@ -1715,6 +1718,35 @@ DashArray FontCascade::dashesForIntersectionsWithRect(const TextRun& run, const 
         }
     }
     return result;
+}
+
+bool shouldSynthesizeSmallCaps(bool dontSynthesizeSmallCaps, const Font* nextFont, UChar32 baseCharacter, std::optional<UChar32> capitalizedBase, FontVariantCaps fontVariantCaps, bool engageAllSmallCapsProcessing)
+{
+    if (fontVariantCaps == FontVariantCaps::Normal)
+        return false;
+
+    if (dontSynthesizeSmallCaps)
+        return false;
+    if (!nextFont || nextFont == Font::systemFallback())
+        return false;
+    if (engageAllSmallCapsProcessing && isUnicodeCompatibleASCIIWhitespace(baseCharacter))
+        return false;
+    if (!engageAllSmallCapsProcessing && !capitalizedBase)
+        return false;
+    return !nextFont->variantCapsSupportedForSynthesis(fontVariantCaps);
+}
+
+// FIXME: Capitalization is language-dependent and context-dependent and should operate on grapheme clusters instead of codepoints.
+std::optional<UChar32> capitalized(UChar32 baseCharacter)
+{
+    if (U_GET_GC_MASK(baseCharacter) & U_GC_M_MASK)
+        return std::nullopt;
+
+    UChar32 uppercaseCharacter = u_toupper(baseCharacter);
+    ASSERT(uppercaseCharacter == baseCharacter || (U_IS_BMP(baseCharacter) == U_IS_BMP(uppercaseCharacter)));
+    if (uppercaseCharacter != baseCharacter)
+        return uppercaseCharacter;
+    return std::nullopt;
 }
 
 }

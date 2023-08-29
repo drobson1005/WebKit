@@ -179,6 +179,7 @@ void AccessibilityScrollView::clearChildren()
     AccessibilityObject::clearChildren();
     m_verticalScrollbar = nullptr;
     m_horizontalScrollbar = nullptr;
+    m_childrenDirty = false;
 }
 
 bool AccessibilityScrollView::computeAccessibilityIsIgnored() const
@@ -234,8 +235,7 @@ LayoutRect AccessibilityScrollView::elementRect() const
 Document* AccessibilityScrollView::document() const
 {
     if (auto* frameView = dynamicDowncast<LocalFrameView>(m_scrollView.get())) {
-        if (auto* localFrame = dynamicDowncast<LocalFrame>(frameView->frame()))
-            return localFrame->document();
+        return frameView->frame().document();
     }
     return AccessibilityObject::document();
 }

@@ -36,6 +36,7 @@
 #include <wtf/SetForScope.h>
 
 namespace WebCore {
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(AXIsolatedTree);
 
 HashMap<PageIdentifier, Ref<AXIsolatedTree>>& AXIsolatedTree::treePageCache()
 {
@@ -48,7 +49,6 @@ AXIsolatedTree::AXIsolatedTree(AXObjectCache& axObjectCache)
     , m_axObjectCache(&axObjectCache)
     , m_pageActivityState(axObjectCache.pageActivityState())
     , m_geometryManager(axObjectCache.m_geometryManager.ptr())
-    , m_usedOnAXThread(axObjectCache.usedOnAXThread())
 {
     AXTRACE("AXIsolatedTree::AXIsolatedTree"_s);
     ASSERT(isMainThread());
@@ -171,11 +171,11 @@ RefPtr<AXIsolatedTree> AXIsolatedTree::treeForPageID(PageIdentifier pageID)
 
 RefPtr<AXIsolatedObject> AXIsolatedTree::objectForID(const AXID axID) const
 {
-    // In isolated tree mode 2, only access m_readerThreadNodeMap on the AX thread.
-    ASSERT(m_usedOnAXThread ? !isMainThread() : isMainThread());
-    if (m_usedOnAXThread && isMainThread())
+    // In isolated tree mode, only access m_readerThreadNodeMap on the AX thread.
+    if (isMainThread()) {
+        ASSERT_NOT_REACHED();
         return nullptr;
-
+    }
     return axID.isValid() ? m_readerThreadNodeMap.get(axID) : nullptr;
 }
 
@@ -574,19 +574,23 @@ void AXIsolatedTree::updateNodeProperties(AXCoreObject& axObject, const Vector<A
             propertyMap.set(AXPropertyName::SupportsKeyShortcuts, axObject.supportsKeyShortcuts());
             propertyMap.set(AXPropertyName::KeyShortcuts, axObject.keyShortcuts().isolatedCopy());
             break;
+        case AXPropertyName::SelectedChildren:
+            propertyMap.set(AXPropertyName::SelectedChildren, axIDs(axObject.selectedChildren()));
+            break;
         case AXPropertyName::SupportsPosInSet:
             propertyMap.set(AXPropertyName::SupportsPosInSet, axObject.supportsPosInSet());
             break;
         case AXPropertyName::SupportsSetSize:
             propertyMap.set(AXPropertyName::SupportsSetSize, axObject.supportsSetSize());
             break;
-        case AXPropertyName::TextInputMarkedRange:
-            // FIXME: We should have a mechanism to remove a property from the map for when textInputMarkedRange is std::nullopt.
-            if (auto textInputMarkedRange = axObject.textInputMarkedRange())
-                propertyMap.set(AXPropertyName::TextInputMarkedRange, *textInputMarkedRange);
-            else
-                propertyMap.set(AXPropertyName::TextInputMarkedRange, nullptr);
+        case AXPropertyName::TextInputMarkedTextMarkerRange: {
+            std::pair<AXID, CharacterRange> value;
+            auto range = axObject.textInputMarkedTextMarkerRange();
+            if (auto characterRange = range.characterRange(); range && characterRange)
+                value = { range.start().objectID(), *characterRange };
+            propertyMap.set(AXPropertyName::TextInputMarkedTextMarkerRange, value);
             break;
+        }
         case AXPropertyName::URL:
             propertyMap.set(AXPropertyName::URL, axObject.url().isolatedCopy());
             break;
@@ -610,6 +614,9 @@ void AXIsolatedTree::updateNodeAndDependentProperties(AccessibilityObject& axObj
     ASSERT(isMainThread());
 
     updateNode(axObject);
+
+    if (RefPtr correspondingControl = axObject.isLabel() ? axObject.correspondingControlForLabelElement() : nullptr)
+        updateNode(*correspondingControl);
 
     // When a row gains or loses cells, the column count of the table can change.
     bool updateTableAncestorColumns = is<AccessibilityTableRow>(axObject);
@@ -737,6 +744,13 @@ void AXIsolatedTree::updateChildren(AccessibilityObject& axObject, ResolveNodeCh
 
     // Also queue updates to the target node itself and any properties that depend on children().
     updateNodeAndDependentProperties(*axAncestor);
+}
+
+void AXIsolatedTree::updateChildrenForObjects(const ListHashSet<RefPtr<AccessibilityObject>>& axObjects)
+{
+    // FIXME: optimize this method to avoid updating the same object or subtree.
+    for (auto& axObject : axObjects)
+        updateChildren(*axObject);
 }
 
 void AXIsolatedTree::setPageActivityState(OptionSet<ActivityState> state)
@@ -903,10 +917,11 @@ void AXIsolatedTree::applyPendingChanges()
 {
     AXTRACE("AXIsolatedTree::applyPendingChanges"_s);
 
-    // In isolated tree mode 2, only apply pending changes on the AX thread.
-    ASSERT(m_usedOnAXThread ? !isMainThread() : isMainThread());
-    if (m_usedOnAXThread && isMainThread())
+    // In isolated tree mode, only apply pending changes on the AX thread.
+    if (isMainThread()) {
+        ASSERT_NOT_REACHED();
         return;
+    }
 
     Locker locker { m_changeLogLock };
 

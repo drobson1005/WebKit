@@ -101,7 +101,7 @@ void StyledElement::attributeChanged(const QualifiedName& name, const AtomString
             styleAttributeChanged(newValue, reason);
         else if (hasPresentationalHintsForAttribute(name)) {
             elementData()->setPresentationalHintStyleIsDirty(true);
-            invalidateStyle();
+            invalidateStyleInternal();
         }
     }
 }
@@ -155,7 +155,7 @@ void StyledElement::styleAttributeChanged(const AtomString& newStyleString, Attr
 
     elementData()->setStyleAttributeIsDirty(false);
 
-    invalidateStyle();
+    invalidateStyleInternal();
     InspectorInstrumentation::didInvalidateStyleAttr(*this);
 }
 
@@ -167,7 +167,7 @@ void StyledElement::invalidateStyleAttribute()
     }
 
     elementData()->setStyleAttributeIsDirty(true);
-    invalidateStyle();
+    invalidateStyleInternal();
 
     // In the rare case of selectors like "[style] ~ div" we need to synchronize immediately to invalidate.
     if (styleResolver().ruleSets().hasComplexSelectorsForStyleAttribute()) {
@@ -276,6 +276,15 @@ void StyledElement::addSubresourceAttributeURLs(ListHashSet<URL>& urls) const
     });
 }
 
+const ImmutableStyleProperties* StyledElement::presentationalHintStyle() const
+{
+    if (!elementData())
+        return nullptr;
+    if (elementData()->presentationalHintStyleIsDirty())
+        const_cast<StyledElement&>(*this).rebuildPresentationalHintStyle();
+    return elementData()->presentationalHintStyle();
+}
+
 void StyledElement::rebuildPresentationalHintStyle()
 {
     auto style = MutableStyleProperties::create(isSVGElement() ? SVGAttributeMode : HTMLQuirksMode);
@@ -292,7 +301,7 @@ void StyledElement::rebuildPresentationalHintStyle()
     if (style->isEmpty())
         elementData.m_presentationalHintStyle = nullptr;
     else
-        elementData.m_presentationalHintStyle = WTFMove(style);
+        elementData.m_presentationalHintStyle = style->immutableCopy();
 }
 
 void StyledElement::addPropertyToPresentationalHintStyle(MutableStyleProperties& style, CSSPropertyID propertyID, CSSValueID identifier)

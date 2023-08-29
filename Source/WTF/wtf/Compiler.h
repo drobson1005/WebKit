@@ -194,6 +194,23 @@
 #define ALWAYS_INLINE_EXCEPT_MSVC ALWAYS_INLINE
 #endif
 
+
+/* ALWAYS_INLINE_LAMBDA */
+
+/* In GCC functions marked with no_sanitize_address cannot call functions that are marked with always_inline and not marked with no_sanitize_address.
+ * Therefore we need to give up on the enforcement of ALWAYS_INLINE_LAMBDA when bulding with ASAN. https://gcc.gnu.org/bugzilla/show_bug.cgi?id=67368 */
+#if !defined(ALWAYS_INLINE_LAMBDA) && COMPILER(GCC_COMPATIBLE) && defined(NDEBUG) && !COMPILER(MINGW) && !(COMPILER(GCC) && ASAN_ENABLED)
+#define ALWAYS_INLINE_LAMBDA __attribute__((__always_inline__))
+#endif
+
+#if !defined(ALWAYS_INLINE_LAMBDA) && COMPILER(MSVC) && defined(NDEBUG)
+#define ALWAYS_INLINE_LAMBDA [[msvc::forceinline]]
+#endif
+
+#if !defined(ALWAYS_INLINE_LAMBDA)
+#define ALWAYS_INLINE_LAMBDA
+#endif
+
 /* WTF_EXTERN_C_{BEGIN, END} */
 
 #ifdef __cplusplus
@@ -257,7 +274,7 @@
 
 /* NO_RETURN */
 
-#if !defined(NO_RETURN) && COMPILER(GCC_COMPATIBLE)
+#if !defined(NO_RETURN) && (COMPILER(GCC) || COMPILER(CLANG))
 #define NO_RETURN __attribute((__noreturn__))
 #endif
 
@@ -281,6 +298,18 @@
 #define NOT_TAIL_CALLED
 #endif
 
+/* MUST_TAIL_CALL */
+
+#if !defined(MUST_TAIL_CALL) && defined(__cplusplus) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::musttail)
+#define MUST_TAIL_CALL [[clang::musttail]]
+#endif
+#endif
+
+#if !defined(MUST_TAIL_CALL)
+#define MUST_TAIL_CALL
+#endif
+
 /* RETURNS_NONNULL */
 #if !defined(RETURNS_NONNULL) && COMPILER(GCC_COMPATIBLE)
 #define RETURNS_NONNULL __attribute__((returns_nonnull))
@@ -292,7 +321,7 @@
 
 /* NO_RETURN_WITH_VALUE */
 
-#if !defined(NO_RETURN_WITH_VALUE) && !COMPILER(MSVC)
+#if !defined(NO_RETURN_WITH_VALUE) && (COMPILER(GCC) || COMPILER(CLANG))
 #define NO_RETURN_WITH_VALUE NO_RETURN
 #endif
 
@@ -344,7 +373,7 @@
 
 /* UNUSED_FUNCTION */
 
-#if !defined(UNUSED_FUNCTION) && COMPILER(GCC_COMPATIBLE)
+#if !defined(UNUSED_FUNCTION) && (COMPILER(GCC) || COMPILER(CLANG))
 #define UNUSED_FUNCTION __attribute__((unused))
 #endif
 
@@ -370,6 +399,17 @@
 
 #if !defined(REFERENCED_FROM_ASM)
 #define REFERENCED_FROM_ASM
+#endif
+
+/* NO_REORDER */
+
+#if !defined(NO_REORDER) && COMPILER(GCC)
+#define NO_REORDER \
+    __attribute__((__no_reorder__))
+#endif
+
+#if !defined(NO_REORDER)
+#define NO_REORDER
 #endif
 
 /* UNLIKELY */
@@ -505,6 +545,9 @@
 
 #define ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN IGNORE_WARNINGS_BEGIN("deprecated-implementations")
 #define ALLOW_DEPRECATED_IMPLEMENTATIONS_END IGNORE_WARNINGS_END
+
+#define ALLOW_DEPRECATED_PRAGMA_BEGIN IGNORE_WARNINGS_BEGIN("deprecated-pragma")
+#define ALLOW_DEPRECATED_PRAGMA_END IGNORE_WARNINGS_END
 
 #define ALLOW_NEW_API_WITHOUT_GUARDS_BEGIN IGNORE_CLANG_WARNINGS_BEGIN("unguarded-availability-new")
 #define ALLOW_NEW_API_WITHOUT_GUARDS_END IGNORE_CLANG_WARNINGS_END

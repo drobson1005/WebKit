@@ -30,6 +30,7 @@
 #include "FontCascadeDescription.h"
 #include "FontCascadeFonts.h"
 #include "Path.h"
+#include "TextSpacing.h"
 #include <optional>
 #include <wtf/HashSet.h>
 #include <wtf/WeakPtr.h>
@@ -50,7 +51,7 @@ class TextLayout;
 class TextRun;
 
 namespace DisplayList {
-class InMemoryDisplayList;
+class DisplayList;
 }
     
 struct GlyphData;
@@ -118,7 +119,6 @@ public:
 
     const FontCascadeDescription& fontDescription() const { return m_fontDescription; }
 
-    int pixelSize() const { return fontDescription().computedPixelSize(); }
     float size() const { return fontDescription().computedSize(); }
 
     bool isCurrent(const FontSelector&) const;
@@ -152,6 +152,8 @@ public:
 
     float wordSpacing() const { return m_wordSpacing; }
     float letterSpacing() const { return m_letterSpacing; }
+    TextSpacingTrim textSpacingTrim() const { return m_fontDescription.textSpacingTrim(); }
+    TextAutospace textAutospace() const { return m_fontDescription.textAutospace(); }
     void setWordSpacing(float s) { m_wordSpacing = s; }
     void setLetterSpacing(float s) { m_letterSpacing = s; }
     bool isFixedPitch() const;
@@ -184,7 +186,7 @@ public:
     const FontRanges& fallbackRangesAt(unsigned) const;
     GlyphData glyphDataForCharacter(UChar32, bool mirror, FontVariant = AutoVariant) const;
 
-    const Font* fontForCombiningCharacterSequence(const UChar*, size_t length) const;
+    const Font* fontForCombiningCharacterSequence(StringView) const;
 
     static bool isCJKIdeograph(UChar32);
     static bool isCJKIdeographOrSymbol(UChar32);
@@ -210,7 +212,7 @@ public:
 
     static float syntheticObliqueAngle() { return 14; }
 
-    std::unique_ptr<DisplayList::InMemoryDisplayList> displayListForTextRun(GraphicsContext&, const TextRun&, unsigned from = 0, std::optional<unsigned> to = { }, CustomFontNotReadyAction = CustomFontNotReadyAction::DoNotPaintIfFontNotReady) const;
+    std::unique_ptr<DisplayList::DisplayList> displayListForTextRun(GraphicsContext&, const TextRun&, unsigned from = 0, std::optional<unsigned> to = { }, CustomFontNotReadyAction = CustomFontNotReadyAction::DoNotPaintIfFontNotReady) const;
 
     unsigned generation() const { return m_generation; }
 
@@ -283,10 +285,13 @@ public:
 
     static String normalizeSpaces(const LChar*, unsigned length);
     static String normalizeSpaces(const UChar*, unsigned length);
+    static String normalizeSpaces(StringView);
 
     bool useBackslashAsYenSymbol() const { return m_useBackslashAsYenSymbol; }
     FontCascadeFonts* fonts() const { return m_fonts.get(); }
     bool isLoadingCustomFonts() const;
+
+    static ResolvedEmojiPolicy resolveEmojiPolicy(FontVariantEmoji, UChar32);
 
 private:
 
@@ -354,8 +359,9 @@ inline float FontCascade::tabWidth(const Font& font, const TabSize& tabSize, flo
     if (!baseTabWidth)
         result = letterSpacing();
     else {
-        float tabDeltaWidth = baseTabWidth - fmodf(position, baseTabWidth);
-        result = (tabDeltaWidth < font.spaceWidth() / 2) ? baseTabWidth : tabDeltaWidth;
+        result = baseTabWidth - fmodf(position, baseTabWidth);
+        if (result < font.spaceWidth() / 2)
+            result += baseTabWidth;
     }
     // If our caller passes in SyntheticBoldInclusion::Exclude, that means they're going to apply synthetic bold themselves later.
     // However, regardless of that, the space characters that are fed into the width calculation need to have their correct width, including the synthetic bold.
@@ -363,4 +369,7 @@ inline float FontCascade::tabWidth(const Font& font, const TabSize& tabSize, flo
     return result - (syntheticBoldInclusion == Font::SyntheticBoldInclusion::Exclude ? font.syntheticBoldOffset() : 0);
 }
 
-}
+bool shouldSynthesizeSmallCaps(bool, const Font*, UChar32, std::optional<UChar32>, FontVariantCaps, bool);
+std::optional<UChar32> capitalized(UChar32);
+
+} // namespace WebCore

@@ -36,6 +36,7 @@
 #include "ChromeClient.h"
 #include "ColorBlending.h"
 #include "ContainerNode.h"
+#include "ContentVisibilityDocumentState.h"
 #include "DebugPageOverlays.h"
 #include "DocumentInlines.h"
 #include "DocumentLoader.h"
@@ -140,10 +141,6 @@
 #include "LegacyTileCache.h"
 #endif
 
-#if PLATFORM(MAC)
-#include "LocalDefaultSystemAppearance.h"
-#endif
-
 #include "DisplayView.h"
 #include "LayoutContext.h"
 
@@ -169,27 +166,27 @@ static constexpr float mainArticleSignificantRenderedTextMeanLength = 25;
 
 Pagination::Mode paginationModeForRenderStyle(const RenderStyle& style)
 {
-    Overflow overflow = style.overflowY();
+    auto overflow = style.overflowY();
     if (overflow != Overflow::PagedX && overflow != Overflow::PagedY)
         return Unpaginated;
 
     bool isHorizontalWritingMode = style.isHorizontalWritingMode();
-    TextDirection textDirection = style.direction();
-    WritingMode writingMode = style.writingMode();
+    auto textDirection = style.direction();
+    auto blockFlowDirection = writingModeToBlockFlowDirection(style.writingMode());
 
     // paged-x always corresponds to LeftToRightPaginated or RightToLeftPaginated. If the WritingMode
     // is horizontal, then we use TextDirection to choose between those options. If the WritingMode
-    // is vertical, then the direction of the verticality dictates the choice.
+    // is vertical, then the block flow direction dictates the choice.
     if (overflow == Overflow::PagedX) {
-        if ((isHorizontalWritingMode && textDirection == TextDirection::LTR) || writingMode == WritingMode::LeftToRight)
+        if ((isHorizontalWritingMode && textDirection == TextDirection::LTR) || blockFlowDirection == BlockFlowDirection::LeftToRight)
             return LeftToRightPaginated;
         return RightToLeftPaginated;
     }
 
     // paged-y always corresponds to TopToBottomPaginated or BottomToTopPaginated. If the WritingMode
-    // is horizontal, then the direction of the horizontality dictates the choice. If the WritingMode
+    // is horizontal, then the block flow direction dictates the choice. If the WritingMode
     // is vertical, then we use TextDirection to choose between those options. 
-    if (writingMode == WritingMode::TopToBottom || (!isHorizontalWritingMode && textDirection == TextDirection::RTL))
+    if (blockFlowDirection == BlockFlowDirection::TopToBottom || (!isHorizontalWritingMode && textDirection == TextDirection::RTL))
         return TopToBottomPaginated;
     return BottomToTopPaginated;
 }
@@ -2411,6 +2408,9 @@ void LocalFrameView::maintainScrollPositionAtAnchor(ContainerNode* anchorNode)
 
     cancelScheduledScrolls();
 
+    if (is<Element>(anchorNode))
+        m_frame->document()->contentVisibilityDocumentState().updateContentRelevancyForScrollIfNeeded(downcast<Element>(*anchorNode));
+
     // We need to update the layout before scrolling, otherwise we could
     // really mess things up if an anchor scroll comes at a bad moment.
     m_frame->document()->updateStyleIfNeeded();
@@ -2464,7 +2464,7 @@ void LocalFrameView::setScrollPosition(const ScrollPosition& scrollPosition, con
     auto snappedPosition = scrollPositionFromOffset(snappedOffset);
 
     if (options.animated == ScrollIsAnimated::Yes)
-        scrollToPositionWithAnimation(snappedPosition, currentScrollType(), options.clamping);
+        scrollToPositionWithAnimation(snappedPosition, options);
     else
         ScrollView::setScrollPosition(snappedPosition, options);
 
@@ -2595,15 +2595,14 @@ void LocalFrameView::textFragmentIndicatorTimerFired()
         return;
     
     if (textIndicator) {
-        constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::AllowVisibleChildFrameContentOnly };
-        
-        auto textRects = RenderFlexibleBox::absoluteTextRects(range);
-        
-        HitTestResult result;
         auto* localMainFrame = dynamicDowncast<LocalFrame>(page->mainFrame());
         if (!localMainFrame)
             return;
-        result = localMainFrame->eventHandler().hitTestResultAtPoint(LayoutPoint(textRects.first().center()), hitType);
+
+        auto textRects = RenderObject::absoluteTextRects(range);
+
+        constexpr auto hitType = OptionSet { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::AllowVisibleChildFrameContentOnly };
+        auto result = localMainFrame->eventHandler().hitTestResultAtPoint(LayoutPoint(textRects.first().center()), hitType);
         if (!intersects(range, *result.targetNode()))
             return;
         
@@ -2665,8 +2664,7 @@ bool LocalFrameView::scrollRectToVisible(const LayoutRect& absoluteRect, const R
 static ScrollPositionChangeOptions scrollPositionChangeOptionsForElement(const LocalFrameView& frameView, Element* element, const ScrollRectToVisibleOptions& options)
 {
     auto scrollPositionOptions = ScrollPositionChangeOptions::createProgrammatic();
-    if (is<LocalFrame>(frameView.frame())
-        && !downcast<LocalFrame>(frameView.frame()).eventHandler().autoscrollInProgress()
+    if (!frameView.frame().eventHandler().autoscrollInProgress()
         && element
         && useSmoothScrolling(options.behavior, element))
         scrollPositionOptions.animated = ScrollIsAnimated::Yes;
@@ -3085,12 +3083,12 @@ bool LocalFrameView::requestStopKeyboardScrollAnimation(bool immediate)
     return false;
 }
 
-bool LocalFrameView::requestScrollToPosition(const ScrollPosition& position, ScrollType scrollType, ScrollClamping clamping, ScrollIsAnimated animated)
+bool LocalFrameView::requestScrollToPosition(const ScrollPosition& position, const ScrollPositionChangeOptions& options)
 {
-    LOG_WITH_STREAM(Scrolling, stream << "LocalFrameView::requestScrollToPosition " << position << " animated  " << (animated == ScrollIsAnimated::Yes));
+    LOG_WITH_STREAM(Scrolling, stream << "LocalFrameView::requestScrollToPosition " << position << " options  " << options);
 
 #if ENABLE(ASYNC_SCROLLING)
-    if (auto* tiledBacking = this->tiledBacking(); tiledBacking && animated == ScrollIsAnimated::No) {
+    if (auto* tiledBacking = this->tiledBacking(); tiledBacking && options.animated == ScrollIsAnimated::No) {
 #if PLATFORM(IOS_FAMILY)
         auto contentSize = exposedContentRect().size();
 #else
@@ -3102,12 +3100,10 @@ bool LocalFrameView::requestScrollToPosition(const ScrollPosition& position, Scr
 
 #if ENABLE(ASYNC_SCROLLING) || USE(COORDINATED_GRAPHICS)
     if (auto scrollingCoordinator = this->scrollingCoordinator())
-        return scrollingCoordinator->requestScrollToPosition(*this, position, scrollType, clamping, animated);
+        return scrollingCoordinator->requestScrollToPosition(*this, position, options);
 #else
     UNUSED_PARAM(position);
-    UNUSED_PARAM(scrollType);
-    UNUSED_PARAM(clamping);
-    UNUSED_PARAM(animated);
+    UNUSED_PARAM(options);
 #endif
 
     return false;
@@ -3322,8 +3318,7 @@ void LocalFrameView::adjustTiledBackingCoverage()
 
 static bool shouldEnableSpeculativeTilingDuringLoading(const LocalFrameView& view)
 {
-    auto* localFrame = dynamicDowncast<LocalFrame>(view.frame());
-    auto* page = localFrame ? localFrame->page() : nullptr;
+    auto* page = view.frame().page();
     return page && view.isVisuallyNonEmpty() && !page->progress().isMainLoadProgressing();
 }
 
@@ -4000,7 +3995,6 @@ void LocalFrameView::performFixedWidthAutoSize()
     resize(m_autoSizeConstraint.width(), m_autoSizeConstraint.height());
 
     Ref<LocalFrameView> protectedThis(*this);
-    document->updateStyleIfNeeded();
     document->updateLayoutIgnorePendingStylesheets();
     // While the final content size could slightly be different after the next resize/layout (see below), we intentionally save and report
     // the current value to avoid unstable layout (e.g. content "height: 100%").
@@ -4269,17 +4263,17 @@ void LocalFrameView::scrollTo(const ScrollPosition& newPosition)
     didChangeScrollOffset();
 }
 
-void LocalFrameView::scrollToPositionWithAnimation(const ScrollPosition& position, ScrollType scrollType, ScrollClamping)
+void LocalFrameView::scrollToPositionWithAnimation(const ScrollPosition& position, const ScrollPositionChangeOptions& options)
 {
     // FIXME: Why isn't all this in ScrollableArea?
     auto previousScrollType = currentScrollType();
-    setCurrentScrollType(scrollType);
+    setCurrentScrollType(options.type);
 
     if (scrollAnimationStatus() == ScrollAnimationStatus::Animating)
         scrollAnimator().cancelAnimations();
 
     if (position != scrollPosition())
-        ScrollableArea::scrollToPositionWithAnimation(position);
+        ScrollableArea::scrollToPositionWithAnimation(position, options);
 
     setCurrentScrollType(previousScrollType);
 }
@@ -4517,10 +4511,19 @@ void LocalFrameView::updateScrollCorner()
     RenderElement* renderer = nullptr;
     std::unique_ptr<RenderStyle> cornerStyle;
     IntRect cornerRect = scrollCornerRect();
-    
-    if (!cornerRect.isEmpty()) {
+    Document* doc = m_frame->document();
+
+    auto usesStandardScrollbarStyle = [](auto& doc) {
+        if (!doc || !doc->documentElement())
+            return false;
+        if (!doc->documentElement()->renderer())
+            return false;
+
+        return doc->documentElement()->renderer()->style().usesStandardScrollbarStyle();
+    };
+
+    if (!(usesStandardScrollbarStyle(doc) || cornerRect.isEmpty())) {
         // Try the <body> element first as a scroll corner source.
-        Document* doc = m_frame->document();
         Element* body = doc ? doc->bodyOrFrameset() : nullptr;
         if (body && body->renderer()) {
             renderer = body->renderer();
@@ -4569,11 +4572,6 @@ void LocalFrameView::paintScrollCorner(GraphicsContext& context, const IntRect& 
         m_scrollCorner->paintIntoRect(context, cornerRect.location(), cornerRect);
         return;
     }
-
-#if PLATFORM(MAC)
-    // Keep this in sync with ScrollAnimatorMac's effectiveAppearanceForScrollerImp:.
-    LocalDefaultSystemAppearance localAppearance(useDarkAppearanceForScrollbars());
-#endif
 
     ScrollView::paintScrollCorner(context, cornerRect);
 }
@@ -5022,7 +5020,7 @@ void LocalFrameView::updateHasReachedSignificantRenderedTextThreshold()
         return;
 
     auto* page = m_frame->page();
-    if (!page || !page->requestedLayoutMilestones().contains(DidRenderSignificantAmountOfText))
+    if (!page || !page->requestedLayoutMilestones().contains(LayoutMilestone::DidRenderSignificantAmountOfText))
         return;
 
     auto* document = m_frame->document();
@@ -5881,8 +5879,8 @@ void LocalFrameView::fireLayoutRelatedMilestonesIfNeeded()
     if (m_firstLayoutCallbackPending) {
         m_firstLayoutCallbackPending = false;
         m_frame->loader().didFirstLayout();
-        if (requestedMilestones & DidFirstLayout)
-            milestonesAchieved.add(DidFirstLayout);
+        if (requestedMilestones & LayoutMilestone::DidFirstLayout)
+            milestonesAchieved.add(LayoutMilestone::DidFirstLayout);
         if (m_frame->isMainFrame())
             page->startCountingRelevantRepaintedObjects();
     }
@@ -5892,20 +5890,20 @@ void LocalFrameView::fireLayoutRelatedMilestonesIfNeeded()
         if (m_contentQualifiesAsVisuallyNonEmpty) {
             m_firstVisuallyNonEmptyLayoutMilestoneIsPending = false;
 
-            addPaintPendingMilestones(DidFirstMeaningfulPaint);
-            if (requestedMilestones & DidFirstVisuallyNonEmptyLayout)
-                milestonesAchieved.add(DidFirstVisuallyNonEmptyLayout);
+            addPaintPendingMilestones(LayoutMilestone::DidFirstMeaningfulPaint);
+            if (requestedMilestones & LayoutMilestone::DidFirstVisuallyNonEmptyLayout)
+                milestonesAchieved.add(LayoutMilestone::DidFirstVisuallyNonEmptyLayout);
         }
     }
 
     if (!m_renderedSignificantAmountOfText && qualifiesAsSignificantRenderedText()) {
         m_renderedSignificantAmountOfText = true;
-        if (requestedMilestones & DidRenderSignificantAmountOfText)
-            milestonesAchieved.add(DidRenderSignificantAmountOfText);
+        if (requestedMilestones & LayoutMilestone::DidRenderSignificantAmountOfText)
+            milestonesAchieved.add(LayoutMilestone::DidRenderSignificantAmountOfText);
     }
 
     if (milestonesAchieved && m_frame->isMainFrame()) {
-        if (milestonesAchieved.contains(DidFirstVisuallyNonEmptyLayout))
+        if (milestonesAchieved.contains(LayoutMilestone::DidFirstVisuallyNonEmptyLayout))
             FRAMEVIEW_RELEASE_LOG(Layout, "fireLayoutRelatedMilestonesIfNeeded: Firing first visually non-empty layout milestone on the main frame");
         m_frame->loader().didReachLayoutMilestone(milestonesAchieved);
     }
@@ -5919,21 +5917,16 @@ void LocalFrameView::firePaintRelatedMilestonesIfNeeded()
 
     OptionSet<LayoutMilestone> milestonesAchieved;
 
-    // Make sure the pending paint milestones have actually been requested before we send them.
-    if (m_milestonesPendingPaint & DidFirstFlushForHeaderLayer) {
-        if (page->requestedLayoutMilestones() & DidFirstFlushForHeaderLayer)
-            milestonesAchieved.add(DidFirstFlushForHeaderLayer);
+    if (m_milestonesPendingPaint & LayoutMilestone::DidFirstPaintAfterSuppressedIncrementalRendering) {
+        if (page->requestedLayoutMilestones() & LayoutMilestone::DidFirstPaintAfterSuppressedIncrementalRendering)
+            milestonesAchieved.add(LayoutMilestone::DidFirstPaintAfterSuppressedIncrementalRendering);
     }
 
-    if (m_milestonesPendingPaint & DidFirstPaintAfterSuppressedIncrementalRendering) {
-        if (page->requestedLayoutMilestones() & DidFirstPaintAfterSuppressedIncrementalRendering)
-            milestonesAchieved.add(DidFirstPaintAfterSuppressedIncrementalRendering);
-    }
-
-    if (m_milestonesPendingPaint & DidFirstMeaningfulPaint) {
-        if (page->requestedLayoutMilestones() & DidFirstMeaningfulPaint)
-            milestonesAchieved.add(DidFirstMeaningfulPaint);
+    if (m_milestonesPendingPaint & LayoutMilestone::DidFirstMeaningfulPaint) {
+        if (page->requestedLayoutMilestones() & LayoutMilestone::DidFirstMeaningfulPaint)
+            milestonesAchieved.add(LayoutMilestone::DidFirstMeaningfulPaint);
         if (m_frame->isMainFrame()) {
+            WTFEmitSignpost(m_frame->document(), "Page Load: First Meaningful Paint");
             if (auto* page = m_frame->page())
                 page->didFirstMeaningfulPaint();
         }
@@ -5971,7 +5964,7 @@ ScrollBehaviorForFixedElements LocalFrameView::scrollBehaviorForFixedElements() 
     return m_frame->settings().backgroundShouldExtendBeyondPage() ? StickToViewportBounds : StickToDocumentBounds;
 }
 
-Frame& LocalFrameView::frame() const
+LocalFrame& LocalFrameView::frame() const
 {
     return m_frame;
 }
@@ -6316,6 +6309,33 @@ OverscrollBehavior LocalFrameView::verticalOverscrollBehavior()  const
     return OverscrollBehavior::Auto;
 }
 
+Color LocalFrameView::scrollbarThumbColorStyle() const
+{
+    auto* document = m_frame->document();
+    auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
+    if (scrollingObject)
+        return scrollingObject->style().effectiveScrollbarThumbColor();
+    return { };
+}
+
+Color LocalFrameView::scrollbarTrackColorStyle() const
+{
+    auto* document = m_frame->document();
+    auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
+    if (scrollingObject)
+        return scrollingObject->style().effectiveScrollbarTrackColor();
+    return { };
+}
+
+ScrollbarGutter LocalFrameView::scrollbarGutterStyle()  const
+{
+    auto* document = m_frame->document();
+    auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
+    if (scrollingObject)
+        return scrollingObject->style().scrollbarGutter();
+    return { };
+}
+
 ScrollbarWidth LocalFrameView::scrollbarWidthStyle()  const
 {
     auto* document = m_frame->document();
@@ -6379,10 +6399,7 @@ float LocalFrameView::deviceScaleFactor() const
 
 void LocalFrameView::writeRenderTreeAsText(TextStream& ts, OptionSet<RenderAsTextFlag> behavior)
 {
-    auto* localFrame = dynamicDowncast<LocalFrame>(frame());
-    if (!localFrame)
-        return;
-    externalRepresentationForLocalFrame(ts, *localFrame, behavior);
+    externalRepresentationForLocalFrame(ts, frame(), behavior);
 }
 
 } // namespace WebCore

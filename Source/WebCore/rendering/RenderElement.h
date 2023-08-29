@@ -108,6 +108,8 @@ public:
     inline bool shouldApplyLayoutOrPaintContainment() const;
     inline bool shouldApplyAnyContainment() const;
 
+    bool hasEligibleContainmentForSizeQuery() const;
+
     Color selectionColor(CSSPropertyID) const;
     std::unique_ptr<RenderStyle> selectionPseudoStyle() const;
 
@@ -286,6 +288,8 @@ public:
 
     virtual bool establishesIndependentFormattingContext() const;
     bool createsNewFormattingContext() const;
+
+    bool isSkippedContentRoot() const;
 
 protected:
     enum BaseTypeFlag {
@@ -539,6 +543,13 @@ inline RenderObject* RenderElement::lastInFlowChild() const
         return lastChild->previousInFlowSibling();
     }
     return nullptr;
+}
+
+inline bool RenderObject::isSkippedContentRoot() const
+{
+    if (isText())
+        return false;
+    return downcast<RenderElement>(*this).isSkippedContentRoot();
 }
 
 } // namespace WebCore

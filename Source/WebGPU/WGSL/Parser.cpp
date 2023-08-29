@@ -31,6 +31,7 @@
 #include "ParserPrivate.h"
 #include "WGSLShaderModule.h"
 
+#include <wtf/HashSet.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WGSL {
@@ -297,17 +298,17 @@ static AST::UnaryOperation toUnaryOperation(const Token& token)
 }
 
 template<typename Lexer>
-std::optional<Error> parse(ShaderModule& shaderModule)
+std::optional<FailedCheck> parse(ShaderModule& shaderModule)
 {
     Lexer lexer(shaderModule.source());
     Parser parser(shaderModule, lexer);
     auto result = parser.parseShader();
     if (!result.has_value())
-        return result.error();
+        return FailedCheck { { result.error() }, { /* warnings */ } };
     return std::nullopt;
 }
 
-std::optional<Error> parse(ShaderModule& shaderModule)
+std::optional<FailedCheck> parse(ShaderModule& shaderModule)
 {
     if (shaderModule.source().is8Bit())
         return parse<Lexer<LChar>>(shaderModule);
@@ -348,7 +349,7 @@ Result<void> Parser<Lexer>::parseShader()
 {
     // FIXME: parse directives here.
 
-    while (!m_lexer.isAtEndOfFile()) {
+    while (current().type != TokenType::EndOfFile) {
         auto globalExpected = parseGlobalDecl();
         if (!globalExpected)
             return makeUnexpected(globalExpected.error());
@@ -519,8 +520,12 @@ Result<AST::Structure::Ref> Parser<Lexer>::parseStructure(AST::Attribute::List&&
     CONSUME_TYPE(BraceLeft);
 
     AST::StructureMember::List members;
+    HashSet<String> seenMembers;
     while (current().type != TokenType::BraceRight) {
         PARSE(member, StructureMember);
+        auto result = seenMembers.add(member.get().name());
+        if (!result.isNewEntry)
+            FAIL(makeString("duplicate member '", member.get().name(), "' in struct '", name, "'"));
         members.append(member);
         if (current().type == TokenType::Comma)
             consume();
@@ -553,22 +558,6 @@ Result<AST::TypeName::Ref> Parser<Lexer>::parseTypeName()
 
     if (current().type == TokenType::KeywordArray)
         return parseArrayType();
-    if (current().type == TokenType::KeywordI32) {
-        consume();
-        RETURN_ARENA_NODE(NamedTypeName, AST::Identifier::makeWithSpan(CURRENT_SOURCE_SPAN(), StringView { "i32"_s }));
-    }
-    if (current().type == TokenType::KeywordF32) {
-        consume();
-        RETURN_ARENA_NODE(NamedTypeName, AST::Identifier::makeWithSpan(CURRENT_SOURCE_SPAN(), StringView { "f32"_s }));
-    }
-    if (current().type == TokenType::KeywordU32) {
-        consume();
-        RETURN_ARENA_NODE(NamedTypeName, AST::Identifier::makeWithSpan(CURRENT_SOURCE_SPAN(), StringView { "u32"_s }));
-    }
-    if (current().type == TokenType::KeywordBool) {
-        consume();
-        RETURN_ARENA_NODE(NamedTypeName, AST::Identifier::makeWithSpan(CURRENT_SOURCE_SPAN(), StringView { "bool"_s }));
-    }
     if (current().type == TokenType::Identifier) {
         PARSE(name, Identifier);
         return parseTypeNameAfterIdentifier(WTFMove(name), _startOfElementPosition);
@@ -580,12 +569,11 @@ Result<AST::TypeName::Ref> Parser<Lexer>::parseTypeName()
 template<typename Lexer>
 Result<AST::TypeName::Ref> Parser<Lexer>::parseTypeNameAfterIdentifier(AST::Identifier&& name, SourcePosition _startOfElementPosition) // NOLINT
 {
-    auto kind = AST::ParameterizedTypeName::stringViewToKind(name.id());
-    if (kind && current().type == TokenType::Lt) {
+    if (current().type == TokenType::Lt) {
         CONSUME_TYPE(Lt);
         PARSE(elementType, TypeName);
         CONSUME_TYPE(Gt);
-        RETURN_ARENA_NODE(ParameterizedTypeName, *kind, WTFMove(elementType));
+        RETURN_ARENA_NODE(ParameterizedTypeName, WTFMove(name), WTFMove(elementType));
     }
     RETURN_ARENA_NODE(NamedTypeName, WTFMove(name));
 }
@@ -674,10 +662,26 @@ Result<AST::Variable::Ref> Parser<Lexer>::parseVariableWithAttributes(AST::Attri
     }
 
     AST::Expression::Ptr maybeInitializer = nullptr;
-    if (current().type == TokenType::Equal) {
-        consume();
+    if (varFlavor == AST::VariableFlavor::Const || varFlavor == AST::VariableFlavor::Let || current().type == TokenType::Equal) {
+        CONSUME_TYPE(Equal);
         PARSE(initializerExpr, Expression);
         maybeInitializer = &initializerExpr.get();
+    }
+
+    if (!maybeType && !maybeInitializer) {
+        ASCIILiteral flavor = [&] {
+            switch (varFlavor) {
+            case AST::VariableFlavor::Const:
+                RELEASE_ASSERT_NOT_REACHED();
+            case AST::VariableFlavor::Let:
+                RELEASE_ASSERT_NOT_REACHED();
+            case AST::VariableFlavor::Override:
+                return "override"_s;
+            case AST::VariableFlavor::Var:
+                return "var"_s;
+            }
+        }();
+        FAIL(makeString(flavor, " declaration requires a type or initializer"_s));
     }
 
     RETURN_ARENA_NODE(Variable, varFlavor, WTFMove(name), WTFMove(maybeQualifier), WTFMove(maybeType), WTFMove(maybeInitializer), WTFMove(attributes));
@@ -1252,21 +1256,12 @@ Result<AST::Expression::Ref> Parser<Lexer>::parsePrimaryExpression()
         // use of < as either the less-than operator or the beginning of a
         // template-parameter list. Here we are checking for vector or matrix
         // type names. Alternatively, those names could be turned into keywords
-        auto typePrefix = AST::ParameterizedTypeName::stringViewToKind(ident.id());
-        if ((typePrefix && current().type == TokenType::Lt) || current().type == TokenType::ParenLeft) {
+        if (current().type == TokenType::Lt || current().type == TokenType::ParenLeft) {
             PARSE(type, TypeNameAfterIdentifier, WTFMove(ident), _startOfElementPosition);
             PARSE(arguments, ArgumentExpressionList);
             RETURN_ARENA_NODE(CallExpression, WTFMove(type), WTFMove(arguments));
         }
         RETURN_ARENA_NODE(IdentifierExpression, WTFMove(ident));
-    }
-    case TokenType::KeywordI32:
-    case TokenType::KeywordU32:
-    case TokenType::KeywordF32:
-    case TokenType::KeywordBool: {
-        PARSE(type, TypeName);
-        PARSE(arguments, ArgumentExpressionList);
-        RETURN_ARENA_NODE(CallExpression, WTFMove(type), WTFMove(arguments));
     }
     case TokenType::KeywordArray: {
         PARSE(arrayType, ArrayType);

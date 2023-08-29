@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011, 2013 Google Inc.  All rights reserved.
- * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -69,9 +69,6 @@ namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(VTTCue);
 WTF_MAKE_ISO_ALLOCATED_IMPL(VTTCueBox);
-
-// This constant should correspond with the percentage returned by CaptionUserPreferences::captionFontSizeScaleAndImportance.
-constexpr double DEFAULTCAPTIONFONTSIZEPERCENTAGE = 5;
 
 static const CSSValueID displayWritingModeMap[] = {
     CSSValueHorizontalTb, CSSValueVerticalRl, CSSValueVerticalLr
@@ -172,7 +169,6 @@ void VTTCueBox::applyCSSProperties()
 
     // the 'position' property must be set to 'absolute'
     // the 'unicode-bidi' property must be set to 'plaintext'
-    // the 'writing-mode' property must be set to writing-mode
     // the overflow-wrap property must be set to break-word
     // the text-wrap property must be set to balance [CSS-TEXT-4]
     // The color property on the (root) list of WebVTT Node Objects must be set
@@ -186,6 +182,9 @@ void VTTCueBox::applyCSSProperties()
     //   Let left be x-position vw and top be y-position vh.
     // Use 'cqh' and 'cqw' rather than 'vh' and 'vw' here, as the video viewport
     // is not a true viewport, but it is a container, so they serve the same purpose.
+
+    // the 'writing-mode' property must be set to writing-mode
+    setInlineStyleProperty(CSSPropertyWritingMode, cue->getCSSWritingMode(), false);
 
     // the 'top' property must be set to top
     std::visit(WTF::makeVisitor([&] (double top) {
@@ -216,7 +215,7 @@ void VTTCueBox::applyCSSProperties()
 
     // the 'height' property must be set to height
     std::visit(WTF::makeVisitor([&] (double height) {
-        setInlineStyleProperty(CSSPropertyHeight, height, CSSUnitType::CSS_CQW);
+        setInlineStyleProperty(CSSPropertyHeight, height, CSSUnitType::CSS_CQH);
     }, [&] (auto) {
         setInlineStyleProperty(CSSPropertyHeight, CSSValueAuto);
     }), cue->height());
@@ -413,7 +412,7 @@ void VTTCue::setPositionAlign(PositionAlignSetting positionAlignment)
     didChange();
 }
 
-ExceptionOr<void> VTTCue::setSize(int size)
+ExceptionOr<void> VTTCue::setSize(double size)
 {
     // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#dom-texttrackcue-size
     // On setting, if the new value is negative or greater than 100, then throw an IndexSizeError

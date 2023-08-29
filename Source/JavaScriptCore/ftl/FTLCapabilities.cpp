@@ -169,6 +169,7 @@ inline CapabilityLevel canCompile(Node* node)
     case StringCharCodeAt:
     case StringCodePointAt:
     case StringFromCharCode:
+    case StringIndexOf:
     case AllocatePropertyStorage:
     case ReallocatePropertyStorage:
     case NukeStructureAndSetButterfly:
@@ -362,6 +363,8 @@ inline CapabilityLevel canCompile(Node* node)
     case RegExpMatchFast:
     case RegExpMatchFastGlobal:
     case NewRegexp:
+    case NewMap:
+    case NewSet:
     case StringReplace:
     case StringReplaceRegExp:
     case StringReplaceString:
@@ -398,6 +401,7 @@ inline CapabilityLevel canCompile(Node* node)
     case CallDOM:
     case CallDOMGetter:
     case ArraySlice:
+    case ArraySpliceExtract:
     case ArrayIndexOf:
     case ArrayPop:
     case ArrayPush:

@@ -39,7 +39,10 @@
 #import "WebProcessProxy.h"
 #import <QuartzCore/CoreAnimation.h>
 #import <WebCore/MediaPlayerEnums.h>
+#import <WebCore/NullVideoFullscreenInterface.h>
 #import <WebCore/TimeRanges.h>
+#import <WebCore/VideoFullscreenInterfaceAVKit.h>
+#import <WebCore/VideoFullscreenInterfaceMac.h>
 #import <WebCore/WebAVPlayerLayer.h>
 #import <WebCore/WebAVPlayerLayerView.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
@@ -204,6 +207,12 @@ void VideoFullscreenModelContext::removeClient(VideoFullscreenModelClient& clien
 {
     ASSERT(m_clients.contains(&client));
     m_clients.remove(&client);
+}
+
+void VideoFullscreenModelContext::setPlayerLayer(RetainPtr<WebAVPlayerLayer>&& playerLayer)
+{
+    m_playerLayer = WTFMove(playerLayer);
+    [m_playerLayer setVideoDimensions:m_videoDimensions];
 }
 
 void VideoFullscreenModelContext::setVideoDimensions(const WebCore::FloatSize& videoDimensions)
@@ -574,7 +583,9 @@ void VideoFullscreenManagerProxy::removeClientForContext(PlaybackSessionContextI
     clientCount--;
 
     if (clientCount <= 0) {
-        ensureInterface(contextId).setVideoFullscreenModel(nullptr);
+        auto& interface = ensureInterface(contextId);
+        interface.setVideoFullscreenModel(nullptr);
+        interface.invalidate();
         m_playbackSessionManagerProxy->removeClientForContext(contextId);
         m_clientCounts.remove(contextId);
         m_contextMap.remove(contextId);
@@ -605,7 +616,7 @@ void VideoFullscreenManagerProxy::forEachSession(Function<void(VideoFullscreenMo
 
 void VideoFullscreenManagerProxy::requestBitmapImageForCurrentTime(PlaybackSessionContextIdentifier identifier, CompletionHandler<void(ShareableBitmap::Handle&&)>&& completionHandler)
 {
-    auto* gpuProcess = GPUProcessProxy::singletonIfCreated();
+    RefPtr gpuProcess = GPUProcessProxy::singletonIfCreated();
     if (!gpuProcess) {
         completionHandler({ });
         return;
@@ -635,7 +646,8 @@ void VideoFullscreenManagerProxy::addVideoInPictureInPictureDidChangeObserver(co
 void VideoFullscreenManagerProxy::hasVideoInPictureInPictureDidChange(bool value)
 {
     ALWAYS_LOG(LOGIDENTIFIER, value);
-    m_page->uiClient().hasVideoInPictureInPictureDidChange(m_page, value);
+    RefPtr page = m_page;
+    page->uiClient().hasVideoInPictureInPictureDidChange(page.get(), value);
     m_pipChangeObservers.forEach([value] (auto& observer) { observer(value); });
 }
 
@@ -741,7 +753,12 @@ void VideoFullscreenManagerProxy::willRemoveLayerForID(PlaybackSessionContextIde
 void VideoFullscreenManagerProxy::setupFullscreenWithID(PlaybackSessionContextIdentifier contextId, WebKit::LayerHostingContextID videoLayerID, const WebCore::FloatRect& screenRect, const WebCore::FloatSize& initialSize, const WebCore::FloatSize& videoDimensions, float hostingDeviceScaleFactor, HTMLMediaElementEnums::VideoFullscreenMode videoFullscreenMode, bool allowsPictureInPicture, bool standby, bool blocksReturnToFullscreenFromPictureInPicture)
 {
     auto& [model, interface] = ensureModelAndInterface(contextId);
-    addClientForContext(contextId);
+
+    // Do not add another refcount for this contextId if the interface is already in
+    // a fullscreen mode, lest the refcounts get out of sync, as removeClientForContext
+    // is only called once both PiP and video fullscreen are fully exited.
+    if (interface->mode() == HTMLMediaElementEnums::VideoFullscreenModeNone)
+        addClientForContext(contextId);
 
     if (m_mockVideoPresentationModeEnabled) {
         if (!videoDimensions.isEmpty())
@@ -863,15 +880,7 @@ void VideoFullscreenManagerProxy::exitFullscreenWithoutAnimationToMode(PlaybackS
         return;
     }
 
-#if PLATFORM(MAC)
     ensureInterface(contextId).exitFullscreenWithoutAnimationToMode(targetMode);
-#else
-    auto& [model, interface] = ensureModelAndInterface(contextId);
-    interface->invalidate();
-    [model->layerHostView() removeFromSuperview];
-    model->setLayerHostView(nullptr);
-    removeClientForContext(contextId);
-#endif
 
     hasVideoInPictureInPictureDidChange(targetMode & MediaPlayerEnums::VideoFullscreenModePictureInPicture);
 }
@@ -1111,7 +1120,7 @@ void VideoFullscreenManagerProxy::setVideoLayerFrame(PlaybackSessionContextIdent
         fenceSendRight = drawingArea->createFence();
 #endif
 
-    m_page->send(Messages::VideoFullscreenManager::SetVideoLayerFrameFenced(contextId, frame, fenceSendRight));
+    m_page->send(Messages::VideoFullscreenManager::SetVideoLayerFrameFenced(contextId, frame, WTFMove(fenceSendRight)));
 }
 
 void VideoFullscreenManagerProxy::setVideoLayerGravity(PlaybackSessionContextIdentifier contextId, WebCore::MediaPlayerEnums::VideoGravity gravity)

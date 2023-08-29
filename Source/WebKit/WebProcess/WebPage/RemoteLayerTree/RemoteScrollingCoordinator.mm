@@ -44,7 +44,9 @@
 #import <WebCore/Page.h>
 #import <WebCore/RenderLayerCompositor.h>
 #import <WebCore/RenderView.h>
+#import <WebCore/ScrollbarsController.h>
 #import <WebCore/ScrollingStateFrameScrollingNode.h>
+#import <WebCore/ScrollingStateTree.h>
 #import <WebCore/ScrollingTreeFixedNodeCocoa.h>
 #import <WebCore/ScrollingTreeStickyNodeCocoa.h>
 #import <WebCore/WheelEventTestMonitor.h>
@@ -101,12 +103,14 @@ void RemoteScrollingCoordinator::setScrollPinningBehavior(ScrollPinningBehavior)
     // FIXME: send to the UI process.
 }
 
-void RemoteScrollingCoordinator::buildTransaction(RemoteScrollingCoordinatorTransaction& transaction)
+RemoteScrollingCoordinatorTransaction RemoteScrollingCoordinator::buildTransaction()
 {
     willCommitTree();
 
-    transaction.setClearScrollLatching(std::exchange(m_clearScrollLatchingInNextTransaction, false));
-    transaction.setStateTreeToEncode(scrollingStateTree()->commit(LayerRepresentation::PlatformLayerIDRepresentation));
+    return {
+        scrollingStateTree()->commit(LayerRepresentation::PlatformLayerIDRepresentation),
+        std::exchange(m_clearScrollLatchingInNextTransaction, false)
+    };
 }
 
 // Notification from the UI process that we scrolled.
@@ -186,9 +190,24 @@ WheelEventHandlingResult RemoteScrollingCoordinator::handleWheelEventForScrollin
     return WheelEventHandlingResult::handled();
 }
 
-void RemoteScrollingCoordinator::scrollingTreeNodeScrollbarVisibilityDidChange(ScrollingNodeID nodeID, WebCore::ScrollbarOrientation orientation, bool isVisible)
+void RemoteScrollingCoordinator::scrollingTreeNodeScrollbarVisibilityDidChange(ScrollingNodeID nodeID, ScrollbarOrientation orientation, bool isVisible)
 {
-    AsyncScrollingCoordinator::scrollingTreeNodeScrollbarVisibilityDidChange(nodeID, orientation, isVisible);
+    auto* frameView = frameViewForScrollingNode(nodeID);
+    if (!frameView)
+        return;
+
+    if (auto* scrollableArea = frameView->scrollableAreaForScrollingNodeID(nodeID))
+        scrollableArea->scrollbarsController().setScrollbarVisibilityState(orientation, isVisible);
+}
+
+void RemoteScrollingCoordinator::scrollingTreeNodeScrollbarMinimumThumbLengthDidChange(ScrollingNodeID nodeID, ScrollbarOrientation orientation, int minimumThumbLength)
+{
+    auto* frameView = frameViewForScrollingNode(nodeID);
+    if (!frameView)
+        return;
+
+    if (auto* scrollableArea = frameView->scrollableAreaForScrollingNodeID(nodeID))
+        scrollableArea->scrollbarsController().setScrollbarMinimumThumbLength(orientation, minimumThumbLength);
 }
 
 } // namespace WebKit

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2015 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -265,6 +266,9 @@ public:
     void setDefaultPlaybackRate(double) override;
     WEBCORE_EXPORT double playbackRate() const override;
     void setPlaybackRate(double) override;
+    WEBCORE_EXPORT bool preservesPitch() const;
+    WEBCORE_EXPORT void setPreservesPitch(bool);
+
 
 // MediaTime versions of playback state
     MediaTime currentMediaTime() const;
@@ -273,8 +277,6 @@ public:
     WEBCORE_EXPORT void fastSeek(const MediaTime&);
 
     void updatePlaybackRate();
-    WEBCORE_EXPORT bool webkitPreservesPitch() const;
-    WEBCORE_EXPORT void setWebkitPreservesPitch(bool);
     Ref<TimeRanges> played() override;
     Ref<TimeRanges> seekable() const override;
     double seekableTimeRangesLastModifiedTime() const;
@@ -403,6 +405,7 @@ public:
     void scheduleConfigureTextTracks();
     void configureTextTracks();
     void configureTextTrackGroup(const TrackGroup&);
+    void configureMetadataTextTrackGroup(const TrackGroup&);
 
     void setSelectedTextTrack(TextTrack*);
 
@@ -644,9 +647,8 @@ public:
     WEBCORE_EXPORT LayerHostingContextID layerHostingContextID();
     WEBCORE_EXPORT WebCore::FloatSize naturalSize();
 
-    FloatSize mediaPlayerVideoInlineSize() const override { return videoInlineSize(); }
-    WEBCORE_EXPORT WebCore::FloatSize videoInlineSize() const;
-    void setVideoInlineSizeFenced(const FloatSize&, const WTF::MachSendRight&);
+    WEBCORE_EXPORT WebCore::FloatSize videoLayerSize() const;
+    void setVideoLayerSizeFenced(const FloatSize&, WTF::MachSendRight&&);
     void updateMediaState();
 
 protected:
@@ -824,6 +826,9 @@ private:
 
     bool mediaPlayerShouldDisableHDR() const final { return shouldDisableHDR(); }
 
+    FloatSize mediaPlayerVideoLayerSize() const final { return videoLayerSize(); }
+    void mediaPlayerVideoLayerSizeDidChange(const FloatSize& size) final { m_videoLayerSize = size; }
+
     void pendingActionTimerFired();
     void progressEventTimerFired();
     void playbackProgressTimerFired();
@@ -837,7 +842,7 @@ private:
 
     void seek(const MediaTime&);
     void seekInternal(const MediaTime&);
-    void seekWithTolerance(const MediaTime&, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance, bool fromDOM);
+    void seekWithTolerance(const SeekTarget&, bool fromDOM);
     void finishSeek();
     void clearSeeking();
     void addPlayedRange(const MediaTime& start, const MediaTime& end);
@@ -865,7 +870,6 @@ private:
     void endIgnoringTrackDisplayUpdateRequests();
 
     void updateActiveTextTrackCues(const MediaTime&);
-    HTMLTrackElement* showingTrackWithSameKind(HTMLTrackElement*) const;
 
     enum class CueAction : uint8_t { Enter, Exit };
     void executeCueEnterOrExitActionForTime(TextTrackCue&, CueAction);
@@ -1069,7 +1073,7 @@ private:
     double m_requestedPlaybackRate { 1 };
     double m_reportedPlaybackRate { 1 };
     double m_defaultPlaybackRate { 1 };
-    bool m_webkitPreservesPitch { true };
+    bool m_preservesPitch { true };
     NetworkState m_networkState { NETWORK_EMPTY };
     ReadyState m_readyState { HAVE_NOTHING };
     ReadyState m_readyStateMaximum { HAVE_NOTHING };
@@ -1080,17 +1084,13 @@ private:
 
     struct PendingSeek {
         WTF_MAKE_STRUCT_FAST_ALLOCATED;
-        PendingSeek(const MediaTime& now, const MediaTime& targetTime, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance)
+        PendingSeek(const MediaTime& now, const SeekTarget& inTarget)
             : now(now)
-            , targetTime(targetTime)
-            , negativeTolerance(negativeTolerance)
-            , positiveTolerance(positiveTolerance)
+            , target(inTarget)
         {
         }
         MediaTime now;
-        MediaTime targetTime;
-        MediaTime negativeTolerance;
-        MediaTime positiveTolerance;
+        SeekTarget target;
     };
     std::unique_ptr<PendingSeek> m_pendingSeek;
     SeekType m_pendingSeekType { NoSeek };
@@ -1321,7 +1321,7 @@ private:
     bool m_userPrefersExtendedDescriptions { false };
     bool m_changingSynthesisState { false };
 
-    FloatSize m_videoInlineSize { };
+    FloatSize m_videoLayerSize { };
 
 #if !RELEASE_LOG_DISABLED
     RefPtr<Logger> m_logger;

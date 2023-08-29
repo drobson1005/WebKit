@@ -94,8 +94,6 @@ private:
     void convertToLuminanceMask() final;
     void transformToColorSpace(const WebCore::DestinationColorSpace&) final;
 
-    bool prefersPreparationForDisplay() final { return true; }
-    
     void flushDrawingContext() final;
     bool flushDrawingContextAsync() final;
 
@@ -109,7 +107,7 @@ private:
     RefPtr<RemoteImageBufferProxyFlushFence> m_pendingFlush;
     WeakPtr<RemoteRenderingBackendProxy> m_remoteRenderingBackendProxy;
     RemoteDisplayListRecorderProxy m_remoteDisplayList;
-    bool m_needsFlush { false };
+    bool m_needsFlush { true };
 };
 
 class RemoteSerializedImageBufferProxy : public WebCore::SerializedImageBuffer {

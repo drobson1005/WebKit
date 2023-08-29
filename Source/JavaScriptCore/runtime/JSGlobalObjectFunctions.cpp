@@ -54,17 +54,17 @@ const ASCIILiteral ObjectProtoCalledOnNullOrUndefinedError { "Object.prototype._
 const ASCIILiteral RestrictedPropertyAccessError { "'arguments', 'callee', and 'caller' cannot be accessed in this context."_s };
 
 template<unsigned charactersCount>
-static constexpr Bitmap<256> makeCharacterBitmap(const char (&characters)[charactersCount])
+static constexpr WTF::BitSet<256> makeCharacterBitmap(const char (&characters)[charactersCount])
 {
     static_assert(charactersCount > 0, "Since string literal is null terminated, characterCount is always larger than 0");
-    Bitmap<256> bitmap;
+    WTF::BitSet<256> bitmap;
     for (unsigned i = 0; i < charactersCount - 1; ++i)
         bitmap.set(characters[i]);
     return bitmap;
 }
 
 template<typename CharacterType>
-static JSValue encode(JSGlobalObject* globalObject, const Bitmap<256>& doNotEscape, const CharacterType* characters, unsigned length)
+static JSValue encode(JSGlobalObject* globalObject, const WTF::BitSet<256>& doNotEscape, const CharacterType* characters, unsigned length)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -145,7 +145,7 @@ static JSValue encode(JSGlobalObject* globalObject, const Bitmap<256>& doNotEsca
     return jsString(vm, builder.toString());
 }
 
-static JSValue encode(JSGlobalObject* globalObject, JSValue argument, const Bitmap<256>& doNotEscape)
+static JSValue encode(JSGlobalObject* globalObject, JSValue argument, const WTF::BitSet<256>& doNotEscape)
 {
     return toStringView(globalObject, argument, [&] (StringView view) {
         if (view.is8Bit())
@@ -156,7 +156,7 @@ static JSValue encode(JSGlobalObject* globalObject, JSValue argument, const Bitm
 
 template <typename CharType>
 ALWAYS_INLINE
-static JSValue decode(JSGlobalObject* globalObject, const CharType* characters, int length, const Bitmap<256>& doNotUnescape, bool strict)
+static JSValue decode(JSGlobalObject* globalObject, const CharType* characters, int length, const WTF::BitSet<256>& doNotUnescape, bool strict)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -229,7 +229,7 @@ static JSValue decode(JSGlobalObject* globalObject, const CharType* characters, 
     RELEASE_AND_RETURN(scope, jsString(vm, builder.toString()));
 }
 
-static JSValue decode(JSGlobalObject* globalObject, JSValue argument, const Bitmap<256>& doNotUnescape, bool strict)
+static JSValue decode(JSGlobalObject* globalObject, JSValue argument, const WTF::BitSet<256>& doNotUnescape, bool strict)
 {
     return toStringView(globalObject, argument, [&] (StringView view) {
         if (view.is8Bit())
@@ -565,7 +565,7 @@ JSC_DEFINE_HOST_FUNCTION(globalFuncDecodeURI, (JSGlobalObject* globalObject, Cal
 
 JSC_DEFINE_HOST_FUNCTION(globalFuncDecodeURIComponent, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    static constexpr Bitmap<256> emptyBitmap;
+    static constexpr WTF::BitSet<256> emptyBitmap;
     return JSValue::encode(decode(globalObject, callFrame->argument(0), emptyBitmap, true));
 }
 
@@ -881,7 +881,7 @@ static CodeBlock* getCallerCodeBlock(CallFrame* callFrame)
     CodeOrigin codeOrigin = callerFrame->codeOrigin();
     if (codeOrigin && codeOrigin.inlineCallFrame())
         return baselineCodeBlockForInlineCallFrame(codeOrigin.inlineCallFrame());
-    if (callerFrame->isWasmFrame())
+    if (callerFrame->isNativeCalleeFrame())
         return nullptr;
     return callerFrame->codeBlock();
 }
@@ -1000,19 +1000,6 @@ JSC_DEFINE_HOST_FUNCTION(globalFuncCopyDataProperties, (JSGlobalObject* globalOb
 
     ensureStillAliveHere(unlinkedCodeBlock);
     return JSValue::encode(target);
-}
-
-JSC_DEFINE_HOST_FUNCTION(globalFuncDateTimeFormat, (JSGlobalObject* globalObject, CallFrame* callFrame))
-{
-    VM& vm = globalObject->vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    IntlDateTimeFormat* dateTimeFormat = IntlDateTimeFormat::create(vm, globalObject->dateTimeFormatStructure());
-    dateTimeFormat->initializeDateTimeFormat(globalObject, callFrame->argument(0), callFrame->argument(1));
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    double value = callFrame->argument(2).toNumber(globalObject);
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    RELEASE_AND_RETURN(scope, JSValue::encode(dateTimeFormat->format(globalObject, value)));
 }
 
 JSC_DEFINE_HOST_FUNCTION(globalFuncHandleNegativeProxyHasTrapResult, (JSGlobalObject* globalObject, CallFrame* callFrame))

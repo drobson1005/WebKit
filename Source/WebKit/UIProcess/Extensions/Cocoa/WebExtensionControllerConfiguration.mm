@@ -37,7 +37,7 @@
 
 namespace WebKit {
 
-String WebExtensionControllerConfiguration::createStorageDirectoryPath(std::optional<UUID> identifier)
+String WebExtensionControllerConfiguration::createStorageDirectoryPath(std::optional<WTF::UUID> identifier)
 {
     static NeverDestroyed<String> defaultStoragePath;
     static dispatch_once_t onceToken;
@@ -55,6 +55,8 @@ String WebExtensionControllerConfiguration::createStorageDirectoryPath(std::opti
 
         String appDirectoryName = [NSBundle mainBundle].bundleIdentifier ?: [NSProcessInfo processInfo].processName;
         defaultStoragePath.get() = FileSystem::pathByAppendingComponents(libraryPath, { "WebKit"_s, appDirectoryName, "WebExtensions"_s, identifierPath });
+
+        RELEASE_ASSERT(!defaultStoragePath->isEmpty());
     });
 
     return defaultStoragePath.get();

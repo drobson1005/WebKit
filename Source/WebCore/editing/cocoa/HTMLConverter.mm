@@ -58,6 +58,7 @@
 #import "HTMLTextAreaElement.h"
 #import "LoaderNSURLExtras.h"
 #import "LocalFrame.h"
+#import "Quirks.h"
 #import "RenderImage.h"
 #import "RenderText.h"
 #import "StyleProperties.h"
@@ -88,43 +89,6 @@ using namespace HTMLNames;
 #if PLATFORM(IOS_FAMILY)
 
 enum {
-    NSTextBlockAbsoluteValueType    = 0,    // Absolute value in points
-    NSTextBlockPercentageValueType  = 1     // Percentage value (out of 100)
-};
-typedef NSUInteger NSTextBlockValueType;
-
-enum {
-    NSTextBlockWidth            = 0,
-    NSTextBlockMinimumWidth     = 1,
-    NSTextBlockMaximumWidth     = 2,
-    NSTextBlockHeight           = 4,
-    NSTextBlockMinimumHeight    = 5,
-    NSTextBlockMaximumHeight    = 6
-};
-typedef NSUInteger NSTextBlockDimension;
-
-enum {
-    NSTextBlockPadding  = -1,
-    NSTextBlockBorder   =  0,
-    NSTextBlockMargin   =  1
-};
-typedef NSInteger NSTextBlockLayer;
-
-enum {
-    NSTextTableAutomaticLayoutAlgorithm = 0,
-    NSTextTableFixedLayoutAlgorithm     = 1
-};
-typedef NSUInteger NSTextTableLayoutAlgorithm;
-
-enum {
-    NSTextBlockTopAlignment         = 0,
-    NSTextBlockMiddleAlignment      = 1,
-    NSTextBlockBottomAlignment      = 2,
-    NSTextBlockBaselineAlignment    = 3
-};
-typedef NSUInteger NSTextBlockVerticalAlignment;
-
-enum {
     NSEnterCharacter                = 0x0003,
     NSBackspaceCharacter            = 0x0008,
     NSTabCharacter                  = 0x0009,
@@ -137,53 +101,9 @@ enum {
     NSParagraphSeparatorCharacter   = 0x2029,
 };
 
-enum {
-    NSLeftTabStopType = 0,
-    NSRightTabStopType,
-    NSCenterTabStopType,
-    NSDecimalTabStopType
-};
-typedef NSUInteger NSTextTabType;
-
-@interface NSColor : UIColor
-+ (id)colorWithCalibratedRed:(CGFloat)red green:(CGFloat)green blue:(CGFloat)blue alpha:(CGFloat)alpha;
-@end
-
-@interface NSTextTab ()
-- (id)initWithType:(NSTextTabType)type location:(CGFloat)loc;
-@end
-
-@interface NSParagraphStyle ()
-- (void)setHeaderLevel:(NSInteger)level;
-- (void)setTextBlocks:(NSArray *)array;
-@end
-
-@interface NSTextBlock : NSObject
-- (void)setValue:(CGFloat)val type:(NSTextBlockValueType)type forDimension:(NSTextBlockDimension)dimension;
+@interface NSTextBlock ()
 - (void)setWidth:(CGFloat)val type:(NSTextBlockValueType)type forLayer:(NSTextBlockLayer)layer edge:(NSRectEdge)edge;
-- (void)setBackgroundColor:(UIColor *)color;
-- (UIColor *)backgroundColor;
 - (void)setBorderColor:(UIColor *)color forEdge:(NSRectEdge)edge;
-- (void)setBorderColor:(UIColor *)color;        // Convenience method sets all edges at once
-- (void)setVerticalAlignment:(NSTextBlockVerticalAlignment)alignment;
-@end
-
-@interface NSTextTable : NSTextBlock
-- (void)setNumberOfColumns:(NSUInteger)numCols;
-- (void)setCollapsesBorders:(BOOL)flag;
-- (void)setHidesEmptyCells:(BOOL)flag;
-- (void)setLayoutAlgorithm:(NSTextTableLayoutAlgorithm)algorithm;
-- (NSUInteger)numberOfColumns;
-- (void)release;
-@end
-
-@interface NSTextTableBlock : NSTextBlock
-- (id)initWithTable:(NSTextTable *)table startingRow:(NSInteger)row rowSpan:(NSInteger)rowSpan startingColumn:(NSInteger)col columnSpan:(NSInteger)colSpan;     // Designated initializer
-- (NSInteger)startingColumn;
-- (NSInteger)startingRow;
-- (NSUInteger)numberOfColumns;
-- (NSInteger)columnSpan;
-- (NSInteger)rowSpan;
 @end
 
 #else
@@ -256,6 +176,7 @@ private:
     HashMap<RefPtr<Element>, RetainPtr<NSDictionary>> m_aggregatedAttributesForElements;
 
     UserSelectNoneStateCache m_userSelectNoneStateCache;
+    bool m_ignoreUserSelectNoneContent { false };
 
     RetainPtr<NSMutableAttributedString> _attrStr;
     RetainPtr<NSMutableDictionary> _documentAttrs;
@@ -328,6 +249,7 @@ HTMLConverter::HTMLConverter(const SimpleRange& range)
     : m_start(makeContainerOffsetPosition(range.start))
     , m_end(makeContainerOffsetPosition(range.end))
     , m_userSelectNoneStateCache(ComposedTree)
+    , m_ignoreUserSelectNoneContent(!range.start.document().quirks().needsToCopyUserSelectNoneQuirk())
 {
     _attrStr = adoptNS([[NSMutableAttributedString alloc] init]);
     _documentAttrs = adoptNS([[NSMutableDictionary alloc] init]);
@@ -1272,7 +1194,7 @@ BOOL HTMLConverter::_addAttachmentForElement(Element& element, NSURL *url, BOOL 
             NSTextAttachment *mimeTextAttachment = nil;
             [WebMessageDocumentClass document:NULL attachment:&mimeTextAttachment forURL:url];
             if (mimeTextAttachment && [mimeTextAttachment respondsToSelector:@selector(fileWrapper)]) {
-                fileWrapper = [mimeTextAttachment performSelector:@selector(fileWrapper)];
+                fileWrapper = [mimeTextAttachment fileWrapper];
                 ignoreOrientation = NO;
             }
         }
@@ -1598,7 +1520,7 @@ BOOL HTMLConverter::_enterElement(Element& element, BOOL embedded)
 
     if (element.hasTagName(headTag) && !embedded)
         _processHeadElement(element);
-    else if (!m_userSelectNoneStateCache.nodeOnlyContainsUserSelectNone(element) && (!displayValue.length() || !(displayValue == noneAtom() || displayValue == "table-column"_s || displayValue == "table-column-group"_s))) {
+    else if ((!m_ignoreUserSelectNoneContent || !m_userSelectNoneStateCache.nodeOnlyContainsUserSelectNone(element)) && (!displayValue.length() || !(displayValue == noneAtom() || displayValue == "table-column"_s || displayValue == "table-column-group"_s))) {
         if (_caches->isBlockElement(element) && !element.hasTagName(brTag) && !(displayValue == "table-cell"_s && ![_textTables count])
             && !([_textLists count] > 0 && displayValue == "block"_s && !element.hasTagName(liTag) && !element.hasTagName(ulTag) && !element.hasTagName(olTag)))
             _newParagraphForElement(element, element.tagName(), NO, YES);
@@ -2074,7 +1996,7 @@ void HTMLConverter::_exitElement(Element& element, NSInteger depth, NSUInteger s
 
 void HTMLConverter::_processText(CharacterData& characterData)
 {
-    if (m_userSelectNoneStateCache.nodeOnlyContainsUserSelectNone(characterData))
+    if (m_ignoreUserSelectNoneContent && m_userSelectNoneStateCache.nodeOnlyContainsUserSelectNone(characterData))
         return;
     NSUInteger textLength = [_attrStr length];
     unichar lastChar = (textLength > 0) ? [[_attrStr string] characterAtIndex:textLength - 1] : '\n';

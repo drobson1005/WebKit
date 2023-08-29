@@ -67,7 +67,7 @@ public:
     void animationStarted(const String& key, MonotonicTime beginTime) override;
     void animationEnded(const String& key) override;
 
-    void setMask(PlatformCALayer*) override;
+    void setMaskLayer(RefPtr<WebCore::PlatformCALayer>&&) override;
 
     bool isOpaque() const override;
     void setOpaque(bool) override;
@@ -98,6 +98,10 @@ public:
 
     void setBackingStoreAttached(bool) override;
     bool backingStoreAttached() const override;
+
+#if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
+    void setVisibleRect(const FloatRect&) override;
+#endif
 
     bool geometryFlipped() const override;
     WEBCORE_EXPORT void setGeometryFlipped(bool) override;

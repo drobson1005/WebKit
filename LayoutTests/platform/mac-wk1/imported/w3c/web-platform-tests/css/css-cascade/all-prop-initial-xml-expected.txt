@@ -109,6 +109,7 @@ PASS content
 PASS content-visibility
 PASS counter-increment
 PASS counter-reset
+PASS counter-set
 PASS cursor
 PASS cx
 PASS cy
@@ -348,7 +349,6 @@ PASS white-space-collapse
 PASS widows
 PASS width
 PASS will-change
-PASS word-boundary-detection
 PASS word-break
 PASS word-spacing
 PASS writing-mode

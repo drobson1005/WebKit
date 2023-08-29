@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007-2023 Apple Inc. All rights reserved.
- * Copyright (C) 2014 Google Inc. All rights reserved.
+ * Copyright (C) 2014-2015 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -978,6 +978,14 @@ void HTMLMediaElement::willDetachRenderers()
 void HTMLMediaElement::didDetachRenderers()
 {
     scheduleUpdateShouldAutoplay();
+
+    queueTaskKeepingObjectAlive(*this, TaskSource::MediaElement, [this] {
+        // If we detach a media element from a renderer, we may no longer need the MediaPlayerPrivate
+        // to vend a PlatformLayer. However, the renderer may be torn down and re-attached during a
+        // single run-loop as a result of layout or due to the element being re-parented.
+        if (!renderer() && m_player)
+            m_player->acceleratedRenderingStateChanged();
+    });
 }
 
 void HTMLMediaElement::didRecalcStyle(Style::Change)
@@ -1146,15 +1154,6 @@ String HTMLMediaElement::canPlayType(const String& mimeType) const
 {
     MediaEngineSupportParameters parameters;
     ContentType contentType(mimeType);
-
-#if PLATFORM(COCOA)
-    if (document().quirks().shouldAdvertiseSupportForHLSSubtitleTypes()
-        && contentType.containerType() == "application/vnd.apple.mpegurl"_s
-        && (contentType.codecs().contains("stpp.ttml.im1t"_s) || contentType.codecs().contains("wvtt"_s))) {
-        ALWAYS_LOG(LOGIDENTIFIER, "Quirk, ", mimeType, ": probably");
-        return "probably"_s;
-    }
-#endif
 
     parameters.type = contentType;
     parameters.contentTypesRequiringHardwareSupport = mediaContentTypesRequiringHardwareSupport();
@@ -1614,7 +1613,7 @@ void HTMLMediaElement::loadResource(const URL& initialURL, ContentType& contentT
 
     if (!autoplay() && !m_havePreparedToPlay)
         m_player->setPreload(mediaSession().effectivePreloadForElement());
-    m_player->setPreservesPitch(m_webkitPreservesPitch);
+    m_player->setPreservesPitch(m_preservesPitch);
     m_player->setPitchCorrectionAlgorithm(document().settings().pitchCorrectionAlgorithm());
 
     if (!m_explicitlyMuted) {
@@ -2789,8 +2788,10 @@ void HTMLMediaElement::setReadyState(MediaPlayer::ReadyState state)
 
     if (m_seeking) {
         // 4.8.10.9, step 11
-        if (wasPotentiallyPlaying && m_readyState < HAVE_FUTURE_DATA)
+        if (wasPotentiallyPlaying && m_readyState < HAVE_FUTURE_DATA) {
+            ALWAYS_LOG(LOGIDENTIFIER, "queuing waiting event, currentTime = ", currentMediaTime());
             scheduleEvent(eventNames().waitingEvent);
+        }
 
         // 4.8.10.10 step 14 & 15.
         if (m_seekRequested && !m_player->seeking() && m_readyState >= HAVE_CURRENT_DATA)
@@ -3353,7 +3354,7 @@ void HTMLMediaElement::fastSeek(const MediaTime& time)
 
     MediaTime delta = time - currentMediaTime();
     MediaTime negativeTolerance = delta < MediaTime::zeroTime() ? MediaTime::positiveInfiniteTime() : delta;
-    seekWithTolerance(time, negativeTolerance, MediaTime::zeroTime(), true);
+    seekWithTolerance({ time, negativeTolerance, MediaTime::zeroTime() }, true);
 }
 
 #if ENABLE(MEDIA_STREAM)
@@ -3402,20 +3403,19 @@ void HTMLMediaElement::setAudioOutputDevice(String&& deviceId, DOMPromiseDeferre
 void HTMLMediaElement::seek(const MediaTime& time)
 {
     ALWAYS_LOG(LOGIDENTIFIER, time);
-    seekWithTolerance(time, MediaTime::zeroTime(), MediaTime::zeroTime(), true);
+    seekWithTolerance({ time, MediaTime::zeroTime(), MediaTime::zeroTime() }, true);
 }
 
 void HTMLMediaElement::seekInternal(const MediaTime& time)
 {
     ALWAYS_LOG(LOGIDENTIFIER, time);
-    seekWithTolerance(time, MediaTime::zeroTime(), MediaTime::zeroTime(), false);
+    seekWithTolerance({ time, MediaTime::zeroTime(), MediaTime::zeroTime() }, false);
 }
 
-void HTMLMediaElement::seekWithTolerance(const MediaTime& inTime, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance, bool fromDOM)
+void HTMLMediaElement::seekWithTolerance(const SeekTarget& target, bool fromDOM)
 {
-    ALWAYS_LOG(LOGIDENTIFIER, "time = ", inTime, ", negativeTolerance = ", negativeTolerance, ", positiveTolerance = ", positiveTolerance);
+    ALWAYS_LOG(LOGIDENTIFIER, "SeekTarget = ", target);
     // 4.8.10.9 Seeking
-    MediaTime time = inTime;
 
     // 1 - Set the media element's show poster flag to false.
     setShowPosterFlag(false);
@@ -3452,13 +3452,13 @@ void HTMLMediaElement::seekWithTolerance(const MediaTime& inTime, const MediaTim
         if (m_lastSeekTime < now)
             addPlayedRange(m_lastSeekTime, now);
     }
-    m_lastSeekTime = time;
+    m_lastSeekTime = target.time;
 
     // 5 - If the seek was in response to a DOM method call or setting of an IDL attribute, then continue
     // the script. The remainder of these steps must be run asynchronously.
-    m_pendingSeek = makeUnique<PendingSeek>(now, time, negativeTolerance, positiveTolerance);
+    m_pendingSeek = makeUnique<PendingSeek>(now, target);
     if (fromDOM) {
-        ALWAYS_LOG(LOGIDENTIFIER, "enqueuing seek from ", now, " to ", time);
+        ALWAYS_LOG(LOGIDENTIFIER, "enqueuing seek from ", now, " to ", target.time);
         queueCancellableTaskKeepingObjectAlive(*this, TaskSource::MediaElement, m_seekTaskCancellationGroup, std::bind(&HTMLMediaElement::seekTask, this));
     } else
         seekTask();
@@ -3480,9 +3480,9 @@ void HTMLMediaElement::seekTask()
 
     ASSERT(m_pendingSeek);
     MediaTime now = m_pendingSeek->now;
-    MediaTime time = m_pendingSeek->targetTime;
-    MediaTime negativeTolerance = m_pendingSeek->negativeTolerance;
-    MediaTime positiveTolerance = m_pendingSeek->positiveTolerance;
+    MediaTime time = m_pendingSeek->target.time;
+    MediaTime negativeTolerance = m_pendingSeek->target.negativeThreshold;
+    MediaTime positiveTolerance = m_pendingSeek->target.positiveThreshold;
     m_pendingSeek = nullptr;
 
     ASSERT(negativeTolerance.isValid());
@@ -3557,7 +3557,7 @@ void HTMLMediaElement::seekTask()
 
     // 11 - Set the current playback position to the given new playback position
     m_seekRequested = true;
-    m_player->seekWithTolerance(time, negativeTolerance, positiveTolerance);
+    m_player->seekToTarget({ time, negativeTolerance, positiveTolerance });
 
     // 12 - Wait until the user agent has established whether or not the media data for the new playback
     // position is available, and, if it is, until it has decoded enough data to play back that position.
@@ -3646,7 +3646,7 @@ void HTMLMediaElement::setSeeking(bool seeking)
 {
     if (m_seeking == seeking)
         return;
-    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassSeeking, seeking);
+    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassType::Seeking, seeking);
     m_seeking = seeking;
 }
 
@@ -3755,7 +3755,7 @@ void HTMLMediaElement::setCurrentTime(double time)
 
 void HTMLMediaElement::setCurrentTimeWithTolerance(double time, double toleranceBefore, double toleranceAfter)
 {
-    seekWithTolerance(MediaTime::createWithDouble(time), MediaTime::createWithDouble(toleranceBefore), MediaTime::createWithDouble(toleranceAfter), true);
+    seekWithTolerance({ MediaTime::createWithDouble(time), MediaTime::createWithDouble(toleranceBefore), MediaTime::createWithDouble(toleranceAfter) }, true);
 }
 
 void HTMLMediaElement::setCurrentTime(const MediaTime& time)
@@ -3815,8 +3815,8 @@ void HTMLMediaElement::setPaused(bool paused)
     if (m_paused == paused)
         return;
     Style::PseudoClassChangeInvalidation styleInvalidation(*this, {
-        { CSSSelector::PseudoClassPaused, paused },
-        { CSSSelector::PseudoClassPlaying, !paused },
+        { CSSSelector::PseudoClassType::Paused, paused },
+        { CSSSelector::PseudoClassType::Playing, !paused },
     });
     m_paused = paused;
     updateBufferingState();
@@ -3912,16 +3912,16 @@ void HTMLMediaElement::updatePlaybackRate()
         m_player->setRate(requestedRate);
 }
 
-bool HTMLMediaElement::webkitPreservesPitch() const
+bool HTMLMediaElement::preservesPitch() const
 {
-    return m_webkitPreservesPitch;
+    return m_preservesPitch;
 }
 
-void HTMLMediaElement::setWebkitPreservesPitch(bool preservesPitch)
+void HTMLMediaElement::setPreservesPitch(bool preservesPitch)
 {
     INFO_LOG(LOGIDENTIFIER, preservesPitch);
 
-    m_webkitPreservesPitch = preservesPitch;
+    m_preservesPitch = preservesPitch;
 
     if (!m_player)
         return;
@@ -4287,7 +4287,7 @@ void HTMLMediaElement::setMuted(bool muted)
             if (hasAudio() && muted)
                 userDidInterfereWithAutoplay();
         }
-        Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassMuted, muted);
+        Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassType::Muted, muted);
         m_muted = muted;
         m_explicitlyMuted = true;
 
@@ -4322,7 +4322,7 @@ void HTMLMediaElement::setVolumeLocked(bool locked)
     if (m_volumeLocked == locked)
         return;
 
-    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassVolumeLocked, locked);
+    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassType::VolumeLocked, locked);
     m_volumeLocked = locked;
 }
 
@@ -4339,7 +4339,7 @@ void HTMLMediaElement::updateBufferingState()
     // matches the element.)
     bool buffering = !paused() && m_networkState == NETWORK_LOADING && m_readyState <= HAVE_CURRENT_DATA;
     if (m_buffering != buffering) {
-        Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassBuffering, buffering);
+        Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassType::Buffering, buffering);
         m_buffering = buffering;
     }
 }
@@ -4358,7 +4358,7 @@ void HTMLMediaElement::updateStalledState()
     // also matches the element.)
     bool stalled = !paused() && m_networkState == NETWORK_LOADING && m_readyState <= HAVE_CURRENT_DATA && m_sentStalledEvent;
     if (m_stalled != stalled) {
-        Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassStalled, stalled);
+        Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassType::Stalled, stalled);
         m_stalled = stalled;
     }
 }
@@ -4817,6 +4817,22 @@ void HTMLMediaElement::didRemoveTextTrack(HTMLTrackElement& trackElement)
     m_textTracksWhenResourceSelectionBegan.removeFirst(&textTrack);
 }
 
+void HTMLMediaElement::configureMetadataTextTrackGroup(const TrackGroup& group)
+{
+    ASSERT(group.tracks.size());
+    // https://html.spec.whatwg.org/multipage/embedded-content.html#honor-user-preferences-for-automatic-text-track-selection
+    // 3. If there are any text tracks in the media element's list of text tracks whose text track kind is
+    // chapters or metadata that correspond to track elements with a default attribute set whose text track mode
+    // is set to disabled, then set the text track mode of all such tracks to hidden.
+    for (auto& textTrack : group.tracks) {
+        if (textTrack->mode() != TextTrack::Mode::Disabled)
+            continue;
+        if (!textTrack->isDefault())
+            continue;
+        textTrack->setMode(TextTrack::Mode::Hidden);
+    }
+}
+
 void HTMLMediaElement::configureTextTrackGroup(const TrackGroup& group)
 {
     ASSERT(group.tracks.size());
@@ -5171,7 +5187,7 @@ void HTMLMediaElement::configureTextTracks()
     if (chapterTracks.tracks.size())
         configureTextTrackGroup(chapterTracks);
     if (metadataTracks.tracks.size())
-        configureTextTrackGroup(metadataTracks);
+        configureMetadataTextTrackGroup(metadataTracks);
     if (otherTracks.tracks.size())
         configureTextTrackGroup(otherTracks);
 
@@ -5956,10 +5972,10 @@ void HTMLMediaElement::scheduleUpdatePlayState()
         return;
 
     auto logSiteIdentifier = LOGIDENTIFIER;
-    ALWAYS_LOG(logSiteIdentifier, "task scheduled");
+    INFO_LOG(logSiteIdentifier, "task scheduled");
     queueCancellableTaskKeepingObjectAlive(*this, TaskSource::MediaElement, m_updatePlayStateTaskCancellationGroup, [this, logSiteIdentifier] {
         UNUSED_PARAM(logSiteIdentifier);
-        ALWAYS_LOG(logSiteIdentifier, "lambda(), task fired");
+        INFO_LOG(logSiteIdentifier, "lambda(), task fired");
         Ref<HTMLMediaElement> protectedThis(*this); // updatePlayState calls methods that can trigger arbitrary DOM mutations.
         updatePlayState();
     });
@@ -6263,6 +6279,7 @@ void HTMLMediaElement::clearMediaPlayer()
     m_resourceSelectionTaskCancellationGroup.cancel();
 
     updateSleepDisabling();
+    updateRenderer();
 }
 
 const char* HTMLMediaElement::activeDOMObjectName() const
@@ -6743,7 +6760,12 @@ void HTMLMediaElement::enterFullscreen(VideoFullscreenMode mode)
     m_changingVideoFullscreenMode = true;
 
 #if ENABLE(FULLSCREEN_API) && ENABLE(VIDEO_USES_ELEMENT_FULLSCREEN)
-    if (document().settings().fullScreenEnabled() && mode == VideoFullscreenModeStandard) {
+#if PLATFORM(IOS_FAMILY)
+    bool videoUsesElementFullscreen = document().settings().videoFullscreenRequiresElementFullscreen();
+#else
+    constexpr bool videoUsesElementFullscreen = true;
+#endif
+    if (videoUsesElementFullscreen && document().settings().fullScreenEnabled() && mode == VideoFullscreenModeStandard) {
         m_temporarilyAllowingInlinePlaybackAfterFullscreen = false;
         m_waitingToEnterFullscreen = true;
         document().fullscreenManager().requestFullscreenForElement(*this, nullptr, FullscreenManager::ExemptIFrameAllowFullscreenRequirement);
@@ -7405,6 +7427,7 @@ void HTMLMediaElement::createMediaPlayer() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 #endif
 
     updateSleepDisabling();
+    updateRenderer();
 }
 
 #if ENABLE(WEB_AUDIO)
@@ -8121,7 +8144,9 @@ bool HTMLMediaElement::ensureMediaControls()
 
         mediaControlsHostJSWrapperObject->putDirect(vm, controller, controllerValue, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::ReadOnly);
 
-        updatePageScaleFactorJSProperty();
+        if (m_mediaControlsDependOnPageScaleFactor)
+            updatePageScaleFactorJSProperty();
+
         RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
 
         updateUsesLTRUserInterfaceLayoutDirectionJSProperty();
@@ -8393,43 +8418,43 @@ void HTMLMediaElement::didReceiveRemoteControlCommand(PlatformMediaSession::Remo
     UserGestureIndicator remoteControlUserGesture(ProcessingUserGesture, &document());
     const double defaultSkipAmount = 15;
     switch (command) {
-    case PlatformMediaSession::PlayCommand:
+    case PlatformMediaSession::RemoteControlCommandType::PlayCommand:
         play();
         break;
-    case PlatformMediaSession::StopCommand:
-    case PlatformMediaSession::PauseCommand:
+    case PlatformMediaSession::RemoteControlCommandType::StopCommand:
+    case PlatformMediaSession::RemoteControlCommandType::PauseCommand:
         pause();
         break;
-    case PlatformMediaSession::TogglePlayPauseCommand:
+    case PlatformMediaSession::RemoteControlCommandType::TogglePlayPauseCommand:
         canPlay() ? play() : pause();
         break;
-    case PlatformMediaSession::BeginSeekingBackwardCommand:
+    case PlatformMediaSession::RemoteControlCommandType::BeginSeekingBackwardCommand:
         beginScanning(Backward);
         break;
-    case PlatformMediaSession::BeginSeekingForwardCommand:
+    case PlatformMediaSession::RemoteControlCommandType::BeginSeekingForwardCommand:
         beginScanning(Forward);
         break;
-    case PlatformMediaSession::EndSeekingBackwardCommand:
-    case PlatformMediaSession::EndSeekingForwardCommand:
+    case PlatformMediaSession::RemoteControlCommandType::EndSeekingBackwardCommand:
+    case PlatformMediaSession::RemoteControlCommandType::EndSeekingForwardCommand:
         endScanning();
         break;
-    case PlatformMediaSession::BeginScrubbingCommand:
+    case PlatformMediaSession::RemoteControlCommandType::BeginScrubbingCommand:
         beginScrubbing();
         break;
-    case PlatformMediaSession::EndScrubbingCommand:
+    case PlatformMediaSession::RemoteControlCommandType::EndScrubbingCommand:
         endScrubbing();
         break;
-    case PlatformMediaSession::SkipForwardCommand: {
+    case PlatformMediaSession::RemoteControlCommandType::SkipForwardCommand: {
         auto delta = argument.time ? argument.time.value() : defaultSkipAmount;
         handleSeekToPlaybackPosition(std::min(currentTime() + delta, duration()));
         break;
     }
-    case PlatformMediaSession::SkipBackwardCommand: {
+    case PlatformMediaSession::RemoteControlCommandType::SkipBackwardCommand: {
         auto delta = argument.time ? argument.time.value() : defaultSkipAmount;
         handleSeekToPlaybackPosition(std::max(currentTime() - delta, 0.));
         break;
     }
-    case PlatformMediaSession::SeekToPlaybackPositionCommand:
+    case PlatformMediaSession::RemoteControlCommandType::SeekToPlaybackPositionCommand:
         ASSERT(argument.time);
         if (argument.time)
             handleSeekToPlaybackPosition(argument.time.value());
@@ -8529,19 +8554,19 @@ FloatSize HTMLMediaElement::naturalSize()
     return { };
 }
 
-FloatSize HTMLMediaElement::videoInlineSize() const
+FloatSize HTMLMediaElement::videoLayerSize() const
 {
-    return m_videoInlineSize;
+    return m_videoLayerSize;
 }
 
-void HTMLMediaElement::setVideoInlineSizeFenced(const FloatSize& size, const WTF::MachSendRight& fence)
+void HTMLMediaElement::setVideoLayerSizeFenced(const FloatSize& size, WTF::MachSendRight&& fence)
 {
-    if (m_videoInlineSize == size)
+    if (m_videoLayerSize == size)
         return;
 
-    m_videoInlineSize = size;
+    m_videoLayerSize = size;
     if (m_player)
-        m_player->setVideoInlineSizeFenced(size, fence);
+        m_player->setVideoLayerSizeFenced(size, WTFMove(fence));
 }
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
@@ -8552,10 +8577,10 @@ void HTMLMediaElement::scheduleUpdateMediaState()
         return;
 
     auto logSiteIdentifier = LOGIDENTIFIER;
-    ALWAYS_LOG(logSiteIdentifier, "task scheduled");
+    INFO_LOG(logSiteIdentifier, "task scheduled");
     queueCancellableTaskKeepingObjectAlive(*this, TaskSource::MediaElement, m_updateMediaStateTaskCancellationGroup, [this, logSiteIdentifier] {
         UNUSED_PARAM(logSiteIdentifier);
-        ALWAYS_LOG(logSiteIdentifier, "lambda(), task fired");
+        INFO_LOG(logSiteIdentifier, "lambda(), task fired");
         Ref<HTMLMediaElement> protectedThis(*this); // updateMediaState calls methods that can trigger arbitrary DOM mutations.
         updateMediaState();
     });
@@ -8919,6 +8944,9 @@ void HTMLMediaElement::setFullscreenMode(VideoFullscreenMode mode)
     m_videoFullscreenMode = mode;
     visibilityStateChanged();
     schedulePlaybackControlsManagerUpdate();
+
+    if (m_player)
+        m_player->acceleratedRenderingStateChanged();
 }
 
 #if !RELEASE_LOG_DISABLED
@@ -9007,7 +9035,7 @@ MediaElementSession& HTMLMediaElement::mediaSession() const
 
 void HTMLMediaElement::updateMediaPlayer(IntSize presentationSize, bool shouldMaintainAspectRatio)
 {
-    ALWAYS_LOG(LOGIDENTIFIER);
+    INFO_LOG(LOGIDENTIFIER);
     m_player->setPresentationSize(presentationSize);
     visibilityStateChanged();
     m_player->setVisibleInViewport(isVisibleInViewport());

@@ -84,6 +84,7 @@ public:
     public:
         VideoDecoderIdentifier identifier;
         VideoCodecType type;
+        String codec;
         void* decodedImageCallback WTF_GUARDED_BY_LOCK(decodedImageCallbackLock) { nullptr };
         DecoderCallback decoderCallback;
         Lock decodedImageCallbackLock;
@@ -94,7 +95,7 @@ public:
     };
 
     Decoder* createDecoder(VideoCodecType);
-    void createDecoderAndWaitUntilReady(VideoCodecType, Function<void(Decoder&)>&&);
+    void createDecoderAndWaitUntilReady(VideoCodecType, const String& codec, Function<void(Decoder*)>&&);
 
     int32_t releaseDecoder(Decoder&);
     void flushDecoder(Decoder&, Function<void()>&&);
@@ -134,7 +135,7 @@ public:
     };
 
     Encoder* createEncoder(VideoCodecType, const std::map<std::string, std::string>&);
-    void createEncoderAndWaitUntilReady(VideoCodecType, const std::map<std::string, std::string>&, bool isRealtime, bool useAnnexB, Function<void(Encoder&)>&&);
+    void createEncoderAndWaitUntilReady(VideoCodecType, const std::map<std::string, std::string>&, bool isRealtime, bool useAnnexB, Function<void(Encoder*)>&&);
     int32_t releaseEncoder(Encoder&);
     int32_t initializeEncoder(Encoder&, uint16_t width, uint16_t height, unsigned startBitrate, unsigned maxBitrate, unsigned minBitrate, uint32_t maxFramerate);
     int32_t encodeFrame(Encoder&, const WebCore::VideoFrame&, int64_t timestamp, std::optional<uint64_t> duration, bool shouldEncodeAsKeyFrame);
@@ -187,8 +188,8 @@ private:
     template<typename Buffer> bool copySharedVideoFrame(LibWebRTCCodecs::Encoder&, IPC::Connection&, Buffer&&);
     WorkQueue& workQueue() const { return m_queue; }
 
-    Decoder* createDecoderInternal(VideoCodecType, Function<void(Decoder&)>&&);
-    Encoder* createEncoderInternal(VideoCodecType, const std::map<std::string, std::string>&, bool isRealtime, bool useAnnexB, Function<void(Encoder&)>&&);
+    Decoder* createDecoderInternal(VideoCodecType, const String& codec, Function<void(Decoder(*))>&&);
+    Encoder* createEncoderInternal(VideoCodecType, const std::map<std::string, std::string>&, bool isRealtime, bool useAnnexB, Function<void(Encoder*)>&&);
     template<typename Frame> int32_t encodeFrameInternal(Encoder&, const Frame&, bool shouldEncodeAsKeyFrame, WebCore::VideoFrameRotation, MediaTime, int64_t timestamp, std::optional<uint64_t> duration);
 
 private:

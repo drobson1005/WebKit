@@ -24,6 +24,7 @@
  */
 
 #import "config.h"
+#import "FrameTreeChecks.h"
 #import "HTTPServer.h"
 #import "TestNavigationDelegate.h"
 #import "Utilities.h"
@@ -58,12 +59,6 @@ static void enableWindowOpenPSON(WKWebViewConfiguration *configuration)
         }
     }
 }
-
-enum RemoteFrameTag { RemoteFrame };
-struct ExpectedFrameTree {
-    std::variant<RemoteFrameTag, String> remoteOrOrigin;
-    Vector<ExpectedFrameTree> children { };
-};
 
 static bool frameTreesMatch(_WKFrameTreeNode *actualRoot, const ExpectedFrameTree& expectedRoot)
 {
@@ -119,7 +114,7 @@ static void checkFrameTreesInProcesses(NSSet<_WKFrameTreeNode *> *actualTrees, V
     EXPECT_TRUE(frameTreesMatch(actualTrees, WTFMove(expectedFrameTrees)));
 }
 
-static void checkFrameTreesInProcesses(WKWebView *webView, Vector<ExpectedFrameTree>&& expectedFrameTrees)
+void checkFrameTreesInProcesses(WKWebView *webView, Vector<ExpectedFrameTree>&& expectedFrameTrees)
 {
     checkFrameTreesInProcesses(frameTrees(webView).get(), WTFMove(expectedFrameTrees));
 }
@@ -128,8 +123,8 @@ enum class FrameType : bool { Local, Remote };
 static pid_t findFramePID(NSSet<_WKFrameTreeNode *> *set, FrameType local)
 {
     for (_WKFrameTreeNode *node in set) {
-        if (node._isLocalFrame == (local == FrameType::Local))
-            return node._processIdentifier;
+        if (node.info._isLocalFrame == (local == FrameType::Local))
+            return node.info._processIdentifier;
     }
     ASSERT_NOT_REACHED();
     return 0;
@@ -382,8 +377,8 @@ TEST(SiteIsolation, PostMessageWithMessagePorts)
 
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = mainFrame.childFrames.firstObject._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = mainFrame.childFrames.firstObject.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
@@ -455,8 +450,8 @@ TEST(SiteIsolation, PostMessageWithNotAllowedTargetOrigin)
 
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = mainFrame.childFrames.firstObject._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = mainFrame.childFrames.firstObject.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
@@ -522,8 +517,8 @@ TEST(SiteIsolation, PostMessageToIFrameWithOpaqueOrigin)
 
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = mainFrame.childFrames.firstObject._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = mainFrame.childFrames.firstObject.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
@@ -582,13 +577,13 @@ TEST(SiteIsolation, NavigatingCrossOriginIframeToSameOrigin)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_EQ(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "example.com");
         done = true;
     }];
     Util::run(&done);
@@ -615,13 +610,13 @@ TEST(SiteIsolation, ParentNavigatingCrossOriginIframeToSameOrigin)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_EQ(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "example.com");
         done = true;
     }];
     Util::run(&done);
@@ -654,13 +649,13 @@ TEST(SiteIsolation, IframeNavigatesSelfWithoutChangingOrigin)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
@@ -685,13 +680,13 @@ TEST(SiteIsolation, IframeWithConfirm)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
@@ -716,13 +711,13 @@ TEST(SiteIsolation, IframeWithPrompt)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
@@ -770,13 +765,13 @@ TEST(SiteIsolation, ChildNavigatingToNewDomain)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "foo.com");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "foo.com");
         done = true;
     }];
     Util::run(&done);
@@ -803,13 +798,13 @@ TEST(SiteIsolation, ChildNavigatingToMainFrameDomain)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_EQ(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "example.com");
         done = true;
     }];
     Util::run(&done);
@@ -836,13 +831,13 @@ TEST(SiteIsolation, ChildNavigatingToSameDomain)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
@@ -874,10 +869,10 @@ TEST(SiteIsolation, ChildNavigatingToDomainLoadedOnADifferentPage)
     __block pid_t firstFramePID = 0;
     __block bool done { false };
     [firstWebView _frames:^(_WKFrameTreeNode *mainFrame) {
-        pid_t mainFramePid = mainFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         firstFramePID = mainFramePid;
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
@@ -885,21 +880,19 @@ TEST(SiteIsolation, ChildNavigatingToDomainLoadedOnADifferentPage)
     done = false;
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
         EXPECT_NE(firstFramePID, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
 }
 
-// FIXME: This test times out on the iOS simulator. Investigate and fix.
-#if PLATFORM(MAC)
 TEST(SiteIsolation, MainFrameWithTwoIFramesInTheSameProcess)
 {
     HTTPServer server({
@@ -911,8 +904,7 @@ TEST(SiteIsolation, MainFrameWithTwoIFramesInTheSameProcess)
     [navigationDelegate allowAnyTLSCertificate];
 
     auto configuration = server.httpsProxyConfiguration();
-    // FIXME: call enableSiteIsolation to make this actually use site isolation
-    // once we make changes so that this isn't flaky.
+    enableSiteIsolation(configuration);
 
     auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
     webView.get().navigationDelegate = navigationDelegate.get();
@@ -931,23 +923,21 @@ TEST(SiteIsolation, MainFrameWithTwoIFramesInTheSameProcess)
         EXPECT_EQ(mainFrame.childFrames.count, 2u);
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
         _WKFrameTreeNode *otherChildFrame = mainFrame.childFrames[1];
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
-        pid_t otherChildFramePid = otherChildFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
+        pid_t otherChildFramePid = otherChildFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(otherChildFramePid, 0);
         EXPECT_EQ(childFramePid, otherChildFramePid);
-        // FIXME: Switch to EXPECT_NE once siteIsolation is enabled.
-        EXPECT_EQ(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
-        EXPECT_WK_STREQ(otherChildFrame.securityOrigin.host, "webkit.org");
+        EXPECT_NE(mainFramePid, childFramePid);
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
+        EXPECT_WK_STREQ(otherChildFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
 }
-#endif
 
 TEST(SiteIsolation, ChildBeingNavigatedToMainFrameDomainByParent)
 {
@@ -960,7 +950,7 @@ TEST(SiteIsolation, ChildBeingNavigatedToMainFrameDomainByParent)
     [navigationDelegate allowAnyTLSCertificate];
 
     auto configuration = server.httpsProxyConfiguration();
-    // FIXME: Fix failures and enable site isolation
+    enableSiteIsolation(configuration);
 
     auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
     webView.get().navigationDelegate = navigationDelegate.get();
@@ -970,17 +960,22 @@ TEST(SiteIsolation, ChildBeingNavigatedToMainFrameDomainByParent)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
-        // FIXME: Switch to EXPECT_NE once siteIsolation is enabled.
         EXPECT_EQ(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "example.com");
         done = true;
     }];
     Util::run(&done);
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { "https://example.com"_s } }
+        }
+    });
 }
 
 TEST(SiteIsolation, ChildBeingNavigatedToSameDomainByParent)
@@ -994,7 +989,7 @@ TEST(SiteIsolation, ChildBeingNavigatedToSameDomainByParent)
     [navigationDelegate allowAnyTLSCertificate];
 
     auto configuration = server.httpsProxyConfiguration();
-    // FIXME: Fix failures and enable site isolation
+    enableSiteIsolation(configuration);
 
     auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
     webView.get().navigationDelegate = navigationDelegate.get();
@@ -1004,17 +999,247 @@ TEST(SiteIsolation, ChildBeingNavigatedToSameDomainByParent)
     __block bool done { false };
     [webView _frames:^(_WKFrameTreeNode *mainFrame) {
         _WKFrameTreeNode *childFrame = mainFrame.childFrames.firstObject;
-        pid_t mainFramePid = mainFrame._processIdentifier;
-        pid_t childFramePid = childFrame._processIdentifier;
+        pid_t mainFramePid = mainFrame.info._processIdentifier;
+        pid_t childFramePid = childFrame.info._processIdentifier;
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
-        // FIXME: Switch to EXPECT_NE once siteIsolation is enabled.
-        EXPECT_EQ(mainFramePid, childFramePid);
-        EXPECT_WK_STREQ(mainFrame.securityOrigin.host, "example.com");
-        EXPECT_WK_STREQ(childFrame.securityOrigin.host, "webkit.org");
+        EXPECT_NE(mainFramePid, childFramePid);
+        EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
+        EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
     }];
     Util::run(&done);
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://webkit.org"_s } }
+        }
+    });
+}
+
+TEST(SiteIsolation, ChildBeingNavigatedToNewDomainByParent)
+{
+    auto appleHTML = "<script>"
+        "window.addEventListener('message', (event) => {"
+        "    parent.window.postMessage(event.data + 'pong', { 'targetOrigin' : '*' });"
+        "}, false);"
+        "alert('apple iframe loaded')"
+        "</script>"_s;
+
+    HTTPServer server({
+        { "/example"_s, { "<iframe id='webkit_frame' src='https://webkit.org/webkit'></iframe><script>onload = () => { document.getElementById('webkit_frame').src = 'https://apple.com/apple' }</script>"_s } },
+        { "/webkit"_s, { "<html></html>"_s } },
+        { "/apple"_s, { appleHTML } }
+    }, HTTPServer::Protocol::HttpsProxy);
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+
+    auto configuration = server.httpsProxyConfiguration();
+    enableSiteIsolation(configuration);
+
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example"]]];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "apple iframe loaded");
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://apple.com"_s } }
+        }
+    });
+
+    NSString *jsCheckingPostMessageRoundTripAfterIframeProcessChange = @""
+    "window.addEventListener('message', (event) => {"
+    "    alert('parent frame received ' + event.data)"
+    "}, false);"
+    "document.getElementById('webkit_frame').contentWindow.postMessage('ping', '*');";
+    [webView evaluateJavaScript:jsCheckingPostMessageRoundTripAfterIframeProcessChange completionHandler:nil];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "parent frame received pingpong");
+}
+
+TEST(SiteIsolation, IframeRedirectSameSite)
+{
+    HTTPServer server({
+        { "/example"_s, { "<iframe src='https://webkit.org/webkit'></iframe>"_s } },
+        { "/webkit"_s, { 302, { { "Location"_s, "https://www.webkit.org/www_webkit"_s } }, "redirecting..."_s } },
+        { "/www_webkit"_s, { "arrived!"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+    auto configuration = server.httpsProxyConfiguration();
+    enableSiteIsolation(configuration);
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://www.webkit.org"_s } }
+        }
+    });
+}
+
+TEST(SiteIsolation, IframeRedirectCrossSite)
+{
+    HTTPServer server({
+        { "/example1"_s, { "<iframe src='https://webkit.org/webkit1'></iframe>"_s } },
+        { "/webkit1"_s, { 302, { { "Location"_s, "https://apple.com/apple1"_s } }, "redirecting..."_s } },
+        { "/apple1"_s, { "arrived!"_s } },
+        { "/example2"_s, { "<iframe src='https://webkit.org/webkit2'></iframe>"_s } },
+        { "/webkit2"_s, { 302, { { "Location"_s, "https://webkit.org/webkit3"_s } }, "redirecting..."_s } },
+        { "/webkit3"_s, { 302, { { "Location"_s, "https://example.com/example3"_s } }, "redirecting..."_s } },
+        { "/example3"_s, { "arrived!"_s } },
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+    auto configuration = server.httpsProxyConfiguration();
+    enableSiteIsolation(configuration);
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example1"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://apple.com"_s } }
+        }
+    });
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example2"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { "https://example.com"_s } }
+        }
+    });
+}
+
+TEST(SiteIsolation, NavigationWithIFrames)
+{
+    HTTPServer server({
+        { "/1"_s, { "<iframe src='https://domain2.com/2'></iframe>"_s } },
+        { "/2"_s, { "hi!"_s } },
+        { "/3"_s, { "<iframe src='https://domain4.com/4'></iframe>"_s } },
+        { "/4"_s, { "<iframe src='https://domain5.com/5'></iframe>"_s } },
+        { "/5"_s, { "hi!"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+    auto configuration = server.httpsProxyConfiguration();
+    enableSiteIsolation(configuration);
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://domain1.com/1"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://domain3.com/3"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    [webView goBack];
+    [navigationDelegate waitForDidFinishNavigation];
+    // FIXME: Implement CachedFrame for RemoteFrames and verify the page is resumed correctly.
+}
+
+TEST(SiteIsolation, RemoveFrames)
+{
+    HTTPServer server({
+        { "/webkit_main"_s, { "<iframe src='https://webkit.org/webkit_iframe' id='wk'></iframe><iframe src='https://example.com/example_iframe' id='ex'></iframe>"_s } },
+        { "/webkit_iframe"_s, { "hi!"_s } },
+        { "/example_iframe"_s, { "<iframe src='example_grandchild_frame'></iframe>"_s } },
+        { "/example_grandchild_frame"_s, { "hi!"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+    auto configuration = server.httpsProxyConfiguration();
+    enableSiteIsolation(configuration);
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://webkit.org/webkit_main"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://webkit.org"_s,
+            { { "https://webkit.org"_s }, { RemoteFrame, { { RemoteFrame } } } }
+        }, { RemoteFrame,
+            { { RemoteFrame }, { "https://example.com"_s, { { "https://example.com"_s } } } }
+        }
+    });
+
+    __block bool removedLocalFrame { false };
+    [webView evaluateJavaScript:@"var frame = document.getElementById('wk');frame.parentNode.removeChild(frame);" completionHandler:^(id, NSError *error) {
+        removedLocalFrame = true;
+    }];
+    Util::run(&removedLocalFrame);
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://webkit.org"_s,
+            { { RemoteFrame, { { RemoteFrame } } } }
+        }, { RemoteFrame,
+            { { "https://example.com"_s, { { "https://example.com"_s } } } }
+        }
+    });
+
+    __block bool removedRemoteFrame { false };
+    [webView evaluateJavaScript:@"var frame = document.getElementById('ex');frame.parentNode.removeChild(frame);" completionHandler:^(id, NSError *error) {
+        removedRemoteFrame = true;
+    }];
+    Util::run(&removedRemoteFrame);
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://webkit.org"_s }
+    });
+}
+
+TEST(SiteIsolation, ProvisionalLoadFailure)
+{
+    HTTPServer server({
+        { "/example"_s, { "<iframe src='https://webkit.org/webkit'></iframe>"_s } },
+        { "/webkit"_s, { HTTPResponse::TerminateConnection::Yes } },
+        { "/apple"_s,  { "hello"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+    auto configuration = server.httpsProxyConfiguration();
+    enableSiteIsolation(configuration);
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s, { { "https://example.com"_s } } }
+    });
+
+    [webView evaluateJavaScript:@"var iframe = document.createElement('iframe');document.body.appendChild(iframe);iframe.src = 'https://apple.com/apple'" completionHandler:nil];
+    Vector<ExpectedFrameTree> expectedFrameTreesAfterAddingApple { {
+        "https://example.com"_s, { { "https://example.com"_s }, { RemoteFrame } }
+    }, {
+        RemoteFrame, { { RemoteFrame }, { "https://apple.com"_s } }
+    } };
+    while (!frameTreesMatch(frameTrees(webView.get()).get(), Vector<ExpectedFrameTree> { expectedFrameTreesAfterAddingApple }))
+        Util::spinRunLoop();
+
+    [webView evaluateJavaScript:@"iframe.src = 'https://webkit.org/webkit'" completionHandler:nil];
+
+    // FIXME: This could use the iframe's load event handler, but LocalDOMWindow::dispatchLoadEvent has no analog in RemoteDOMWindow so it's never called.
+    Util::runFor(0.5_s);
+    checkFrameTreesInProcesses(webView.get(), WTFMove(expectedFrameTreesAfterAddingApple));
 }
 
 }

@@ -232,19 +232,20 @@ void InlineItemsBuilder::collectInlineItems(InlineItems& inlineItems, Formatting
 
         while (!layoutQueue.isEmpty()) {
             auto layoutBox = layoutQueue.takeLast();
-            if (layoutBox->isInlineTextBox()) {
+            if (layoutBox->isOutOfFlowPositioned()) {
+                // Let's not construct InlineItems for out-of-flow content as they don't participate in the inline layout.
+                // However to be able to static positioning them, we need to compute their approximate positions.
+                outOfFlowBoxes.append(layoutBox);
+            } else if (layoutBox->isInlineTextBox()) {
                 auto& inlineTextBox = downcast<InlineTextBox>(layoutBox);
                 handleTextContent(inlineTextBox, inlineItems, partialContentOffset(inlineTextBox));
             } else if (layoutBox->isAtomicInlineLevelBox() || layoutBox->isLineBreakBox())
                 handleInlineLevelBox(layoutBox, inlineItems);
             else if (layoutBox->isInlineBox())
                 handleInlineBoxEnd(layoutBox, inlineItems);
-            else if (layoutBox->isFloatingPositioned())
+            else if (layoutBox->isFloatingPositioned()) {
                 inlineItems.append({ layoutBox, InlineItem::Type::Float });
-            else if (layoutBox->isOutOfFlowPositioned()) {
-                // Let's not construct InlineItems for out-of-flow content as they don't participate in the inline layout.
-                // However to be able to static positioning them, we need to compute their approximate positions.
-                outOfFlowBoxes.append(layoutBox);
+                m_isNonBidiTextAndForcedLineBreakOnlyContent = false;
             } else
                 ASSERT_NOT_REACHED();
 
@@ -254,6 +255,7 @@ void InlineItemsBuilder::collectInlineItems(InlineItems& inlineItems, Formatting
             }
         }
     }
+    m_formattingState.setIsNonBidiTextAndForcedLineBreakOnlyContent(m_isNonBidiTextAndForcedLineBreakOnlyContent);
 }
 
 static void replaceNonPreservedNewLineAndTabCharactersAndAppend(const InlineTextBox& inlineTextBox, StringBuilder& paragraphContentBuilder)
@@ -458,8 +460,12 @@ static inline void buildBidiParagraph(const RenderStyle& rootStyle, const Inline
         } else if (inlineItem.isFloat()) {
             // Floats are not part of the inline content which make them opaque to bidi.
             inlineItemOffsetList.uncheckedAppend({ });
+        } else if (inlineItem.isOpaque()) {
+            // opaque items are also opaque to bidi.
+            inlineItemOffsetList.uncheckedAppend({ });
         } else
             ASSERT_NOT_IMPLEMENTED_YET();
+
     }
 }
 
@@ -635,10 +641,11 @@ void InlineItemsBuilder::handleTextContent(const InlineTextBox& inlineTextBox, I
         return inlineItems.append(InlineTextItem::createNonWhitespaceItem(inlineTextBox, { }, contentLength, UBIDI_DEFAULT_LTR, false, { }));
 
     m_contentRequiresVisualReordering = m_contentRequiresVisualReordering || TextUtil::containsStrongDirectionalityText(text);
+    m_isNonBidiTextAndForcedLineBreakOnlyContent = m_isNonBidiTextAndForcedLineBreakOnlyContent && !m_contentRequiresVisualReordering;
     auto& style = inlineTextBox.style();
     auto shouldPreserveSpacesAndTabs = TextUtil::shouldPreserveSpacesAndTabs(inlineTextBox);
     auto shouldPreserveNewline = TextUtil::shouldPreserveNewline(inlineTextBox);
-    auto lineBreakIteratorFactory = CachedLineBreakIteratorFactory { text, style.computedLocale(), TextUtil::lineBreakIteratorMode(style.lineBreak()), TextUtil::contentAnalysis(style.wordBoundaryDetection()) };
+    auto lineBreakIteratorFactory = CachedLineBreakIteratorFactory { text, style.computedLocale(), TextUtil::lineBreakIteratorMode(style.lineBreak()), TextUtil::contentAnalysis(style.wordBreak()) };
     auto currentPosition = partialContentOffset.value_or(0lu);
     ASSERT(currentPosition <= contentLength);
 
@@ -728,22 +735,29 @@ void InlineItemsBuilder::handleInlineBoxStart(const Box& inlineBox, InlineItems&
     inlineItems.append({ inlineBox, InlineItem::Type::InlineBoxStart });
     auto& style = inlineBox.style();
     m_contentRequiresVisualReordering = m_contentRequiresVisualReordering || !style.isLeftToRightDirection() || (style.rtlOrdering() == Order::Logical && style.unicodeBidi() != UnicodeBidi::Normal);
+    m_isNonBidiTextAndForcedLineBreakOnlyContent = false;
 }
 
 void InlineItemsBuilder::handleInlineBoxEnd(const Box& inlineBox, InlineItems& inlineItems)
 {
     inlineItems.append({ inlineBox, InlineItem::Type::InlineBoxEnd });
+    ASSERT(!m_isNonBidiTextAndForcedLineBreakOnlyContent);
+    m_isNonBidiTextAndForcedLineBreakOnlyContent = false;
     // Inline box end item itself can not trigger bidi content.
     ASSERT(contentRequiresVisualReordering() || inlineBox.style().isLeftToRightDirection() || inlineBox.style().rtlOrdering() == Order::Visual || inlineBox.style().unicodeBidi() == UnicodeBidi::Normal);
 }
 
 void InlineItemsBuilder::handleInlineLevelBox(const Box& layoutBox, InlineItems& inlineItems)
 {
-    if (layoutBox.isAtomicInlineLevelBox())
+    if (layoutBox.isAtomicInlineLevelBox()) {
+        m_isNonBidiTextAndForcedLineBreakOnlyContent = false;
         return inlineItems.append({ layoutBox, InlineItem::Type::Box });
+    }
 
-    if (layoutBox.isLineBreakBox())
+    if (layoutBox.isLineBreakBox()) {
+        m_isNonBidiTextAndForcedLineBreakOnlyContent = m_isNonBidiTextAndForcedLineBreakOnlyContent && !layoutBox.isWordBreakOpportunity();
         return inlineItems.append({ layoutBox, layoutBox.isWordBreakOpportunity() ? InlineItem::Type::WordBreakOpportunity : InlineItem::Type::HardLineBreak });
+    }
 
     ASSERT_NOT_REACHED();
 }

@@ -369,7 +369,7 @@
             "codegen-properties": {
                 "visited-link-color-support": true,
                 "color-property": true,
-                "custom": "Value",
+                "custom": "All",
                 "high-priority": true,
                 "fast-path-inherited": true,
                 "parser-grammar": "<color accept-quirky-colors-in-quirks-mode>"
@@ -1204,6 +1204,9 @@
             ],
             "codegen-properties": {
                 "settings-flag": "cssTextSpacingEnabled",
+                "font-property": true,
+                "high-priority": true,
+                "sink-priority": true,
                 "converter": "TextSpacingTrim",
                 "parser-function": "consumeTextSpacingTrim",
                 "parser-grammar-unused": "auto | space-all | trim-all | [ allow-end || space-first ]",
@@ -1223,6 +1226,9 @@
             ],
             "codegen-properties": {
                 "settings-flag": "cssTextSpacingEnabled",
+                "font-property": true,
+                "high-priority": true,
+                "sink-priority": true,
                 "converter": "TextAutospace",
                 "parser-function": "consumeTextAutospace",
                 "parser-grammar-unused": "normal | auto | no-autospace | [ [ ideograph-alpha || ideograph-numeric || punctuation ] || [ insert | replace ] ]",
@@ -1242,13 +1248,11 @@
                 "vertical-rl",
                 {
                     "value": "sideways-lr",
-                    "status": "unimplemented",
-                    "url": "https://w3c.github.io/csswg-drafts/css-writing-modes/#block-flow"
+                    "settings-flag": "sidewaysWritingModesEnabled"
                 },
                 {
                     "value": "sideways-rl",
-                    "status": "unimplemented",
-                    "url": "https://w3c.github.io/csswg-drafts/css-writing-modes/#block-flow"
+                    "settings-flag": "sidewaysWritingModesEnabled"
                 },
                 {
                     "value": "lr-tb",
@@ -3254,7 +3258,7 @@
             },
             "specification": {
                 "category": "css-lists",
-                "url": "https://www.w3.org/TR/css-lists-3/#propdef-counter-increment"
+                "url": "https://drafts.csswg.org/css-lists/#propdef-counter-increment"
             }
         },
         "counter-reset": {
@@ -3269,7 +3273,22 @@
             },
             "specification": {
                 "category": "css-lists",
-                "url": "https://www.w3.org/TR/css-lists-3/#counter-properties"
+                "url": "https://drafts.csswg.org/css-lists/#propdef-counter-reset"
+            }
+        },
+        "counter-set": {
+            "values": [
+                "none"
+            ],
+            "codegen-properties": {
+                "custom": "All",
+                "parser-function": "consumeCounterSet",
+                "parser-grammar-unused": "[ <counter-name> <integer>? ]+ | none",
+                "parser-grammar-unused-reason": "Needs support for '+' multipliers and optionals."
+            },
+            "specification": {
+                "category": "css-lists",
+                "url": "https://drafts.csswg.org/css-lists/#propdef-counter-set"
             }
         },
         "cursor": {
@@ -3376,7 +3395,6 @@
             }
         },
         "dominant-baseline": {
-            "inherited": true,
             "values": [
                 "auto",
                 "use-script",
@@ -4464,6 +4482,7 @@
             "status": "experimental"
         },
         "math-style": {
+            "inherited": true,
             "values": [
                 "normal",
                 "compact"
@@ -5220,6 +5239,7 @@
             }
         },
         "paint-order": {
+            "inherited": true,
             "codegen-properties": {
                 "converter": "PaintOrder",
                 "parser-function": "consumePaintOrder",
@@ -6117,7 +6137,7 @@
         },
         "will-change": {
             "codegen-properties": {
-                "custom": "Value",
+                "converter": "WillChange",
                 "parser-function": "consumeWillChange",
                 "parser-function-requires-context": true,
                 "parser-grammar-unused": "auto | [ scroll-position | contents | <custom-ident> ]#",
@@ -6128,29 +6148,17 @@
                 "url": "https://www.w3.org/TR/css-will-change/#propdef-will-change"
             }
         },
-        "word-boundary-detection": {
-            "inherited": true,
-            "codegen-properties": {
-                "settings-flag": "wordBoundaryDetectionEnabled",
-                "converter": "WordBoundaryDetection",
-                "parser-function": "consumeWordBoundaryDetection",
-                "parser-grammar-unused": "normal | auto(<lang>)",
-                "parser-grammar-unused-reason": "Only KeywordTerm, ReferenceTerm and UnboundedRepetitionTerm terms are supported inside MatchOneTerm at this time: '[ normal | auto(<lang>) ]' - auto(<lang>)",
-                "parser-grammar-comment": "There is also a 'manual' value which we don't implement yet."
-            },
-            "specification": {
-                "category": "css-text",
-                "url": "https://drafts.csswg.org/css-text-4/#propdef-word-boundary-detection"
-            },
-            "status": "in development"
-        },
         "word-break": {
             "inherited": true,
             "values": [
                 "normal",
                 "break-all",
                 "keep-all",
-                "break-word"
+                "break-word",
+                {
+                    "settings-flag": "cssWordBreakAutoEnabled",
+                    "value": "auto"
+                }
             ],
             "codegen-properties": {
                 "aliases": [
@@ -6383,7 +6391,8 @@
         },
         "contain": {
             "codegen-properties": {
-                "custom": "All",
+                "converter": "Contain",
+                "initial": "initialContainment",
                 "settings-flag": "cssContainmentEnabled",
                 "parser-function": "consumeContain",
                 "parser-grammar-unused": "none | strict | content | [ size || layout || paint ]",
@@ -9677,13 +9686,13 @@
         "@font-palette-values": {
             "font-family": {
                 "codegen-properties": {
-                    "parser-function": "consumeFamilyName",
-                    "parser-grammar-unused": "<family-name>",
+                    "parser-function": "consumeFamilyNameList",
+                    "parser-grammar-unused": "<family-name>#",
                     "parser-grammar-unused-reason": "Needs support for special 'family-name' processing."
                 },
                 "specification": {
                     "category": "css-fonts-4",
-                    "url": "https://www.w3.org/TR/css-fonts-4/#font-family-2-desc"
+                    "url": "https://drafts.csswg.org/css-fonts-4/#font-family-2-desc"
                 }
             },
             "base-palette": {

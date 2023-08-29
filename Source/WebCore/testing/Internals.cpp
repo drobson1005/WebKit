@@ -1337,6 +1337,17 @@ ExceptionOr<RefPtr<Element>> Internals::pseudoElement(Element& element, const St
     return pseudoId == "before"_s ? element.beforePseudoElement() : element.afterPseudoElement();
 }
 
+double Internals::preferredRenderingUpdateInterval()
+{
+    auto* document = contextDocument();
+    if (!document)
+        return 0;
+    auto* page = document->page();
+    if (!page)
+        return 0;
+    return page->preferredRenderingUpdateInterval().milliseconds();
+}
+
 ExceptionOr<String> Internals::elementRenderTreeAsText(Element& element)
 {
     element.document().updateStyleIfNeeded();
@@ -1421,7 +1432,7 @@ ExceptionOr<bool> Internals::isTimerThrottled(int timeoutId)
     if (timer->intervalClampedToMinimum() > timer->m_originalInterval)
         return true;
 
-    return !!timer->alignedFireTime(MonotonicTime { });
+    return !!scriptExecutionContext()->alignedFireTime(timer->hasReachedMaxNestingLevel(), MonotonicTime { });
 }
 
 String Internals::requestAnimationFrameThrottlingReasons() const
@@ -1560,6 +1571,20 @@ ExceptionOr<void> Internals::setFormControlStateOfPreviousHistoryItem(const Vect
 }
 
 #if ENABLE(SPEECH_SYNTHESIS)
+void Internals::simulateSpeechSynthesizerVoiceListChange()
+{
+    if (m_platformSpeechSynthesizer) {
+        m_platformSpeechSynthesizer->client().voicesDidChange();
+        return;
+    }
+
+    RefPtr document = contextDocument();
+    if (!document || !document->domWindow())
+        return;
+
+    if (RefPtr synthesis = LocalDOMWindowSpeechSynthesis::speechSynthesis(*document->domWindow()))
+        synthesis->simulateVoicesListChange();
+}
 
 void Internals::enableMockSpeechSynthesizer()
 {
@@ -2642,7 +2667,7 @@ void Internals::updateEditorUINowIfScheduled()
     }
 }
 
-bool Internals::hasSpellingMarker(int from, int length)
+bool Internals::hasMarkerFor(DocumentMarker::MarkerType type, int from, int length)
 {
     Document* document = contextDocument();
     if (!document || !document->frame())
@@ -2650,29 +2675,32 @@ bool Internals::hasSpellingMarker(int from, int length)
 
     updateEditorUINowIfScheduled();
 
-    return document->editor().selectionStartHasMarkerFor(DocumentMarker::Spelling, from, length);
+    return document->editor().selectionStartHasMarkerFor(type, from, length);
+}
+
+bool Internals::hasSpellingMarker(int from, int length)
+{
+    return hasMarkerFor(DocumentMarker::Spelling, from, length);
+}
+
+bool Internals::hasGrammarMarker(int from, int length)
+{
+    return hasMarkerFor(DocumentMarker::Grammar, from, length);
 }
 
 bool Internals::hasAutocorrectedMarker(int from, int length)
 {
-    Document* document = contextDocument();
-    if (!document || !document->frame())
-        return false;
-
-    updateEditorUINowIfScheduled();
-
-    return document->editor().selectionStartHasMarkerFor(DocumentMarker::Autocorrected, from, length);
+    return hasMarkerFor(DocumentMarker::Autocorrected, from, length);
 }
 
 bool Internals::hasDictationAlternativesMarker(int from, int length)
 {
-    auto* document = contextDocument();
-    if (!document || !document->frame())
-        return false;
+    return hasMarkerFor(DocumentMarker::DictationAlternatives, from, length);
+}
 
-    updateEditorUINowIfScheduled();
-
-    return document->frame()->editor().selectionStartHasMarkerFor(DocumentMarker::DictationAlternatives, from, length);
+bool Internals::hasCorrectionIndicatorMarker(int from, int length)
+{
+    return hasMarkerFor(DocumentMarker::CorrectionIndicator, from, length);
 }
 
 void Internals::setContinuousSpellCheckingEnabled(bool enabled)
@@ -2928,7 +2956,7 @@ String Internals::documentIdentifier(const Document& document) const
 
 bool Internals::isDocumentAlive(const String& documentIdentifier) const
 {
-    auto uuid = UUID::parseVersion4(documentIdentifier);
+    auto uuid = WTF::UUID::parseVersion4(documentIdentifier);
     ASSERT(uuid);
     return uuid ? Document::allDocumentsMap().contains({ *uuid, Process::identifier() }) : false;
 }
@@ -3016,15 +3044,6 @@ ExceptionOr<void> Internals::setInspectorIsUnderTest(bool isUnderTest)
 
     page->inspectorController().setIsUnderTest(isUnderTest);
     return { };
-}
-
-bool Internals::hasGrammarMarker(int from, int length)
-{
-    Document* document = contextDocument();
-    if (!document || !document->frame())
-        return false;
-
-    return document->editor().selectionStartHasMarkerFor(DocumentMarker::Grammar, from, length);
 }
 
 unsigned Internals::numberOfScrollableAreas()
@@ -3480,9 +3499,24 @@ ExceptionOr<void> Internals::garbageCollectDocumentResources() const
     return { };
 }
 
+bool Internals::isUnderMemoryWarning()
+{
+    return MemoryPressureHandler::singleton().isUnderMemoryWarning();
+}
+
 bool Internals::isUnderMemoryPressure()
 {
     return MemoryPressureHandler::singleton().isUnderMemoryPressure();
+}
+
+void Internals::beginSimulatedMemoryWarning()
+{
+    MemoryPressureHandler::singleton().beginSimulatedMemoryWarning();
+}
+
+void Internals::endSimulatedMemoryWarning()
+{
+    MemoryPressureHandler::singleton().endSimulatedMemoryWarning();
 }
 
 void Internals::beginSimulatedMemoryPressure()
@@ -4433,6 +4467,11 @@ void Internals::setSelectionWithoutValidation(Ref<Node> baseNode, unsigned baseO
         VisiblePosition { makeDeprecatedLegacyPosition(extentNode.get(), extentOffset) });
 }
 
+void Internals::setSelectionFromNone()
+{
+    contextDocument()->frame()->selection().setSelectionFromNone();
+}
+
 ExceptionOr<bool> Internals::isPluginUnavailabilityIndicatorObscured(Element& element)
 {
     if (!is<HTMLPlugInElement>(element))
@@ -4678,27 +4717,27 @@ ExceptionOr<void> Internals::postRemoteControlCommand(const String& commandStrin
     PlatformMediaSession::RemoteCommandArgument parameter { argument, { } };
 
     if (equalLettersIgnoringASCIICase(commandString, "play"_s))
-        command = PlatformMediaSession::PlayCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::PlayCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "pause"_s))
-        command = PlatformMediaSession::PauseCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::PauseCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "stop"_s))
-        command = PlatformMediaSession::StopCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::StopCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "toggleplaypause"_s))
-        command = PlatformMediaSession::TogglePlayPauseCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::TogglePlayPauseCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "beginseekingbackward"_s))
-        command = PlatformMediaSession::BeginSeekingBackwardCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::BeginSeekingBackwardCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "endseekingbackward"_s))
-        command = PlatformMediaSession::EndSeekingBackwardCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::EndSeekingBackwardCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "beginseekingforward"_s))
-        command = PlatformMediaSession::BeginSeekingForwardCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::BeginSeekingForwardCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "endseekingforward"_s))
-        command = PlatformMediaSession::EndSeekingForwardCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::EndSeekingForwardCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "seektoplaybackposition"_s))
-        command = PlatformMediaSession::SeekToPlaybackPositionCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::SeekToPlaybackPositionCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "beginscrubbing"_s))
-        command = PlatformMediaSession::BeginScrubbingCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::BeginScrubbingCommand;
     else if (equalLettersIgnoringASCIICase(commandString, "endscrubbing"_s))
-        command = PlatformMediaSession::EndScrubbingCommand;
+        command = PlatformMediaSession::RemoteControlCommandType::EndScrubbingCommand;
     else
         return Exception { InvalidAccessError };
 
@@ -4745,6 +4784,19 @@ void Internals::endAudioSessionInterruption()
 #if USE(AUDIO_SESSION)
     AudioSession::sharedSession().endInterruptionForTesting();
 #endif
+}
+
+void Internals::suspendAllMediaBuffering()
+{
+    auto frame = this->frame();
+    if (!frame)
+        return;
+
+    auto page = frame->page();
+    if (!page)
+        return;
+
+    page->suspendAllMediaBuffering();
 }
 
 #endif // ENABLE(VIDEO)
@@ -4944,6 +4996,11 @@ void Internals::mockMediaPlaybackTargetPickerDismissPopup()
     frame->page()->mockMediaPlaybackTargetPickerDismissPopup();
 }
 #endif
+
+bool Internals::isMonitoringWirelessRoutes() const
+{
+    return PlatformMediaSessionManager::sharedManager().isMonitoringWirelessTargets();
+}
 
 ExceptionOr<Ref<MockPageOverlay>> Internals::installMockPageOverlay(PageOverlayType type)
 {
@@ -5654,9 +5711,6 @@ void Internals::simulateEventForWebGLContext(SimulatedWebGLContextEvent event, W
 {
     WebGLRenderingContext::SimulatedEventForTesting contextEvent;
     switch (event) {
-    case SimulatedWebGLContextEvent::ContextChange:
-        contextEvent = WebGLRenderingContext::SimulatedEventForTesting::ContextChange;
-        break;
     case SimulatedWebGLContextEvent::GPUStatusFailure:
         contextEvent = WebGLRenderingContext::SimulatedEventForTesting::GPUStatusFailure;
         break;
@@ -6715,7 +6769,7 @@ bool Internals::supportsPictureInPicture()
 
 String Internals::focusRingColor()
 {
-    return serializationForCSS(RenderTheme::singleton().focusRingColor({ }));
+    return serializationForCSS(RenderTheme::singleton().focusRingColor(StyleColorOptions::UseSystemAppearance));
 }
 
 ExceptionOr<unsigned> Internals::createSleepDisabler(const String& reason, bool display)
@@ -7116,6 +7170,46 @@ bool Internals::isUsingUISideCompositing() const
     if (!page)
         return false;
     return page->chrome().client().isUsingUISideCompositing();
+}
+
+AccessibilityObject* Internals::axObjectForElement(Element& element) const
+{
+    auto* document = contextDocument();
+    if (!document)
+        return nullptr;
+    WebCore::AXObjectCache::enableAccessibility();
+
+    auto* cache = document->axObjectCache();
+    return cache ? cache->getOrCreate(&element) : nullptr;
+}
+
+String Internals::getComputedLabel(Element& element) const
+{
+    if (auto* axObject = axObjectForElement(element))
+        return axObject->computedLabel();
+    return ""_s;
+}
+
+String Internals::getComputedRole(Element& element) const
+{
+    if (auto* axObject = axObjectForElement(element))
+        return axObject->computedRoleString();
+    return ""_s;
+}
+
+bool Internals::readyToRetrieveComputedRoleOrLabel(Element& element) const
+{
+    // If the element has a renderer, it should be ready to go.
+    if (element.renderer())
+        return true;
+
+    auto* computedStyle = element.computedStyle();
+    // If we can't get computed style for some reason, assume we can query for computed role or label.
+    if (!computedStyle)
+        return true;
+
+    // If the element needs a renderer but doesn't have one yet, we aren't ready to query the computed accessibility role or label. Doing so before the renderer has been attached will yield incorrect results.
+    return !element.rendererIsNeeded(*computedStyle);
 }
 
 } // namespace WebCore

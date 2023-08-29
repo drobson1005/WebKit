@@ -309,11 +309,14 @@ bool ensureGStreamerInitialized()
     return isGStreamerInitialized;
 }
 
-static void registerInternalVideoEncoder()
+static bool registerInternalVideoEncoder()
 {
 #if ENABLE(VIDEO)
-    gst_element_register(nullptr, "webkitvideoencoder", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_VIDEO_ENCODER);
+    if (auto factory = adoptGRef(gst_element_factory_find("webkitvideoencoder")))
+        return false;
+    return gst_element_register(nullptr, "webkitvideoencoder", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_VIDEO_ENCODER);
 #endif
+    return false;
 }
 
 void registerWebKitGStreamerElements()
@@ -426,8 +429,7 @@ void registerWebKitGStreamerVideoEncoder()
     static std::once_flag onceFlag;
     bool registryWasUpdated = false;
     std::call_once(onceFlag, [&registryWasUpdated] {
-        registerInternalVideoEncoder();
-        registryWasUpdated = true;
+        registryWasUpdated = registerInternalVideoEncoder();
     });
 
     // The video encoder might be registered after the scanner was initialized, so in this situation
@@ -634,18 +636,28 @@ GstBuffer* gstBufferNewWrappedFast(void* data, size_t length)
 
 GstElement* makeGStreamerElement(const char* factoryName, const char* name)
 {
+    static Lock lock;
+    static Vector<const char*> cache WTF_GUARDED_BY_LOCK(lock);
     auto* element = gst_element_factory_make(factoryName, name);
-    if (!element)
+    Locker locker { lock };
+    if (!element && !cache.contains(factoryName)) {
+        cache.append(factoryName);
         WTFLogAlways("GStreamer element %s not found. Please install it", factoryName);
+    }
     return element;
 }
 
 GstElement* makeGStreamerBin(const char* description, bool ghostUnlinkedPads)
 {
+    static Lock lock;
+    static Vector<const char*> cache WTF_GUARDED_BY_LOCK(lock);
     GUniqueOutPtr<GError> error;
     auto* bin = gst_parse_bin_from_description(description, ghostUnlinkedPads, &error.outPtr());
-    if (!bin)
+    Locker locker { lock };
+    if (!bin && !cache.contains(description)) {
+        cache.append(description);
         WTFLogAlways("Unable to create bin for description: \"%s\". Error: %s", description, error->message);
+    }
     return bin;
 }
 
@@ -661,6 +673,15 @@ static std::optional<RefPtr<JSON::Value>> gstStructureValueToJSON(const GValue* 
         auto array = JSON::Array::create();
         for (unsigned i = 0; i < size; i++) {
             if (auto innerJson = gstStructureValueToJSON(gst_value_array_get_value(value, i)))
+                array->pushValue(innerJson->releaseNonNull());
+        }
+        return array->asArray()->asValue();
+    }
+    if (GST_VALUE_HOLDS_LIST(value)) {
+        unsigned size = gst_value_list_get_size(value);
+        auto array = JSON::Array::create();
+        for (unsigned i = 0; i < size; i++) {
+            if (auto innerJson = gstStructureValueToJSON(gst_value_list_get_value(value, i)))
                 array->pushValue(innerJson->releaseNonNull());
         }
         return array->asArray()->asValue();
@@ -1003,6 +1024,12 @@ void fillVideoInfoColorimetryFromColorSpace(GstVideoInfo* info, const PlatformVi
         GST_VIDEO_INFO_COLORIMETRY(info).range = GST_VIDEO_COLOR_RANGE_UNKNOWN;
 }
 
+void configureAudioDecoderForHarnessing(const GRefPtr<GstElement>& element)
+{
+    if (gstObjectHasProperty(element.get(), "max-errors"))
+        g_object_set(element.get(), "max-errors", 0, nullptr);
+}
+
 void configureVideoDecoderForHarnessing(const GRefPtr<GstElement>& element)
 {
     if (gstObjectHasProperty(element.get(), "max-threads"))
@@ -1010,6 +1037,12 @@ void configureVideoDecoderForHarnessing(const GRefPtr<GstElement>& element)
 
     if (gstObjectHasProperty(element.get(), "max-errors"))
         g_object_set(element.get(), "max-errors", 0, nullptr);
+
+    if (gstObjectHasProperty(element.get(), "std-compliance"))
+        gst_util_set_object_arg(G_OBJECT(element.get()), "std-compliance", "strict");
+
+    if (gstObjectHasProperty(element.get(), "output-corrupt"))
+        g_object_set(element.get(), "output-corrupt", FALSE, nullptr);
 }
 
 static bool gstObjectHasProperty(GstObject* gstObject, const char* name)
@@ -1025,6 +1058,20 @@ bool gstObjectHasProperty(GstElement* element, const char* name)
 bool gstObjectHasProperty(GstPad* pad, const char* name)
 {
     return gstObjectHasProperty(GST_OBJECT_CAST(pad), name);
+}
+
+GRefPtr<GstBuffer> wrapSpanData(const std::span<const uint8_t>& span)
+{
+    if (span.empty())
+        return nullptr;
+
+    Vector<uint8_t> data { span };
+    auto bufferSize = data.size();
+    auto bufferData = data.data();
+    auto buffer = adoptGRef(gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY, bufferData, bufferSize, 0, bufferSize, new Vector<uint8_t>(WTFMove(data)), [](gpointer data) {
+        delete static_cast<Vector<uint8_t>*>(data);
+    }));
+    return buffer;
 }
 
 #undef GST_CAT_DEFAULT

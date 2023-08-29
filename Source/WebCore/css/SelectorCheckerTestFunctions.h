@@ -445,9 +445,7 @@ ALWAYS_INLINE bool matchesFullScreenDocumentPseudoClass(const Element& element)
 {
     // While a Document is in the fullscreen state, the 'full-screen-document' pseudoclass applies
     // to all elements of that Document.
-    if (!element.document().fullscreenManager().isFullscreen())
-        return false;
-    return true;
+    return element.document().fullscreenManager().fullscreenElement();
 }
 
 ALWAYS_INLINE bool matchesFullScreenControlsHiddenPseudoClass(const Element& element)
@@ -523,7 +521,7 @@ ALWAYS_INLINE bool isFrameFocused(const Element& element)
 
 ALWAYS_INLINE bool matchesLegacyDirectFocusPseudoClass(const Element& element)
 {
-    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassFocus))
+    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassType::Focus))
         return true;
 
     return element.focused() && isFrameFocused(element);
@@ -537,7 +535,7 @@ ALWAYS_INLINE bool doesShadowTreeContainFocusedElement(const Element& element)
 
 ALWAYS_INLINE bool matchesFocusPseudoClass(const Element& element)
 {
-    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassFocus))
+    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassType::Focus))
         return true;
 
     return (element.focused() || doesShadowTreeContainFocusedElement(element)) && isFrameFocused(element);
@@ -548,7 +546,7 @@ ALWAYS_INLINE bool matchesFocusVisiblePseudoClass(const Element& element)
     if (!element.document().settings().focusVisibleEnabled())
         return matchesLegacyDirectFocusPseudoClass(element);
 
-    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassFocusVisible))
+    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassType::FocusVisible))
         return true;
 
     return element.hasFocusVisible() && isFrameFocused(element);
@@ -556,7 +554,7 @@ ALWAYS_INLINE bool matchesFocusVisiblePseudoClass(const Element& element)
 
 ALWAYS_INLINE bool matchesFocusWithinPseudoClass(const Element& element)
 {
-    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassFocusWithin))
+    if (InspectorInstrumentation::forcePseudoState(element, CSSSelector::PseudoClassType::FocusWithin))
         return true;
 
     return element.hasFocusWithin() && isFrameFocused(element);

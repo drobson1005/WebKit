@@ -268,6 +268,7 @@ bool doesGC(Graph& graph, Node* node)
 #if ASSERT_ENABLED
     case ArrayPush:
     case ArrayPop:
+    case ArraySpliceExtract:
     case PushWithScope:
     case CreateActivation:
     case CreateDirectArguments:
@@ -393,6 +394,8 @@ bool doesGC(Graph& graph, Node* node)
     case NewArrayBuffer:
     case NewRegexp:
     case NewStringObject:
+    case NewMap:
+    case NewSet:
     case NewSymbol:
     case MakeRope:
     case MakeAtomString:
@@ -443,6 +446,7 @@ bool doesGC(Graph& graph, Node* node)
     case ValueBitNot:
     case ValueNegate:
     case DateSetTime:
+    case StringIndexOf:
 #else // not ASSERT_ENABLED
     // See comment at the top for why the default for all nodes should be to
     // return true.

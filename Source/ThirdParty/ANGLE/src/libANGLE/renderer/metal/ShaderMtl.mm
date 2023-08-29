@@ -63,7 +63,7 @@ class MTLWaitableCompileEventImpl final : public WaitableCompileEvent
     bool postTranslate(std::string *infoLog) override
     {
         sh::TShHandleBase *base    = static_cast<sh::TShHandleBase *>(mTranslateTask->getHandle());
-        auto translatorMetalDirect = base->getAsTranslatorMetalDirect();
+        auto translatorMetalDirect = base->getAsTranslatorMSL();
         if (translatorMetalDirect != nullptr)
         {
             // Copy reflection from translation.
@@ -113,7 +113,11 @@ std::shared_ptr<WaitableCompileEvent> ShaderMtl::compile(const gl::Context *cont
         options->initOutputVariables = true;
     }
 
-    if (displayMtl->getFeatures().intelExplicitBoolCastWorkaround.enabled)
+    options->metal.generateShareableShaders =
+        displayMtl->getFeatures().generateShareableShaders.enabled;
+
+    if (displayMtl->getFeatures().intelExplicitBoolCastWorkaround.enabled ||
+        options->metal.generateShareableShaders)
     {
         options->addExplicitBoolCasts = true;
     }

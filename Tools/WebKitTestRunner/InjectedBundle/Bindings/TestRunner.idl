@@ -26,6 +26,7 @@
 interface TestRunner {
     readonly attribute boolean isWebKit2;
     readonly attribute boolean isIOSFamily;
+    readonly attribute boolean isMac;
     readonly attribute boolean isKeyboardImmediatelyAvailable;
 
     // The basics.
@@ -403,7 +404,7 @@ interface TestRunner {
     undefined installFakeHelvetica(DOMString configuration);
 
     undefined addMockCameraDevice(DOMString persistentId, DOMString label, object properties);
-    undefined addMockMicrophoneDevice(DOMString persistentId, DOMString label);
+    undefined addMockMicrophoneDevice(DOMString persistentId, DOMString label, object properties);
     undefined addMockScreenDevice(DOMString persistentId, DOMString label);
     undefined clearMockMediaDevices();
     undefined removeMockMediaDevice(DOMString persistentId);
@@ -424,8 +425,6 @@ interface TestRunner {
 
     undefined injectUserScript(DOMString string);
     readonly attribute unsigned long userScriptInjectedCount;
-
-    undefined sendDisplayConfigurationChangedMessageForTesting();
 
     undefined setServiceWorkerFetchTimeout(double seconds);
 

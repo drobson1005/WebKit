@@ -28,8 +28,6 @@
 
 #pragma once
 
-#include "Decoder.h"
-#include "Encoder.h"
 #include "MessageReceiveQueueMap.h"
 #include "MessageReceiver.h"
 #include "ReceiverMatcher.h"
@@ -148,6 +146,8 @@ template<typename AsyncReplyResult> struct AsyncReplyError {
     static AsyncReplyResult create() { return AsyncReplyResult { }; };
 };
 
+class Decoder;
+class Encoder;
 class MachMessage;
 class UnixMessage;
 class WorkQueueMessageReceiver;
@@ -160,7 +160,20 @@ template<typename T> struct ConnectionSendSyncResult {
     std::optional<typename T::ReplyArguments> replyArguments;
     Error error { Error::NoError };
 
-    bool succeeded() const { return error == Error::NoError; }
+    ConnectionSendSyncResult(Error error)
+        : error(error)
+    {
+        ASSERT(error != Error::NoError);
+    }
+
+    ConnectionSendSyncResult(std::unique_ptr<Decoder>&& decoder, std::optional<typename T::ReplyArguments>&& replyArguments)
+        : decoder(WTFMove(decoder)), replyArguments(WTFMove(replyArguments))
+    {
+        ASSERT(this->replyArguments.has_value());
+        error = !this->replyArguments ? Error::Unspecified : Error::NoError;
+    }
+
+    bool succeeded() const { return error == Error::NoError && replyArguments.has_value(); }
 
     typename T::ReplyArguments& reply()
     {
@@ -315,7 +328,11 @@ public:
         DecoderOrError(Error inError)
             : decoder(nullptr)
             , error(inError)
-        { }
+        {
+            ASSERT(error != Error::NoError);
+        }
+        DecoderOrError(DecoderOrError&&);
+        ~DecoderOrError();
     };
 
     static RefPtr<Connection> connection(UniqueID);
@@ -455,6 +472,9 @@ public:
 
     CompletionHandler<void(Decoder*)> takeAsyncReplyHandler(AsyncReplyID);
 
+    template<typename T, typename C> static void callReply(IPC::Decoder&, C&& completionHandler);
+    template<typename T, typename C> static void cancelReply(C&& completionHandler);
+
 private:
     Connection(Identifier, bool isServer);
     void platformInitialize(Identifier);
@@ -514,9 +534,6 @@ private:
 
     // Only valid between open() and invalidate().
     SerialFunctionDispatcher& dispatcher();
-
-    template<typename T, typename C> static void callReply(IPC::Decoder&, C&& completionHandler);
-    template<typename T, typename C> static void cancelReply(C&& completionHandler);
 
     class SyncMessageState;
     struct SyncMessageStateRelease {
@@ -667,7 +684,7 @@ template<typename T>
 Error Connection::send(UniqueID connectionID, T&& message, uint64_t destinationID, OptionSet<SendOption> sendOptions, std::optional<Thread::QOS> qos)
 {
     Locker locker { s_connectionMapLock };
-    auto* connection = connectionMap().get(connectionID);
+    RefPtr connection = connectionMap().get(connectionID);
     if (!connection)
         return Error::NoConnectionForIdentifier;
     return connection->send(WTFMove(message), destinationID, sendOptions, qos);
@@ -703,20 +720,22 @@ template<typename T> Connection::SendSyncResult<T> Connection::sendSync(T&& mess
 
     // Now send the message and wait for a reply.
     auto replyDecoderOrError = sendSyncMessage(syncRequestID, WTFMove(encoder), timeout, sendSyncOptions);
-    if (!replyDecoderOrError.decoder)
-        return { nullptr, std::nullopt, replyDecoderOrError.error };
+    if (!replyDecoderOrError.decoder) {
+        ASSERT(replyDecoderOrError.error != Error::NoError);
+        return { replyDecoderOrError.error };
+    }
 
-    SendSyncResult<T> result;
-    *replyDecoderOrError.decoder >> result.replyArguments;
-    if (!result.replyArguments)
-        return { nullptr, std::nullopt, Error::FailedToDecodeReplyArguments };
+    std::optional<typename T::ReplyArguments> replyArguments;
+    *replyDecoderOrError.decoder >> replyArguments;
+    if (!replyArguments)
+        return { Error::FailedToDecodeReplyArguments };
 
-    result.decoder = WTFMove(replyDecoderOrError.decoder);
-    return result;
+    return { WTFMove(replyDecoderOrError.decoder), WTFMove(replyArguments) };
 }
 
 template<typename T> Error Connection::waitForAndDispatchImmediately(uint64_t destinationID, Timeout timeout, OptionSet<WaitForOption> waitForOptions)
 {
+    static_assert(T::canDispatchOutOfOrder, "Can only use waitForAndDispatchImmediately on messages declared with CanDispatchOutOfOrder");
     auto decoderOrError = waitForMessage(T::name(), destinationID, timeout, waitForOptions);
     if (!decoderOrError.decoder)
         return decoderOrError.error;
@@ -731,6 +750,7 @@ template<typename T> Error Connection::waitForAndDispatchImmediately(uint64_t de
 
 template<typename T> Error Connection::waitForAsyncReplyAndDispatchImmediately(AsyncReplyID replyID, Timeout timeout)
 {
+    static_assert(T::replyCanDispatchOutOfOrder, "Can only use waitForAsyncReplyAndDispatchImmediately on messages declared with ReplyCanDispatchOutOfOrder");
     auto decoderOrError = waitForMessage(T::asyncMessageReplyName(), replyID.toUInt64(), timeout, { });
     if (!decoderOrError.decoder)
         return decoderOrError.error;

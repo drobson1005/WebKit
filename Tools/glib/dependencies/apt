@@ -70,6 +70,7 @@ PACKAGES=(
     $(aptIfExists libwpebackend-fdo-1.0-dev)
     libxml2-utils
     libxslt1-dev
+    mesa-common-dev
     ninja-build
     patch
     ruby
@@ -84,7 +85,7 @@ PACKAGES=(
     pulseaudio-utils
     ruby-highline
     ruby-json
-    $(aptIfExists python-gi)
+    python3-gi
 
     # These are dependencies necessary for building with the Flatpak SDK.
     flatpak

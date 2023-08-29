@@ -41,7 +41,7 @@
 namespace WebCore {
 
 namespace DisplayList {
-class InMemoryDisplayList;
+class DisplayList;
 }
 
 class FloatRoundedRect;
@@ -203,7 +203,7 @@ public:
 
     constexpr static CompositingCoordinatesOrientation defaultContentsOrientation = CompositingCoordinatesOrientation::TopDown;
 
-    WEBCORE_EXPORT RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate() override;
+    WEBCORE_EXPORT RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate(GraphicsLayerAsyncContentsDisplayDelegate*) override;
 
 #if ENABLE(THREADED_ANIMATION_RESOLUTION)
     WEBCORE_EXPORT void setAcceleratedEffectsAndBaseValues(AcceleratedEffects&&, AcceleratedEffectValues&&) override;
@@ -677,7 +677,7 @@ private:
 
     Vector<FloatRect> m_dirtyRects;
 
-    std::unique_ptr<DisplayList::InMemoryDisplayList> m_displayList;
+    std::unique_ptr<DisplayList::DisplayList> m_displayList;
 
     float m_contentsScaleLimitingFactor { 1 };
     float m_rootRelativeScaleFactor { 1.0f };

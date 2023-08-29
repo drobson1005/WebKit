@@ -564,8 +564,12 @@ String InputType::validationMessage() const
     if (typeMismatch())
         return typeMismatchText();
 
-    if (patternMismatch(value))
-        return validationMessagePatternMismatchText();
+    if (patternMismatch(value)) {
+        auto title = element()->attributeWithoutSynchronization(HTMLNames::titleAttr).string().trim(isASCIIWhitespace).simplifyWhiteSpace(isASCIIWhitespace);
+        if (title.isEmpty())
+            return validationMessagePatternMismatchText();
+        return validationMessagePatternMismatchText(title);
+    }
 
     if (element()->tooShort())
         return validationMessageTooShortText(value.length(), element()->minLength());
@@ -822,7 +826,7 @@ void InputType::setValue(const String& sanitizedValue, bool valueChanged, TextFi
 
     std::optional<Style::PseudoClassChangeInvalidation> styleInvalidation;
     if (wasInRange != inRange)
-        emplace(styleInvalidation, *element(), { { CSSSelector::PseudoClassInRange, inRange }, { CSSSelector::PseudoClassOutOfRange, !inRange } });
+        emplace(styleInvalidation, *element(), { { CSSSelector::PseudoClassType::InRange, inRange }, { CSSSelector::PseudoClassType::OutOfRange, !inRange } });
 
     element()->setValueInternal(sanitizedValue, eventBehavior);
 

@@ -273,12 +273,14 @@ static NSString * const _WKARQLWebsiteURLParameterKey = @"ARQLWebsiteURLParamete
         return nil;
 
     _previewController = previewController;
+    _fileHandle = FileSystem::invalidPlatformFileHandle;
     return self;
 }
 
 - (BOOL)isValidMIMEType:(NSString *)MIMEType
 {
-    return WebCore::MIMETypeRegistry::isUSDMIMEType(MIMEType);
+    // We need to be liberal in which MIME types we accept, because some servers are not configured for USD.
+    return WebCore::MIMETypeRegistry::isUSDMIMEType(MIMEType) || [MIMEType isEqualToString:@"application/octet-stream"];
 }
 
 - (BOOL)isValidFileExtension:(NSString *)extension
@@ -346,6 +348,7 @@ static NSString * const _WKARQLWebsiteURLParameterKey = @"ARQLWebsiteURLParamete
 
 - (void)completeLoad
 {
+    ASSERT(_fileHandle != FileSystem::invalidPlatformFileHandle);
     size_t byteCount = FileSystem::writeToFile(_fileHandle, [_data bytes], [_data length]);
     FileSystem::closeFile(_fileHandle);
 
@@ -361,16 +364,16 @@ static NSString * const _WKARQLWebsiteURLParameterKey = @"ARQLWebsiteURLParamete
 
 namespace WebKit {
 
-void SystemPreviewController::begin(const URL& url, const WebCore::SystemPreviewInfo& systemPreviewInfo)
+void SystemPreviewController::begin(const URL& url, const SecurityOriginData& topOrigin, const WebCore::SystemPreviewInfo& systemPreviewInfo, CompletionHandler<void()>&& completionHandler)
 {
     ASSERT(!m_qlPreviewController);
     if (m_qlPreviewController)
-        return;
+        return completionHandler();
 
     UIViewController *presentingViewController = m_webPageProxy.uiClient().presentingViewController();
 
     if (!presentingViewController)
-        return;
+        return completionHandler();
 
     m_systemPreviewInfo = systemPreviewInfo;
 
@@ -378,9 +381,9 @@ void SystemPreviewController::begin(const URL& url, const WebCore::SystemPreview
 
     auto request = WebCore::ResourceRequest(url);
     WeakPtr weakThis { *this };
-    m_webPageProxy.dataTaskWithRequest(WTFMove(request), [weakThis] (Ref<API::DataTask>&& task) {
+    m_webPageProxy.dataTaskWithRequest(WTFMove(request), topOrigin, [weakThis, completionHandler = WTFMove(completionHandler)] (Ref<API::DataTask>&& task) mutable {
         if (!weakThis)
-            return;
+            return completionHandler();
 
         auto strongThis = weakThis.get();
 
@@ -388,6 +391,7 @@ void SystemPreviewController::begin(const URL& url, const WebCore::SystemPreview
         strongThis->m_wkSystemPreviewDataTaskDelegate = adoptNS([[_WKSystemPreviewDataTaskDelegate alloc] initWithSystemPreviewController:strongThis]);
         [dataTask setDelegate:strongThis->m_wkSystemPreviewDataTaskDelegate.get()];
         strongThis->takeActivityToken();
+        completionHandler();
     });
 
     m_downloadURL = url;
@@ -530,7 +534,7 @@ void SystemPreviewController::triggerSystemPreviewAction()
 
 void SystemPreviewController::triggerSystemPreviewActionWithTargetForTesting(uint64_t elementID, NSString* documentID, uint64_t pageID)
 {
-    auto uuid = UUID::parseVersion4(String(documentID));
+    auto uuid = WTF::UUID::parseVersion4(String(documentID));
     ASSERT(uuid);
     if (!uuid)
         return;

@@ -86,4 +86,21 @@ typedef void (^MRUIWindowSceneResizeRequestCompletion)(CGSize grantedSize, NSErr
 
 #endif // USE(APPLE_INTERNAL_SDK)
 
+// FIXME: <rdar://111655142> Import ornaments SPI using framework headers.
+
+@interface MRUIPlatterOrnament : NSObject
+@property (nonatomic, assign, getter=_depthDisplacement, setter=_setDepthDisplacement:) CGFloat depthDisplacement;
+@property (nonatomic, assign) CGPoint offset2D;
+@property (nonatomic, assign) CGPoint sceneAnchorPoint;
+@property (nonatomic, readwrite, strong) UIViewController *viewController;
+@end
+
+@interface MRUIPlatterOrnamentManager : NSObject
+@property (nonatomic, readonly) NSArray<MRUIPlatterOrnament *> *ornaments;
+@end
+
+@interface UIWindowScene (MRUIPlatterOrnaments)
+@property (nonatomic, readonly) MRUIPlatterOrnamentManager *_mrui_platterOrnamentManager;
+@end
+
 #endif // PLATFORM(VISION)

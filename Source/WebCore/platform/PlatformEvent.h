@@ -103,7 +103,7 @@ public:
     OptionSet<Modifier> modifiers() const { return m_modifiers; }
 
     WallTime timestamp() const { return m_timestamp; }
-    std::optional<UUID> authorizationToken() const { return m_authorizationToken; };
+    std::optional<WTF::UUID> authorizationToken() const { return m_authorizationToken; };
 
 protected:
     PlatformEvent()
@@ -144,23 +144,7 @@ protected:
     WallTime m_timestamp;
     Type m_type;
     OptionSet<Modifier> m_modifiers;
-    std::optional<UUID> m_authorizationToken;
+    std::optional<WTF::UUID> m_authorizationToken;
 };
 
 } // namespace WebCore
-
-namespace WTF {
-
-template<> struct EnumTraits<WebCore::PlatformEvent::Modifier> {
-    using values = EnumValues<
-        WebCore::PlatformEvent::Modifier,
-        WebCore::PlatformEvent::Modifier::AltKey,
-        WebCore::PlatformEvent::Modifier::ControlKey,
-        WebCore::PlatformEvent::Modifier::MetaKey,
-        WebCore::PlatformEvent::Modifier::ShiftKey,
-        WebCore::PlatformEvent::Modifier::CapsLockKey,
-        WebCore::PlatformEvent::Modifier::AltGraphKey
-    >;
-};
-
-} // namespace WTF

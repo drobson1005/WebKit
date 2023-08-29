@@ -141,6 +141,8 @@ public:
     virtual bool scrollUpdatesDisabled() const { notImplemented(); return false; }
     virtual void setScrollUpdatesDisabled(bool) { notImplemented(); }
 
+    virtual bool isZoomingOrScrolling() const { notImplemented(); return false; }
+
     virtual void scrollToOffset(long, long, ScrollToOptions*) { notImplemented(); }
 
     virtual void immediateScrollToOffset(long, long, ScrollToOptions*) { notImplemented(); }
@@ -268,6 +270,7 @@ public:
     virtual JSObjectRef inputViewBounds() const { notImplemented(); return nullptr; }
     virtual void activateDataListSuggestion(unsigned, JSValueRef) { notImplemented(); }
     virtual void setSelectedColorForColorPicker(double, double, double) { notImplemented(); }
+    virtual void setAppAccentColor(unsigned short, unsigned short, unsigned short) { notImplemented(); }
 
     // Find in Page
 
@@ -308,7 +311,9 @@ public:
     virtual JSObjectRef textSelectionCaretRect() const { notImplemented(); return nullptr; }
     virtual JSObjectRef selectionStartGrabberViewRect() const { notImplemented(); return nullptr; }
     virtual JSObjectRef selectionEndGrabberViewRect() const { notImplemented(); return nullptr; }
+    virtual JSObjectRef selectionEndGrabberViewShapePathDescription() const { notImplemented(); return nullptr; }
     virtual JSObjectRef selectionCaretViewRect() const { notImplemented(); return nullptr; }
+    virtual JSObjectRef selectionCaretViewRectInGlobalCoordinates() const { notImplemented(); return nullptr; }
     virtual JSObjectRef selectionRangeViewRects() const { notImplemented(); return nullptr; }
 
     // Rotation
@@ -381,6 +386,10 @@ public:
 
     virtual void setDidEndScrollingCallback(JSValueRef);
     JSValueRef didEndScrollingCallback() const;
+
+    // Image Analysis
+
+    virtual uint64_t currentImageAnalysisRequestID() const { return 0; }
 
 protected:
     explicit UIScriptController(UIScriptContext&);

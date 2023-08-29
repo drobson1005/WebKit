@@ -313,7 +313,8 @@ ExceptionOr<void> WebSocket::connect(const String& url, const Vector<String>& pr
         Document& document = downcast<Document>(context);
         RefPtr frame = document.frame();
         // FIXME: make the mixed content check equivalent to the non-document mixed content check currently in WorkerThreadableWebSocketChannel::Bridge::connect()
-        if (!frame || !MixedContentChecker::canRunInsecureContent(*frame, document.securityOrigin(), m_url)) {
+        // In particular we need to match the error messaging in the console and the inspector instrumentation. See WebSocketChannel::fail.
+        if (!frame || !MixedContentChecker::frameAndAncestorsCanRunInsecureContent(*frame, document.securityOrigin(), m_url)) {
             failAsynchronously();
             return { };
         }
@@ -475,10 +476,9 @@ String WebSocket::extensions() const
     return m_extensions;
 }
 
-ExceptionOr<void> WebSocket::setBinaryType(BinaryType binaryType)
+void WebSocket::setBinaryType(BinaryType binaryType)
 {
     m_binaryType = binaryType;
-    return { };
 }
 
 EventTargetInterface WebSocket::eventTargetInterface() const

@@ -27,6 +27,7 @@
 
 #include <unicode/utypes.h>
 #include <wtf/DataRef.h>
+#include <wtf/OptionSet.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -40,6 +41,7 @@ class Color;
 class ContentData;
 class CounterContent;
 class CursorList;
+class Element;
 class FillLayer;
 class FilterOperations;
 class FloatPoint;
@@ -89,9 +91,9 @@ class TextSizeAdjustment;
 class TextUnderlineOffset;
 class TransformOperations;
 class TransformationMatrix;
+class TransformOperationData;
 class TranslateTransformOperation;
 class WillChangeData;
-class WordBoundaryDetection;
 
 enum CSSPropertyID : uint16_t;
 enum GridAutoFlow : uint8_t;
@@ -104,6 +106,7 @@ enum class AspectRatioType : uint8_t;
 enum class AutoRepeatType : uint8_t;
 enum class BackfaceVisibility : uint8_t;
 enum class BlendMode : uint8_t;
+enum class BlockFlowDirection : uint8_t;
 enum class BlockStepInsert : bool;
 enum class BorderCollapse : bool;
 enum class BorderStyle : uint8_t;
@@ -172,6 +175,7 @@ enum class Overflow : uint8_t;
 enum class OverflowAnchor : bool;
 enum class OverflowWrap : uint8_t;
 enum class OverscrollBehavior : uint8_t;
+enum class PaintBehavior : uint32_t;
 enum class PaintOrder : uint8_t;
 enum class PaintType : uint8_t;
 enum class PointerEvents : uint8_t;
@@ -214,6 +218,7 @@ enum class TextZoom : bool;
 enum class TouchAction : uint8_t;
 enum class TransformBox : uint8_t;
 enum class TransformStyle3D : uint8_t;
+enum class TypographicMode : bool;
 enum class UnicodeBidi : uint8_t;
 enum class UsedClear : uint8_t;
 enum class UsedFloat : uint8_t;
@@ -242,6 +247,7 @@ struct MasonryAutoFlow;
 struct NamedGridAreaMap;
 struct NamedGridLinesMap;
 struct OrderedNamedGridLinesMap;
+
 struct ScrollSnapAlign;
 struct ScrollSnapType;
 struct ScrollbarGutter;
@@ -262,6 +268,7 @@ using LayoutBoxExtent = RectEdges<LayoutUnit>;
 
 namespace Style {
 class CustomPropertyRegistry;
+struct ScopedName;
 }
 
 constexpr auto PublicPseudoIDBits = 9;
@@ -515,7 +522,6 @@ public:
     WEBCORE_EXPORT const FontCascadeDescription& fontDescription() const;
     float specifiedFontSize() const;
     float computedFontSize() const;
-    unsigned computedFontPixelSize() const;
     std::pair<FontOrientation, NonCJKGlyphOrientation> fontAndGlyphOrientation();
 
     inline FontVariationSettings fontVariationSettings() const;
@@ -692,11 +698,11 @@ public:
     inline bool containsPaint() const;
     inline bool containsLayoutOrPaint() const;
     inline ContainerType containerType() const;
-    inline const Vector<AtomString>& containerNames() const;
+    inline const Vector<Style::ScopedName>& containerNames() const;
 
     inline ContentVisibility contentVisibility() const;
 
-    inline bool effectiveSkipsContent() const;
+    inline std::optional<ContentVisibility> skippedContentReason() const;
 
     inline ContainIntrinsicSizeType containIntrinsicWidthType() const;
     inline ContainIntrinsicSizeType containIntrinsicHeightType() const;
@@ -704,6 +710,10 @@ public:
     inline ContainIntrinsicSizeType containIntrinsicLogicalHeightType() const;
     inline bool containIntrinsicWidthHasAuto() const;
     inline bool containIntrinsicHeightHasAuto() const;
+    inline bool containIntrinsicLogicalWidthHasAuto() const;
+    inline bool containIntrinsicLogicalHeightHasAuto() const;
+    inline void containIntrinsicWidthAddAuto();
+    inline void containIntrinsicHeightAddAuto();
     inline std::optional<Length> containIntrinsicWidth() const;
     inline std::optional<Length> containIntrinsicHeight() const;
     inline bool hasAutoLengthContainIntrinsicSize() const;
@@ -725,6 +735,7 @@ public:
     inline const StyleSelfAlignmentData& alignItems() const;
     inline const StyleSelfAlignmentData& alignSelf() const;
     inline FlexDirection flexDirection() const;
+    inline bool isRowFlexDirection() const;
     inline bool isColumnFlexDirection() const;
     inline bool isReverseFlexDirection() const;
     inline FlexWrap flexWrap() const;
@@ -827,7 +838,6 @@ public:
     inline unsigned short columnRuleWidth() const;
     inline bool columnRuleIsTransparent() const;
     inline ColumnSpan columnSpan() const;
-    inline const WordBoundaryDetection& wordBoundaryDetection() const;
 
     inline const TransformOperations& transform() const;
     inline bool hasTransform() const;
@@ -889,11 +899,10 @@ public:
     void unapplyTransformOrigin(TransformationMatrix&, const FloatPoint3D& originTranslate) const;
 
     // applyTransform calls applyTransformOrigin(), then applyCSSTransform(), followed by unapplyTransformOrigin().
-    void applyTransform(TransformationMatrix&, const FloatRect& boundingBox) const;
-    void applyTransform(TransformationMatrix&, const FloatRect& boundingBox, OptionSet<TransformOperationOption>) const;
-    void applyCSSTransform(TransformationMatrix&, const FloatRect& boundingBox) const;
-    void applyCSSTransform(TransformationMatrix&, const FloatRect& boundingBox, OptionSet<TransformOperationOption>) const;
-    void applyMotionPathTransform(TransformationMatrix&, const FloatRect& boundingBox) const;
+    void applyTransform(TransformationMatrix&, const TransformOperationData& boundingBox) const;
+    void applyTransform(TransformationMatrix&, const TransformOperationData& boundingBox, OptionSet<TransformOperationOption>) const;
+    void applyCSSTransform(TransformationMatrix&, const TransformOperationData& boundingBox) const;
+    void applyCSSTransform(TransformationMatrix&, const TransformOperationData& boundingBox, OptionSet<TransformOperationOption>) const;
     void setPageScaleTransform(float);
 
     inline bool hasPositionedMask() const;
@@ -971,6 +980,8 @@ public:
     const ScrollSnapAlign& scrollSnapAlign() const;
     ScrollSnapStop scrollSnapStop() const;
 
+    Color effectiveScrollbarThumbColor() const;
+    Color effectiveScrollbarTrackColor() const;
     inline std::optional<ScrollbarColor> scrollbarColor() const;
     inline const StyleColor& scrollbarThumbColor() const;
     inline const StyleColor& scrollbarTrackColor() const;
@@ -1006,6 +1017,8 @@ public:
     inline bool isVerticalWritingMode() const;
     inline bool isFlippedLinesWritingMode() const;
     inline bool isFlippedBlocksWritingMode() const;
+    BlockFlowDirection blockFlowDirection() const;
+    TypographicMode typographicMode() const;
 
     inline ImageOrientation imageOrientation() const;
     inline ImageRendering imageRendering() const;
@@ -1044,6 +1057,7 @@ public:
 
     bool shouldPlaceVerticalScrollbarOnLeft() const;
 
+    inline bool usesStandardScrollbarStyle() const;
     inline bool usesLegacyScrollbarStyle() const;
 
 #if ENABLE(APPLE_PAY)
@@ -1260,7 +1274,7 @@ public:
 
     inline void setContain(OptionSet<Containment>);
     inline void setContainerType(ContainerType);
-    inline void setContainerNames(const Vector<AtomString>&);
+    inline void setContainerNames(const Vector<Style::ScopedName>&);
 
     inline void setContainIntrinsicWidthType(ContainIntrinsicSizeType);
     inline void setContainIntrinsicHeightType(ContainIntrinsicSizeType);
@@ -1269,7 +1283,7 @@ public:
 
     inline void setContentVisibility(ContentVisibility);
 
-    inline void setEffectiveSkipsContent(bool);
+    inline void setSkippedContentReason(ContentVisibility);
 
     inline void setListStyleType(ListStyleType);
     void setListStyleImage(RefPtr<StyleImage>&&);
@@ -1418,7 +1432,6 @@ public:
     inline void setColumnRuleWidth(unsigned short);
     inline void resetColumnRule();
     inline void setColumnSpan(ColumnSpan);
-    inline void setWordBoundaryDetection(const WordBoundaryDetection&);
     inline void inheritColumnPropertiesFrom(const RenderStyle& parent);
 
     inline void setTransform(const TransformOperations&);
@@ -1593,6 +1606,8 @@ public:
     inline SVGPaintType fillPaintType() const;
     inline StyleColor fillPaintColor() const;
     inline void setFillPaintColor(const StyleColor&);
+    inline void setHasExplicitlySetColor(bool);
+    inline bool hasExplicitlySetColor() const;
     inline float fillOpacity() const;
     inline void setFillOpacity(float);
 
@@ -1682,6 +1697,7 @@ public:
     const AtomString& hyphenString() const;
 
     bool inheritedEqual(const RenderStyle&) const;
+    bool inheritedCustomPropertiesEqual(const RenderStyle&) const;
     bool fastPathInheritedEqual(const RenderStyle&) const;
     bool nonFastPathInheritedEqual(const RenderStyle&) const;
 
@@ -1725,10 +1741,10 @@ public:
     Color colorResolvingCurrentColor(CSSPropertyID colorProperty, bool visitedLink) const;
 
     // Resolves the currentColor keyword, but must not be used for the "color" property which has a different semantic.
-    WEBCORE_EXPORT Color colorResolvingCurrentColor(const StyleColor&) const;
+    WEBCORE_EXPORT Color colorResolvingCurrentColor(const StyleColor&, bool visitedLink = false) const;
 
-    WEBCORE_EXPORT Color visitedDependentColor(CSSPropertyID) const;
-    WEBCORE_EXPORT Color visitedDependentColorWithColorFilter(CSSPropertyID) const;
+    WEBCORE_EXPORT Color visitedDependentColor(CSSPropertyID, OptionSet<PaintBehavior> paintBehavior = { }) const;
+    WEBCORE_EXPORT Color visitedDependentColorWithColorFilter(CSSPropertyID, OptionSet<PaintBehavior> paintBehavior = { }) const;
 
     WEBCORE_EXPORT Color colorByApplyingColorFilter(const Color&) const;
     WEBCORE_EXPORT Color colorWithColorFilter(const StyleColor&) const;
@@ -1741,8 +1757,8 @@ public:
 
     inline void setMathStyle(const MathStyle&);
 
-    inline void setTextSpacingTrim(TextSpacingTrim);
-    inline void setTextAutospace(TextAutospace);
+    void setTextSpacingTrim(TextSpacingTrim v);
+    void setTextAutospace(TextAutospace v);
 
     static constexpr Overflow initialOverflowX();
     static constexpr Overflow initialOverflowY();
@@ -1770,8 +1786,6 @@ public:
     static constexpr WritingMode initialWritingMode();
     static constexpr TextCombine initialTextCombine();
     static constexpr TextOrientation initialTextOrientation();
-    static constexpr TextSpacingTrim initialTextSpacingTrim();
-    static constexpr TextAutospace initialTextAutospace();
     static constexpr ObjectFit initialObjectFit();
     static inline LengthPoint initialObjectPosition();
     static constexpr EmptyCell initialEmptyCells();
@@ -1872,10 +1886,9 @@ public:
     static constexpr OptionSet<Containment> contentContainment();
     static constexpr ContainerType initialContainerType();
     static constexpr ContentVisibility initialContentVisibility();
-    static Vector<AtomString> initialContainerNames();
+    static Vector<Style::ScopedName> initialContainerNames();
     static double initialAspectRatioWidth() { return 1.0; }
     static double initialAspectRatioHeight() { return 1.0; }
-    static WordBoundaryDetection initialWordBoundaryDetection();
 
     static constexpr ContainIntrinsicSizeType initialContainIntrinsicWidthType();
     static constexpr ContainIntrinsicSizeType initialContainIntrinsicHeightType();
@@ -2150,13 +2163,14 @@ private:
         unsigned usesContainerUnits : 1;
         unsigned hasExplicitlyInheritedProperties : 1; // Explicitly inherits a non-inherited property.
         unsigned disallowsFastPathInheritance : 1;
+        unsigned hasContentNone : 1;
         unsigned isUnique : 1; // Style cannot be shared.
+
+        // Non-property related state bits.
         unsigned emptyState : 1;
         unsigned firstChildState : 1;
         unsigned lastChildState : 1;
         unsigned isLink : 1;
-        unsigned hasContentNone : 1;
-
         unsigned styleType : 4; // PseudoId
         unsigned pseudoBits : PublicPseudoIDBits;
 
@@ -2193,13 +2207,15 @@ private:
         // 44 bits
 
         // CSS Text Layout Module Level 3: Vertical writing support
-        unsigned writingMode : 2; // WritingMode
-        // 46 bits
+        unsigned writingMode : 3; // WritingMode
+        // 47 bits
 
 #if ENABLE(TEXT_AUTOSIZING)
         unsigned autosizeStatus : 5;
 #endif
-        // 51 bits
+        // 52 bits
+        unsigned hasExplicitlySetColor : 1;
+        // 53 bits
     };
 
     // This constructor is used to implement the replace operation.
@@ -2261,5 +2277,7 @@ constexpr BorderStyle collapsedBorderStyle(BorderStyle);
 inline bool pseudoElementRendererIsNeeded(const RenderStyle*);
 inline bool generatesBox(const RenderStyle&);
 inline bool isNonVisibleOverflow(Overflow);
+
+inline bool isSkippedContentRoot(const RenderStyle&, const Element*);
 
 } // namespace WebCore

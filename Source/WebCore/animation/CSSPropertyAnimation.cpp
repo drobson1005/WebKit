@@ -3609,8 +3609,9 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new LengthBoxPropertyWrapper(CSSPropertyBorderImageWidth, &RenderStyle::borderImageWidth, &RenderStyle::setBorderImageWidth, { LengthBoxPropertyWrapper::Flags::IsLengthPercentage, LengthBoxPropertyWrapper::Flags::MayOverrideBorderWidths }),
         new LengthBoxPropertyWrapper(CSSPropertyBorderImageOutset, &RenderStyle::borderImageOutset, &RenderStyle::setBorderImageOutset),
 
-        new StyleImagePropertyWrapper(CSSPropertyWebkitMaskBoxImageSource, &RenderStyle::maskBoxImageSource, &RenderStyle::setMaskBoxImageSource),
-        new PropertyWrapper<const NinePieceImage&>(CSSPropertyWebkitMaskBoxImage, &RenderStyle::maskBoxImage, &RenderStyle::setMaskBoxImage),
+        new StyleImagePropertyWrapper(CSSPropertyMaskBorderSource, &RenderStyle::maskBorderSource, &RenderStyle::setMaskBorderSource),
+        new PropertyWrapper<const NinePieceImage&>(CSSPropertyMaskBorder, &RenderStyle::maskBorder, &RenderStyle::setMaskBorder),
+        new PropertyWrapper<const NinePieceImage&>(CSSPropertyWebkitMaskBoxImage, &RenderStyle::maskBorder, &RenderStyle::setMaskBorder),
 
         new FillLayersPropertyWrapper(CSSPropertyBackgroundPositionX, &RenderStyle::backgroundLayers, &RenderStyle::ensureBackgroundLayers),
         new FillLayersPropertyWrapper(CSSPropertyBackgroundPositionY, &RenderStyle::backgroundLayers, &RenderStyle::ensureBackgroundLayers),
@@ -3873,6 +3874,7 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new FontVariantNumericWrapper,
         new DiscreteFontDescriptionTypedWrapper<FontVariantPosition>(CSSPropertyFontVariantPosition, &FontCascadeDescription::variantPosition, &FontCascadeDescription::setVariantPosition),
         new DiscreteFontDescriptionTypedWrapper<FontVariantCaps>(CSSPropertyFontVariantCaps, &FontCascadeDescription::variantCaps, &FontCascadeDescription::setVariantCaps),
+        new DiscreteFontDescriptionTypedWrapper<FontVariantEmoji>(CSSPropertyFontVariantEmoji, &FontCascadeDescription::variantEmoji, &FontCascadeDescription::setVariantEmoji),
         new GridTemplateAreasWrapper,
         new QuotesWrapper,
         new DiscretePropertyWrapper<bool>(CSSPropertyScrollBehavior, &RenderStyle::useSmoothScrolling, &RenderStyle::setUseSmoothScrolling),
@@ -4052,6 +4054,12 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         case CSSPropertyMarginBlock: // logical shorthand
         case CSSPropertyMarginInline: // logical shorthand
         case CSSPropertyMarker:
+        case CSSPropertyMaskBorder:
+        case CSSPropertyMaskBorderOutset:
+        case CSSPropertyMaskBorderRepeat:
+        case CSSPropertyMaskBorderSlice:
+        case CSSPropertyMaskBorderSource:
+        case CSSPropertyMaskBorderWidth:
         case CSSPropertyMasonryAutoFlow:
         case CSSPropertyMathStyle:
         case CSSPropertyOverflow:
@@ -4143,12 +4151,6 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         case CSSPropertyWebkitMarqueeRepetition:
         case CSSPropertyWebkitMarqueeSpeed:
         case CSSPropertyWebkitMarqueeStyle:
-        case CSSPropertyWebkitMaskBoxImage:
-        case CSSPropertyWebkitMaskBoxImageOutset:
-        case CSSPropertyWebkitMaskBoxImageRepeat:
-        case CSSPropertyWebkitMaskBoxImageSlice:
-        case CSSPropertyWebkitMaskBoxImageSource:
-        case CSSPropertyWebkitMaskBoxImageWidth:
         case CSSPropertyWebkitMaskClip:
         case CSSPropertyWebkitMaskComposite:
         case CSSPropertyWebkitMaskSourceType:

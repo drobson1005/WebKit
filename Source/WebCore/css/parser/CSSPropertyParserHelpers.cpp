@@ -2287,7 +2287,8 @@ template<> struct NormalizePercentage<Lab<float>> {
     //  for L: 0% = 0.0, 100% = 100.0
     //  for a and b: -100% = -125, 100% = 125 (NOTE: 0% is 0)
 
-    static constexpr double lightnessScaleFactor = 100.0 / 100.0;
+    static constexpr double maximumLightnessNumber = 100.0;
+    static constexpr double lightnessScaleFactor = maximumLightnessNumber / 100.0;
     static constexpr double abScaleFactor = 125.0 / 100.0;
 };
 
@@ -2295,7 +2296,8 @@ template<> struct NormalizePercentage<OKLab<float>> {
     //  for L: 0% = 0.0, 100% = 1.0
     //  for a and b: -100% = -0.4, 100% = 0.4 (NOTE: 0% is 0)
 
-    static constexpr double lightnessScaleFactor = 1.0 / 100.0;
+    static constexpr double maximumLightnessNumber = 1.0;
+    static constexpr double lightnessScaleFactor = maximumLightnessNumber / 100.0;
     static constexpr double abScaleFactor = 0.4 / 100.0;
 };
 
@@ -2303,7 +2305,8 @@ template<> struct NormalizePercentage<LCHA<float>> {
     //  for L: 0% = 0.0, 100% = 100.0
     //  for C: 0% = 0, 100% = 150
 
-    static constexpr double lightnessScaleFactor = 100.0 / 100.0;
+    static constexpr double maximumLightnessNumber = 100.0;
+    static constexpr double lightnessScaleFactor = maximumLightnessNumber / 100.0;
     static constexpr double chromaScaleFactor = 150.0 / 100.0;
 };
 
@@ -2311,7 +2314,8 @@ template<> struct NormalizePercentage<OKLCHA<float>> {
     //  for L: 0% = 0.0, 100% = 1.0
     //  for C: 0% = 0.0 100% = 0.4
 
-    static constexpr double lightnessScaleFactor = 1.0 / 100.0;
+    static constexpr double maximumLightnessNumber = 1.0;
+    static constexpr double lightnessScaleFactor = maximumLightnessNumber / 100.0;
     static constexpr double chromaScaleFactor = 0.4 / 100.0;
 };
 
@@ -2416,8 +2420,8 @@ static Color parseLabParametersRaw(CSSParserTokenRange& args, ConsumerForLightne
         return { };
 
     auto normalizedLightness = WTF::switchOn(*lightness,
-        [] (NumberRaw number) { return std::max(0.0, number.value); },
-        [] (PercentRaw percent) { return std::max(0.0, normalizeLightnessPercent<ColorType>(percent.value)); },
+        [] (NumberRaw number) { return std::clamp(number.value, 0.0, NormalizePercentage<ColorType>::maximumLightnessNumber); },
+        [] (PercentRaw percent) { return std::clamp(normalizeLightnessPercent<ColorType>(percent.value), 0.0, 100.0); },
         [] (NoneRaw) { return std::numeric_limits<double>::quiet_NaN(); }
     );
     auto normalizedA = WTF::switchOn(*aValue,
@@ -2508,8 +2512,8 @@ static Color parseLCHParametersRaw(CSSParserTokenRange& args, ConsumerForLightne
         return { };
 
     auto normalizedLightness = WTF::switchOn(*lightness,
-        [] (NumberRaw number) { return std::max(0.0, number.value); },
-        [] (PercentRaw percent) { return std::max(0.0, normalizeLightnessPercent<ColorType>(percent.value)); },
+        [] (NumberRaw number) { return std::clamp(number.value, 0.0, NormalizePercentage<ColorType>::maximumLightnessNumber); },
+        [] (PercentRaw percent) { return std::clamp(normalizeLightnessPercent<ColorType>(percent.value), 0.0, 100.0); },
         [] (NoneRaw) { return std::numeric_limits<double>::quiet_NaN(); }
     );
     auto normalizedChroma = WTF::switchOn(*chroma,
@@ -7051,7 +7055,6 @@ static RefPtr<CSSValue> consumeBasicShapeOrBox(CSSParserTokenRange& range, const
 
 // Parses the ray() definition as defined in https://drafts.fxtf.org/motion-1/#ray-function
 // ray( <angle> && <ray-size>? && contain? && [at <position>]? )
-// FIXME: Implement `at <position>`.
 static RefPtr<CSSRayValue> consumeRayShape(CSSParserTokenRange& range, const CSSParserContext& context)
 {
     if (range.peek().type() != FunctionToken || range.peek().functionId() != CSSValueRay)
@@ -7062,12 +7065,20 @@ static RefPtr<CSSRayValue> consumeRayShape(CSSParserTokenRange& range, const CSS
     RefPtr<CSSPrimitiveValue> angle;
     std::optional<CSSValueID> size;
     bool isContaining = false;
+    std::optional<PositionCoordinates> position;
     while (!args.atEnd()) {
         if (!angle && (angle = consumeAngle(args, context.mode, UnitlessQuirk::Forbid, UnitlessZeroQuirk::Forbid)))
             continue;
         if (!size && (size = consumeIdentRaw<CSSValueClosestSide, CSSValueClosestCorner, CSSValueFarthestSide, CSSValueFarthestCorner, CSSValueSides>(args)))
             continue;
         if (!isContaining && (isContaining = consumeIdentRaw<CSSValueContain>(args).has_value()))
+            continue;
+        auto consumeAtPosition = [&](CSSParserTokenRange& subrange) -> std::optional<PositionCoordinates> {
+            if (consumeIdentRaw<CSSValueAt>(subrange))
+                return consumePositionCoordinates(subrange, context.mode, UnitlessQuirk::Forbid, PositionSyntax::Position);
+            return std::nullopt;
+        };
+        if (!position && (position = consumeAtPosition(args)))
             continue;
         return nullptr;
     }
@@ -7076,7 +7087,12 @@ static RefPtr<CSSRayValue> consumeRayShape(CSSParserTokenRange& range, const CSS
     if (!angle)
         return nullptr;
 
-    return CSSRayValue::create(angle.releaseNonNull(), size.value_or(CSSValueClosestSide), isContaining);
+    return CSSRayValue::create(
+        angle.releaseNonNull(),
+        size.value_or(CSSValueClosestSide),
+        isContaining,
+        position ? RefPtr { CSSValuePair::createNoncoalescing(WTFMove(position->x), WTFMove(position->y)) } : nullptr
+    );
 }
 
 // Consumes shapes accepted by clip-path and offset-path.
@@ -7344,6 +7360,11 @@ bool consumeBorderImageComponents(CSSPropertyID property, CSSParserTokenRange& r
         } else
             return false;
     } while (!range.atEnd());
+
+    // If we're setting from the legacy shorthand, make sure to set the `mask-border-slice` fill to true.
+    if (property == CSSPropertyWebkitMaskBoxImage && !slice)
+        slice = CSSBorderImageSliceValue::create({ CSSPrimitiveValue::create(0), CSSPrimitiveValue::create(0), CSSPrimitiveValue::create(0), CSSPrimitiveValue::create(0) }, true);
+
     return true;
 }
 

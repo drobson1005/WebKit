@@ -80,9 +80,6 @@
         "subtests": {
             "/webkit/WebKitWebProcessExtension/form-submission-steps": {
                 "expected": {"all": {"status": ["TIMEOUT", "PASS"], "bug": "webkit.org/b/205333"}}
-            },
-            "/webkit/WebKitWebProcessExtension/user-messages": {
-                "expected": {"all": {"slow": true}}
             }
         }
     },

@@ -1076,7 +1076,6 @@ public:
 
 #if PLATFORM(GTK)
     GtkWidget* viewWidget();
-    bool makeGLContextCurrent();
 #endif
 
 #if PLATFORM(GTK) && HAVE(APP_ACCENT_COLORS)
@@ -1319,7 +1318,6 @@ public:
     void scrollTextRangeToVisible(const WebFoundTextRange&);
     void clearAllDecoratedFoundText();
     void didBeginTextSearchOperation();
-    void didEndTextSearchOperation();
 
     void requestRectForFoundTextRange(const WebFoundTextRange&, CompletionHandler<void(WebCore::FloatRect)>&&);
     void addLayerForFindOverlay(CompletionHandler<void(WebCore::PlatformLayerIdentifier)>&&);

@@ -30,6 +30,7 @@
 #pragma once
 
 #include "BasicShapes.h"
+#include "LengthPoint.h"
 #include "MotionPath.h"
 #include "OffsetRotation.h"
 #include "Path.h"
@@ -135,7 +136,12 @@ public:
 
     void setReferenceBox(CSSBoxType referenceBox) { m_referenceBox = referenceBox; }
     CSSBoxType referenceBox() const { return m_referenceBox; }
-    const std::optional<Path> getPath(const TransformOperationData& data) const final { return pathForReferenceRect(data.boundingBox()); }
+    const std::optional<Path> getPath(const TransformOperationData& data) const final
+    {
+        if (data.motionPathData())
+            return pathForReferenceRect(data.motionPathData()->containingBlockBoundingRect);
+        return pathForReferenceRect(data.boundingBox());
+    }
 
 private:
     bool operator==(const PathOperation& other) const override
@@ -172,15 +178,9 @@ public:
         return adoptRef(*new BoxPathOperation(referenceBox));
     }
 
-    static Ref<BoxPathOperation> create(Path&& path, CSSBoxType referenceBox)
-    {
-        return adoptRef(*new BoxPathOperation(WTFMove(path), referenceBox));
-    }
-
     Ref<PathOperation> clone() const final
     {
-        auto path = m_path;
-        return adoptRef(*new BoxPathOperation(WTFMove(path), m_referenceBox));
+        return adoptRef(*new BoxPathOperation(m_referenceBox));
     }
 
     const Path pathForReferenceRect(const FloatRoundedRect& boundingRect) const
@@ -190,8 +190,10 @@ public:
         return path;
     }
     
-    const std::optional<Path> getPath(const TransformOperationData&) const final { return m_path; }
-    const Path& path() const { return m_path; }
+    const std::optional<Path> getPath(const TransformOperationData& data) const final
+    {
+        return MotionPath::computePathForBox(*this, data);
+    }
     CSSBoxType referenceBox() const { return m_referenceBox; }
 
 private:
@@ -208,15 +210,6 @@ private:
         , m_referenceBox(referenceBox)
     {
     }
-
-    BoxPathOperation(Path&& path, CSSBoxType referenceBox)
-        : PathOperation(Box)
-        , m_path(WTFMove(path))
-        , m_referenceBox(referenceBox)
-    {
-    }
-
-    Path m_path;
     CSSBoxType m_referenceBox;
 };
 
@@ -231,14 +224,21 @@ public:
         Sides
     };
 
-    WEBCORE_EXPORT static Ref<RayPathOperation> create(float angle, Size, bool isContaining);
+    static Ref<RayPathOperation> create(float angle, Size size, bool isContaining)
+    {
+        return adoptRef(*new RayPathOperation(angle, size, isContaining));
+    }
+
+    WEBCORE_EXPORT static Ref<RayPathOperation> create(float angle, Size, bool isContaining, LengthPoint&& position);
+
     Ref<PathOperation> clone() const final;
 
     float angle() const { return m_angle; }
     Size size() const { return m_size; }
     bool isContaining() const { return m_isContaining; }
+    const LengthPoint& position() const { return m_position; }
 
-    bool canBlend(const PathOperation&) const final;
+    WEBCORE_EXPORT bool canBlend(const PathOperation&) const final;
     WEBCORE_EXPORT RefPtr<PathOperation> blend(const PathOperation*, const BlendingContext&) const final;
 
     double lengthForPath() const;
@@ -254,7 +254,8 @@ private:
         auto& otherCasted = downcast<RayPathOperation>(other);
         return m_angle == otherCasted.m_angle
             && m_size == otherCasted.m_size
-            && m_isContaining == otherCasted.m_isContaining;
+            && m_isContaining == otherCasted.m_isContaining
+            && m_position == otherCasted.m_position;
     }
 
     RayPathOperation(float angle, Size size, bool isContaining)
@@ -264,9 +265,20 @@ private:
         , m_isContaining(isContaining)
     {
     }
+
+    RayPathOperation(float angle, Size size, bool isContaining, LengthPoint&& position)
+        : PathOperation(Ray)
+        , m_angle(angle)
+        , m_size(size)
+        , m_isContaining(isContaining)
+        , m_position(WTFMove(position))
+    {
+    }
+
     float m_angle { 0 };
     Size m_size;
     bool m_isContaining { false };
+    LengthPoint m_position { Length(LengthType::Auto), Length(LengthType::Auto) };
 };
 
 } // namespace WebCore

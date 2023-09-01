@@ -692,6 +692,7 @@ static WebCore::Color scrollViewBackgroundColor(WKWebView *webView, AllowPageBac
 
 - (CGPoint)_initialContentOffsetForScrollView
 {
+    // FIXME: Should this use -[_scrollView adjustedContentInset]?
     auto combinedUnobscuredAndScrollViewInset = [self _computedContentInset];
     return CGPointMake(-combinedUnobscuredAndScrollViewInset.left, -combinedUnobscuredAndScrollViewInset.top);
 }
@@ -1106,10 +1107,8 @@ static void changeContentOffsetBoundedInValidRange(UIScrollView *scrollView, Web
 
     if (_perProcessState.pendingFindLayerID) {
         CALayer *layer = downcast<WebKit::RemoteLayerTreeDrawingAreaProxy>(*_page->drawingArea()).remoteLayerTreeHost().layerForID(_perProcessState.pendingFindLayerID);
-        if (layer.superlayer) {
-            _perProcessState.committedFindLayerID = std::exchange(_perProcessState.pendingFindLayerID, { });
-            _page->findClient().didAddLayerForFindOverlay(_page.get(), layer);
-        }
+        if (layer.superlayer)
+            [self _didAddLayerForFindOverlay:layer];
     }
 
 #if ENABLE(OVERLAY_REGIONS_IN_EVENT_REGION)
@@ -1329,10 +1328,10 @@ static void addOverlayEventRegions(WebCore::PlatformLayerIdentifier layerID, con
     [self _zoomToCenter:visibleRectAfterZoom.center() atScale:scale animated:animated honorScrollability:YES];
 }
 
-static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOffset, WebCore::FloatSize contentSize, WebCore::FloatSize unobscuredContentSize)
+static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOffset, WebCore::FloatPoint minimumContentOffset, WebCore::FloatSize contentSize, WebCore::FloatSize unobscuredContentSize)
 {
     WebCore::FloatSize maximumContentOffset = contentSize - unobscuredContentSize;
-    return contentOffset.constrainedBetween(WebCore::FloatPoint(), WebCore::FloatPoint(maximumContentOffset));
+    return contentOffset.constrainedBetween(minimumContentOffset, WebCore::FloatPoint(maximumContentOffset));
 }
 
 - (void)_scrollToContentScrollPosition:(WebCore::FloatPoint)scrollPosition scrollOrigin:(WebCore::IntPoint)scrollOrigin animated:(BOOL)animated
@@ -1417,6 +1416,9 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
     WebCore::FloatPoint unobscuredContentOffset = unobscuredContentRect.location();
     WebCore::FloatSize contentSize([self._currentContentView bounds].size);
 
+    auto scrollViewInsets = [_scrollView adjustedContentInset];
+    WebCore::FloatPoint minimumContentOffset(-scrollViewInsets.left, -scrollViewInsets.top);
+
     // Center the target rect in the scroll view.
     // If the target doesn't fit in the scroll view, center on the gesture location instead.
     WebCore::FloatPoint newUnobscuredContentOffset;
@@ -1428,14 +1430,14 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
         newUnobscuredContentOffset.setY(targetRect.y() - (unobscuredContentRect.height() - targetRect.height()) / 2);
     else
         newUnobscuredContentOffset.setY(origin.y() - unobscuredContentRect.height() / 2);
-    newUnobscuredContentOffset = constrainContentOffset(newUnobscuredContentOffset, contentSize, unobscuredContentRect.size());
+    newUnobscuredContentOffset = constrainContentOffset(newUnobscuredContentOffset, minimumContentOffset, contentSize, unobscuredContentRect.size());
 
     if (unobscuredContentOffset == newUnobscuredContentOffset) {
         if (targetRect.width() > unobscuredContentRect.width())
             newUnobscuredContentOffset.setX(origin.x() - unobscuredContentRect.width() / 2);
         if (targetRect.height() > unobscuredContentRect.height())
             newUnobscuredContentOffset.setY(origin.y() - unobscuredContentRect.height() / 2);
-        newUnobscuredContentOffset = constrainContentOffset(newUnobscuredContentOffset, contentSize, unobscuredContentRect.size());
+        newUnobscuredContentOffset = constrainContentOffset(newUnobscuredContentOffset, minimumContentOffset, contentSize, unobscuredContentRect.size());
     }
 
     WebCore::FloatSize scrollViewOffsetDelta = newUnobscuredContentOffset - unobscuredContentOffset;
@@ -2035,6 +2037,10 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
     if (![self usesStandardContentView] && [_customContentView respondsToSelector:@selector(web_scrollViewDidScroll:)])
         [_customContentView web_scrollViewDidScroll:(UIScrollView *)scrollView];
 
+#if HAVE(UIFINDINTERACTION)
+    [self _updateFindOverlayPosition];
+#endif
+
     [self _scheduleVisibleContentRectUpdateAfterScrollInView:scrollView];
 
     if (WebKit::RemoteLayerTreeScrollingPerformanceData* scrollPerfData = _page->scrollingPerformanceData())
@@ -2253,6 +2259,10 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
 {
     CGRect bounds = self.bounds;
     [_scrollView setFrame:bounds];
+
+#if HAVE(UIFINDINTERACTION)
+    [self _updateFindOverlayPosition];
+#endif
 
 #if HAVE(UI_WINDOW_SCENE_LIVE_RESIZE)
     if (_perProcessState.liveResizeParameters)
@@ -3137,6 +3147,87 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(UISe
     return [_contentView supportsTextReplacementForWebView];
 }
 
+- (CABasicAnimation *)_animationForFindOverlay:(BOOL)animateIn
+{
+    CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    animation.fromValue = animateIn ? @0 : @1;
+    animation.toValue = animateIn ? @1 : @0;
+    animation.duration = 0.2f;
+    animation.timingFunction = [CAMediaTimingFunction functionWithControlPoints:0.445 :0.05 :0.55 :0.95];
+    return animation;
+}
+
+- (void)_updateFindOverlayPosition
+{
+    UIScrollView *scrollView = _scrollView.get();
+    [_findOverlay setBounds:CGRectMake(0, 0, scrollView.bounds.size.width, scrollView.bounds.size.height)];
+    [_findOverlay setCenter:CGPointMake(scrollView.center.x + scrollView.contentOffset.x, scrollView.center.y + scrollView.contentOffset.y)];
+}
+
+- (void)_showFindOverlay
+{
+    if (!_findOverlay) {
+        _findOverlay = adoptNS([[UIView alloc] init]);
+        UIColor *overlayColor = [UIColor colorWithRed:(26. / 255) green:(26. / 255) blue:(26. / 255) alpha:(64. / 255)];
+        [_findOverlay setBackgroundColor:overlayColor];
+    }
+
+    [self _updateFindOverlayPosition];
+    [_scrollView insertSubview:_findOverlay.get() belowSubview:_contentView.get()];
+
+    if (CALayer *contentViewFindOverlayLayer = [self _layerForFindOverlay]) {
+        [[_findOverlay layer] removeAllAnimations];
+        [contentViewFindOverlayLayer removeAllAnimations];
+
+        [_findOverlay setAlpha:1];
+        [contentViewFindOverlayLayer setOpacity:1];
+    } else {
+        [_findOverlay setAlpha:0];
+        [self _addLayerForFindOverlay];
+    }
+}
+
+- (void)_hideFindOverlay
+{
+    CALayer *contentViewFindOverlayLayer = [self _layerForFindOverlay];
+    CALayer *findOverlayLayer = [_findOverlay layer];
+
+    if (!findOverlayLayer && !contentViewFindOverlayLayer)
+        return;
+
+    if ([findOverlayLayer animationForKey:@"findOverlayFadeOut"])
+        return;
+
+    [contentViewFindOverlayLayer removeAllAnimations];
+    [findOverlayLayer removeAllAnimations];
+
+    [CATransaction begin];
+
+    CABasicAnimation *animation = [self _animationForFindOverlay:NO];
+
+    [CATransaction setCompletionBlock:[weakSelf = WeakObjCPtr<WKWebView>(self)] {
+        auto strongSelf = weakSelf.get();
+        if (!strongSelf)
+            return;
+
+        if ([strongSelf->_findOverlay alpha])
+            return;
+
+        [strongSelf->_findOverlay removeFromSuperview];
+        strongSelf->_findOverlay = nil;
+
+        [strongSelf _removeLayerForFindOverlay];
+    }];
+
+    [contentViewFindOverlayLayer addAnimation:animation forKey:@"findOverlayFadeOut"];
+    [findOverlayLayer addAnimation:animation forKey:@"findOverlayFadeOut"];
+
+    [CATransaction commit];
+
+    contentViewFindOverlayLayer.opacity = 0;
+    findOverlayLayer.opacity = 0;
+}
+
 #endif // HAVE(UIFINDINTERACTION)
 
 #if HAVE(UIKIT_RESIZABLE_WINDOWS)
@@ -3272,6 +3363,31 @@ static bool isLockdownModeWarningNeeded()
     }
     ASSERT_NOT_REACHED();
     return _UIDataOwnerUndefined;
+}
+
+- (void)_didAddLayerForFindOverlay:(CALayer *)layer
+{
+    _perProcessState.committedFindLayerID = std::exchange(_perProcessState.pendingFindLayerID, { });
+    _page->findClient().didAddLayerForFindOverlay(_page.get(), layer);
+
+#if HAVE(UIFINDINTERACTION)
+    CABasicAnimation *animation = [self _animationForFindOverlay:YES];
+    CALayer *findOverlayLayer = [_findOverlay layer];
+
+    [layer addAnimation:animation forKey:@"findOverlayFadeIn"];
+    [findOverlayLayer addAnimation:animation forKey:@"findOverlayFadeIn"];
+
+    layer.opacity = 1;
+    findOverlayLayer.opacity = 1;
+#endif
+}
+
+- (void)_didRemoveLayerForFindOverlay
+{
+    if (!_page)
+        return;
+
+    _page->findClient().didRemoveLayerForFindOverlay(_page.get());
 }
 
 @end
@@ -4225,8 +4341,7 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
         if (!strongSelf)
             return;
 
-        if (auto* page = strongSelf->_page.get())
-            page->findClient().didRemoveLayerForFindOverlay(page);
+        [strongSelf _didRemoveLayerForFindOverlay];
     });
 }
 

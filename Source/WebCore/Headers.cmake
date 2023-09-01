@@ -2034,6 +2034,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/displaylists/DisplayList.h
     platform/graphics/displaylists/DisplayListDrawingContext.h
     platform/graphics/displaylists/DisplayListImageBuffer.h
+    platform/graphics/displaylists/DisplayListItem.h
     platform/graphics/displaylists/DisplayListItems.h
     platform/graphics/displaylists/DisplayListRecorder.h
     platform/graphics/displaylists/DisplayListRecorderImpl.h
@@ -2100,6 +2101,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/transforms/Matrix3DTransformOperation.h
     platform/graphics/transforms/MatrixTransformOperation.h
     platform/graphics/transforms/PerspectiveTransformOperation.h
+    platform/graphics/transforms/Quaternion.h
     platform/graphics/transforms/RotateTransformOperation.h
     platform/graphics/transforms/ScaleTransformOperation.h
     platform/graphics/transforms/SkewTransformOperation.h

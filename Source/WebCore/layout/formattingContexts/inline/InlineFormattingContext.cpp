@@ -67,10 +67,10 @@ InlineFormattingContext::InlineFormattingContext(const ElementBox& formattingCon
 {
 }
 
-InlineLayoutResult InlineFormattingContext::layoutInFlowAndFloatContent(const ConstraintsForInlineContent& constraints, InlineLayoutState& inlineLayoutState, const InlineDamage* lineDamage)
+InlineLayoutResult InlineFormattingContext::layout(const ConstraintsForInlineContent& constraints, InlineLayoutState& inlineLayoutState, const InlineDamage* lineDamage)
 {
     auto& floatingState = inlineLayoutState.parentBlockLayoutState().floatingState();
-    if (!root().hasInFlowChild()) {
+    if (!root().hasInFlowChild() && !root().hasOutOfFlowChild()) {
         // Float only content does not support partial layout.
         ASSERT(!lineDamage);
         layoutFloatContentOnly(constraints, floatingState);
@@ -81,8 +81,8 @@ InlineLayoutResult InlineFormattingContext::layoutInFlowAndFloatContent(const Co
     auto needsLayoutStartPosition = !lineDamage || !lineDamage->start() ? InlineItemPosition() : lineDamage->start()->inlineItemPosition;
     auto needsInlineItemsUpdate = inlineFormattingState.inlineItems().isEmpty() || lineDamage;
     if (needsInlineItemsUpdate) {
-        // FIXME: This shoul go to invalidation.
-        m_maximumIntrinsicWidthResultForSingleLine = { };
+        // FIXME: This should go to invalidation.
+        inlineFormattingState.clearMaximumIntrinsicWidthLayoutResult();
         InlineItemsBuilder { root(), inlineFormattingState }.build(needsLayoutStartPosition);
     }
 
@@ -114,12 +114,6 @@ InlineLayoutResult InlineFormattingContext::layoutInFlowAndFloatContent(const Co
     return lineLayout(lineBuilder, inlineItems, needsLayoutRange, previousLine(), constraints, inlineLayoutState, lineDamage);
 }
 
-void InlineFormattingContext::layoutOutOfFlowContent(const ConstraintsForInlineContent& constraints, InlineLayoutState& inlineLayoutState, const InlineDisplay::Content& inlineDisplayContent)
-{
-    // Collecting out-of-flow boxes happens during the in-flow phase.
-    computeStaticPositionForOutOfFlowContent(formattingState().outOfFlowBoxes(), constraints, inlineDisplayContent, inlineLayoutState.parentBlockLayoutState().floatingState());
-}
-
 IntrinsicWidthConstraints InlineFormattingContext::computedIntrinsicSizes(const InlineDamage* lineDamage)
 {
     auto& inlineFormattingState = formattingState();
@@ -136,9 +130,9 @@ IntrinsicWidthConstraints InlineFormattingContext::computedIntrinsicSizes(const 
 
     auto intrinsicWidthHandler = IntrinsicWidthHandler { *this };
     auto intrinsicSizes = intrinsicWidthHandler.computedIntrinsicSizes();
-    m_maximumIntrinsicWidthResultForSingleLine = intrinsicWidthHandler.maximumIntrinsicWidthResult();
-
-    formattingState().setIntrinsicWidthConstraints(intrinsicSizes);
+    inlineFormattingState.setIntrinsicWidthConstraints(intrinsicSizes);
+    if (intrinsicWidthHandler.maximumIntrinsicWidthResult())
+        inlineFormattingState.setMaximumIntrinsicWidthLayoutResult(WTFMove(*intrinsicWidthHandler.maximumIntrinsicWidthResult()));
     return intrinsicSizes;
 }
 
@@ -243,26 +237,6 @@ void InlineFormattingContext::layoutFloatContentOnly(const ConstraintsForInlineC
     }
 }
 
-void InlineFormattingContext::computeStaticPositionForOutOfFlowContent(const FormattingState::OutOfFlowBoxList& outOfFlowBoxes, const ConstraintsForInFlowContent& constraints, const InlineDisplay::Content& displayContent, const FloatingState& floatingState)
-{
-    // This function computes the static position for out-of-flow content inside the inline formatting context.
-    // As per spec, the static position of an out-of-flow box is computed as if the position was set to static.
-    // However it does not mean that the out-of-flow box should be involved in the inline layout process.
-    // Instead we figure out this static position after the inline layout by looking at the previous/next sibling (or parent) box's geometry and
-    // place the out-of-flow box at the logical right position.
-    auto& formattingGeometry = this->formattingGeometry();
-    auto& formattingState = this->formattingState();
-    auto floatingContext = FloatingContext { *this, floatingState };
-
-    for (auto& outOfFlowBox : outOfFlowBoxes) {
-        if (outOfFlowBox->style().isOriginalDisplayInlineType()) {
-            formattingState.boxGeometry(outOfFlowBox).setLogicalTopLeft(formattingGeometry.staticPositionForOutOfFlowInlineLevelBox(outOfFlowBox, constraints, displayContent, floatingContext));
-            continue;
-        }
-        formattingState.boxGeometry(outOfFlowBox).setLogicalTopLeft(formattingGeometry.staticPositionForOutOfFlowBlockLevelBox(outOfFlowBox, constraints, displayContent));
-    }
-}
-
 static LineEndingEllipsisPolicy lineEndingEllipsisPolicy(const RenderStyle& rootStyle, size_t numberOfLines, std::optional<size_t> numberOfVisibleLinesAllowed)
 {
     // We may have passed the line-clamp line with overflow visible.
@@ -332,19 +306,23 @@ void InlineFormattingContext::resetGeometryForClampedContent(const InlineItemRan
 
 bool InlineFormattingContext::createDisplayContentForLineFromCachedContent(const ConstraintsForInlineContent& constraints, const InlineLayoutState& inlineLayoutState, InlineLayoutResult& layoutResult)
 {
-    if (!m_maximumIntrinsicWidthResultForSingleLine)
+    auto& inlineFormattingState = formattingState();
+
+    if (!inlineFormattingState.maximumIntrinsicWidthLayoutResult())
         return false;
+
+    auto& maximumIntrinsicWidthResultForSingleLine = inlineFormattingState.maximumIntrinsicWidthLayoutResult();
     auto horizontalAvailableSpace = constraints.horizontal().logicalWidth;
-    if (m_maximumIntrinsicWidthResultForSingleLine->constraint > horizontalAvailableSpace) {
-        m_maximumIntrinsicWidthResultForSingleLine = { };
+    if (maximumIntrinsicWidthResultForSingleLine->constraint > horizontalAvailableSpace) {
+        inlineFormattingState.clearMaximumIntrinsicWidthLayoutResult();
         return false;
     }
     if (!inlineLayoutState.parentBlockLayoutState().floatingState().isEmpty()) {
-        m_maximumIntrinsicWidthResultForSingleLine = { };
+        inlineFormattingState.clearMaximumIntrinsicWidthLayoutResult();
         return false;
     }
 
-    auto& lineBreakingResult = m_maximumIntrinsicWidthResultForSingleLine->result;
+    auto& lineBreakingResult = maximumIntrinsicWidthResultForSingleLine->result;
     auto restoreTrimmedTrailingWhitespaceIfApplicable = [&] {
         if (root().style().lineBreak() != LineBreak::AfterWhiteSpace || !lineBreakingResult.trimmedTrailingWhitespaceWidth)
             return;
@@ -352,7 +330,7 @@ bool InlineFormattingContext::createDisplayContentForLineFromCachedContent(const
             return;
         if (!Line::restoreTrimmedTrailingWhitespace(lineBreakingResult.trimmedTrailingWhitespaceWidth, lineBreakingResult.inlineContent)) {
             ASSERT_NOT_REACHED();
-            m_maximumIntrinsicWidthResultForSingleLine = { };
+            inlineFormattingState.clearMaximumIntrinsicWidthLayoutResult();
             return;
         }
         lineBreakingResult.contentGeometry.logicalWidth += lineBreakingResult.trimmedTrailingWhitespaceWidth;

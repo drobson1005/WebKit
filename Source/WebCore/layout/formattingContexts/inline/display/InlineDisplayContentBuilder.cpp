@@ -451,10 +451,12 @@ void InlineDisplayContentBuilder::processNonBidiContent(const LineLayoutResult& 
 #endif
     auto writingMode = root().style().writingMode();
     auto contentStartInVisualOrder = m_displayLine.topLeft();
+    Vector<size_t> blockLevelOutOfFlowBoxList;
 
     appendRootInlineBoxDisplayBox(flipRootInlineBoxRectToVisualForWritingMode(lineBox.logicalRectForRootInlineBox(), writingMode), lineBox.rootInlineBox().hasContent(), boxes);
 
-    for (auto& lineRun : lineLayoutResult.inlineContent) {
+    for (size_t index = 0; index < lineLayoutResult.inlineContent.size(); ++index) {
+        auto& lineRun = lineLayoutResult.inlineContent[index];
         auto& layoutBox = lineRun.layoutBox();
 
         auto visualRectRelativeToRoot = [&](auto logicalRect) {
@@ -498,11 +500,18 @@ void InlineDisplayContentBuilder::processNonBidiContent(const LineLayoutResult& 
             continue;
         }
         if (lineRun.isOpaque()) {
-            // Set geometry for this opaque box.
+            auto& boxGeometry = formattingState().boxGeometry(layoutBox);
+            if (layoutBox.style().isOriginalDisplayInlineType()) {
+                auto logicalTopLeft = lineBox.logicalRectForOpaqueBox(lineRun, boxGeometry).topLeft();
+                logicalTopLeft.moveBy(lineBox.logicalRect().topLeft());
+                boxGeometry.setLogicalTopLeft(toLayoutPoint(logicalTopLeft));
+            } else
+                blockLevelOutOfFlowBoxList.append(index);
             continue;
         }
         ASSERT(lineRun.isInlineBoxEnd() || lineRun.isWordBreakOpportunity());
     }
+    setGeometryForBlockLevelOutOfFlowBoxes(blockLevelOutOfFlowBoxList, lineBox, lineLayoutResult.inlineContent);
 }
 
 struct DisplayBoxTree {
@@ -682,9 +691,10 @@ void InlineDisplayContentBuilder::processBidiContent(const LineLayoutResult& lin
     auto hasInlineBox = false;
     auto createDisplayBoxesInVisualOrder = [&] {
 
-        auto rootInlineBoxVidsualRectInInlineDirection = lineBox.logicalRectForRootInlineBox();
-        rootInlineBoxVidsualRectInInlineDirection.setLeft(m_displayLine.contentLogicalLeftIgnoringInlineDirection());
-        appendRootInlineBoxDisplayBox(flipRootInlineBoxRectToVisualForWritingMode(rootInlineBoxVidsualRectInInlineDirection, root().style().writingMode()), lineBox.rootInlineBox().hasContent(), boxes);
+        Vector<size_t> blockLevelOutOfFlowBoxList;
+        auto rootInlineBoxVisualRectInInlineDirection = lineBox.logicalRectForRootInlineBox();
+        rootInlineBoxVisualRectInInlineDirection.setLeft(m_displayLine.contentLogicalLeftIgnoringInlineDirection());
+        appendRootInlineBoxDisplayBox(flipRootInlineBoxRectToVisualForWritingMode(rootInlineBoxVisualRectInInlineDirection, root().style().writingMode()), lineBox.rootInlineBox().hasContent(), boxes);
 
         auto contentRightInInlineDirectionVisualOrder = contentStartInInlineDirectionVisualOrder;
         auto& inlineContent = lineLayoutResult.inlineContent;
@@ -765,11 +775,18 @@ void InlineDisplayContentBuilder::processBidiContent(const LineLayoutResult& lin
                 continue;
             }
             if (lineRun.isOpaque()) {
-                // Set geometry for this opaque box.
+                auto& boxGeometry = formattingState().boxGeometry(layoutBox);
+                if (layoutBox.style().isOriginalDisplayInlineType()) {
+                    auto logicalTopLeft = lineBox.logicalRectForOpaqueBox(lineRun, boxGeometry).topLeft();
+                    logicalTopLeft.moveBy(lineBox.logicalRect().topLeft());
+                    boxGeometry.setLogicalTopLeft(toLayoutPoint(logicalTopLeft));
+                } else
+                    blockLevelOutOfFlowBoxList.append(visualOrder);
                 continue;
             }
             ASSERT_NOT_REACHED();
         }
+        setGeometryForBlockLevelOutOfFlowBoxes(blockLevelOutOfFlowBoxList, lineBox, inlineContent, lineLayoutResult.directionality.visualOrderList);
     };
     createDisplayBoxesInVisualOrder();
 
@@ -866,6 +883,33 @@ void InlineDisplayContentBuilder::collectInkOverflowForInlineBoxes(InlineDisplay
             accumulatedInkOverflowRect = displayBox.inkOverflow();
         else
             accumulatedInkOverflowRect.expandToContain(displayBox.inkOverflow());
+    }
+}
+
+void InlineDisplayContentBuilder::setGeometryForBlockLevelOutOfFlowBoxes(const Vector<size_t> indexList, const LineBox& lineBox, const Line::RunList& lineRuns, const Vector<int32_t>& visualOrderList)
+{
+    auto& formattingContext = this->formattingContext();
+    auto outOfFlowContentHasPreviousInFlowSiblingWithContentOrDecoration = false;
+
+    for (size_t i = 0; i < indexList.size(); ++i) {
+        auto outOfFlowBoxIndex = indexList[i];
+        ASSERT(outOfFlowBoxIndex < lineRuns.size());
+
+        auto hasPreviousInFlowContent = [&] {
+            if (outOfFlowContentHasPreviousInFlowSiblingWithContentOrDecoration)
+                return true;
+            for (size_t runIndex = i ? outOfFlowBoxIndex + 1 : 0; runIndex < outOfFlowBoxIndex; ++runIndex) {
+                auto& previousRun = visualOrderList.isEmpty() ? lineRuns[runIndex] : lineRuns[visualOrderList[runIndex]];
+                if (Line::Run::isContentfulOrHasDecoration(previousRun, formattingContext)) {
+                    outOfFlowContentHasPreviousInFlowSiblingWithContentOrDecoration = true;
+                    return true;
+                }
+            }
+            return false;
+        };
+        // Block level boxes are placed either at the start of the line or "under" depending whether they have previous inflow sibling.
+        auto logicalTop = hasPreviousInFlowContent() ? lineBox.logicalRect().bottom() : lineBox.logicalRect().top();
+        formattingState().boxGeometry(lineRuns[outOfFlowBoxIndex].layoutBox()).setLogicalTopLeft({ constraints().horizontal().logicalLeft, logicalTop });
     }
 }
 

@@ -1309,50 +1309,6 @@ static Ref<CSSValue> fontVariantLigaturesPropertyValue(FontVariantLigatures comm
     return CSSValueList::createSpaceSeparated(WTFMove(valueList));
 }
 
-static Ref<CSSValue> fontVariantPositionPropertyValue(FontVariantPosition position)
-{
-    CSSValueID valueID = CSSValueNormal;
-    switch (position) {
-    case FontVariantPosition::Normal:
-        break;
-    case FontVariantPosition::Subscript:
-        valueID = CSSValueSub;
-        break;
-    case FontVariantPosition::Superscript:
-        valueID = CSSValueSuper;
-        break;
-    }
-    return CSSPrimitiveValue::create(valueID);
-}
-
-static Ref<CSSValue> fontVariantCapsPropertyValue(FontVariantCaps caps)
-{
-    CSSValueID valueID = CSSValueNormal;
-    switch (caps) {
-    case FontVariantCaps::Normal:
-        break;
-    case FontVariantCaps::Small:
-        valueID = CSSValueSmallCaps;
-        break;
-    case FontVariantCaps::AllSmall:
-        valueID = CSSValueAllSmallCaps;
-        break;
-    case FontVariantCaps::Petite:
-        valueID = CSSValuePetiteCaps;
-        break;
-    case FontVariantCaps::AllPetite:
-        valueID = CSSValueAllPetiteCaps;
-        break;
-    case FontVariantCaps::Unicase:
-        valueID = CSSValueUnicase;
-        break;
-    case FontVariantCaps::Titling:
-        valueID = CSSValueTitlingCaps;
-        break;
-    }
-    return CSSPrimitiveValue::create(valueID);
-}
-
 static Ref<CSSValue> fontVariantNumericPropertyValue(FontVariantNumericFigure figure, FontVariantNumericSpacing spacing, FontVariantNumericFraction fraction, FontVariantNumericOrdinal ordinal, FontVariantNumericSlashedZero slashedZero)
 {
     if (figure == FontVariantNumericFigure::Normal && spacing == FontVariantNumericSpacing::Normal && fraction == FontVariantNumericFraction::Normal && ordinal == FontVariantNumericOrdinal::Normal && slashedZero == FontVariantNumericSlashedZero::Normal)
@@ -1731,10 +1687,9 @@ static Ref<CSSValue> valueForPathOperation(const RenderStyle& style, const PathO
 
     case PathOperation::Ray: {
         auto& ray = downcast<RayPathOperation>(*operation);
-
         auto angle = CSSPrimitiveValue::create(ray.angle(), CSSUnitType::CSS_DEG);
-
-        return CSSRayValue::create(WTFMove(angle), valueIDForRaySize(ray.size()), ray.isContaining());
+        RefPtr<CSSValuePair> position = ray.position().x().isAuto() ? nullptr : RefPtr { CSSValuePair::createNoncoalescing(Ref { zoomAdjustedPixelValueForLength(ray.position().x(), style) }, Ref { zoomAdjustedPixelValueForLength(ray.position().y(), style) }) };
+        return CSSRayValue::create(WTFMove(angle), valueIDForRaySize(ray.size()), ray.isContaining(), WTFMove(position));
     }
     }
 
@@ -3804,15 +3759,17 @@ RefPtr<CSSValue> ComputedStyleExtractor::valueForPropertyInStyle(const RenderSty
     case CSSPropertyFontVariantLigatures:
         return fontVariantLigaturesPropertyValue(style.fontDescription().variantCommonLigatures(), style.fontDescription().variantDiscretionaryLigatures(), style.fontDescription().variantHistoricalLigatures(), style.fontDescription().variantContextualAlternates());
     case CSSPropertyFontVariantPosition:
-        return fontVariantPositionPropertyValue(style.fontDescription().variantPosition());
+        return createConvertingToCSSValueID(style.fontDescription().variantPosition());
     case CSSPropertyFontVariantCaps:
-        return fontVariantCapsPropertyValue(style.fontDescription().variantCaps());
+        return createConvertingToCSSValueID(style.fontDescription().variantCaps());
     case CSSPropertyFontVariantNumeric:
         return fontVariantNumericPropertyValue(style.fontDescription().variantNumericFigure(), style.fontDescription().variantNumericSpacing(), style.fontDescription().variantNumericFraction(), style.fontDescription().variantNumericOrdinal(), style.fontDescription().variantNumericSlashedZero());
     case CSSPropertyFontVariantAlternates:
         return fontVariantAlternatesPropertyValue(style.fontDescription().variantAlternates());
     case CSSPropertyFontVariantEastAsian:
         return fontVariantEastAsianPropertyValue(style.fontDescription().variantEastAsianVariant(), style.fontDescription().variantEastAsianWidth(), style.fontDescription().variantEastAsianRuby());
+    case CSSPropertyFontVariantEmoji:
+        return createConvertingToCSSValueID(style.fontDescription().variantEmoji());
     case CSSPropertyZIndex:
         if (style.hasAutoSpecifiedZIndex())
             return CSSPrimitiveValue::create(CSSValueAuto);
@@ -3918,18 +3875,19 @@ RefPtr<CSSValue> ComputedStyleExtractor::valueForPropertyInStyle(const RenderSty
             return nullptr;
         return valueForNinePieceImageQuad(style.borderImage().borderSlices(), style);
     case CSSPropertyWebkitMaskBoxImage:
-        return valueForNinePieceImage(propertyID, style.maskBoxImage(), style);
-    case CSSPropertyWebkitMaskBoxImageOutset:
-        return valueForNinePieceImageQuad(style.maskBoxImage().outset(), style);
-    case CSSPropertyWebkitMaskBoxImageRepeat:
-        return valueForNinePieceImageRepeat(style.maskBoxImage());
-    case CSSPropertyWebkitMaskBoxImageSlice:
-        return valueForNinePieceImageSlice(style.maskBoxImage());
-    case CSSPropertyWebkitMaskBoxImageWidth:
-        return valueForNinePieceImageQuad(style.maskBoxImage().borderSlices(), style);
-    case CSSPropertyWebkitMaskBoxImageSource:
-        if (style.maskBoxImageSource())
-            return style.maskBoxImageSource()->computedStyleValue(style);
+    case CSSPropertyMaskBorder:
+        return valueForNinePieceImage(propertyID, style.maskBorder(), style);
+    case CSSPropertyMaskBorderOutset:
+        return valueForNinePieceImageQuad(style.maskBorder().outset(), style);
+    case CSSPropertyMaskBorderRepeat:
+        return valueForNinePieceImageRepeat(style.maskBorder());
+    case CSSPropertyMaskBorderSlice:
+        return valueForNinePieceImageSlice(style.maskBorder());
+    case CSSPropertyMaskBorderWidth:
+        return valueForNinePieceImageQuad(style.maskBorder().borderSlices(), style);
+    case CSSPropertyMaskBorderSource:
+        if (style.maskBorderSource())
+            return style.maskBorderSource()->computedStyleValue(style);
         return CSSPrimitiveValue::create(CSSValueNone);
     case CSSPropertyWebkitInitialLetter: {
         auto drop = !style.initialLetterDrop() ? CSSPrimitiveValue::create(CSSValueNormal) : CSSPrimitiveValue::create(style.initialLetterDrop());

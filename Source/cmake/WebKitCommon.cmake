@@ -13,6 +13,12 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
         message(STATUS "The CMake build type is: ${CMAKE_BUILD_TYPE}")
     endif ()
 
+    # Exporting compile commands is available for Ninja and Makefile generators
+    # See https://cmake.org/cmake/help/latest/variable/CMAKE_EXPORT_COMPILE_COMMANDS.html
+    if (DEVELOPER_MODE AND (CMAKE_GENERATOR MATCHES "Makefile" OR CMAKE_GENERATOR MATCHES "Ninja"))
+        set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+    endif ()
+
     option(ENABLE_JAVASCRIPTCORE "Enable building JavaScriptCore" ON)
     option(ENABLE_WEBCORE "Enable building JavaScriptCore" ON)
     option(ENABLE_WEBKIT "Enable building WebKit" ON)
@@ -37,8 +43,6 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     # Determine which port will be built
     # -----------------------------------------------------------------------------
     set(ALL_PORTS
-        Efl
-        FTW
         GTK
         JSCOnly
         Mac

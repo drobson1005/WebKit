@@ -112,9 +112,6 @@ public:
 
     Lock& objectGraphLockForContext();
 
-    virtual bool isRenderbuffer() const { return false; }
-    virtual bool isTexture() const { return false; }
-
 protected:
     WebGLObject(WebGLRenderingContextBase&, PlatformGLObject);
 
@@ -122,8 +119,6 @@ protected:
 
     // deleteObjectImpl should be only called once to delete the OpenGL resource.
     virtual void deleteObjectImpl(const AbstractLocker&, GraphicsContextGL*, PlatformGLObject) = 0;
-
-    virtual void detach();
 
     WeakPtr<WebGLRenderingContextBase> m_context;
 private:

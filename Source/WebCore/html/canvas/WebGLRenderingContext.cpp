@@ -32,17 +32,22 @@
 #include "CachedImage.h"
 #include "EXTBlendMinMax.h"
 #include "EXTClipControl.h"
+#include "EXTColorBufferFloat.h"
 #include "EXTColorBufferHalfFloat.h"
+#include "EXTConservativeDepth.h"
 #include "EXTDepthClamp.h"
 #include "EXTDisjointTimerQuery.h"
+#include "EXTDisjointTimerQueryWebGL2.h"
 #include "EXTFloatBlend.h"
 #include "EXTFragDepth.h"
 #include "EXTPolygonOffsetClamp.h"
+#include "EXTRenderSnorm.h"
 #include "EXTShaderTextureLOD.h"
 #include "EXTTextureCompressionBPTC.h"
 #include "EXTTextureCompressionRGTC.h"
 #include "EXTTextureFilterAnisotropic.h"
 #include "EXTTextureMirrorClampToEdge.h"
+#include "EXTTextureNorm16.h"
 #include "EXTsRGB.h"
 #include "HTMLCanvasElement.h"
 #include "HTMLImageElement.h"
@@ -50,8 +55,12 @@
 #include "ImageData.h"
 #include "InspectorInstrumentation.h"
 #include "KHRParallelShaderCompile.h"
+#include "NVShaderNoperspectiveInterpolation.h"
+#include "OESDrawBuffersIndexed.h"
 #include "OESElementIndexUint.h"
 #include "OESFBORenderMipmap.h"
+#include "OESSampleVariables.h"
+#include "OESShaderMultisampleInterpolation.h"
 #include "OESStandardDerivatives.h"
 #include "OESTextureFloat.h"
 #include "OESTextureFloatLinear.h"
@@ -62,6 +71,7 @@
 #include "WebCodecsVideoFrame.h"
 #include "WebCoreOpaqueRootInlines.h"
 #include "WebGLBuffer.h"
+#include "WebGLClipCullDistance.h"
 #include "WebGLColorBufferFloat.h"
 #include "WebGLCompressedTextureASTC.h"
 #include "WebGLCompressedTextureETC.h"
@@ -73,13 +83,18 @@
 #include "WebGLDebugShaders.h"
 #include "WebGLDepthTexture.h"
 #include "WebGLDrawBuffers.h"
+#include "WebGLDrawInstancedBaseVertexBaseInstance.h"
 #include "WebGLFramebuffer.h"
 #include "WebGLLoseContext.h"
 #include "WebGLMultiDraw.h"
+#include "WebGLMultiDrawInstancedBaseVertexBaseInstance.h"
 #include "WebGLPolygonMode.h"
 #include "WebGLProgram.h"
+#include "WebGLProvokingVertex.h"
+#include "WebGLRenderSharedExponent.h"
 #include "WebGLRenderbuffer.h"
 #include "WebGLSampler.h"
+#include "WebGLStencilTexturing.h"
 #include "WebGLTexture.h"
 #include "WebGLTransformFeedback.h"
 #include "WebGLVertexArrayObject.h"
@@ -249,7 +264,7 @@ WebGLAny WebGLRenderingContext::getFramebufferAttachmentParameter(GCGLenum targe
     }
 #endif
 
-    RefPtr object = m_framebufferBinding->getAttachmentObject(attachment);
+    auto object = m_framebufferBinding->getAttachmentObject(attachment);
     if (!object) {
         if (pname == GraphicsContextGL::FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE)
             return static_cast<unsigned>(GraphicsContextGL::NONE);
@@ -259,18 +274,19 @@ WebGLAny WebGLRenderingContext::getFramebufferAttachmentParameter(GCGLenum targe
         return nullptr;
     }
 
+    const bool isTexture = std::holds_alternative<RefPtr<WebGLTexture>>(*object);
     switch (pname) {
     case GraphicsContextGL::FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
-        if (object->isTexture())
+        if (isTexture)
             return static_cast<unsigned>(GraphicsContextGL::TEXTURE);
         return static_cast<unsigned>(GraphicsContextGL::RENDERBUFFER);
     case GraphicsContextGL::FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:
-        if (object->isTexture())
-            return static_pointer_cast<WebGLTexture>(WTFMove(object));
-        return static_pointer_cast<WebGLRenderbuffer>(WTFMove(object));
+        if (isTexture)
+            return std::get<RefPtr<WebGLTexture>>(WTFMove(*object));
+        return std::get<RefPtr<WebGLRenderbuffer>>(WTFMove(*object));
     case GraphicsContextGL::FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
     case GraphicsContextGL::FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
-        if (!object->isTexture())
+        if (!isTexture)
             break;
         return m_context->getFramebufferAttachmentParameteri(target, attachment, pname);
     case GraphicsContextGL::FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:

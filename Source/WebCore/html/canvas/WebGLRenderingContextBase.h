@@ -534,7 +534,7 @@ protected:
     RefPtr<Image> drawImageIntoBuffer(Image&, int width, int height, int deviceScaleFactor, const char* functionName);
 
 #if ENABLE(VIDEO)
-    RefPtr<Image> videoFrameToImage(HTMLVideoElement&, BackingStoreCopy, const char* functionName);
+    RefPtr<Image> videoFrameToImage(HTMLVideoElement&, const char* functionName);
 #endif
 
     WebGLTexture::TextureExtensionFlag textureExtensionFlags() const;
@@ -621,7 +621,7 @@ protected:
         LRUImageBufferCache(int capacity);
         // Returns pointer to a cleared image buffer that is owned by the cache. The pointer is valid until next call.
         // Using fillOperator == CompositeOperator::Copy can be used to omit the clear of the buffer.
-        ImageBuffer* imageBuffer(const IntSize&, DestinationColorSpace, CompositeOperator fillOperator = CompositeOperator::SourceOver);
+        RefPtr<ImageBuffer> imageBuffer(const IntSize&, DestinationColorSpace, CompositeOperator fillOperator = CompositeOperator::SourceOver);
     private:
         void bubbleToFront(size_t idx);
         Vector<std::optional<std::pair<DestinationColorSpace, Ref<ImageBuffer>>>> m_buffers;
@@ -670,7 +670,6 @@ protected:
     bool m_isGLES2Compliant;
     bool m_isDepthStencilSupported;
 
-    bool m_synthesizedErrorsToConsole { true };
     int m_numGLErrorsToConsoleAllowed;
 
     bool m_preventBufferClearForInspector { false };
@@ -681,6 +680,7 @@ protected:
     // Enabled extension objects.
     // FIXME: Move some of these to WebGLRenderingContext, the ones not needed for WebGL2
     RefPtr<ANGLEInstancedArrays> m_angleInstancedArrays;
+    RefPtr<EXTBlendFuncExtended> m_extBlendFuncExtended;
     RefPtr<EXTBlendMinMax> m_extBlendMinMax;
     RefPtr<EXTClipControl> m_extClipControl;
     RefPtr<EXTColorBufferFloat> m_extColorBufferFloat;
@@ -938,9 +938,6 @@ protected:
 
     // Helper function to validate blend equation mode.
     virtual bool validateBlendEquation(const char* functionName, GCGLenum) = 0;
-
-    // Helper function to validate blend func factors.
-    bool validateBlendFuncFactors(const char* functionName, GCGLenum src, GCGLenum dst);
 
     // Helper function to validate a GL capability.
     virtual bool validateCapability(const char* functionName, GCGLenum);

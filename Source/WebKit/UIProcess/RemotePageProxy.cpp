@@ -31,14 +31,17 @@
 #include "FormDataReference.h"
 #include "FrameInfoData.h"
 #include "HandleMessage.h"
+#include "NativeWebMouseEvent.h"
 #include "NavigationActionData.h"
 #include "RemotePageDrawingAreaProxy.h"
 #include "RemotePageVisitedLinkStoreRegistration.h"
 #include "WebFrameProxy.h"
+#include "WebPageMessages.h"
 #include "WebPageProxy.h"
 #include "WebPageProxyMessages.h"
 #include "WebProcessMessages.h"
 #include "WebProcessProxy.h"
+#include <WebCore/RemoteMouseEventData.h>
 
 namespace WebKit {
 
@@ -52,12 +55,15 @@ RemotePageProxy::RemotePageProxy(WebPageProxy& page, WebProcessProxy& process, c
         m_messageReceiverRegistration.transferMessageReceivingFrom(*registrationToTransfer, *this);
     else
         m_messageReceiverRegistration.startReceivingMessages(m_process, m_webPageID, *this);
+
+    m_process->addRemotePageProxy(*this);
+
     page.addRemotePageProxy(domain, *this);
 }
 
 void RemotePageProxy::injectPageIntoNewProcess()
 {
-    auto* page = m_page.get();
+    RefPtr page = m_page.get();
     if (!page) {
         ASSERT_NOT_REACHED();
         return;
@@ -71,13 +77,14 @@ void RemotePageProxy::injectPageIntoNewProcess()
 
     auto parameters = page->creationParameters(m_process, *drawingArea);
     parameters.subframeProcessFrameTreeCreationParameters = page->frameTreeCreationParameters();
-    parameters.isProcessSwap = true; // FIXME: This should be a parameter to creationParameters rather than doctoring up the parameters afterwards.
+    parameters.isProcessSwap = true; // FIXME: This should be a parameter to creationParameters rather than doctoring up the parameters afterwards. <rdar://116201784>
     parameters.topContentInset = 0;
     m_process->send(Messages::WebProcess::CreateWebPage(m_webPageID, parameters), 0);
 }
 
 RemotePageProxy::~RemotePageProxy()
 {
+    m_process->removeRemotePageProxy(*this);
     if (m_page)
         m_page->removeRemotePageProxy(m_domain);
 }
@@ -85,12 +92,12 @@ RemotePageProxy::~RemotePageProxy()
 void RemotePageProxy::didReceiveMessage(IPC::Connection& connection, IPC::Decoder& decoder)
 {
 #if HAVE(VISIBILITY_PROPAGATION_VIEW)
-    // FIXME: This needs to be handled correctly in a way that doesn't cause assertions or crashes..
+    // FIXME: This needs to be handled correctly in a way that doesn't cause assertions or crashes. <rdar://116202187>
     if (decoder.messageName() == Messages::WebPageProxy::DidCreateContextInWebProcessForVisibilityPropagation::name())
         return;
 #endif
 
-    // FIXME: Removing this will be necessary to getting layout tests to work with site isolation.
+    // FIXME: Removing this will be necessary to getting layout tests to work with site isolation. <rdar://116202187>
     if (decoder.messageName() == Messages::WebPageProxy::HandleMessage::name())
         return;
 
@@ -180,6 +187,17 @@ bool RemotePageProxy::didReceiveSyncMessage(IPC::Connection& connection, IPC::De
         return m_page->didReceiveSyncMessage(connection, decoder, encoder);
 
     return false;
+}
+
+void RemotePageProxy::sendMouseEvent(const WebCore::FrameIdentifier& frameID, const NativeWebMouseEvent& event, std::optional<Vector<SandboxExtensionHandle>>&& sandboxExtensions)
+{
+    sendWithAsyncReply(Messages::WebPage::MouseEvent(frameID, event, sandboxExtensions), [this, protectedThis = Ref { *this }, sandboxExtensions = WTFMove(sandboxExtensions)] (std::optional<WebEventType> eventType, bool handled, std::optional<WebCore::RemoteMouseEventData> remoteMouseEventData) mutable {
+        if (!m_page)
+            return;
+        if (!eventType)
+            return;
+        m_page->handleMouseEventReply(*eventType, handled, remoteMouseEventData, WTFMove(sandboxExtensions));
+    });
 }
 
 }

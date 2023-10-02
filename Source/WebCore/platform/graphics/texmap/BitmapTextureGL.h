@@ -26,7 +26,6 @@
 #include "BitmapTexture.h"
 #include "ClipStack.h"
 #include "FilterOperation.h"
-#include "Image.h"
 #include "IntSize.h"
 #include "TextureMapperContextAttributes.h"
 #include "TextureMapperGL.h"
@@ -37,6 +36,7 @@ namespace WebCore {
 class TextureMapper;
 class TextureMapperGL;
 class FilterOperation;
+class NativeImage;
 
 #if OS(WINDOWS)
 #define USE_TEXMAP_DEPTH_STENCIL_BUFFER 1
@@ -62,23 +62,22 @@ public:
     virtual uint32_t id() const { return m_id; }
     uint32_t textureTarget() const { return GL_TEXTURE_2D; }
     IntSize textureSize() const { return m_textureSize; }
-    void updateContents(Image*, const IntRect&, const IntPoint&) override;
+    void updateContents(NativeImage*, const IntRect&, const IntPoint&) override;
     void updateContents(const void*, const IntRect& target, const IntPoint& sourceOffset, int bytesPerLine) override;
     bool isBackedByOpenGL() const override { return true; }
 
-    RefPtr<BitmapTexture> applyFilters(TextureMapper&, const FilterOperations&, bool defersLastFilter) override;
+    RefPtr<BitmapTexture> applyFilters(TextureMapper&, const FilterOperations&, bool defersLastFilterPass) override;
     struct FilterInfo {
-        RefPtr<FilterOperation> filter;
-        unsigned pass;
-        RefPtr<BitmapTexture> contentTexture;
+        RefPtr<const FilterOperation> filter;
 
-        FilterInfo(RefPtr<FilterOperation>&& f = nullptr, unsigned p = 0, RefPtr<BitmapTexture>&& t = nullptr)
+        FilterInfo(RefPtr<const FilterOperation>&& f = nullptr)
             : filter(WTFMove(f))
-            , pass(p)
-            , contentTexture(WTFMove(t))
             { }
     };
+
     const FilterInfo* filterInfo() const { return &m_filterInfo; }
+    void setFilterInfo(FilterInfo&& filterInfo) { m_filterInfo = WTFMove(filterInfo); }
+
     ClipStack& clipStack() { return m_clipStack; }
 
     GLint internalFormat() const { return m_internalFormat; }
@@ -101,10 +100,6 @@ private:
     ClipStack m_clipStack;
     TextureMapperContextAttributes m_contextAttributes;
     TextureMapperGL::Flags m_colorConvertFlags { TextureMapperGL::NoFlag };
-
-#if ENABLE(WEBGL)
-    RefPtr<Image> m_pendingContents { nullptr };
-#endif
 
     void clearIfNeeded();
     void createFboIfNeeded();

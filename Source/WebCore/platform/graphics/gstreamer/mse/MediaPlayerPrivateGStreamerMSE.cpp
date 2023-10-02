@@ -140,6 +140,8 @@ void MediaPlayerPrivateGStreamerMSE::play()
 {
     GST_DEBUG_OBJECT(pipeline(), "Play requested");
     m_isPaused = false;
+    if (!m_playbackRate && m_playbackRatePausedState == PlaybackRatePausedState::ManuallyPaused)
+        m_playbackRatePausedState = PlaybackRatePausedState::RatePaused;
     updateStates();
 }
 
@@ -147,6 +149,7 @@ void MediaPlayerPrivateGStreamerMSE::pause()
 {
     GST_DEBUG_OBJECT(pipeline(), "Pause requested");
     m_isPaused = true;
+    m_playbackRatePausedState = PlaybackRatePausedState::ManuallyPaused;
     updateStates();
 }
 
@@ -192,7 +195,11 @@ bool MediaPlayerPrivateGStreamerMSE::doSeek(const SeekTarget& target, float rate
     // Notify MediaSource and have new frames enqueued (when they're available).
     // Seek should only continue once the seekToTarget completionhandler has run.
     // This will also add support for fastSeek once done (see webkit.org/b/260607)
-    m_mediaSource->seekToTarget(target, [](const MediaTime&) { });
+    m_mediaSource->waitForTarget(target, [this, weakThis = WeakPtr { this }](const MediaTime& time) {
+        if (!weakThis)
+            return;
+        m_mediaSource->seekToTime(time, [] { });
+    });
     return true;
 }
 
@@ -270,8 +277,7 @@ void MediaPlayerPrivateGStreamerMSE::asyncStateChangeDone()
         m_isSeeking = false;
         GST_DEBUG("Seek complete because of preroll. currentMediaTime = %s", currentMediaTime().toString().utf8().data());
         // By calling timeChanged(), m_isSeeking will be checked an a "seeked" event will be emitted.
-        if (auto player = m_player.get())
-            player->timeChanged();
+        timeChanged(currentMediaTime());
     }
 
     propagateReadyStateToPlayer();
@@ -294,12 +300,14 @@ void MediaPlayerPrivateGStreamerMSE::sourceSetup(GstElement* sourceElement)
 
 void MediaPlayerPrivateGStreamerMSE::updateStates()
 {
-    bool shouldBePlaying = !m_isPaused && readyState() >= MediaPlayer::ReadyState::HaveFutureData;
+    bool shouldBePlaying = (!m_isPaused && readyState() >= MediaPlayer::ReadyState::HaveFutureData && m_playbackRatePausedState != PlaybackRatePausedState::RatePaused)
+        || m_playbackRatePausedState == PlaybackRatePausedState::ShouldMoveToPlaying;
     GST_DEBUG_OBJECT(pipeline(), "shouldBePlaying = %s, m_isPipelinePlaying = %s", boolForPrinting(shouldBePlaying), boolForPrinting(m_isPipelinePlaying));
     if (shouldBePlaying && !m_isPipelinePlaying) {
         if (!changePipelineState(GST_STATE_PLAYING))
             GST_ERROR_OBJECT(pipeline(), "Setting the pipeline to PLAYING failed");
         m_isPipelinePlaying = true;
+        m_playbackRatePausedState = PlaybackRatePausedState::Playing;
     } else if (!shouldBePlaying && m_isPipelinePlaying) {
         if (!changePipelineState(GST_STATE_PAUSED))
             GST_ERROR_OBJECT(pipeline(), "Setting the pipeline to PAUSED failed");

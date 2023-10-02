@@ -311,7 +311,9 @@ JSC_DEFINE_JIT_OPERATION(operationObjectAssignObject, void, (JSGlobalObject* glo
         // https://bugs.webkit.org/show_bug.cgi?id=187837
 
         // Do not clear since Vector::clear shrinks the backing store.
-        if (objectAssignFast(vm, target, source, properties, values))
+        bool objectAssignFastSucceeded = objectAssignFast(globalObject, target, source, properties, values);
+        RETURN_IF_EXCEPTION(scope, void());
+        if (objectAssignFastSucceeded)
             return;
     }
 
@@ -342,7 +344,9 @@ JSC_DEFINE_JIT_OPERATION(operationObjectAssignUntyped, void, (JSGlobalObject* gl
 
         Vector<RefPtr<UniquedStringImpl>, 8> properties;
         MarkedArgumentBuffer values;
-        if (objectAssignFast(vm, target, source, properties, values))
+        bool objectAssignFastSucceeded = objectAssignFast(globalObject, target, source, properties, values);
+        RETURN_IF_EXCEPTION(scope, void());
+        if (objectAssignFastSucceeded)
             return;
     }
 
@@ -1156,14 +1160,6 @@ JSC_DEFINE_JIT_OPERATION(operationArraySpliceExtract, EncodedJSValue, (JSGlobalO
     auto scope = DECLARE_THROW_SCOPE(vm);
 
     uint64_t length = base->length();
-    if (!length) {
-        scope.release();
-        setLength(globalObject, vm, base, length);
-        constexpr bool throwException = true;
-        base->setLength(globalObject, 0, throwException);
-        return JSValue::encode(jsUndefined());
-    }
-
     uint64_t actualStart = 0;
     int64_t startInt64 = start;
     if (startInt64 < 0) {
@@ -1183,7 +1179,7 @@ JSC_DEFINE_JIT_OPERATION(operationArraySpliceExtract, EncodedJSValue, (JSGlobalO
     std::pair<SpeciesConstructResult, JSObject*> speciesResult = speciesConstructArray(globalObject, base, actualDeleteCount);
     EXCEPTION_ASSERT(!!scope.exception() == (speciesResult.first == SpeciesConstructResult::Exception));
     if (speciesResult.first == SpeciesConstructResult::Exception)
-        return JSValue::encode(jsUndefined());
+        return { };
 
     JSValue result;
     if (LIKELY(speciesResult.first == SpeciesConstructResult::FastPath)) {

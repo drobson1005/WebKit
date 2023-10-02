@@ -309,6 +309,12 @@ void StringDumper::visit(AssignmentStatement& statement)
     m_out.print(";");
 }
 
+void StringDumper::visit(CallStatement& statement)
+{
+    visit(statement.call());
+    m_out.print(";");
+}
+
 void StringDumper::visit(CompoundAssignmentStatement& statement)
 {
     m_out.print(m_indent);
@@ -396,7 +402,7 @@ void StringDumper::visit(ForStatement& statement)
 }
 
 // Types
-void StringDumper::visit(ArrayTypeName& type)
+void StringDumper::visit(ArrayTypeExpression& type)
 {
     m_out.print("array");
     if (type.maybeElementType()) {
@@ -410,19 +416,20 @@ void StringDumper::visit(ArrayTypeName& type)
     }
 }
 
-void StringDumper::visit(NamedTypeName& type)
-{
-    m_out.print(type.name());
-}
-
-void StringDumper::visit(ParameterizedTypeName& type)
+void StringDumper::visit(ElaboratedTypeExpression& type)
 {
     m_out.print(type.base(), "<");
-    visit(type.elementType());
+    bool first = true;
+    for (auto& argument : type.arguments()) {
+        if (!first)
+            m_out.print(", ");
+        first = false;
+        visit(argument);
+    }
     m_out.print(">");
 }
 
-void StringDumper::visit(ReferenceTypeName& type)
+void StringDumper::visit(ReferenceTypeExpression& type)
 {
     visit(type.type());
     m_out.print("&");
@@ -452,11 +459,7 @@ void StringDumper::visit(StructureMember& member)
 
 void StringDumper::visit(VariableQualifier& qualifier)
 {
-    constexpr ASCIILiteral accessMode[]= { "read"_s, "write"_s, "read_write"_s };
-    constexpr ASCIILiteral storageClass[] = { "function"_s, "private"_s, "workgroup"_s, "uniform"_s, "storage"_s };
-    auto sc = WTF::enumToUnderlyingType(qualifier.storageClass());
-    auto am = WTF::enumToUnderlyingType(qualifier.accessMode());
-    m_out.print("<", storageClass[sc], ",", accessMode[am], ">");
+    m_out.print("<", qualifier.addressSpace(), ",", qualifier.accessMode(), ">");
 }
 
 void dumpAST(ShaderModule& shaderModule)

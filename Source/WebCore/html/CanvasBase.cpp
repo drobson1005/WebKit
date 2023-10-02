@@ -53,11 +53,9 @@ static std::atomic<size_t> s_activePixelMemory { 0 };
 namespace WebCore {
 
 #if USE(CG)
-// FIXME: It seems strange that the default quality is not the one that is literally named "default".
-// Should fix names to make this easier to understand, or write an excellent comment here explaining why not.
-const InterpolationQuality defaultInterpolationQuality = InterpolationQuality::Low;
+constexpr InterpolationQuality defaultInterpolationQuality = InterpolationQuality::Low;
 #else
-const InterpolationQuality defaultInterpolationQuality = InterpolationQuality::Default;
+constexpr InterpolationQuality defaultInterpolationQuality = InterpolationQuality::Medium;
 #endif
 
 static std::optional<size_t> maxCanvasAreaForTesting;
@@ -300,67 +298,50 @@ RefPtr<ImageBuffer> CanvasBase::setImageBuffer(RefPtr<ImageBuffer>&& buffer) con
     return returnBuffer;
 }
 
-GraphicsClient* CanvasBase::graphicsClient() const
-{
-    if (scriptExecutionContext()->isDocument() && downcast<Document>(scriptExecutionContext())->page())
-        return &downcast<Document>(scriptExecutionContext())->page()->chrome();
-    if (is<WorkerGlobalScope>(scriptExecutionContext()))
-        return downcast<WorkerGlobalScope>(scriptExecutionContext())->workerClient();
-
-    return nullptr;
-}
-
 bool CanvasBase::shouldAccelerate(const IntSize& size) const
 {
-    auto checkedArea = size.area<RecordOverflow>();
-    if (checkedArea.hasOverflowed())
-        return false;
-
-    return shouldAccelerate(checkedArea.value());
+    return shouldAccelerate(size.unclampedArea());
 }
 
-bool CanvasBase::shouldAccelerate(unsigned area) const
+bool CanvasBase::shouldAccelerate(uint64_t area) const
 {
-    if (area > scriptExecutionContext()->settingsValues().maximumAccelerated2dCanvasSize)
-        return false;
-
 #if USE(IOSURFACE_CANVAS_BACKING_STORE)
-    return scriptExecutionContext()->settingsValues().canvasUsesAcceleratedDrawing;
+    if (!scriptExecutionContext()->settingsValues().canvasUsesAcceleratedDrawing)
+        return false;
+    if (area < scriptExecutionContext()->settingsValues().minimumAccelerated2DContextArea)
+        return false;
+    return true;
 #else
+    UNUSED_PARAM(area);
     return false;
 #endif
 }
 
-RefPtr<ImageBuffer> CanvasBase::allocateImageBuffer(bool usesDisplayListDrawing, bool avoidBackendSizeCheckForTesting) const
+RefPtr<ImageBuffer> CanvasBase::allocateImageBuffer() const
 {
-    auto checkedArea = size().area<RecordOverflow>();
-
-    if (checkedArea.hasOverflowed() || checkedArea > maxCanvasArea()) {
+    uint64_t area = size().unclampedArea();
+    if (!area)
+        return nullptr;
+    if (area > maxCanvasArea()) {
         auto message = makeString("Canvas area exceeds the maximum limit (width * height > ", maxCanvasArea(), ").");
         scriptExecutionContext()->addConsoleMessage(MessageSource::JS, MessageLevel::Warning, message);
         return nullptr;
     }
 
-    unsigned area = checkedArea.value();
-    if (!area)
-        return nullptr;
-
     OptionSet<ImageBufferOptions> bufferOptions;
     if (shouldAccelerate(area))
         bufferOptions.add(ImageBufferOptions::Accelerated);
-    // FIXME: Add a new setting for DisplayList drawing on canvas.
-    if (usesDisplayListDrawing || scriptExecutionContext()->settingsValues().displayListDrawingEnabled)
-        bufferOptions.add(ImageBufferOptions::UseDisplayList);
 
-    auto [colorSpace, pixelFormat] = [&] {
-        if (renderingContext())
-            return std::pair { renderingContext()->colorSpace(), renderingContext()->pixelFormat() };
-        return std::pair { DestinationColorSpace::SRGB(), PixelFormat::BGRA8 };
-    }();
-    ImageBufferCreationContext context = { };
-    context.graphicsClient = graphicsClient();
-    context.avoidIOSurfaceSizeCheckInWebProcessForTesting = avoidBackendSizeCheckForTesting;
-    return ImageBuffer::create(size(), RenderingPurpose::Canvas, 1, colorSpace, pixelFormat, bufferOptions, context);
+    auto colorSpace = DestinationColorSpace::SRGB();
+    auto pixelFormat = PixelFormat::BGRA8;
+
+    if (auto* context = renderingContext()) {
+        bufferOptions = context->adjustImageBufferOptionsForTesting(bufferOptions);
+        colorSpace = context->colorSpace();
+        pixelFormat = context->pixelFormat();
+    }
+
+    return ImageBuffer::create(size(), RenderingPurpose::Canvas, 1, colorSpace, pixelFormat, bufferOptions, scriptExecutionContext()->graphicsClient());
 }
 
 bool CanvasBase::shouldInjectNoiseBeforeReadback() const

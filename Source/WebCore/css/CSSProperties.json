@@ -476,6 +476,7 @@
             "codegen-properties": {
                 "high-priority": true,
                 "parser-function": "consumeDisplay",
+                "parser-function-requires-context-mode": true,
                 "parser-grammar-unused": "[ <display-outside> || <display-inside> ] | <display-listitem> | <display-internal> | <display-box> | <display-legacy> | <-webkit-display>",
                 "parser-grammar-unused-reason": "Needs support for '||' groups and '&& groups."
             },
@@ -976,6 +977,7 @@
                 "unicode"
             ],
             "codegen-properties": {
+                "settings-flag": "cssFontVariantEmojiEnabled",
                 "parser-grammar": "<<values>>",
                 "name-for-methods": "VariantEmoji",
                 "font-property": true,
@@ -1387,7 +1389,6 @@
         },
         "alignment-baseline": {
             "values": [
-                "auto",
                 "baseline",
                 "before-edge",
                 "text-before-edge",
@@ -4792,12 +4793,13 @@
         },
         "offset-position": {
             "values": [
+                "normal",
                 "auto"
             ],
             "codegen-properties": {
-                "converter": "PositionOrAuto",
+                "converter": "PositionOrAutoOrNormal",
                 "settings-flag": "cssMotionPathEnabled",
-                "parser-grammar": "auto | <position>"
+                "parser-grammar": "normal | auto | <position>"
             },
             "specification": {
                 "category": "css-motion-path",
@@ -7397,6 +7399,7 @@
         },
         "-webkit-backdrop-filter": {
             "codegen-properties": {
+                "related-property": "backdrop-filter",
                 "conditional-converter": "FilterOperations",
                 "enable-if": "ENABLE_FILTERS_LEVEL_2",
                 "parser-function": "consumeFilter",
@@ -7404,6 +7407,26 @@
                 "parser-function-requires-additional-parameters": ["AllowedFilterFunctions::PixelFilters"],
                 "parser-grammar-unused": "none | <filter-value-list>",
                 "parser-grammar-unused-reason": "Needs support for functional syntax groupings and '+' multipliers."
+            },
+            "status": {
+                "status": "experimental"
+            },
+            "specification": {
+                "category": "css-filters",
+                "url": "https://drafts.fxtf.org/filters-2/#BackdropFilterProperty"
+            }
+        },
+        "backdrop-filter": {
+            "codegen-properties": {
+                "related-property": "-webkit-backdrop-filter",
+                "conditional-converter": "FilterOperations",
+                "enable-if": "ENABLE_FILTERS_LEVEL_2",
+                "parser-function": "consumeFilter",
+                "parser-function-requires-context": true,
+                "parser-function-requires-additional-parameters": ["AllowedFilterFunctions::PixelFilters"],
+                "parser-grammar-unused": "none | <filter-value-list>",
+                "parser-grammar-unused-reason": "Needs support for functional syntax groupings and '+' multipliers.",
+                "settings-flag": "cssUnprefixedBackdropFilterEnabled"
             },
             "status": {
                 "status": "experimental"
@@ -10292,6 +10315,7 @@
         },
         "<shape-box>": {
             "grammar": "<box> | margin-box",
+            "exported": true,
             "specification": {
                 "category": "css-shapes",
                 "url": "https://www.w3.org/TR/css-shapes-1/#typedef-shape-box"

@@ -54,6 +54,7 @@
 #include <wtf/Scope.h>
 #include <wtf/StdSet.h>
 #include <wtf/SuspendableWorkQueue.h>
+#include <wtf/WeakHashSet.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WebKit {
@@ -283,11 +284,6 @@ Seconds OperatingDate::secondsSinceEpoch() const
     return Seconds { dateToDaysFrom1970(m_year, m_month, m_monthDay) * secondsPerDay };
 }
 
-bool OperatingDate::operator==(const OperatingDate& other) const
-{
-    return m_monthDay == other.m_monthDay && m_month == other.m_month && m_year == other.m_year;
-}
-
 bool OperatingDate::operator<(const OperatingDate& other) const
 {
     return secondsSinceEpoch() < other.secondsSinceEpoch();
@@ -311,11 +307,11 @@ static String buildList(const ContainerType& values)
     return builder.toString();
 }
 
-static HashSet<ResourceLoadStatisticsStore*>& allStores()
+static WeakHashSet<ResourceLoadStatisticsStore>& allStores()
 {
     ASSERT(!RunLoop::isMain());
 
-    static NeverDestroyed<HashSet<ResourceLoadStatisticsStore*>> map;
+    static NeverDestroyed<WeakHashSet<ResourceLoadStatisticsStore>> map;
     return map;
 }
 
@@ -335,14 +331,14 @@ ResourceLoadStatisticsStore::ResourceLoadStatisticsStore(WebResourceLoadStatisti
         RELEASE_LOG_ERROR(Network, "%p - ResourceLoadStatisticsStore::turnOnIncrementalAutoVacuum failed, error message: %" PUBLIC_LOG_STRING, this, m_database.lastErrorMsg());
 
     includeTodayAsOperatingDateIfNecessary();
-    allStores().add(this);
+    allStores().add(*this);
 }
 
 ResourceLoadStatisticsStore::~ResourceLoadStatisticsStore()
 {
     ASSERT(!RunLoop::isMain());
     close();
-    allStores().remove(this);
+    allStores().remove(*this);
 }
 
 void ResourceLoadStatisticsStore::openITPDatabase()
@@ -1023,8 +1019,8 @@ void ResourceLoadStatisticsStore::openAndUpdateSchemaIfNecessary()
 void ResourceLoadStatisticsStore::interruptAllDatabases()
 {
     ASSERT(!RunLoop::isMain());
-    for (auto store : allStores())
-        store->interrupt();
+    for (auto& store : allStores())
+        store.interrupt();
 }
 
 bool ResourceLoadStatisticsStore::isEmpty() const

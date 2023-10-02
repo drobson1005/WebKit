@@ -515,17 +515,8 @@ void WebProcessPool::createGPUProcessConnection(WebProcessProxy& webProcessProxy
 #endif
 
     parameters.isLockdownModeEnabled = webProcessProxy.lockdownMode() == WebProcessProxy::LockdownMode::Enabled;
-    parameters.isWebGPUEnabled = WTF::anyOf(webProcessProxy.pages(), [](const auto& page) {
-        return page->preferences().webGPUEnabled();
-    });
-    parameters.isWebGLEnabled = WTF::anyOf(webProcessProxy.pages(), [](const auto& page) {
-        return page->preferences().webGLEnabled();
-    });
-    parameters.isDOMRenderingEnabled = WTF::anyOf(webProcessProxy.pages(), [](const auto& page) {
-        return page->preferences().useGPUProcessForDOMRenderingEnabled();
-    });
     parameters.allowTestOnlyIPC = webProcessProxy.allowTestOnlyIPC();
-    
+
     ensureGPUProcess().createGPUProcessConnection(webProcessProxy, WTFMove(connectionIdentifier), WTFMove(parameters));
 }
 #endif
@@ -1864,8 +1855,8 @@ void WebProcessPool::processForNavigation(WebPageProxy& page, WebFrameProxy& fra
                 completionHandler(Ref { page.mainFrame()->process() }, nullptr, "Found process for the same registration domain as mainFrame domain"_s);
                 return;
             }
-            if (auto* remotePageProxy = page.remotePageProxyForRegistrableDomain(registrableDomain)) {
-                completionHandler(Ref { remotePageProxy->process() }, nullptr, "Found process for the same registration domain"_s);
+            if (auto* process = page.processForRegistrableDomain(registrableDomain)) {
+                completionHandler(Ref { *process }, nullptr, "Found process for the same registration domain"_s);
                 return;
             }
         }
@@ -1950,7 +1941,7 @@ std::tuple<Ref<WebProcessProxy>, SuspendedPageProxy*, ASCIILiteral> WebProcessPo
     if (m_automationSession)
         return { WTFMove(sourceProcess), nullptr, "An automation session is active"_s };
 
-    // FIXME: We ought to be able to re-use processes that haven't committed anything with site isolation enabled, but cross-site redirects are tricky.
+    // FIXME: We ought to be able to re-use processes that haven't committed anything with site isolation enabled, but cross-site redirects are tricky. <rdar://116203552>
     if (!sourceProcess->hasCommittedAnyProvisionalLoads() && !page.preferences().siteIsolationEnabled()) {
         tryPrewarmWithDomainInformation(sourceProcess, targetRegistrableDomain);
         return { WTFMove(sourceProcess), nullptr, "Process has not yet committed any provisional loads"_s };

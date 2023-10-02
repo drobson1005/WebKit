@@ -30,6 +30,7 @@
 
 #include "WebExtensionContextParameters.h"
 #include "WebExtensionContextProxyMessages.h"
+#include "WebPageProxy.h"
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 
@@ -57,30 +58,43 @@ WebExtensionContext::WebExtensionContext()
 
 WebExtensionContextParameters WebExtensionContext::parameters() const
 {
-    // FIXME: <https://webkit.org/b/246488> Send over localized dictionary to the WebProcess.
-
     return WebExtensionContextParameters {
         identifier(),
         baseURL(),
         uniqueIdentifier(),
+        extension().serializeLocalization(),
         extension().serializeManifest(),
         extension().manifestVersion(),
         inTestingMode()
     };
 }
 
-WeakHashSet<WebProcessProxy> WebExtensionContext::processes(WebExtensionEventListenerType type) const
+bool WebExtensionContext::pageListensForEvent(const WebPageProxy& page, WebExtensionEventListenerType type, WebExtensionContentWorldType contentWorldType) const
 {
-    WeakHashSet<WebProcessProxy> processes;
-    auto page = m_eventListenerPages.find(type);
-    if (page != m_eventListenerPages.end()) {
-        for (auto entry : page->value) {
-            Ref process = entry.key.process();
-            if (process->canSendMessage())
-                processes.add(process);
-        }
+    auto pagesEntry = m_eventListenerPages.find({ type, contentWorldType });
+    if (pagesEntry == m_eventListenerPages.end())
+        return false;
+
+    if (!pagesEntry->value.contains(page))
+        return false;
+
+    return page.process().canSendMessage();
+}
+
+WebExtensionContext::WebProcessProxySet WebExtensionContext::processes(WebExtensionEventListenerType type, WebExtensionContentWorldType contentWorldType) const
+{
+    auto pagesEntry = m_eventListenerPages.find({ type, contentWorldType });
+    if (pagesEntry == m_eventListenerPages.end())
+        return { };
+
+    WebProcessProxySet result;
+    for (auto entry : pagesEntry->value) {
+        Ref process = entry.key.process();
+        if (process->canSendMessage())
+            result.add(WTFMove(process));
     }
-    return processes;
+
+    return result;
 }
 
 } // namespace WebKit

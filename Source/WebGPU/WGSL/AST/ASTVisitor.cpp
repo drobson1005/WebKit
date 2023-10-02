@@ -209,6 +209,15 @@ void Visitor::visit(Expression& expression)
     case AST::NodeKind::Unsigned32Literal:
         checkErrorAndVisit(downcast<AST::Unsigned32Literal>(expression));
         break;
+    case AST::NodeKind::ArrayTypeExpression:
+        checkErrorAndVisit(downcast<AST::ArrayTypeExpression>(expression));
+        break;
+    case AST::NodeKind::ElaboratedTypeExpression:
+        checkErrorAndVisit(downcast<AST::ElaboratedTypeExpression>(expression));
+        break;
+    case AST::NodeKind::ReferenceTypeExpression:
+        checkErrorAndVisit(downcast<AST::ReferenceTypeExpression>(expression));
+        break;
     default:
         ASSERT_NOT_REACHED("Unhandled Expression");
     }
@@ -324,6 +333,9 @@ void Visitor::visit(Statement& statement)
     case AST::NodeKind::BreakStatement:
         checkErrorAndVisit(downcast<AST::BreakStatement>(statement));
         break;
+    case AST::NodeKind::CallStatement:
+        checkErrorAndVisit(downcast<AST::CallStatement>(statement));
+        break;
     case AST::NodeKind::CompoundAssignmentStatement:
         checkErrorAndVisit(downcast<AST::CompoundAssignmentStatement>(statement));
         break;
@@ -379,6 +391,11 @@ void Visitor::visit(AST::AssignmentStatement& assignmentStatement)
 
 void Visitor::visit(AST::BreakStatement&)
 {
+}
+
+void Visitor::visit(AST::CallStatement& callStatement)
+{
+    checkErrorAndVisit(callStatement.call());
 }
 
 void Visitor::visit(AST::CompoundAssignmentStatement& compoundAssignmentStatement)
@@ -478,44 +495,21 @@ void Visitor::visit(AST::StructureMember& structureMember)
 
 // Types
 
-void Visitor::visit(AST::TypeName& typeName)
+void Visitor::visit(AST::ArrayTypeExpression& arrayTypeExpression)
 {
-    switch (typeName.kind()) {
-    case AST::NodeKind::ArrayTypeName:
-        checkErrorAndVisit(downcast<AST::ArrayTypeName>(typeName));
-        break;
-    case AST::NodeKind::NamedTypeName:
-        checkErrorAndVisit(downcast<AST::NamedTypeName>(typeName));
-        break;
-    case AST::NodeKind::ParameterizedTypeName:
-        checkErrorAndVisit(downcast<AST::ParameterizedTypeName>(typeName));
-        break;
-    case AST::NodeKind::ReferenceTypeName:
-        checkErrorAndVisit(downcast<AST::ReferenceTypeName>(typeName));
-        break;
-    default:
-        ASSERT_NOT_REACHED("Unhandled TypeName");
-    }
+    maybeCheckErrorAndVisit(arrayTypeExpression.maybeElementType());
+    maybeCheckErrorAndVisit(arrayTypeExpression.maybeElementCount());
 }
 
-void Visitor::visit(AST::ArrayTypeName& arrayTypeName)
+void Visitor::visit(AST::ElaboratedTypeExpression& elaboratedExpression)
 {
-    maybeCheckErrorAndVisit(arrayTypeName.maybeElementType());
-    maybeCheckErrorAndVisit(arrayTypeName.maybeElementCount());
+    for (auto& argument : elaboratedExpression.arguments())
+        checkErrorAndVisit(argument);
 }
 
-void Visitor::visit(AST::NamedTypeName&)
+void Visitor::visit(AST::ReferenceTypeExpression& referenceTypeExpression)
 {
-}
-
-void Visitor::visit(AST::ParameterizedTypeName& parameterizedTypeName)
-{
-    checkErrorAndVisit(parameterizedTypeName.elementType());
-}
-
-void Visitor::visit(AST::ReferenceTypeName& referenceTypeName)
-{
-    checkErrorAndVisit(referenceTypeName.type());
+    checkErrorAndVisit(referenceTypeExpression.type());
 }
 
 // Variable
@@ -531,21 +525,6 @@ void Visitor::visit(AST::Variable& variable)
 
 void Visitor::visit(VariableQualifier&)
 {
-}
-
-std::optional<unsigned> extractInteger(const AST::Expression& expression)
-{
-    switch (expression.kind()) {
-    case AST::NodeKind::AbstractIntegerLiteral:
-        return { static_cast<unsigned>(downcast<AST::AbstractIntegerLiteral>(expression).value()) };
-    case AST::NodeKind::Unsigned32Literal:
-        return { static_cast<unsigned>(downcast<AST::Unsigned32Literal>(expression).value()) };
-    case AST::NodeKind::Signed32Literal:
-        return { static_cast<unsigned>(downcast<AST::Signed32Literal>(expression).value()) };
-    default:
-        // FIXME: handle constants and overrides
-        return std::nullopt;
-    }
 }
 
 } // namespace WGSL::AST

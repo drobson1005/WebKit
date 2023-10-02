@@ -94,7 +94,6 @@ const TestFeatures& TestOptions::defaults()
             { "DirectoryUploadEnabled", true },
             { "EventHandlerDrivenSmoothKeyboardScrollingEnabled", eventHandlerDrivenSmoothKeyboardScrollingEnabledValue },
             { "ExposeSpeakersEnabled", true },
-            { "FrameFlatteningEnabled", false },
             { "FullScreenEnabled", true },
             { "GenericCueAPIEnabled", false },
             { "HiddenPageCSSAnimationSuspensionEnabled", false },
@@ -135,6 +134,9 @@ const TestFeatures& TestOptions::defaults()
             { "WebAuthenticationEnabled", true },
 #if ENABLE(WEBGL) && PLATFORM(COCOA)
             { "WebGLUsingMetal", true },
+#endif
+#if ENABLE(WEBGL)
+            { "WebGLDraftExtensionsEnabled", true },
 #endif
             { "WebRTCRemoteVideoFrameEnabled", true },
             { "XSSAuditorEnabled", false },
@@ -206,6 +208,7 @@ const TestFeatures& TestOptions::defaults()
             { "dragInteractionPolicy", { } },
             { "focusStartsInputSessionPolicy", { } },
             { "jscOptions", { } },
+            { "captionDisplayMode", { } },
             { "standaloneWebApplicationURL", { } },
         };
         features.stringVectorTestRunnerFeatures = {
@@ -265,6 +268,7 @@ const std::unordered_map<std::string, TestHeaderKeyType>& TestOptions::keyTypeMa
         { "dragInteractionPolicy", TestHeaderKeyType::StringTestRunner },
         { "focusStartsInputSessionPolicy", TestHeaderKeyType::StringTestRunner },
         { "jscOptions", TestHeaderKeyType::StringTestRunner },
+        { "captionDisplayMode", TestHeaderKeyType::StringTestRunner },
         { "standaloneWebApplicationURL", TestHeaderKeyType::StringURLTestRunner },
 
         { "language", TestHeaderKeyType::StringVectorTestRunner },

@@ -379,7 +379,6 @@ RefPtr<CSSCalcOperationNode> CSSCalcOperationNode::createSum(Vector<Ref<CSSCalcE
     auto newCategory = determineCategory(values, CalcOperator::Add);
     if (newCategory == CalculationCategory::Other) {
         LOG_WITH_STREAM(Calc, stream << "Failed to create sum node because unable to determine category from " << prettyPrintNodes(values));
-        newCategory = determineCategory(values, CalcOperator::Add);
         return nullptr;
     }
 
@@ -917,12 +916,16 @@ Ref<CSSCalcExpressionNode> CSSCalcOperationNode::simplifyNode(Ref<CSSCalcExpress
                     return false;
             }
 
-            // At the root, preserve the root function by only merging nodes with the same function.
             auto& child = parent.children().first();
             if (!is<CSSCalcOperationNode>(child))
                 return false;
 
+            // At the root, calc(otherFunction()) should always collapse to otherFunction().
             auto parentFunction = functionFromOperator(parent.calcOperator());
+            if (parentFunction == CSSValueCalc)
+                return true;
+
+            // At the root, preserve the root function by merging nodes with the same function.
             auto childFunction = functionFromOperator(downcast<CSSCalcOperationNode>(child.get()).calcOperator());
             return childFunction == parentFunction;
         };
@@ -1060,13 +1063,6 @@ void CSSCalcOperationNode::collectComputedStyleDependencies(ComputedStyleDepende
 {
     for (auto& child : m_children)
         child->collectComputedStyleDependencies(dependencies);
-}
-
-bool CSSCalcOperationNode::convertingToLengthHasRequiredConversionData(int lengthConversion, const CSSToLengthConversionData& conversionData) const
-{
-    return WTF::anyOf(m_children, [lengthConversion, &conversionData] (auto& child) {
-        return child->convertingToLengthHasRequiredConversionData(lengthConversion, conversionData);
-    });
 }
 
 void CSSCalcOperationNode::buildCSSText(const CSSCalcExpressionNode& node, StringBuilder& builder)

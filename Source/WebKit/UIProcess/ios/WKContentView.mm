@@ -515,7 +515,7 @@ static WebCore::FloatBoxExtent floatBoxExtent(UIEdgeInsets insets)
     return unobscuredContentRect;
 }
 
-- (void)didUpdateVisibleRect:(CGRect)visibleContentRect
+- (std::optional<WebKit::VisibleContentRectUpdateInfo>)createVisibleContentRectUpdateInfoFromVisibleRect:(CGRect)visibleContentRect
     unobscuredRect:(CGRect)unobscuredContentRect
     contentInsets:(UIEdgeInsets)contentInsets
     unobscuredRectInScrollViewCoordinates:(CGRect)unobscuredRectInScrollViewCoordinates
@@ -529,7 +529,7 @@ static WebCore::FloatBoxExtent floatBoxExtent(UIEdgeInsets insets)
 {
     auto drawingArea = _page->drawingArea();
     if (!drawingArea)
-        return;
+        return std::nullopt;
 
     MonotonicTime timestamp = MonotonicTime::now();
     WebCore::VelocityData velocityData;
@@ -544,7 +544,7 @@ static WebCore::FloatBoxExtent floatBoxExtent(UIEdgeInsets insets)
     CGRect unobscuredContentRectRespectingInputViewBounds = [self _computeUnobscuredContentRectRespectingInputViewBounds:unobscuredContentRect inputViewBounds:inputViewBounds];
     WebCore::FloatRect fixedPositionRectForLayout = _page->computeLayoutViewportRect(unobscuredContentRect, unobscuredContentRectRespectingInputViewBounds, _page->layoutViewportRect(), zoomScale, WebCore::LayoutViewportConstraint::ConstrainedToDocumentRect);
 
-    WebKit::VisibleContentRectUpdateInfo visibleContentRectUpdateInfo(
+    return WebKit::VisibleContentRectUpdateInfo {
         visibleContentRect,
         unobscuredContentRect,
         floatBoxExtent(contentInsets),
@@ -555,25 +555,46 @@ static WebCore::FloatBoxExtent floatBoxExtent(UIEdgeInsets insets)
         floatBoxExtent(unobscuredSafeAreaInsets),
         zoomScale,
         viewStability,
-        _sizeChangedSinceLastVisibleContentRectUpdate,
-        self.webView._allowsViewportShrinkToFit,
-        enclosedInScrollableAncestorView,
+        !!_sizeChangedSinceLastVisibleContentRectUpdate,
+        !!self.webView._allowsViewportShrinkToFit,
+        !!enclosedInScrollableAncestorView,
         velocityData,
-        downcast<WebKit::RemoteLayerTreeDrawingAreaProxy>(*drawingArea).lastCommittedLayerTreeTransactionID());
+        downcast<WebKit::RemoteLayerTreeDrawingAreaProxy>(*drawingArea).lastCommittedLayerTreeTransactionID()
+    };
+}
 
-    LOG_WITH_STREAM(VisibleRects, stream << "-[WKContentView didUpdateVisibleRect]" << visibleContentRectUpdateInfo.dump());
+- (void)didUpdateVisibleRect:(CGRect)visibleContentRect
+    unobscuredRect:(CGRect)unobscuredContentRect
+    contentInsets:(UIEdgeInsets)contentInsets
+    unobscuredRectInScrollViewCoordinates:(CGRect)unobscuredRectInScrollViewCoordinates
+    obscuredInsets:(UIEdgeInsets)obscuredInsets
+    unobscuredSafeAreaInsets:(UIEdgeInsets)unobscuredSafeAreaInsets
+    inputViewBounds:(CGRect)inputViewBounds
+    scale:(CGFloat)zoomScale minimumScale:(CGFloat)minimumScale
+    viewStability:(OptionSet<WebKit::ViewStabilityFlag>)viewStability
+    enclosedInScrollableAncestorView:(BOOL)enclosedInScrollableAncestorView
+    sendEvenIfUnchanged:(BOOL)sendEvenIfUnchanged
+{
+    auto visibleContentRectUpdateInfo = [self createVisibleContentRectUpdateInfoFromVisibleRect:visibleContentRect unobscuredRect:unobscuredContentRect contentInsets:contentInsets unobscuredRectInScrollViewCoordinates:unobscuredRectInScrollViewCoordinates obscuredInsets:obscuredInsets unobscuredSafeAreaInsets:unobscuredSafeAreaInsets inputViewBounds:inputViewBounds scale:zoomScale minimumScale:minimumScale viewStability:viewStability enclosedInScrollableAncestorView:enclosedInScrollableAncestorView sendEvenIfUnchanged:sendEvenIfUnchanged];
+
+    if (!visibleContentRectUpdateInfo)
+        return;
+
+    bool inStableState = viewStability.isEmpty();
+
+    LOG_WITH_STREAM(VisibleRects, stream << "-[WKContentView didUpdateVisibleRect]" << visibleContentRectUpdateInfo->dump());
 
     bool wasStableState = _page->inStableState();
 
-    _page->updateVisibleContentRects(visibleContentRectUpdateInfo, sendEvenIfUnchanged);
+    _page->updateVisibleContentRects(*visibleContentRectUpdateInfo, sendEvenIfUnchanged);
 
     auto layoutViewport = _page->unconstrainedLayoutViewportRect();
     _page->adjustLayersForLayoutViewport(_page->unobscuredContentRect().location(), layoutViewport, _page->displayedContentScale());
 
     _sizeChangedSinceLastVisibleContentRectUpdate = NO;
 
-    drawingArea->updateDebugIndicator();
-    
+    _page->drawingArea()->updateDebugIndicator();
+
     [self updateFixedClippingView:layoutViewport];
 
     if (wasStableState && !inStableState)
@@ -1022,7 +1043,7 @@ static void storeAccessibilityRemoteConnectionInformation(id element, pid_t pid,
         RELEASE_LOG(Printing, "Beginning to generate print preview image. Page count = %zu", [formatterAttributes pageCount]);
 
         // Begin generating the image in expectation of a (eventual) request for the drawn data.
-        auto callbackID = retainedSelf->_page->drawToImage([formatterAttributes frameID], [formatterAttributes printInfo], [isPrintingOnBackgroundThread, printFormatter, retainedSelf](WebKit::ShareableBitmap::Handle&& imageHandle) mutable {
+        auto callbackID = retainedSelf->_page->drawToImage([formatterAttributes frameID], [formatterAttributes printInfo], [isPrintingOnBackgroundThread, printFormatter, retainedSelf](std::optional<WebKit::ShareableBitmap::Handle>&& imageHandle) mutable {
             if (!isPrintingOnBackgroundThread)
                 retainedSelf->_printRenderingCallbackID = { };
             else {
@@ -1030,12 +1051,12 @@ static void storeAccessibilityRemoteConnectionInformation(id element, pid_t pid,
                 [retainedSelf->_pendingBackgroundPrintFormatters removeObject:printFormatter.get()];
             }
 
-            if (imageHandle.isNull()) {
+            if (!imageHandle) {
                 [printFormatter _setPrintPreviewImage:nullptr];
                 return;
             }
 
-            auto bitmap = WebKit::ShareableBitmap::create(WTFMove(imageHandle), WebKit::SharedMemory::Protection::ReadOnly);
+            auto bitmap = WebKit::ShareableBitmap::create(WTFMove(*imageHandle), WebKit::SharedMemory::Protection::ReadOnly);
             if (!bitmap) {
                 [printFormatter _setPrintPreviewImage:nullptr];
                 return;

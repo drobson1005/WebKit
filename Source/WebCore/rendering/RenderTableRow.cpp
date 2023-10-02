@@ -48,19 +48,17 @@ using namespace HTMLNames;
 WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTableRow);
 
 RenderTableRow::RenderTableRow(Element& element, RenderStyle&& style)
-    : RenderBox(element, WTFMove(style), 0)
+    : RenderBox(Type::TableRow, element, WTFMove(style), 0)
     , m_rowIndex(unsetRowIndex)
 {
     setInline(false);
-    setIsTableRow();
 }
 
 RenderTableRow::RenderTableRow(Document& document, RenderStyle&& style)
-    : RenderBox(document, WTFMove(style), 0)
+    : RenderBox(Type::TableRow, document, WTFMove(style), 0)
     , m_rowIndex(unsetRowIndex)
 {
     setInline(false);
-    setIsTableRow();
 }
 
 void RenderTableRow::willBeRemovedFromTree(IsInternalMove isInternalMove)
@@ -90,7 +88,7 @@ void RenderTableRow::styleDidChange(StyleDifference diff, const RenderStyle* old
 
     // If border was changed, notify table.
     if (RenderTable* table = this->table()) {
-        if (oldStyle && oldStyle->border() != style().border())
+        if (oldStyle && !oldStyle->borderIsEquivalentForPainting(style()))
             table->invalidateCollapsedBorders();
 
         if (oldStyle && diff == StyleDifference::Layout && needsLayout() && table->collapseBorders() && borderWidthChanged(oldStyle, &style())) {

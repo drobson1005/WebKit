@@ -76,6 +76,7 @@
 #include <WebCore/HTMLNames.h>
 #include <WebCore/HTMLSelectElement.h>
 #include <WebCore/HTMLTextAreaElement.h>
+#include <WebCore/HandleMouseEventResult.h>
 #include <WebCore/ImageBuffer.h>
 #include <WebCore/JSCSSStyleDeclaration.h>
 #include <WebCore/JSElement.h>
@@ -89,6 +90,7 @@
 #include <WebCore/RemoteDOMWindow.h>
 #include <WebCore/RemoteFrame.h>
 #include <WebCore/RemoteFrameView.h>
+#include <WebCore/RemoteMouseEventData.h>
 #include <WebCore/RenderLayerCompositor.h>
 #include <WebCore/RenderTreeAsText.h>
 #include <WebCore/RenderView.h>
@@ -119,7 +121,7 @@ static uint64_t generateListenerID()
     return uniqueListenerID++;
 }
 
-// FIXME: Remove receivedMainFrameIdentifierFromUIProcess in favor of a more correct way of sending frame tree deltas to each process.
+// FIXME: Remove receivedMainFrameIdentifierFromUIProcess in favor of a more correct way of sending frame tree deltas to each process. <rdar://116201135>
 void WebFrame::initWithCoreMainFrame(WebPage& page, Frame& coreFrame, bool receivedMainFrameIdentifierFromUIProcess)
 {
     if (!receivedMainFrameIdentifierFromUIProcess)
@@ -157,7 +159,7 @@ Ref<WebFrame> WebFrame::createRemoteSubframe(WebPage& page, WebFrame& parent, We
     auto coreFrame = RemoteFrame::createSubframe(*page.corePage(), WTFMove(client), frameID, *parent.coreFrame());
     frame->m_coreFrame = coreFrame.get();
 
-    // FIXME: Pass in a name and call FrameTree::setName here.
+    // FIXME: Pass in a name and call FrameTree::setName here. <rdar://116201307>
     return frame;
 }
 
@@ -198,7 +200,7 @@ WebPage* WebFrame::page() const
     return page ? WebPage::fromCorePage(*page) : nullptr;
 }
 
-WebFrame* WebFrame::fromCoreFrame(const Frame& frame)
+RefPtr<WebFrame> WebFrame::fromCoreFrame(const Frame& frame)
 {
     if (auto* localFrame = dynamicDowncast<LocalFrame>(frame)) {
         auto* webLocalFrameLoaderClient = toWebLocalFrameLoaderClient(localFrame->loader().client());
@@ -241,7 +243,8 @@ FrameInfoData WebFrame::info() const
         m_coreFrame ? m_coreFrame->tree().specifiedName().string() : String(),
         frameID(),
         parent ? std::optional<WebCore::FrameIdentifier> { parent->frameID() } : std::nullopt,
-        getCurrentProcessID()
+        getCurrentProcessID(),
+        isFocused()
     };
 
     return info;
@@ -364,7 +367,7 @@ void WebFrame::didCommitLoadInAnotherProcess(std::optional<WebCore::LayerHosting
     if (!parent)
         newFrame->takeWindowProxyFrom(*localFrame);
     auto remoteFrameView = WebCore::RemoteFrameView::create(newFrame);
-    // FIXME: We need a corresponding setView(nullptr) during teardown to break the ref cycle.
+    // FIXME: We need a corresponding setView(nullptr) during teardown to break the ref cycle. <rdar://116200737>
     newFrame->setView(remoteFrameView.ptr());
     if (ownerRenderer)
         ownerRenderer->setWidget(remoteFrameView.ptr());
@@ -461,7 +464,7 @@ void WebFrame::didReceivePolicyDecision(uint64_t listenerID, PolicyCheckIdentifi
 {
 #if ENABLE(APP_BOUND_DOMAINS)
     if (m_page)
-        m_page->setIsNavigatingToAppBoundDomain(policyDecision.isNavigatingToAppBoundDomain, this);
+        m_page->setIsNavigatingToAppBoundDomain(policyDecision.isNavigatingToAppBoundDomain, Ref { *this });
 #endif
 
     if (!m_coreFrame)
@@ -486,7 +489,7 @@ void WebFrame::didReceivePolicyDecision(uint64_t listenerID, PolicyCheckIdentifi
     m_policyDownloadID = policyDecision.downloadID;
     if (policyDecision.navigationID) {
         auto* localFrame = dynamicDowncast<LocalFrame>(m_coreFrame.get());
-        if (WebDocumentLoader* documentLoader = localFrame ? static_cast<WebDocumentLoader*>(localFrame->loader().policyDocumentLoader()) : nullptr)
+        if (RefPtr documentLoader = localFrame ? static_cast<WebDocumentLoader*>(localFrame->loader().policyDocumentLoader()) : nullptr)
             documentLoader->setNavigationID(policyDecision.navigationID);
     }
 
@@ -693,7 +696,7 @@ String WebFrame::innerText() const
     return localFrame->document()->documentElement()->innerText();
 }
 
-WebFrame* WebFrame::parentFrame() const
+RefPtr<WebFrame> WebFrame::parentFrame() const
 {
     RefPtr localFrame = dynamicDowncast<LocalFrame>(m_coreFrame.get());
     if (!localFrame || !localFrame->ownerElement())
@@ -965,13 +968,13 @@ void WebFrame::stopLoading()
     localFrame->loader().stopForUserCancel();
 }
 
-WebFrame* WebFrame::frameForContext(JSContextRef context)
+RefPtr<WebFrame> WebFrame::frameForContext(JSContextRef context)
 {
     RefPtr coreFrame = LocalFrame::fromJSContext(context);
     return coreFrame ? WebFrame::fromCoreFrame(*coreFrame) : nullptr;
 }
 
-WebFrame* WebFrame::contentFrameForWindowOrFrameElement(JSContextRef context, JSValueRef value)
+RefPtr<WebFrame> WebFrame::contentFrameForWindowOrFrameElement(JSContextRef context, JSValueRef value)
 {
     RefPtr coreFrame = LocalFrame::contentFrameFromWindowOrFrameElement(context, value);
     return coreFrame ? WebFrame::fromCoreFrame(*coreFrame) : nullptr;
@@ -1106,7 +1109,7 @@ void WebFrame::documentLoaderDetached(uint64_t navigationID)
 }
 
 #if PLATFORM(COCOA)
-RetainPtr<CFDataRef> WebFrame::webArchiveData(FrameFilterFunction callback, void* context)
+RetainPtr<CFDataRef> WebFrame::webArchiveData(FrameFilterFunction callback, void* context, const String& mainResourceFileName)
 {
     Ref document = *coreLocalFrame()->document();
     auto archive = LegacyWebArchive::create(document, [this, callback, context](auto& frame) -> bool {
@@ -1117,7 +1120,7 @@ RetainPtr<CFDataRef> WebFrame::webArchiveData(FrameFilterFunction callback, void
         ASSERT(webFrame);
 
         return callback(toAPI(this), toAPI(webFrame.get()), context);
-    });
+    }, mainResourceFileName);
 
     if (!archive)
         return nullptr;
@@ -1143,7 +1146,7 @@ bool WebFrame::shouldEnableInAppBrowserPrivacyProtections()
 
     bool treeHasNonAppBoundFrame = m_isNavigatingToAppBoundDomain && m_isNavigatingToAppBoundDomain == NavigatingToAppBoundDomain::No;
     if (!treeHasNonAppBoundFrame) {
-        for (WebFrame* frame = this; frame; frame = frame->parentFrame()) {
+        for (RefPtr frame = this; frame; frame = frame->parentFrame()) {
             if (frame->isNavigatingToAppBoundDomain() && frame->isNavigatingToAppBoundDomain() == NavigatingToAppBoundDomain::No) {
                 treeHasNonAppBoundFrame = true;
                 break;
@@ -1209,7 +1212,7 @@ static bool isContextClick(const PlatformMouseEvent& event)
 #if USE(APPKIT)
     return WebEventFactory::shouldBeHandledAsContextClick(event);
 #else
-    return event.button() == WebCore::RightButton;
+    return event.button() == WebCore::MouseButton::Right;
 #endif
 }
 
@@ -1235,7 +1238,7 @@ bool WebFrame::handleContextMenuEvent(const PlatformMouseEvent& platformMouseEve
 }
 #endif
 
-bool WebFrame::handleMouseEvent(const WebMouseEvent& mouseEvent)
+WebCore::HandleMouseEventResult WebFrame::handleMouseEvent(const WebMouseEvent& mouseEvent)
 {
     auto* coreLocalFrame = dynamicDowncast<LocalFrame>(coreFrame());
     if (!coreLocalFrame)
@@ -1253,12 +1256,12 @@ bool WebFrame::handleMouseEvent(const WebMouseEvent& mouseEvent)
             page()->corePage()->contextMenuController().clearContextMenu();
 #endif
 
-        bool handled = coreLocalFrame->eventHandler().handleMousePressEvent(platformMouseEvent);
+        auto mousePressEventResult = coreLocalFrame->eventHandler().handleMousePressEvent(platformMouseEvent);
 #if ENABLE(CONTEXT_MENU_EVENT)
         if (isContextClick(platformMouseEvent))
-            handled = handleContextMenuEvent(platformMouseEvent);
+            mousePressEventResult.setHandled(handleContextMenuEvent(platformMouseEvent));
 #endif
-        return handled;
+        return mousePressEventResult;
     }
     case PlatformEvent::Type::MouseReleased:
         if (mouseEvent.gestureWasCancelled() == GestureWasCancelled::Yes)
@@ -1272,7 +1275,7 @@ bool WebFrame::handleMouseEvent(const WebMouseEvent& mouseEvent)
         // Lion when legacy scrollbars are enabled, WebKit receives mouse events all the time. If it is one
         // of those cases where the page is not active and the mouse is not pressed, then we can fire a more
         // efficient scrollbars-only version of the event.
-        if (!(page()->corePage()->focusController().isActive() || (mouseEvent.button() != WebMouseEventButton::NoButton)))
+        if (!(page()->corePage()->focusController().isActive() || (mouseEvent.button() != WebMouseEventButton::None)))
             return coreLocalFrame->eventHandler().passMouseMovedEventToScrollbars(platformMouseEvent);
 #endif
         return coreLocalFrame->eventHandler().mouseMoved(platformMouseEvent);
@@ -1290,6 +1293,17 @@ bool WebFrame::handleMouseEvent(const WebMouseEvent& mouseEvent)
 
 bool WebFrame::handleKeyEvent(const WebKeyboardEvent& keyboardEvent)
 {
+    auto* coreFrame = coreLocalFrame();
+    if (!coreFrame)
+        return false;
+
+    if (keyboardEvent.type() == WebEventType::Char && keyboardEvent.isSystemKey())
+        return coreFrame->eventHandler().handleAccessKey(platform(keyboardEvent));
+    return coreFrame->eventHandler().keyEvent(platform(keyboardEvent));
+}
+
+bool WebFrame::isFocused() const
+{
     if (!m_coreFrame)
         return false;
 
@@ -1297,10 +1311,7 @@ bool WebFrame::handleKeyEvent(const WebKeyboardEvent& keyboardEvent)
     if (!page)
         return false;
 
-    Ref frame = page->focusController().focusedOrMainFrame();
-    if (keyboardEvent.type() == WebEventType::Char && keyboardEvent.isSystemKey())
-        return frame->eventHandler().handleAccessKey(platform(keyboardEvent));
-    return frame->eventHandler().keyEvent(platform(keyboardEvent));
+    return m_coreFrame->page()->focusController().focusedFrame() == coreFrame();
 }
 
 } // namespace WebKit

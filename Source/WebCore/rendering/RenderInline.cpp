@@ -64,14 +64,14 @@ namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(RenderInline);
 
-RenderInline::RenderInline(Element& element, RenderStyle&& style)
-    : RenderBoxModelObject(element, WTFMove(style), RenderInlineFlag)
+RenderInline::RenderInline(Type type, Element& element, RenderStyle&& style)
+    : RenderBoxModelObject(type, element, WTFMove(style), RenderInlineFlag)
 {
     setChildrenInline(true);
 }
 
-RenderInline::RenderInline(Document& document, RenderStyle&& style)
-    : RenderBoxModelObject(document, WTFMove(style), RenderInlineFlag)
+RenderInline::RenderInline(Type type, Document& document, RenderStyle&& style)
+    : RenderBoxModelObject(type, document, WTFMove(style), RenderInlineFlag)
 {
     setChildrenInline(true);
 }
@@ -196,8 +196,7 @@ void RenderInline::styleDidChange(StyleDifference diff, const RenderStyle* oldSt
 
     if (diff >= StyleDifference::Repaint) {
         if (auto* lineLayout = LayoutIntegration::LineLayout::containing(*this)) {
-            auto shouldInvalidateLineLayoutPath = selfNeedsLayout() || !LayoutIntegration::LineLayout::canUseForAfterInlineBoxStyleChange(*this, diff);
-            if (shouldInvalidateLineLayoutPath)
+            if (selfNeedsLayout())
                 lineLayout->flow().invalidateLineLayoutPath();
             else
                 lineLayout->updateStyle(*this, *oldStyle);

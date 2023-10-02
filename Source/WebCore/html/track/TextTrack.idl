@@ -37,9 +37,9 @@ enum TextTrackKind { "subtitles", "captions", "descriptions", "chapters", "metad
     SkipVTableValidation,
     Exposed=Window
 ] interface TextTrack : EventTarget {
-    [ImplementedAs=kindForBindings] attribute TextTrackKind kind;
+    [ImplementedAs=kindForBindings] readonly attribute TextTrackKind kind;
     readonly attribute DOMString label;
-    [EnabledConditionallyReadWriteBySetting=MediaSourceEnabled] attribute [AtomString] DOMString language;
+    readonly attribute [AtomString] DOMString language;
 
     readonly attribute DOMString id;
     readonly attribute DOMString inBandMetadataTrackDispatchType;
@@ -56,6 +56,4 @@ enum TextTrackKind { "subtitles", "captions", "descriptions", "chapters", "metad
 
     // FIXME: Remove 'non-standard'. See: https://bugs.webkit.org/show_bug.cgi?id=260767 
     readonly attribute VTTRegionList regions;
-    undefined addRegion(VTTRegion region);
-    undefined removeRegion(VTTRegion region);
 };

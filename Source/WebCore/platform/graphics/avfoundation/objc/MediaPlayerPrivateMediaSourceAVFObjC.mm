@@ -173,7 +173,7 @@ MediaPlayerPrivateMediaSourceAVFObjC::MediaPlayerPrivateMediaSourceAVFObjC(Media
 
         if (m_synchronizerSeeking && !m_pendingSeek) {
             m_synchronizerSeeking = false;
-            seekCompleted();
+            maybeCompleteSeek();
         }
 
         if (m_pendingSeek)
@@ -339,9 +339,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::playInternal(std::optional<MonotonicT
     }
 
     ALWAYS_LOG(LOGIDENTIFIER);
-#if PLATFORM(IOS_FAMILY)
     m_mediaSourcePrivate->flushActiveSourceBuffersIfNeeded();
-#endif
     m_playing = true;
     if (!shouldBePlaying())
         return;
@@ -418,22 +416,50 @@ bool MediaPlayerPrivateMediaSourceAVFObjC::hasAudio() const
     return m_mediaSourcePrivate->hasAudio();
 }
 
-void MediaPlayerPrivateMediaSourceAVFObjC::setPageIsVisible(bool visible)
+void MediaPlayerPrivateMediaSourceAVFObjC::setPageIsVisible(bool visible, String&& sceneIdentifier)
 {
     if (m_visible == visible)
         return;
 
     ALWAYS_LOG(LOGIDENTIFIER, visible);
     m_visible = visible;
-    if (m_visible)
+    if (m_visible) {
         acceleratedRenderingStateChanged();
 
+        // Rendering may have been interrupted while the page was in a non-visible
+        // state, which would require a flush to resume decoding.
+        if (m_mediaSourcePrivate) {
+            SetForScope(m_flushingActiveSourceBuffersDueToVisibilityChange, true, false);
+            m_mediaSourcePrivate->flushActiveSourceBuffersIfNeeded();
+        }
+    }
+
 #if PLATFORM(VISION)
+    NSError *error = nil;
+    AVAudioSession *session = [PAL::getAVAudioSessionClass() sharedInstance];
     if (!visible) {
-        AVAudioSession *session = [PAL::getAVAudioSessionClass() sharedInstance];
+        if (NSString *sceneId = sceneIdentifier; sceneId.length) {
+            [session setIntendedSpatialExperience:AVAudioSessionSpatialExperienceHeadTracked options:@{
+                @"AVAudioSessionSpatialExperienceOptionSoundStageSize" : @(AVAudioSessionSoundStageSizeAutomatic),
+                @"AVAudioSessionSpatialExperienceOptionAnchoringStrategy" : @(AVAudioSessionAnchoringStrategyScene),
+                @"AVAudioSessionSpatialExperienceOptionSceneIdentifier" : sceneId
+            } error:&error];
+        }
+
         [m_sampleBufferDisplayLayer sampleBufferRenderer].STSLabel = session.spatialTrackingLabel;
-    } else
+    } else {
+        [session setIntendedSpatialExperience:AVAudioSessionSpatialExperienceHeadTracked options:@{
+            @"AVAudioSessionSpatialExperienceOptionSoundStageSize" : @(AVAudioSessionSoundStageSizeAutomatic),
+            @"AVAudioSessionSpatialExperienceOptionAnchoringStrategy" : @(AVAudioSessionAnchoringStrategyAutomatic)
+        } error:&error];
+
         [m_sampleBufferDisplayLayer sampleBufferRenderer].STSLabel = nil;
+    }
+
+    if (error)
+        ALWAYS_LOG(error.localizedDescription.UTF8String);
+#else
+    UNUSED_PARAM(sceneIdentifier);
 #endif
 }
 
@@ -531,8 +557,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::seekInternal()
     m_lastSeekTime = pendingSeek.time;
 
     m_seekState = Seeking;
-    m_mediaSourcePrivate->willSeek();
-    m_mediaSourcePrivate->seekToTarget(pendingSeek, [this, weakThis = WeakPtr { this }] (const MediaTime& seekedTime) {
+    m_mediaSourcePrivate->waitForTarget(pendingSeek, [this, weakThis = WeakPtr { this }] (const MediaTime& seekedTime) {
         if (!weakThis)
             return;
         if (m_seekState != Seeking || seekedTime.isInvalid()) {
@@ -542,22 +567,30 @@ void MediaPlayerPrivateMediaSourceAVFObjC::seekInternal()
         m_lastSeekTime = seekedTime;
 
         ALWAYS_LOG(LOGIDENTIFIER);
-        MediaTime synchronizerTime = PAL::toMediaTime(PAL::CMTimebaseGetTime([m_synchronizer timebase]));
+        MediaTime synchronizerTime = PAL::toMediaTime([m_synchronizer currentTime]);
 
         m_synchronizerSeeking = synchronizerTime != seekedTime;
         ALWAYS_LOG(LOGIDENTIFIER, "seekedTime = ", seekedTime, ", synchronizerTime = ", synchronizerTime, "synchronizer seeking = ", m_synchronizerSeeking);
 
+        if (!m_synchronizerSeeking) {
+            // In cases where the destination seek time precisely matches the synchronizer's existing time
+            // no time jumped notification will be issued. In this case, just notify the MediaPlayer that
+            // the seek completed successfully.
+            maybeCompleteSeek();
+            return;
+        }
+        m_mediaSourcePrivate->willSeek();
         [m_synchronizer setRate:0 time:PAL::toCMTime(seekedTime)];
 
-        // In cases where the destination seek time precisely matches the synchronizer's existing time
-        // no time jumped notification will be issued. In this case, just notify the MediaPlayer that
-        // the seek completed successfully.
-        if (!m_synchronizerSeeking)
-            seekCompleted();
+        m_mediaSourcePrivate->seekToTime(seekedTime, [this, weakThis] {
+            if (!weakThis)
+                return;
+            maybeCompleteSeek();
+        });
     });
 }
 
-void MediaPlayerPrivateMediaSourceAVFObjC::seekCompleted()
+void MediaPlayerPrivateMediaSourceAVFObjC::maybeCompleteSeek()
 {
     if (m_seekState == SeekCompleted)
         return;
@@ -566,16 +599,19 @@ void MediaPlayerPrivateMediaSourceAVFObjC::seekCompleted()
         m_seekState = WaitingForAvailableFame;
         return;
     }
+    m_seekState = Seeking;
     ALWAYS_LOG(LOGIDENTIFIER);
-    m_seekState = SeekCompleted;
-    if (shouldBePlaying())
-        [m_synchronizer setRate:m_rate];
     if (m_synchronizerSeeking) {
         ALWAYS_LOG(LOGIDENTIFIER, "Synchronizer still seeking, bailing out");
         return;
     }
-    if (auto player = m_player.get())
+    m_seekState = SeekCompleted;
+    if (shouldBePlaying())
+        [m_synchronizer setRate:m_rate];
+    if (auto player = m_player.get()) {
+        player->seeked(m_lastSeekTime);
         player->timeChanged();
+    }
 }
 
 bool MediaPlayerPrivateMediaSourceAVFObjC::seeking() const
@@ -915,7 +951,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::ensureLayer()
     @try {
         [m_synchronizer addRenderer:m_sampleBufferDisplayLayer.get()];
     } @catch(NSException *exception) {
-        ERROR_LOG(LOGIDENTIFIER, "-[AVSampleBufferRenderSynchronizer addRenderer:] threw an exception: ", [[exception name] UTF8String], ", reason : ", [[exception reason] UTF8String]);
+        ERROR_LOG(LOGIDENTIFIER, "-[AVSampleBufferRenderSynchronizer addRenderer:] threw an exception: ", exception.name, ", reason : ", exception.reason);
         ASSERT_NOT_REACHED();
 
         setNetworkState(MediaPlayer::NetworkState::DecodeError);
@@ -981,7 +1017,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::destroyDecompressionSession()
 
 bool MediaPlayerPrivateMediaSourceAVFObjC::shouldBePlaying() const
 {
-    return m_playing && !seeking() && allRenderersHaveAvailableSamples() && m_readyState >= MediaPlayer::ReadyState::HaveFutureData;
+    return m_playing && !seeking() && (m_flushingActiveSourceBuffersDueToVisibilityChange || allRenderersHaveAvailableSamples()) && m_readyState >= MediaPlayer::ReadyState::HaveFutureData;
 }
 
 void MediaPlayerPrivateMediaSourceAVFObjC::setHasAvailableVideoFrame(bool flag)
@@ -1000,7 +1036,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::setHasAvailableVideoFrame(bool flag)
     if (player)
         player->firstVideoFrameAvailable();
     if (m_seekState == WaitingForAvailableFame)
-        seekCompleted();
+        maybeCompleteSeek();
 
     if (m_readyStateIsWaitingForAvailableFrame) {
         m_readyStateIsWaitingForAvailableFrame = false;
@@ -1101,6 +1137,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::durationChanged()
 
 void MediaPlayerPrivateMediaSourceAVFObjC::effectiveRateChanged()
 {
+    ALWAYS_LOG(LOGIDENTIFIER, effectiveRate());
     m_playing = effectiveRate() != 0;
     if (auto player = m_player.get())
         player->rateChanged();
@@ -1325,7 +1362,7 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
     @try {
         [m_synchronizer addRenderer:audioRenderer];
     } @catch(NSException *exception) {
-        ERROR_LOG(LOGIDENTIFIER, "-[AVSampleBufferRenderSynchronizer addRenderer:] threw an exception: ", [[exception name] UTF8String], ", reason : ", [[exception reason] UTF8String]);
+        ERROR_LOG(LOGIDENTIFIER, "-[AVSampleBufferRenderSynchronizer addRenderer:] threw an exception: ", exception.name, ", reason : ", exception.reason);
         ASSERT_NOT_REACHED();
 
         setNetworkState(MediaPlayer::NetworkState::DecodeError);

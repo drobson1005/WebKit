@@ -68,6 +68,7 @@ class Identifier;
 class Statement;
 class AssignmentStatement;
 class BreakStatement;
+class CallStatement;
 class CompoundAssignmentStatement;
 class CompoundStatement;
 class ContinueStatement;
@@ -88,19 +89,15 @@ class StructureMember;
 
 class TypeAlias;
 
-class TypeName;
-class ArrayTypeName;
-class NamedTypeName;
-class ParameterizedTypeName;
-class ReferenceTypeName;
+class ArrayTypeExpression;
+class ElaboratedTypeExpression;
+class ReferenceTypeExpression;
 
 class Variable;
 class VariableQualifier;
 
-enum class AccessMode : uint8_t;
 enum class BinaryOperation : uint8_t;
 enum class ParameterRole : uint8_t;
-enum class StorageClass : uint8_t;
 enum class StructureRole : uint8_t;
 enum class UnaryOperation : uint8_t;
 enum class VariableFlavor : uint8_t;

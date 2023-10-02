@@ -58,7 +58,7 @@ inline void Callee::runWithDowncast(const Func& func)
     case CompilationMode::LLIntMode:
         func(static_cast<LLIntCallee*>(this));
         break;
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     case CompilationMode::BBQMode:
         func(static_cast<BBQCallee*>(this));
         break;
@@ -82,7 +82,9 @@ inline void Callee::runWithDowncast(const Func& func)
         func(static_cast<JSEntrypointCallee*>(this));
         break;
     case CompilationMode::JSToWasmICMode:
+#if ENABLE(JIT)
         func(static_cast<JSToWasmICCallee*>(this));
+#endif
         break;
     case CompilationMode::WasmToJSMode:
         func(static_cast<WasmToJSCallee*>(this));
@@ -142,6 +144,7 @@ const HandlerInfo* Callee::handlerForIndex(Instance& instance, unsigned index, c
     return HandlerInfo::handlerForIndex(instance, m_exceptionHandlers, index, tag);
 }
 
+#if ENABLE(JIT)
 JITCallee::JITCallee(Wasm::CompilationMode compilationMode)
     : Callee(compilationMode)
 {
@@ -157,6 +160,7 @@ void JITCallee::setEntrypoint(Wasm::Entrypoint&& entrypoint)
     m_entrypoint = WTFMove(entrypoint);
     NativeCalleeRegistry::singleton().registerCallee(this);
 }
+#endif
 
 WasmToJSCallee::WasmToJSCallee()
     : Callee(Wasm::CompilationMode::WasmToJSMode)
@@ -289,7 +293,7 @@ const WasmInstruction* LLIntCallee::outOfLineJumpTarget(const WasmInstruction* p
     return m_instructions->at(offset + target).ptr();
 }
 
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
 void OptimizingJITCallee::addCodeOrigin(unsigned firstInlineCSI, unsigned lastInlineCSI, const Wasm::ModuleInformation& info, uint32_t functionIndex)
 {
     if (!nameSections.size())

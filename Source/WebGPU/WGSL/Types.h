@@ -26,7 +26,7 @@
 #pragma once
 
 #include "ASTForward.h"
-#include "ASTTypeName.h"
+#include "WGSLEnums.h"
 #include <wtf/HashMap.h>
 #include <wtf/Markable.h>
 #include <wtf/PrintStream.h>
@@ -35,22 +35,8 @@
 namespace WGSL {
 
 class TypeChecker;
+class TypeStore;
 struct Type;
-
-enum class AddressSpace : uint8_t {
-    Function,
-    Private,
-    Workgroup,
-    Uniform,
-    Storage,
-    Handle,
-};
-
-enum class AccessMode : uint8_t {
-    Read,
-    Write,
-    ReadWrite,
-};
 
 namespace Types {
 
@@ -63,7 +49,11 @@ namespace Types {
     f(Void, "void") \
     f(Bool, "bool") \
     f(Sampler, "sampler") \
+    f(SamplerComparison, "sampler_comparion") \
     f(TextureExternal, "texture_external") \
+    f(AccessMode, "access_mode") \
+    f(TexelFormat, "texel_format") \
+    f(AddressSpace, "address_space") \
 
 struct Primitive {
     enum Kind : uint8_t {
@@ -84,13 +74,34 @@ struct Texture {
         TextureCube,
         TextureCubeArray,
         TextureMultisampled2d,
-        TextureStorage1d,
+    };
+
+    const Type* element;
+    Kind kind;
+};
+
+struct TextureStorage {
+    enum class Kind : uint8_t {
+        TextureStorage1d = 1,
         TextureStorage2d,
         TextureStorage2dArray,
         TextureStorage3d,
     };
 
-    const Type* element;
+    Kind kind;
+    TexelFormat format;
+    AccessMode access;
+};
+
+struct TextureDepth {
+    enum class Kind : uint8_t {
+        TextureDepth2d = 1,
+        TextureDepth2dArray,
+        TextureDepthCube,
+        TextureDepthCubeArray,
+        TextureDepthMultisampled2d,
+    };
+
     Kind kind;
 };
 
@@ -126,9 +137,19 @@ struct Reference {
     const Type* element;
 };
 
+struct Pointer {
+    AddressSpace addressSpace;
+    AccessMode accessMode;
+    const Type* element;
+};
+
+struct Atomic {
+    const Type* element;
+};
+
 struct TypeConstructor {
     ASCIILiteral name;
-    std::function<const Type*(AST::ParameterizedTypeName&)> construct;
+    std::function<const Type*(AST::ElaboratedTypeExpression&)> construct;
 };
 
 struct Bottom {
@@ -144,7 +165,11 @@ struct Type : public std::variant<
     Types::Struct,
     Types::Function,
     Types::Texture,
+    Types::TextureStorage,
+    Types::TextureDepth,
     Types::Reference,
+    Types::Pointer,
+    Types::Atomic,
     Types::TypeConstructor,
     Types::Bottom
 > {
@@ -156,7 +181,11 @@ struct Type : public std::variant<
         Types::Struct,
         Types::Function,
         Types::Texture,
+        Types::TextureStorage,
+        Types::TextureDepth,
         Types::Reference,
+        Types::Pointer,
+        Types::Atomic,
         Types::TypeConstructor,
         Types::Bottom
         >::variant;
@@ -171,6 +200,7 @@ ConversionRank conversionRank(const Type* from, const Type* to);
 
 bool isPrimitive(const Type*, Types::Primitive::Kind);
 bool isPrimitiveReference(const Type*, Types::Primitive::Kind);
+const Type* shaderTypeForTexelFormat(TexelFormat, const TypeStore&);
 
 } // namespace WGSL
 
@@ -196,9 +226,4 @@ private:
     String const m_string;
 };
 
-} // namespace WTF
-
-namespace WTF {
-void printInternal(PrintStream&, WGSL::AddressSpace);
-void printInternal(PrintStream&, WGSL::AccessMode);
 } // namespace WTF

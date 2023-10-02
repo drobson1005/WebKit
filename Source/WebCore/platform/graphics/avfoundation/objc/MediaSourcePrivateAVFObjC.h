@@ -74,7 +74,8 @@ public:
     MediaPlayer::ReadyState readyState() const final;
     void setReadyState(MediaPlayer::ReadyState) final;
 
-    void seekToTarget(const SeekTarget&, CompletionHandler<void(const MediaTime&)>&&) final;
+    void waitForTarget(const SeekTarget&, CompletionHandler<void(const MediaTime&)>&&) final;
+    void seekToTime(const MediaTime&, CompletionHandler<void()>&&) final;
 
     MediaTime duration() const;
     const PlatformTimeRanges& buffered();
@@ -92,9 +93,7 @@ public:
     void setVideoLayer(AVSampleBufferDisplayLayer*);
     void setDecompressionSession(WebCoreDecompressionSession*);
 
-#if PLATFORM(IOS_FAMILY)
     void flushActiveSourceBuffersIfNeeded();
-#endif
 
 #if ENABLE(ENCRYPTED_MEDIA)
     void cdmInstanceAttached(CDMInstance&);

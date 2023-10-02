@@ -31,13 +31,14 @@
 #include "FormattingContext.h"
 #include "InlineDisplayContent.h"
 #include "InlineFormattingContext.h"
-#include "InlineFormattingQuirks.h"
 #include "InlineLevelBoxInlines.h"
 #include "InlineLineBoxVerticalAligner.h"
+#include "InlineQuirks.h"
 #include "LayoutBox.h"
 #include "LayoutElementBox.h"
 #include "LengthFunctions.h"
 #include "RenderStyleInlines.h"
+#include "RubyFormattingContext.h"
 
 namespace WebCore {
 namespace Layout {
@@ -56,7 +57,7 @@ InlineLayoutUnit InlineFormattingGeometry::logicalTopForNextLine(const LineLayou
         if (lineLayoutResult.inlineContent.isEmpty())
             return lineLogicalRect.bottom();
         auto& lastRunLayoutBox = lineLayoutResult.inlineContent.last().layoutBox();
-        if (!lastRunLayoutBox.hasFloatClear())
+        if (!lastRunLayoutBox.hasFloatClear() || lastRunLayoutBox.isOutOfFlowPositioned())
             return lineLogicalRect.bottom();
         auto positionWithClearance = floatingContext.verticalPositionWithClearance(lastRunLayoutBox, formattingContext().geometryForBox(lastRunLayoutBox));
         if (!positionWithClearance)
@@ -68,11 +69,10 @@ InlineLayoutUnit InlineFormattingGeometry::logicalTopForNextLine(const LineLayou
         // Floats must have prevented us placing any content on the line.
         // Move next line below the intrusive float(s).
         ASSERT(lineLayoutResult.inlineContent.isEmpty() || lineLayoutResult.inlineContent[0].isLineSpanningInlineBoxStart());
-        ASSERT(lineLayoutResult.floatContent.hasIntrusiveFloat);
         auto nextLineLogicalTop = [&]() -> LayoutUnit {
             if (auto nextLineLogicalTopCandidate = lineLayoutResult.hintForNextLineTopToAvoidIntrusiveFloat)
                 return LayoutUnit { *nextLineLogicalTopCandidate };
-            // We have to have a hit when intrusive floats prevented any inline content placement.
+            // We have to have a hint when intrusive floats prevented any inline content placement.
             ASSERT_NOT_REACHED();
             return LayoutUnit { lineLogicalRect.top() + formattingContext().root().style().computedLineHeight() };
         };
@@ -144,9 +144,9 @@ bool InlineFormattingGeometry::inlineLevelBoxAffectsLineBox(const InlineLevelBox
     if (inlineLevelBox.isListMarker())
         return true;
     if (inlineLevelBox.isInlineBox())
-        return layoutState().inStandardsMode() ? true : formattingContext().formattingQuirks().inlineBoxAffectsLineBox(inlineLevelBox);
+        return layoutState().inStandardsMode() ? true : formattingContext().quirks().inlineBoxAffectsLineBox(inlineLevelBox);
     if (inlineLevelBox.isAtomicInlineLevelBox())
-        return true;
+        return !inlineLevelBox.layoutBox().isRubyAnnotationBox();
     return false;
 }
 
@@ -154,6 +154,7 @@ InlineRect InlineFormattingGeometry::flipVisualRectToLogicalForWritingMode(const
 {
     switch (writingModeToBlockFlowDirection(writingMode)) {
     case BlockFlowDirection::TopToBottom:
+    case BlockFlowDirection::BottomToTop:
         return visualRect;
     case BlockFlowDirection::LeftToRight:
     case BlockFlowDirection::RightToLeft: {
@@ -213,7 +214,7 @@ InlineLayoutUnit InlineFormattingGeometry::initialLineHeight(bool isFirstLine) c
 {
     if (layoutState().inStandardsMode())
         return isFirstLine ? formattingContext().root().firstLineStyle().computedLineHeight() : formattingContext().root().style().computedLineHeight();
-    return formattingContext().formattingQuirks().initialLineHeight();
+    return formattingContext().quirks().initialLineHeight();
 }
 
 FloatingContext::Constraints InlineFormattingGeometry::floatConstraintsForLine(InlineLayoutUnit lineLogicalTop, InlineLayoutUnit contentLogicalHeight, const FloatingContext& floatingContext) const
@@ -363,12 +364,6 @@ InlineLayoutUnit InlineFormattingGeometry::inlineItemWidth(const InlineItem& inl
     if (inlineItem.isOpaque())
         return { };
 
-    // FIXME: The overhang should be computed to not overlap the neighboring runs or overflow the line.
-    if (auto* rubyAdjustments = layoutBox.rubyAdjustments()) {
-        auto& overhang = useFirstLineStyle ? rubyAdjustments->firstLineOverhang : rubyAdjustments->overhang;
-        return boxGeometry.marginBoxWidth() - (overhang.start + overhang.end);
-    }
-
     // Non-replaced inline box (e.g. inline-block)
     return boxGeometry.marginBoxWidth();
 }
@@ -467,6 +462,8 @@ size_t InlineFormattingGeometry::nextWrapOpportunity(size_t startIndex, const In
             return index;
         }
         if (currentItem.isInlineBoxStart() || currentItem.isInlineBoxEnd()) {
+            if (auto nextWrapOpportunityForRuby = RubyFormattingContext::nextWrapOpportunity(index, previousInlineItemIndex, layoutRange, inlineItems))
+                return *nextWrapOpportunityForRuby;
             // Need to see what comes next to decide.
             continue;
         }
@@ -517,7 +514,7 @@ size_t InlineFormattingGeometry::nextWrapOpportunity(size_t startIndex, const In
             // Soft wrap opportunity is at the first inline box that encloses the trailing content.
             for (auto candidateIndex = start + 1; candidateIndex < end; ++candidateIndex) {
                 auto& inlineItem = inlineItems[candidateIndex];
-                ASSERT(inlineItem.isInlineBoxStart() || inlineItem.isInlineBoxEnd() || inlineItem.isOpaque());
+                ASSERT((inlineItem.isInlineBoxStart() || inlineItem.isInlineBoxEnd() || inlineItem.isOpaque()) && !inlineItem.layoutBox().isRuby());
                 if (inlineItem.isInlineBoxStart())
                     inlineBoxStack.append({ &inlineItem.layoutBox(), candidateIndex });
                 else if (inlineItem.isInlineBoxEnd() && !inlineBoxStack.isEmpty())

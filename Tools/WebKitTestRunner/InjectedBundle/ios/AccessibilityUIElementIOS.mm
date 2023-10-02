@@ -98,6 +98,7 @@ typedef void (*AXPostedNotificationCallback)(id element, NSString* notification,
 - (NSString *)accessibilityExpandedTextValue;
 - (NSString *)accessibilitySortDirection;
 - (BOOL)accessibilityIsExpanded;
+- (BOOL)accessibilitySupportsARIAExpanded;
 - (BOOL)accessibilityIsIndeterminate;
 - (NSUInteger)accessibilityBlockquoteLevel;
 - (NSArray *)accessibilityFindMatchingObjects:(NSDictionary *)parameters;
@@ -705,6 +706,11 @@ bool AccessibilityUIElement::isExpanded() const
     return [m_element accessibilityIsExpanded];
 }
 
+bool AccessibilityUIElement::supportsExpanded() const
+{
+    return [m_element accessibilitySupportsARIAExpanded];
+}
+
 bool AccessibilityUIElement::isChecked() const
 {
     return false;
@@ -1036,16 +1042,6 @@ void AccessibilityUIElement::clearSelectedChildren() const
 }
 
 JSRetainPtr<JSStringRef> AccessibilityUIElement::accessibilityValue() const
-{
-    return createJSString();
-}
-
-JSRetainPtr<JSStringRef> AccessibilityUIElement::documentEncoding()
-{
-    return createJSString();
-}
-
-JSRetainPtr<JSStringRef> AccessibilityUIElement::documentURI()
 {
     return createJSString();
 }

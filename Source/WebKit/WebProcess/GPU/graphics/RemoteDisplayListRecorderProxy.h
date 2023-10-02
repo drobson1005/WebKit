@@ -33,6 +33,7 @@
 #include <wtf/WeakPtr.h>
 
 namespace IPC {
+class Signal;
 class Semaphore;
 class StreamClientConnection;
 }
@@ -48,15 +49,10 @@ public:
     RemoteDisplayListRecorderProxy(RemoteImageBufferProxy&, RemoteRenderingBackendProxy&, const WebCore::FloatRect& initialClip, const WebCore::AffineTransform&);
     ~RemoteDisplayListRecorderProxy() = default;
 
-    void convertToLuminanceMask() final;
-    void transformToColorSpace(const WebCore::DestinationColorSpace&) final;
-    void flushContext(const IPC::Semaphore&);
-    void flushContextSync();
     void disconnect();
 
 private:
     template<typename T> void send(T&& message);
-    template<typename T> void sendSync(T&& message);
 
     friend class WebCore::DrawGlyphsRecorder;
 

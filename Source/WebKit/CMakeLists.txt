@@ -29,6 +29,7 @@ set(WebKit_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBKIT_DIR}/NetworkProcess/storage"
     "${WEBKIT_DIR}/NetworkProcess/watchos"
     "${WEBKIT_DIR}/NetworkProcess/webrtc"
+    "${WEBKIT_DIR}/NetworkProcess/webtransport"
     "${WEBKIT_DIR}/Platform"
     "${WEBKIT_DIR}/Platform/IPC"
     "${WEBKIT_DIR}/PluginProcess"
@@ -139,6 +140,7 @@ set(WebKit_MESSAGES_IN_FILES
 
     GPUProcess/graphics/RemoteDisplayListRecorder
     GPUProcess/graphics/RemoteGraphicsContextGL
+    GPUProcess/graphics/RemoteImageBuffer
     GPUProcess/graphics/RemoteRenderingBackend
 
     GPUProcess/graphics/WebGPU/RemoteAdapter
@@ -208,14 +210,14 @@ set(WebKit_MESSAGES_IN_FILES
     NetworkProcess/SharedWorker/WebSharedWorkerServerConnection
     NetworkProcess/SharedWorker/WebSharedWorkerServerToContextConnection
 
-    NetworkProcess/cache/CacheStorageEngineConnection
-
     NetworkProcess/storage/NetworkStorageManager
 
     NetworkProcess/webrtc/NetworkMDNSRegister
     NetworkProcess/webrtc/NetworkRTCMonitor
     NetworkProcess/webrtc/NetworkRTCProvider
     NetworkProcess/webrtc/RTCDataChannelRemoteManagerProxy
+
+    NetworkProcess/webtransport/NetworkTransportSession
 
     Shared/AuxiliaryProcess
     Shared/IPCConnectionTester
@@ -309,6 +311,7 @@ set(WebKit_MESSAGES_IN_FILES
     WebProcess/Network/NetworkProcessConnection
     WebProcess/Network/WebResourceLoader
     WebProcess/Network/WebSocketChannel
+    WebProcess/Network/WebTransportSession
 
     WebProcess/Notifications/WebNotificationManager
 
@@ -336,6 +339,8 @@ set(WebKit_MESSAGES_IN_FILES
     WebProcess/WebStorage/StorageAreaMap
 
     WebProcess/XR/PlatformXRSystemProxy
+
+    webpushd/PushClientConnection
 )
 
 set(WebKit_SERIALIZATION_IN_FILES
@@ -358,6 +363,8 @@ set(WebKit_SERIALIZATION_IN_FILES
     NetworkProcess/NetworkProcessCreationParameters.serialization.in
     NetworkProcess/NetworkResourceLoadParameters.serialization.in
 
+    Platform/IPC/StreamServerConnection.serialization.in
+
     Platform/SharedMemory.serialization.in
 
     Shared/BackgroundFetchState.serialization.in
@@ -370,6 +377,7 @@ set(WebKit_SERIALIZATION_IN_FILES
     Shared/FrameTreeCreationParameters.serialization.in
     Shared/FrameTreeNodeData.serialization.in
     Shared/GPUProcessConnectionParameters.serialization.in
+    Shared/GPUProcessPreferencesForWebProcess.serialization.in
     Shared/GoToBackForwardItemParameters.serialization.in
     Shared/LayerTreeContext.serialization.in
     Shared/LocalFrameCreationParameters.serialization.in
@@ -383,6 +391,7 @@ set(WebKit_SERIALIZATION_IN_FILES
     Shared/SameDocumentNavigationType.serialization.in
     Shared/SessionState.serialization.in
     Shared/ShareableBitmap.serialization.in
+    Shared/ShareableResource.serialization.in
     Shared/TextFlags.serialization.in
     Shared/TextRecognitionResult.serialization.in
     Shared/UpdateInfo.serialization.in
@@ -497,6 +506,29 @@ set(WebKit_SERIALIZATION_IN_FILES
     WebProcess/GPU/webrtc/SharedVideoFrame.serialization.in
 
     WebProcess/WebCoreSupport/WebSpeechSynthesisVoice.serialization.in
+)
+
+set(WebCore_GENERATED_SERIALIZATION_IN_FILES
+    HTTPHeaderNames.serialization.in
+)
+
+set(WebCore_SERIALIZATION_IN_FILES
+    ActivityState.serialization.in
+    DragActions.serialization.in
+    InbandTextTrackPrivate.serialization.in
+    IndexedDB.serialization.in
+    LayoutMilestones.serialization.in
+    MDNSRegisterError.serialization.in
+    MediaPlaybackTargetContext.serialization.in
+    MediaProducer.serialization.in
+    PlatformEvent.serialization.in
+    PlatformMediaSession.serialization.in
+    PlatformScreen.serialization.in
+    PlatformWheelEvent.serialization.in
+    PlaybackSessionModel.serialization.in
+    ProtectionSpaceBase.serialization.in
+    ScrollTypes.serialization.in
+    WebGPU.serialization.in
 )
 
 set(WebKit_FRAMEWORKS
@@ -670,23 +702,6 @@ macro(GENERATE_MESSAGE_SOURCES _output_source _inputs)
     )
 endmacro()
 GENERATE_MESSAGE_SOURCES(WebKit_DERIVED_SOURCES "${WebKit_MESSAGES_IN_FILES}")
-
-set(WebCore_GENERATED_SERIALIZATION_IN_FILES
-    HTTPHeaderNames.serialization.in
-)
-
-set(WebCore_SERIALIZATION_IN_FILES
-    ActivityState.serialization.in
-    DragActions.serialization.in
-    InbandTextTrackPrivate.serialization.in
-    LayoutMilestones.serialization.in
-    MDNSRegisterError.serialization.in
-    MediaPlaybackTargetContext.serialization.in
-    MediaProducer.serialization.in
-    PlatformEvent.serialization.in
-    PlatformMediaSession.serialization.in
-    PlatformScreen.serialization.in
-)
 
 set(WebKit_SERIALIZATION_DEPENDENCIES ${WebKit_SERIALIZATION_IN_FILES})
 foreach (in_file ${WebCore_GENERATED_SERIALIZATION_IN_FILES})

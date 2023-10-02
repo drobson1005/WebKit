@@ -35,6 +35,8 @@
 #import "CocoaHelpers.h"
 #import "Logging.h"
 #import "WebExtensionContext.h"
+#import "WebExtensionTabQueryParameters.h"
+#import "WebExtensionUtilities.h"
 #import "_WKWebExtensionTab.h"
 #import "_WKWebExtensionWindow.h"
 
@@ -87,8 +89,10 @@ WebExtensionWindowParameters WebExtensionWindow::parameters(PopulateTabs populat
         identifier(),
         state(),
         type(),
+
         populate == PopulateTabs::Yes ? std::optional(WTFMove(tabParameters)) : std::nullopt,
         !CGRectIsNull(frame) ? std::optional(frame) : std::nullopt,
+
         isFocused(),
         isPrivate()
     };
@@ -105,6 +109,40 @@ WebExtensionWindowParameters WebExtensionWindow::minimalParameters() const
         std::nullopt,
         std::nullopt
     };
+}
+
+bool WebExtensionWindow::matches(OptionSet<TypeFilter> filter) const
+{
+    switch (type()) {
+    case Type::Normal:
+        return filter.contains(TypeFilter::Normal);
+
+    case Type::Popup:
+        return filter.contains(TypeFilter::Popup);
+    }
+}
+
+bool WebExtensionWindow::matches(const WebExtensionTabQueryParameters& parameters, std::optional<WebPageProxyIdentifier> webPageProxyIdentifier) const
+{
+    if (parameters.windowIdentifier && identifier() != parameters.windowIdentifier.value())
+        return false;
+
+    if (parameters.windowType && !matches(parameters.windowType.value()))
+        return false;
+
+    if (parameters.frontmostWindow && isFrontmost() != parameters.frontmostWindow.value())
+        return false;
+
+    if (parameters.currentWindow) {
+        auto currentWindow = extensionContext()->getWindow(WebExtensionWindowConstants::CurrentIdentifier, webPageProxyIdentifier);
+        if (!currentWindow)
+            return false;
+
+        if (identifier() != currentWindow->identifier())
+            return false;
+    }
+
+    return true;
 }
 
 WebExtensionWindow::TabVector WebExtensionWindow::tabs() const
@@ -233,7 +271,7 @@ _WKWebExtensionWindowState toAPI(WebExtensionWindow::State state)
 void WebExtensionWindow::setState(WebExtensionWindow::State state, CompletionHandler<void(Error)>&& completionHandler)
 {
     if (!isValid() || !m_respondsToSetWindowState || !m_respondsToWindowState) {
-        completionHandler("windows.update() not implemented for 'state'."_s);
+        completionHandler(toErrorString(@"windows.update()", nil, @"it is not implemented for 'state'"));
         return;
     }
 
@@ -256,10 +294,18 @@ bool WebExtensionWindow::isFocused() const
     return this == m_extensionContext->focusedWindow();
 }
 
+bool WebExtensionWindow::isFrontmost() const
+{
+    if (!isValid())
+        return false;
+
+    return this == m_extensionContext->frontmostWindow();
+}
+
 void WebExtensionWindow::focus(CompletionHandler<void(Error)>&& completionHandler)
 {
     if (!isValid() || !m_respondsToFocus) {
-        completionHandler("windows.update() not implemented for 'focused'."_s);
+        completionHandler(toErrorString(@"windows.update()", nil, @"it is not implemented for 'focused'"));
         return;
     }
 
@@ -313,7 +359,7 @@ void WebExtensionWindow::setFrame(CGRect frame, CompletionHandler<void(Error)>&&
     if (!isValid() || !m_respondsToSetFrame || !m_respondsToFrame)
 #endif
     {
-        completionHandler("windows.update() not implemented for 'top', 'left', 'width', and 'height'."_s);
+        completionHandler(toErrorString(@"windows.update()", nil, @"it is not implemented for 'top', 'left', 'width', and 'height'"));
         return;
     }
 
@@ -343,7 +389,7 @@ CGRect WebExtensionWindow::screenFrame() const
 void WebExtensionWindow::close(CompletionHandler<void(Error)>&& completionHandler)
 {
     if (!isValid() || !m_respondsToClose) {
-        completionHandler("windows.remove() not implemented."_s);
+        completionHandler(toErrorString(@"windows.remove()", nil, @"it is not implemented"));
         return;
     }
 

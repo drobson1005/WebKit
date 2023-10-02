@@ -32,15 +32,17 @@
 namespace WebCore {
 namespace Layout {
 
+class InlineLayoutState;
 class LineBox;
 
 class InlineDisplayLineBuilder {
 public:
-    InlineDisplayLineBuilder(const ConstraintsForInlineContent&, const InlineFormattingContext&);
+    InlineDisplayLineBuilder(InlineFormattingContext&, const ConstraintsForInlineContent&);
 
     InlineDisplay::Line build(const LineLayoutResult&, const LineBox&, bool lineIsFullyTruncatedInBlockDirection) const;
 
     static std::optional<FloatRect> trailingEllipsisVisualRectAfterTruncation(LineEndingEllipsisPolicy, const InlineDisplay::Line&, InlineDisplay::Boxes&, bool isLastLineWithInlineContent);
+    static void addLineClampTrailingLinkBoxIfApplicable(const InlineFormattingContext&, const InlineLayoutState&, InlineDisplay::Content&);
 
 private:
     struct EnclosingLineGeometry {
@@ -51,12 +53,13 @@ private:
 
     const ConstraintsForInlineContent& constraints() const { return m_constraints; }
     const InlineFormattingContext& formattingContext() const { return m_inlineFormattingContext; }
+    InlineFormattingContext& formattingContext() { return m_inlineFormattingContext; }
     const Box& root() const { return formattingContext().root(); }
-    LayoutState& layoutState() const { return formattingContext().layoutState(); }
+    const LayoutState& layoutState() const { return formattingContext().layoutState(); }
 
 private:
+    InlineFormattingContext& m_inlineFormattingContext;
     const ConstraintsForInlineContent& m_constraints;
-    const InlineFormattingContext& m_inlineFormattingContext;
 };
 
 }

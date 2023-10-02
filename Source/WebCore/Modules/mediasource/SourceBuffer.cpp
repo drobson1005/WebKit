@@ -449,11 +449,17 @@ void SourceBuffer::removedFromMediaSource()
     m_source = nullptr;
 }
 
-void SourceBuffer::seekToTarget(const SeekTarget& target, CompletionHandler<void(const MediaTime&)>&& completionHandler)
+void SourceBuffer::computeSeekTime(const SeekTarget& target, CompletionHandler<void(const MediaTime&)>&& completionHandler)
 
 {
     ALWAYS_LOG(LOGIDENTIFIER, target);
-    m_private->seekToTarget(target, WTFMove(completionHandler));
+    m_private->computeSeekTime(target, WTFMove(completionHandler));
+}
+
+void SourceBuffer::seekToTime(const MediaTime& time)
+{
+    ALWAYS_LOG(LOGIDENTIFIER, time);
+    m_private->seekToTime(time);
 }
 
 bool SourceBuffer::virtualHasPendingActivity() const
@@ -497,7 +503,7 @@ ExceptionOr<void> SourceBuffer::appendBufferInternal(const unsigned char* data, 
     if (isRemoved() || m_updating)
         return Exception { InvalidStateError };
 
-    DEBUG_LOG(LOGIDENTIFIER, "size = ", size, ", buffered = ", m_private->buffered());
+    ALWAYS_LOG(LOGIDENTIFIER, "size = ", size, ", buffered = ", m_private->buffered(), " streaming = ", m_source->streaming());
 
     // 3. If the readyState attribute of the parent media source is in the "ended" state then run the following steps:
     // 3.1. Set the readyState attribute of the parent media source to "open"
@@ -648,7 +654,7 @@ uint64_t SourceBuffer::maximumBufferSize() const
     if (isRemoved())
         return 0;
 
-    auto* element = m_source->mediaElement();
+    RefPtr element = m_source->mediaElement();
     if (!element)
         return 0;
 
@@ -745,7 +751,7 @@ void SourceBuffer::sourceBufferPrivateDidReceiveInitializationSegment(Initializa
         ASSERT(segment.audioTracks.size() == audioTracks().length());
         for (auto& audioTrackInfo : segment.audioTracks) {
             if (audioTracks().length() == 1) {
-                auto* track = audioTracks().item(0);
+                RefPtr track = audioTracks().item(0);
                 auto oldId = track->id();
                 auto newId = audioTrackInfo.track->id();
                 track->setPrivate(*audioTrackInfo.track);
@@ -762,7 +768,7 @@ void SourceBuffer::sourceBufferPrivateDidReceiveInitializationSegment(Initializa
         ASSERT(segment.videoTracks.size() == videoTracks().length());
         for (auto& videoTrackInfo : segment.videoTracks) {
             if (videoTracks().length() == 1) {
-                auto* track = videoTracks().item(0);
+                RefPtr track = videoTracks().item(0);
                 auto oldId = track->id();
                 auto newId = videoTrackInfo.track->id();
                 track->setPrivate(*videoTrackInfo.track);
@@ -779,7 +785,7 @@ void SourceBuffer::sourceBufferPrivateDidReceiveInitializationSegment(Initializa
         ASSERT(segment.textTracks.size() == textTracks().length());
         for (auto& textTrackInfo : segment.textTracks) {
             if (textTracks().length() == 1) {
-                auto* track = downcast<InbandTextTrack>(textTracks().item(0));
+                RefPtr track = downcast<InbandTextTrack>(textTracks().item(0));
                 auto oldId = track->id();
                 auto newId = textTrackInfo.track->id();
                 track->setPrivate(*textTrackInfo.track);

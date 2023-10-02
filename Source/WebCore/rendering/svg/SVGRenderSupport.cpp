@@ -28,6 +28,7 @@
 #include "SVGRenderSupport.h"
 
 #include "ElementAncestorIteratorInlines.h"
+#include "LegacyRenderSVGResourceClipper.h"
 #include "LegacyRenderSVGRoot.h"
 #include "LegacyRenderSVGShape.h"
 #include "LegacyRenderSVGTransformableContainer.h"
@@ -39,7 +40,6 @@
 #include "RenderGeometryMap.h"
 #include "RenderIterator.h"
 #include "RenderLayer.h"
-#include "RenderSVGResourceClipper.h"
 #include "RenderSVGResourceFilter.h"
 #include "RenderSVGResourceMarker.h"
 #include "RenderSVGResourceMasker.h"
@@ -244,7 +244,7 @@ void SVGRenderSupport::layoutChildren(RenderElement& start, bool selfNeedsLayout
 {
     bool layoutSizeChanged = layoutSizeOfNearestViewportChanged(start);
     bool transformChanged = transformToRootChanged(&start);
-    HashSet<RenderElement*> elementsThatDidNotReceiveLayout;
+    WeakHashSet<RenderElement> elementsThatDidNotReceiveLayout;
 
     for (auto& child : childrenOfType<RenderObject>(start)) {
         bool needsLayout = selfNeedsLayout;
@@ -287,19 +287,19 @@ void SVGRenderSupport::layoutChildren(RenderElement& start, bool selfNeedsLayout
             if (!childEverHadLayout)
                 child.repaint();
         } else if (layoutSizeChanged && is<RenderElement>(child))
-            elementsThatDidNotReceiveLayout.add(&downcast<RenderElement>(child));
+            elementsThatDidNotReceiveLayout.add(downcast<RenderElement>(child));
 
         ASSERT(!child.needsLayout());
     }
 
     if (!layoutSizeChanged) {
-        ASSERT(elementsThatDidNotReceiveLayout.isEmpty());
+        ASSERT(elementsThatDidNotReceiveLayout.isEmptyIgnoringNullReferences());
         return;
     }
 
     // If the layout size changed, invalidate all resources of all children that didn't go through the layout() code path.
-    for (auto* element : elementsThatDidNotReceiveLayout)
-        invalidateResourcesOfChildren(*element);
+    for (auto& element : elementsThatDidNotReceiveLayout)
+        invalidateResourcesOfChildren(element);
 }
 
 bool SVGRenderSupport::isOverflowHidden(const RenderElement& renderer)
@@ -319,7 +319,7 @@ void SVGRenderSupport::intersectRepaintRectWithResources(const RenderElement& re
     if (RenderSVGResourceFilter* filter = resources->filter())
         repaintRect = filter->resourceBoundingBox(renderer);
 
-    if (RenderSVGResourceClipper* clipper = resources->clipper())
+    if (LegacyRenderSVGResourceClipper* clipper = resources->clipper())
         repaintRect.intersect(clipper->resourceBoundingBox(renderer));
 
     if (RenderSVGResourceMasker* masker = resources->masker())
@@ -347,6 +347,7 @@ inline FloatRect clipPathReferenceBox(const RenderElement& renderer, CSSBoxType 
     case CSSBoxType::BorderBox:
     case CSSBoxType::MarginBox:
     case CSSBoxType::StrokeBox:
+    case CSSBoxType::BoxMissing:
         // FIXME: strokeBoundingBox() takes dasharray into account but shouldn't.
         referenceBox = renderer.strokeBoundingBox();
         break;
@@ -361,7 +362,6 @@ inline FloatRect clipPathReferenceBox(const RenderElement& renderer, CSSBoxType 
     case CSSBoxType::ContentBox:
     case CSSBoxType::FillBox:
     case CSSBoxType::PaddingBox:
-    case CSSBoxType::BoxMissing:
         referenceBox = renderer.objectBoundingBox();
         break;
     }
@@ -426,7 +426,7 @@ bool SVGRenderSupport::pointInClippingArea(const RenderElement& renderer, const 
     if (!resources)
         return true;
 
-    if (RenderSVGResourceClipper* clipper = resources->clipper())
+    if (LegacyRenderSVGResourceClipper* clipper = resources->clipper())
         return clipper->hitTestClipContent(renderer.objectBoundingBox(), point);
 
     return true;

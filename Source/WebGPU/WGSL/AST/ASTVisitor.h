@@ -86,6 +86,7 @@ public:
     virtual void visit(AST::Statement&);
     virtual void visit(AST::AssignmentStatement&);
     virtual void visit(AST::BreakStatement&);
+    virtual void visit(AST::CallStatement&);
     virtual void visit(AST::CompoundAssignmentStatement&);
     virtual void visit(AST::CompoundStatement&);
     virtual void visit(AST::ContinueStatement&);
@@ -104,12 +105,9 @@ public:
     virtual void visit(AST::Structure&);
     virtual void visit(AST::StructureMember&);
 
-    // Types
-    virtual void visit(AST::TypeName&);
-    virtual void visit(AST::ArrayTypeName&);
-    virtual void visit(AST::NamedTypeName&);
-    virtual void visit(AST::ParameterizedTypeName&);
-    virtual void visit(AST::ReferenceTypeName&);
+    virtual void visit(AST::ArrayTypeExpression&);
+    virtual void visit(AST::ElaboratedTypeExpression&);
+    virtual void visit(AST::ReferenceTypeExpression&);
 
     virtual void visit(AST::Variable&);
     virtual void visit(AST::VariableQualifier&);
@@ -139,8 +137,6 @@ protected:
 private:
     Result<void> m_expectedError;
 };
-
-std::optional<unsigned> extractInteger(const AST::Expression&);
 
 } // namespace AST
 } // namespace WGSL

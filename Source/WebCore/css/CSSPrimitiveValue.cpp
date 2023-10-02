@@ -516,6 +516,10 @@ Ref<CSSPrimitiveValue> CSSPrimitiveValue::create(const Length& length)
         return create(CSSValueAuto);
     case LengthType::Content:
         return create(CSSValueContent);
+    case LengthType::FillAvailable:
+        return create(CSSValueWebkitFillAvailable);
+    case LengthType::FitContent:
+        return create(CSSValueFitContent);
     case LengthType::Fixed:
         return create(length.value(), CSSUnitType::CSS_PX);
     case LengthType::Intrinsic:
@@ -526,10 +530,8 @@ Ref<CSSPrimitiveValue> CSSPrimitiveValue::create(const Length& length)
         return create(CSSValueMinContent);
     case LengthType::MaxContent:
         return create(CSSValueMaxContent);
-    case LengthType::FillAvailable:
-        return create(CSSValueWebkitFillAvailable);
-    case LengthType::FitContent:
-        return create(CSSValueFitContent);
+    case LengthType::Normal:
+        return create(CSSValueNormal);
     case LengthType::Percent:
         ASSERT(std::isfinite(length.percent()));
         return create(length.percent(), CSSUnitType::CSS_PERCENTAGE);
@@ -546,12 +548,13 @@ Ref<CSSPrimitiveValue> CSSPrimitiveValue::create(const Length& length, const Ren
     switch (length.type()) {
     case LengthType::Auto:
     case LengthType::Content:
+    case LengthType::FillAvailable:
+    case LengthType::FitContent:
     case LengthType::Intrinsic:
     case LengthType::MinIntrinsic:
     case LengthType::MinContent:
     case LengthType::MaxContent:
-    case LengthType::FillAvailable:
-    case LengthType::FitContent:
+    case LengthType::Normal:
     case LengthType::Percent:
         return create(length);
     case LengthType::Fixed:
@@ -1701,24 +1704,6 @@ void CSSPrimitiveValue::collectComputedStyleDependencies(ComputedStyleDependenci
     case CSSUnitType::CSS_CALC:
         m_value.calc->collectComputedStyleDependencies(dependencies);
         break;
-    case CSSUnitType::CSS_NUMBER:
-    case CSSUnitType::CSS_INTEGER:
-    case CSSUnitType::CSS_PERCENTAGE:
-    case CSSUnitType::CSS_PX:
-    case CSSUnitType::CSS_CM:
-    case CSSUnitType::CSS_MM:
-    case CSSUnitType::CSS_IN:
-    case CSSUnitType::CSS_PT:
-    case CSSUnitType::CSS_PC:
-    case CSSUnitType::CSS_DEG:
-    case CSSUnitType::CSS_RAD:
-    case CSSUnitType::CSS_GRAD:
-    case CSSUnitType::CSS_TURN:
-    case CSSUnitType::CSS_MS:
-    case CSSUnitType::CSS_S:
-    case CSSUnitType::CSS_HZ:
-    case CSSUnitType::CSS_KHZ:
-    case CSSUnitType::CSS_DIMENSION:
     case CSSUnitType::CSS_VW:
     case CSSUnitType::CSS_VH:
     case CSSUnitType::CSS_VMIN:
@@ -1743,6 +1728,26 @@ void CSSPrimitiveValue::collectComputedStyleDependencies(ComputedStyleDependenci
     case CSSUnitType::CSS_DVMAX:
     case CSSUnitType::CSS_DVB:
     case CSSUnitType::CSS_DVI:
+        dependencies.viewportDimensions = true;
+        break;
+    case CSSUnitType::CSS_NUMBER:
+    case CSSUnitType::CSS_INTEGER:
+    case CSSUnitType::CSS_PERCENTAGE:
+    case CSSUnitType::CSS_PX:
+    case CSSUnitType::CSS_CM:
+    case CSSUnitType::CSS_MM:
+    case CSSUnitType::CSS_IN:
+    case CSSUnitType::CSS_PT:
+    case CSSUnitType::CSS_PC:
+    case CSSUnitType::CSS_DEG:
+    case CSSUnitType::CSS_RAD:
+    case CSSUnitType::CSS_GRAD:
+    case CSSUnitType::CSS_TURN:
+    case CSSUnitType::CSS_MS:
+    case CSSUnitType::CSS_S:
+    case CSSUnitType::CSS_HZ:
+    case CSSUnitType::CSS_KHZ:
+    case CSSUnitType::CSS_DIMENSION:
     case CSSUnitType::CSS_DPPX:
     case CSSUnitType::CSS_X:
     case CSSUnitType::CSS_DPI:
@@ -1765,6 +1770,29 @@ void CSSPrimitiveValue::collectComputedStyleDependencies(ComputedStyleDependenci
     case CSSUnitType::CSS_VALUE_ID:
         break;
     }
+}
+
+bool CSSPrimitiveValue::convertingToLengthHasRequiredConversionData(int lengthConversion, const CSSToLengthConversionData& conversionData) const
+{
+    // FIXME: We should probably make CSSPrimitiveValue::computeLengthDouble and
+    // CSSPrimitiveValue::computeNonCalcLengthDouble (which has the style assertion)
+    // return std::optional<double> instead of having this check here.
+
+    bool isFixedNumberConversion = lengthConversion & (FixedIntegerConversion | FixedFloatConversion);
+    auto dependencies = computedStyleDependencies();
+    if (!dependencies.rootProperties.isEmpty() && !conversionData.rootStyle())
+        return !isFixedNumberConversion;
+
+    if (!dependencies.properties.isEmpty() && !conversionData.style())
+        return !isFixedNumberConversion;
+
+    if (dependencies.containerDimensions && !conversionData.elementForContainerUnitResolution())
+        return !isFixedNumberConversion;
+
+    if (dependencies.viewportDimensions && conversionData.defaultViewportFactor().isEmpty())
+        return !isFixedNumberConversion;
+
+    return true;
 }
 
 } // namespace WebCore

@@ -49,7 +49,7 @@
 #import <wtf/RunLoop.h>
 
 #if PLATFORM(IOS_FAMILY)
-#import "UIKitSPI.h"
+#import "UIKitSPIForTesting.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #endif
 
@@ -819,7 +819,12 @@ TEST(AdvancedPrivacyProtections, AddNoiseToWebAudioAPIs)
     checkFingerprintForNoise(@"testOscillatorCompressorAnalyzer");
 }
 
+// FIXME when rdar://115137641 is resolved.
+#if PLATFORM(MAC)
+TEST(AdvancedPrivacyProtections, DISABLED_VerifyHashFromNoisyCanvas2DAPI)
+#else
 TEST(AdvancedPrivacyProtections, VerifyHashFromNoisyCanvas2DAPI)
+#endif
 {
     auto testURL = [NSBundle.mainBundle URLForResource:@"canvas-fingerprinting" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"];
     auto resourcesURL = [NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"TestWebKitAPI.resources"];

@@ -25,7 +25,7 @@
 
 #pragma once
 
-#include "InlineFormattingState.h"
+#include "InlineContentCache.h"
 #include "InlineLineTypes.h"
 #include "LayoutElementBox.h"
 #include <wtf/text/StringBuilder.h>
@@ -36,11 +36,14 @@ class InlineTextBox;
 
 class InlineItemsBuilder {
 public:
-    InlineItemsBuilder(const ElementBox& formattingContextRoot, InlineFormattingState&);
+    InlineItemsBuilder(InlineContentCache&, const ElementBox& root);
     void build(InlineItemPosition startPosition);
 
 private:
     void collectInlineItems(InlineItems&, InlineItemPosition startPosition);
+    using LayoutQueue = Vector<CheckedRef<const Box>>;
+    LayoutQueue initializeLayoutQueue(InlineItemPosition startPosition);
+    bool traverseUntilDamaged(LayoutQueue&, const Box& subtreeRoot, const Box& firstDamagedLayoutBox);
     void breakAndComputeBidiLevels(InlineItems&);
     void computeInlineTextItemWidths(InlineItems&);
 
@@ -52,10 +55,12 @@ private:
     bool contentRequiresVisualReordering() const { return m_contentRequiresVisualReordering; }
 
     const ElementBox& root() const { return m_root; }
+    InlineContentCache& inlineContentCache() { return m_inlineContentCache; }
 
+private:
+    InlineContentCache& m_inlineContentCache;
     const ElementBox& m_root;
-    // FIXME: We should not need this here. This is only required by the out of flow boxes.
-    InlineFormattingState& m_formattingState;
+
     bool m_contentRequiresVisualReordering { false };
     bool m_isNonBidiTextAndForcedLineBreakOnlyContent { true };
 };

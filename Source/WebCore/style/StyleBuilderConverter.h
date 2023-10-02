@@ -96,6 +96,7 @@ public:
     static LengthSize convertRadius(BuilderState&, const CSSValue&);
     static LengthPoint convertPosition(BuilderState&, const CSSValue&);
     static LengthPoint convertPositionOrAuto(BuilderState&, const CSSValue&);
+    static LengthPoint convertPositionOrAutoOrNormal(BuilderState&, const CSSValue&);
     static OptionSet<TextDecorationLine> convertTextDecorationLine(BuilderState&, const CSSValue&);
     static OptionSet<TextTransform> convertTextTransform(BuilderState&, const CSSValue&);
     template<typename T> static T convertNumber(BuilderState&, const CSSValue&);
@@ -119,6 +120,7 @@ public:
     static TextAlignMode convertTextAlign(BuilderState&, const CSSValue&);
     static TextAlignLast convertTextAlignLast(BuilderState&, const CSSValue&);
     static RefPtr<PathOperation> convertPathOperation(BuilderState&, const CSSValue&);
+    static RefPtr<PathOperation> convertRayPathOperation(BuilderState&, const CSSValue&);
     static Resize convertResize(BuilderState&, const CSSValue&);
     static int convertMarqueeRepetition(BuilderState&, const CSSValue&);
     static int convertMarqueeSpeed(BuilderState&, const CSSValue&);
@@ -478,6 +480,15 @@ inline LengthPoint BuilderConverter::convertPosition(BuilderState& builderState,
     return LengthPoint(lengthX, lengthY);
 }
 
+inline LengthPoint BuilderConverter::convertPositionOrAutoOrNormal(BuilderState& builderState, const CSSValue& value)
+{
+    if (value.isPair())
+        return convertPosition(builderState, value);
+    if (value.valueID() == CSSValueNormal)
+        return { { LengthType::Normal }, { LengthType::Normal } };
+    return { };
+}
+
 inline LengthPoint BuilderConverter::convertPositionOrAuto(BuilderState& builderState, const CSSValue& value)
 {
     if (value.isPair())
@@ -706,6 +717,39 @@ inline TextAlignLast BuilderConverter::convertTextAlignLast(BuilderState& builde
     return parentStyle.textAlignLast();
 }
 
+inline RefPtr<PathOperation> BuilderConverter::convertRayPathOperation(BuilderState& builderState, const CSSValue& value)
+{
+    auto& rayValue = downcast<CSSRayValue>(value);
+
+    auto size = RayPathOperation::Size::ClosestCorner;
+    switch (rayValue.size()) {
+    case CSSValueClosestCorner:
+        size = RayPathOperation::Size::ClosestCorner;
+        break;
+    case CSSValueClosestSide:
+        size = RayPathOperation::Size::ClosestSide;
+        break;
+    case CSSValueFarthestCorner:
+        size = RayPathOperation::Size::FarthestCorner;
+        break;
+    case CSSValueFarthestSide:
+        size = RayPathOperation::Size::FarthestSide;
+        break;
+    case CSSValueSides:
+        size = RayPathOperation::Size::Sides;
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+        return nullptr;
+    }
+
+    auto position = rayValue.position();
+    if (position)
+        return RayPathOperation::create(rayValue.angle()->computeDegrees(), size, rayValue.isContaining(), convertPosition(builderState, *position));
+
+    return RayPathOperation::create(rayValue.angle()->computeDegrees(), size, rayValue.isContaining());
+}
+
 inline RefPtr<PathOperation> BuilderConverter::convertPathOperation(BuilderState& builderState, const CSSValue& value)
 {
     if (is<CSSPrimitiveValue>(value)) {
@@ -726,46 +770,18 @@ inline RefPtr<PathOperation> BuilderConverter::convertPathOperation(BuilderState
         return nullptr;
     }
 
-    if (is<CSSRayValue>(value)) {
-        auto& rayValue = downcast<CSSRayValue>(value);
-
-        RayPathOperation::Size size = RayPathOperation::Size::ClosestCorner;
-        switch (rayValue.size()) {
-        case CSSValueClosestCorner:
-            size = RayPathOperation::Size::ClosestCorner;
-            break;
-        case CSSValueClosestSide:
-            size = RayPathOperation::Size::ClosestSide;
-            break;
-        case CSSValueFarthestCorner:
-            size = RayPathOperation::Size::FarthestCorner;
-            break;
-        case CSSValueFarthestSide:
-            size = RayPathOperation::Size::FarthestSide;
-            break;
-        case CSSValueSides:
-            size = RayPathOperation::Size::Sides;
-            break;
-        default:
-            ASSERT_NOT_REACHED();
-            return nullptr;
-        }
-
-        auto position = rayValue.position();
-        if (position)
-            return RayPathOperation::create(rayValue.angle()->computeDegrees(), size, rayValue.isContaining(), convertPosition(builderState, *position));
-
-        return RayPathOperation::create(rayValue.angle()->computeDegrees(), size, rayValue.isContaining());
-    }
+    if (is<CSSRayValue>(value))
+        return convertRayPathOperation(builderState, value);
 
     RefPtr<PathOperation> operation;
     auto referenceBox = CSSBoxType::BoxMissing;
     auto processSingleValue = [&](const CSSValue& singleValue) {
         ASSERT(!is<CSSValueList>(singleValue));
-        if (!singleValue.isValueID()) {
-            operation = ShapePathOperation::create(basicShapeForValue(builderState.cssToLengthConversionData(),
-                singleValue, builderState.style().effectiveZoom()));
-        } else
+        if (is<CSSRayValue>(singleValue))
+            operation = convertRayPathOperation(builderState, singleValue);
+        else if (!singleValue.isValueID())
+            operation = ShapePathOperation::create(basicShapeForValue(builderState.cssToLengthConversionData(), singleValue, builderState.style().effectiveZoom()));
+        else
             referenceBox = fromCSSValue<CSSBoxType>(singleValue);
     };
 
@@ -776,7 +792,7 @@ inline RefPtr<PathOperation> BuilderConverter::convertPathOperation(BuilderState
         processSingleValue(value);
 
     if (operation)
-        downcast<ShapePathOperation>(*operation).setReferenceBox(referenceBox);
+        operation->setReferenceBox(referenceBox);
     else {
         ASSERT(referenceBox != CSSBoxType::BoxMissing);
         operation = BoxPathOperation::create(referenceBox);
@@ -1009,7 +1025,7 @@ inline RefPtr<ShapeValue> BuilderConverter::convertShapeValue(BuilderState& buil
         return ShapeValue::create(builderState.createStyleImage(value).releaseNonNull());
 
     RefPtr<BasicShape> shape;
-    CSSBoxType referenceBox = CSSBoxType::BoxMissing;
+    auto referenceBox = CSSBoxType::BoxMissing;
     auto processSingleValue = [&](const CSSValue& currentValue) {
         if (!currentValue.isValueID())
             shape = basicShapeForValue(builderState.cssToLengthConversionData(), currentValue);

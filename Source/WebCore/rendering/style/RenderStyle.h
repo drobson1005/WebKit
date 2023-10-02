@@ -37,6 +37,7 @@ class AutosizeStatus;
 class BorderData;
 class BorderValue;
 class CSSCustomPropertyValue;
+struct CSSPropertiesBitSet;
 class Color;
 class ContentData;
 class CounterContent;
@@ -485,6 +486,8 @@ public:
     float borderAfterWidth() const;
     float borderStartWidth() const;
     float borderEndWidth() const;
+
+    inline bool borderIsEquivalentForPainting(const RenderStyle&) const;
 
     float outlineSize() const { return std::max<float>(0, outlineWidth() + outlineOffset()); }
     float outlineWidth() const;
@@ -1710,6 +1713,7 @@ public:
 
     StyleDifference diff(const RenderStyle&, OptionSet<StyleDifferenceContextSensitiveProperty>& changedContextSensitiveProperties) const;
     bool diffRequiresLayerRepaint(const RenderStyle&, bool isComposited) const;
+    void conservativelyCollectChangedAnimatableProperties(const RenderStyle&, CSSPropertiesBitSet&) const;
 
     constexpr bool isDisplayInlineType() const;
     constexpr bool isOriginalDisplayInlineType() const;
@@ -2134,7 +2138,7 @@ public:
 
 private:
     struct NonInheritedFlags {
-        bool operator==(const NonInheritedFlags&) const;
+        friend bool operator==(const NonInheritedFlags&, const NonInheritedFlags&) = default;
 
         inline void copyNonInheritedFrom(const NonInheritedFlags&);
 
@@ -2178,7 +2182,7 @@ private:
     };
 
     struct InheritedFlags {
-        bool operator==(const InheritedFlags&) const;
+        friend bool operator==(const InheritedFlags&, const InheritedFlags&) = default;
 
         unsigned emptyCells : 1; // EmptyCell
         unsigned captionSide : 2; // CaptionSide

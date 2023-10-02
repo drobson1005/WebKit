@@ -112,7 +112,7 @@ ADDITIONAL_SDKS = $(WK_ADDITIONAL_SDKS);
 CODE_SIGN_IDENTITY = -;
 AD_HOC_CODE_SIGNING_ALLOWED = YES;
 
-SUPPORTED_PLATFORMS = iphoneos iphonesimulator macosx appletvos appletvsimulator watchos watchsimulator;
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator macosx appletvos appletvsimulator watchos watchsimulator xros xrsimulator;
 SUPPORTS_MACCATALYST = YES;
 
 OTHER_CPLUSPLUSFLAGS = $(inherited) -isystem $(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders;
@@ -134,10 +134,12 @@ WK_MACOS_WEAK_FRAMEWORK_ = -weak_framework
 
 WK_USE_RESTRICTED_ENTITLEMENTS = $(USE_INTERNAL_SDK);
 
-EXCLUDED_SOURCE_FILE_NAMES = libWebKitAdditions.a JavaScriptCore.framework 
+EXCLUDED_SOURCE_FILE_NAMES = libWebKitAdditions.a JavaScriptCore.framework;
 
-WK_WEBKIT_DERIVEDSOURCES_INPUT_XCFILELIST_ADDITIONS = $(WK_WEBKITADDITIONS_HEADERS_FOLDER_PATH)/WebKit/DerivedSources-input.xcfilelist
-WK_WEBKIT_DERIVEDSOURCES_OUTPUT_XCFILELIST_ADDITIONS = $(WK_WEBKITADDITIONS_HEADERS_FOLDER_PATH)/WebKit/DerivedSources-output.xcfilelist
+WK_WEBKIT_DERIVEDSOURCES_INPUT_XCFILELIST_ADDITIONS = $(WK_WEBKITADDITIONS_HEADERS_FOLDER_PATH)/WebKit/DerivedSources-input.xcfilelist;
+WK_WEBKIT_DERIVEDSOURCES_OUTPUT_XCFILELIST_ADDITIONS = $(WK_WEBKITADDITIONS_HEADERS_FOLDER_PATH)/WebKit/DerivedSources-output.xcfilelist;
+WK_WEBKIT_RESOURCES_INPUT_XCFILELIST_ADDITIONS = $(WK_WEBKITADDITIONS_HEADERS_FOLDER_PATH)/WebKit/AdditionalResources-input.xcfilelist;
+WK_WEBKIT_RESOURCES_OUTPUT_XCFILELIST_ADDITIONS =$(WK_WEBKITADDITIONS_HEADERS_FOLDER_PATH)/WebKit/AdditionalResources-input.xcfilelist;
 
 LLVM_LTO = $(WK_USER_LTO_MODE_$(WK_LTO_MODE));
 

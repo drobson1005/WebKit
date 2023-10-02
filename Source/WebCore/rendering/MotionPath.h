@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "FloatRoundedRect.h"
 #include "RenderLayerModelObject.h"
 
 namespace WebCore {
@@ -33,9 +34,10 @@ class BoxPathOperation;
 class RenderElement;
 class PathOperation;
 class RayPathOperation;
+class ShapePathOperation;
 
 struct MotionPathData {
-    FloatRect containingBlockBoundingRect;
+    FloatRoundedRect containingBlockBoundingRect;
     FloatPoint offsetFromContainingBlock;
     FloatPoint usedStartingPosition;
 };
@@ -49,6 +51,7 @@ public:
     static std::optional<Path> computePathForRay(const RayPathOperation&, const TransformOperationData&);
     static double lengthForRayPath(const RayPathOperation&, const MotionPathData&);
     static double lengthForRayContainPath(const FloatRect& elementRect, double computedPathLength);
+    WEBCORE_EXPORT static std::optional<Path> computePathForShape(const ShapePathOperation&, const TransformOperationData&);
 };
 
 class TransformOperationData {

@@ -26,7 +26,6 @@
 #pragma once
 
 #include "ASTExpression.h"
-#include "ASTTypeName.h"
 
 namespace WGSL::AST {
 
@@ -37,12 +36,14 @@ namespace WGSL::AST {
 class CallExpression final : public Expression {
     WGSL_AST_BUILDER_NODE(CallExpression);
 public:
+    using Ref = std::reference_wrapper<CallExpression>;
+
     NodeKind kind() const override;
-    TypeName& target() { return m_target.get(); }
+    Expression& target() { return m_target.get(); }
     Expression::List& arguments() { return m_arguments; }
 
 private:
-    CallExpression(SourceSpan span, TypeName::Ref&& target, Expression::List&& arguments)
+    CallExpression(SourceSpan span, Expression::Ref&& target, Expression::List&& arguments)
         : Expression(span)
         , m_target(WTFMove(target))
         , m_arguments(WTFMove(arguments))
@@ -52,7 +53,7 @@ private:
     //   * Type that does not accept parameters (bool, i32, u32, ...)
     //   * Identifier that refers to a type alias.
     //   * Identifier that refers to a function.
-    TypeName::Ref m_target;
+    Expression::Ref m_target;
     Expression::List m_arguments;
 };
 

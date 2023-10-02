@@ -124,14 +124,11 @@ public:
     virtual WebCore::GraphicsLayerFactory* graphicsLayerFactory() { return nullptr; }
     virtual void setRootCompositingLayer(WebCore::Frame&, WebCore::GraphicsLayer*) = 0;
     virtual void addRootFrame(WebCore::FrameIdentifier) { }
-    // FIXME: Add a corresponding removeRootFrame.
+    // FIXME: Add a corresponding removeRootFrame. <rdar://116202445>
 
     // Cause a rendering update to happen as soon as possible.
     virtual void triggerRenderingUpdate() = 0;
-    // Cause a rendering update to happen at the next suitable time,
-    // as determined by the drawing area.
     virtual bool scheduleRenderingUpdate() { return false; }
-
     virtual void renderingUpdateFramesPerSecondChanged() { }
 
     virtual void willStartRenderingUpdateDisplay();
@@ -153,7 +150,7 @@ public:
     virtual bool addMilestonesToDispatch(OptionSet<WebCore::LayoutMilestone>) { return false; }
 
 #if PLATFORM(COCOA)
-    virtual void updateGeometry(const WebCore::IntSize& viewSize, bool flushSynchronously, const WTF::MachSendRight& fencePort, CompletionHandler<void()>&&) = 0;
+    virtual void updateGeometry(const WebCore::IntSize& viewSize, const std::optional<VisibleContentRectUpdateInfo>&, bool flushSynchronously, const WTF::MachSendRight& fencePort, CompletionHandler<void()>&&) = 0;
 #endif
 
 #if USE(GRAPHICS_LAYER_WC)
@@ -168,6 +165,7 @@ public:
     virtual void updateGeometry(const WebCore::IntSize&, CompletionHandler<void()>&&) = 0;
     virtual void didChangeViewportAttributes(WebCore::ViewportAttributes&&) = 0;
     virtual void deviceOrPageScaleFactorChanged() = 0;
+    virtual bool enterAcceleratedCompositingModeIfNeeded() = 0;
 #endif
 
     virtual void adoptLayersFromDrawingArea(DrawingArea&) { }
@@ -190,7 +188,7 @@ protected:
     template<typename T> bool send(T&& message)
     {
         Ref webPage = m_webPage.get();
-        return webPage->send(WTFMove(message), m_identifier.toUInt64(), { });
+        return webPage->send(std::forward<T>(message), m_identifier.toUInt64(), { });
     }
 
     const DrawingAreaType m_type;
@@ -210,7 +208,6 @@ private:
 #if USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
     virtual void updateBackingStoreState(uint64_t /*backingStoreStateID*/, bool /*respondImmediately*/, float /*deviceScaleFactor*/, const WebCore::IntSize& /*size*/,
                                          const WebCore::IntSize& /*scrollOffset*/) { }
-    virtual void targetRefreshRateDidChange(unsigned /*rate*/) { }
     virtual void setDeviceScaleFactor(float) { }
     virtual void forceUpdate() { }
     virtual void didDiscardBackingStore() { }

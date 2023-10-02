@@ -28,6 +28,7 @@
 
 #include "APIProcessPoolConfiguration.h"
 #include "APIWebsitePolicies.h"
+#include "BrowsingContextGroup.h"
 #include "Logging.h"
 #include "WebInspectorUtilities.h"
 #include "WebPageGroup.h"
@@ -53,7 +54,10 @@ Ref<PageConfiguration> PageConfiguration::create()
     return adoptRef(*new PageConfiguration);
 }
 
-PageConfiguration::PageConfiguration() = default;
+PageConfiguration::PageConfiguration()
+    : m_data { BrowsingContextGroup::create() }
+{
+}
 
 PageConfiguration::~PageConfiguration() = default;
 
@@ -64,6 +68,10 @@ Ref<PageConfiguration> PageConfiguration::copy() const
     return copy;
 }
 
+BrowsingContextGroup& PageConfiguration::browsingContextGroup()
+{
+    return m_data.browsingContextGroup.get();
+}
 
 WebProcessPool* PageConfiguration::processPool()
 {
@@ -202,7 +210,7 @@ void PageConfiguration::setDelaysWebProcessLaunchUntilFirstLoad(bool delaysWebPr
 
 bool PageConfiguration::delaysWebProcessLaunchUntilFirstLoad() const
 {
-    if (m_data.processPool && isInspectorProcessPool(*m_data.processPool)) {
+    if (RefPtr processPool = m_data.processPool; processPool && isInspectorProcessPool(*processPool)) {
         // Never delay process launch for inspector pages as inspector pages do not know how to transition from a terminated process.
         RELEASE_LOG(Process, "%p - PageConfiguration::delaysWebProcessLaunchUntilFirstLoad() -> false because of WebInspector pool", this);
         return false;

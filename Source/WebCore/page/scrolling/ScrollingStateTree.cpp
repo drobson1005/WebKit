@@ -61,7 +61,15 @@ ScrollingStateTree::ScrollingStateTree(AsyncScrollingCoordinator* scrollingCoord
 {
 }
 
+ScrollingStateTree::ScrollingStateTree(ScrollingStateTree&&) = default;
+
 ScrollingStateTree::~ScrollingStateTree() = default;
+
+void ScrollingStateTree::attachDeserializedNodes()
+{
+    if (m_rootStateNode)
+        m_rootStateNode->attachAfterDeserialization(*this);
+}
 
 void ScrollingStateTree::setHasChangedProperties(bool changedProperties)
 {
@@ -141,18 +149,15 @@ ScrollingNodeID ScrollingStateTree::insertNode(ScrollingNodeType nodeType, Scrol
             if (!parentID)
                 return newNodeID;
 
-            size_t currentIndex = parent->indexOfChild(*node);
-            if (currentIndex == childIndex)
+            if (parent->childAtIndex(childIndex) == node)
                 return newNodeID;
 
-            ASSERT(currentIndex != notFound);
-            Ref protectedNode { *node };
-            parent->removeChildAtIndex(currentIndex);
+            parent->removeChild(*node);
 
             if (childIndex == notFound)
-                parent->appendChild(WTFMove(protectedNode));
+                parent->appendChild(node.releaseNonNull());
             else
-                parent->insertChild(WTFMove(protectedNode), childIndex);
+                parent->insertChild(node.releaseNonNull(), childIndex);
 
             return newNodeID;
         }
@@ -299,7 +304,7 @@ std::unique_ptr<ScrollingStateTree> ScrollingStateTree::commit(LayerRepresentati
     treeStateClone->setPreferredLayerRepresentation(preferredLayerRepresentation);
 
     if (m_rootStateNode)
-        treeStateClone->setRootStateNode(static_reference_cast<ScrollingStateFrameScrollingNode>(m_rootStateNode->cloneAndReset(*treeStateClone)));
+        treeStateClone->setRootStateNode(downcast<ScrollingStateFrameScrollingNode>(m_rootStateNode->cloneAndReset(*treeStateClone)));
 
     // Now the clone tree has changed properties, and the original tree does not.
     treeStateClone->m_hasChangedProperties = std::exchange(m_hasChangedProperties, false);

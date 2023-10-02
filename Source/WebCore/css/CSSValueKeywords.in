@@ -533,7 +533,11 @@ flow-root
 flow
 -webkit-inline-flex
 -webkit-flex
-//none
+// ruby
+block-ruby
+ruby-base
+ruby-text
+// none
 //
 // CSS_PROP_CURSOR:
 // The order here must match the order of the CursorType enum in RenderStyleConstants.h.
@@ -957,7 +961,6 @@ exclude
 // Variables Implementation
 //
 var
--internal-variable-value
 
 //
 // Environment Variables
@@ -1430,6 +1433,7 @@ fill-box
 
 // motion path
 path
+xywh
 
 calc
 -webkit-calc

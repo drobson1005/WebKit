@@ -523,6 +523,11 @@ static void scaleJITPolicy()
     scaleOption(Options::thresholdForOptimizeSoon(), 1);
     scaleOption(Options::thresholdForFTLOptimizeSoon(), 2);
     scaleOption(Options::thresholdForFTLOptimizeAfterWarmUp(), 2);
+
+    scaleOption(Options::thresholdForBBQOptimizeAfterWarmUp(), 0);
+    scaleOption(Options::thresholdForBBQOptimizeSoon(), 0);
+    scaleOption(Options::thresholdForOMGOptimizeAfterWarmUp(), 1);
+    scaleOption(Options::thresholdForOMGOptimizeSoon(), 1);
 }
 
 static void overrideDefaults()
@@ -602,6 +607,7 @@ static inline void disableAllJITOptions()
 
     Options::dumpDisassembly() = false;
     Options::asyncDisassembly() = false;
+    Options::dumpBaselineDisassembly() = false;
     Options::dumpDFGDisassembly() = false;
     Options::dumpFTLDisassembly() = false;
     Options::dumpRegExpDisassembly() = false;
@@ -680,8 +686,9 @@ void Options::notifyOptionsChanged()
     Options::useConcurrentGC() = false;
     Options::forceUnlinkedDFG() = false;
     Options::useWebAssemblySIMD() = false;
-    Options::useSinglePassBBQJIT() = false;
+    Options::useBBQJIT() = false;
 #endif
+    Options::useDataICInFTL() = false; // Currently, it is not completed. Disable forcefully.
 
     if (!Options::allowDoubleShape())
         Options::useJIT() = false; // We don't support JIT with !allowDoubleShape. So disable it.
@@ -700,6 +707,7 @@ void Options::notifyOptionsChanged()
 
         if (Options::dumpDisassembly()
             || Options::asyncDisassembly()
+            || Options::dumpBaselineDisassembly()
             || Options::dumpDFGDisassembly()
             || Options::dumpFTLDisassembly()
             || Options::dumpRegExpDisassembly()
@@ -782,7 +790,7 @@ void Options::notifyOptionsChanged()
             // BBQ backend if any of them are enabled. We should remove these limitations as support for each
             // is added.
             // FIXME: Add WASM tail calls support to single-pass BBQ JIT. https://bugs.webkit.org/show_bug.cgi?id=253192
-            Options::useSinglePassBBQJIT() = false;
+            Options::useBBQJIT() = false;
         }
     }
 

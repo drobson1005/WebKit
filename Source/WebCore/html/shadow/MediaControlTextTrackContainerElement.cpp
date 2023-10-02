@@ -82,7 +82,7 @@ MediaControlTextTrackContainerElement::MediaControlTextTrackContainerElement(Doc
 
 RenderPtr<RenderElement> MediaControlTextTrackContainerElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    return createRenderer<RenderBlockFlow>(*this, WTFMove(style));
+    return createRenderer<RenderBlockFlow>(RenderObject::Type::BlockFlow, *this, WTFMove(style));
 }
 
 static bool compareCueIntervalForDisplay(const CueInterval& one, const CueInterval& two)
@@ -400,7 +400,7 @@ void MediaControlTextTrackContainerElement::updateSizes(ForceUpdate force)
     });
 }
 
-RefPtr<Image> MediaControlTextTrackContainerElement::createTextTrackRepresentationImage()
+RefPtr<NativeImage> MediaControlTextTrackContainerElement::createTextTrackRepresentationImage()
 {
     if (!hasChildNodes())
         return nullptr;
@@ -435,7 +435,7 @@ RefPtr<Image> MediaControlTextTrackContainerElement::createTextTrackRepresentati
     paintFlags.add(RenderLayer::PaintLayerFlag::TemporaryClipRects);
     layer->paint(buffer->context(), paintingRect, LayoutSize(), { PaintBehavior::FlattenCompositingLayers, PaintBehavior::Snapshotting }, nullptr, paintFlags);
 
-    return ImageBuffer::sinkIntoImage(WTFMove(buffer));
+    return ImageBuffer::sinkIntoNativeImage(WTFMove(buffer));
 }
 
 void MediaControlTextTrackContainerElement::textTrackRepresentationBoundsChanged(const IntRect&)

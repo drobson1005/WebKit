@@ -130,6 +130,7 @@ public:
 
 #if ENABLE(MANAGED_MEDIA_SOURCE)
     virtual bool isManaged() const { return false; }
+    virtual bool streaming() const { return false; }
     void memoryPressure();
 #endif
 
@@ -154,7 +155,8 @@ private:
     static bool isTypeSupported(ScriptExecutionContext&, const String& type, Vector<ContentType>&& contentTypesRequiringHardwareSupport);
 
     void setPrivateAndOpen(Ref<MediaSourcePrivate>&&) final;
-    void seekToTarget(const SeekTarget&, CompletionHandler<void(const MediaTime&)>&&) final;
+    void waitForTarget(const SeekTarget&, CompletionHandler<void(const MediaTime&)>&&) final;
+    void seekToTime(const MediaTime&, CompletionHandler<void()>&&) final;
 
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }

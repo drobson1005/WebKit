@@ -35,28 +35,18 @@
 #import "CocoaHelpers.h"
 #import "WebExtensionContextProxy.h"
 #import "WebExtensionContextProxyMessages.h"
+#import "WebExtensionUtilities.h"
 #import "WebExtensionWindowIdentifier.h"
 #import "_WKWebExtensionControllerDelegatePrivate.h"
 #import "_WKWebExtensionWindowCreationOptionsInternal.h"
 
 namespace WebKit {
 
-static inline bool matchesFilter(const WebExtensionWindow& window, OptionSet<WebExtensionWindow::TypeFilter> filter)
-{
-    switch (window.type()) {
-    case WebExtensionWindow::Type::Normal:
-        return filter.contains(WebExtensionWindow::TypeFilter::Normal);
-
-    case WebExtensionWindow::Type::Popup:
-        return filter.contains(WebExtensionWindow::TypeFilter::Popup);
-    }
-}
-
-void WebExtensionContext::windowsCreate(WebExtensionWindowParameters creationParameters, CompletionHandler<void(std::optional<WebExtensionWindowParameters>, WebExtensionWindow::Error)>&& completionHandler)
+void WebExtensionContext::windowsCreate(const WebExtensionWindowParameters& creationParameters, CompletionHandler<void(std::optional<WebExtensionWindowParameters>, WebExtensionWindow::Error)>&& completionHandler)
 {
     auto delegate = extensionController()->delegate();
     if (![delegate respondsToSelector:@selector(webExtensionController:openNewWindowWithOptions:forExtensionContext:completionHandler:)]) {
-        completionHandler(std::nullopt, "windows.create() not implemented."_s);
+        completionHandler(std::nullopt, toErrorString(@"windows.create()", nil, @"it is not implemented"));
         return;
     }
 
@@ -64,10 +54,10 @@ void WebExtensionContext::windowsCreate(WebExtensionWindowParameters creationPar
     static constexpr CGRect CGRectNaN = { { NaN, NaN }, { NaN, NaN } };
 
     auto *creationOptions = [[_WKWebExtensionWindowCreationOptions alloc] _init];
-    creationOptions.desiredWindowType = creationParameters.type ? toAPI(creationParameters.type.value()) : _WKWebExtensionWindowTypeNormal;
-    creationOptions.desiredWindowState = creationParameters.state ? toAPI(creationParameters.state.value()) : _WKWebExtensionWindowStateNormal;
-    creationOptions.shouldFocus = creationParameters.focused && creationParameters.focused.value();
-    creationOptions.shouldUsePrivateBrowsing = creationParameters.privateBrowsing && creationParameters.privateBrowsing.value();
+    creationOptions.desiredWindowType = toAPI(creationParameters.type.value_or(WebExtensionWindow::Type::Normal));
+    creationOptions.desiredWindowState = toAPI(creationParameters.state.value_or(WebExtensionWindow::State::Normal));
+    creationOptions.shouldFocus = creationParameters.focused.value_or(true);
+    creationOptions.shouldUsePrivateBrowsing = creationParameters.privateBrowsing.value_or(false);
 
     if (creationParameters.frame) {
         CGRect desiredFrame = creationParameters.frame.value();
@@ -93,8 +83,13 @@ void WebExtensionContext::windowsCreate(WebExtensionWindowParameters creationPar
     if (creationParameters.tabs) {
         for (auto& tabParameters : creationParameters.tabs.value()) {
             if (tabParameters.identifier) {
-                if (auto tab = getTab(tabParameters.identifier.value()); tab && tab->isValid())
-                    [tabs addObject:tab->delegate()];
+                auto tab = getTab(tabParameters.identifier.value());
+                if (!tab) {
+                    completionHandler(std::nullopt, toErrorString(@"windows.create()", nil, @"tab '%llu' was not found", tabParameters.identifier.value().toUInt64()));
+                    return;
+                }
+
+                [tabs addObject:tab->delegate()];
             } else if (tabParameters.url)
                 [urls addObject:static_cast<NSURL *>(tabParameters.url.value())];
         }
@@ -123,14 +118,16 @@ void WebExtensionContext::windowsCreate(WebExtensionWindowParameters creationPar
 
 void WebExtensionContext::windowsGet(WebPageProxyIdentifier, WebExtensionWindowIdentifier windowIdentifier, OptionSet<WindowTypeFilter> filter, PopulateTabs populate, CompletionHandler<void(std::optional<WebExtensionWindowParameters>, WebExtensionWindow::Error)>&& completionHandler)
 {
+    static NSString * const apiName = @"windows.get()";
+
     auto window = getWindow(windowIdentifier);
     if (!window) {
-        completionHandler(std::nullopt, "Window not found."_s);
+        completionHandler(std::nullopt, toErrorString(apiName, nil, @"window not found"));
         return;
     }
 
-    if (!matchesFilter(*window, filter)) {
-        completionHandler(std::nullopt, "Window does not match requested 'windowTypes'."_s);
+    if (!window->matches(filter)) {
+        completionHandler(std::nullopt, toErrorString(apiName, nil, @"window does not match requested 'windowTypes'"));
         return;
     }
 
@@ -139,14 +136,16 @@ void WebExtensionContext::windowsGet(WebPageProxyIdentifier, WebExtensionWindowI
 
 void WebExtensionContext::windowsGetLastFocused(OptionSet<WindowTypeFilter> filter, PopulateTabs populate, CompletionHandler<void(std::optional<WebExtensionWindowParameters>, WebExtensionWindow::Error)>&& completionHandler)
 {
+    static NSString * const apiName = @"windows.getLastFocused()";
+
     auto window = frontmostWindow();
     if (!window) {
-        completionHandler(std::nullopt, "Window not found."_s);
+        completionHandler(std::nullopt, toErrorString(apiName, nil, @"window not found"));
         return;
     }
 
-    if (!matchesFilter(*window, filter)) {
-        completionHandler(std::nullopt, "Window does not match requested 'windowTypes'."_s);
+    if (!window->matches(filter)) {
+        completionHandler(std::nullopt, toErrorString(apiName, nil, @"window does not match requested 'windowTypes'"));
         return;
     }
 
@@ -157,7 +156,7 @@ void WebExtensionContext::windowsGetAll(OptionSet<WindowTypeFilter> filter, Popu
 {
     Vector<WebExtensionWindowParameters> result;
     for (auto& window : openWindows()) {
-        if (!matchesFilter(window, filter))
+        if (!window->matches(filter))
             continue;
 
         result.append(window->parameters(populate));
@@ -168,9 +167,11 @@ void WebExtensionContext::windowsGetAll(OptionSet<WindowTypeFilter> filter, Popu
 
 void WebExtensionContext::windowsUpdate(WebExtensionWindowIdentifier windowIdentifier, WebExtensionWindowParameters updateParameters, CompletionHandler<void(std::optional<WebExtensionWindowParameters>, WebExtensionWindow::Error)>&& completionHandler)
 {
+    static NSString * const apiName = @"windows.update()";
+
     auto window = getWindow(windowIdentifier);
     if (!window) {
-        completionHandler(std::nullopt, "Window not found."_s);
+        completionHandler(std::nullopt, toErrorString(apiName, nil, @"window not found"));
         return;
     }
 
@@ -200,7 +201,7 @@ void WebExtensionContext::windowsUpdate(WebExtensionWindowIdentifier windowIdent
 
         CGRect currentFrame = window->frame();
         if (CGRectIsNull(currentFrame)) {
-            stepCompletionHandler("windows.update() not implemented for 'top', 'left', 'width', and 'height'."_s);
+            stepCompletionHandler(toErrorString(apiName, nil, @"it is not implemented for 'top', 'left', 'width', and 'height'"));
             return;
         }
 
@@ -218,7 +219,7 @@ void WebExtensionContext::windowsUpdate(WebExtensionWindowIdentifier windowIdent
         // coordinates with the origin in the top-left corner.
         CGRect screenFrame = window->screenFrame();
         if (CGRectIsEmpty(screenFrame)) {
-            stepCompletionHandler("windows.update() not implemented for 'top', 'left', 'width', and 'height'."_s);
+            stepCompletionHandler(toErrorString(apiName, nil, @"it is not implemented for 'top', 'left', 'width', and 'height'"));
             return;
         }
 
@@ -284,7 +285,7 @@ void WebExtensionContext::windowsRemove(WebExtensionWindowIdentifier windowIdent
 {
     auto window = getWindow(windowIdentifier);
     if (!window) {
-        completionHandler("Window not found."_s);
+        completionHandler(toErrorString(@"windows.remove()", nil, @"window not found"));
         return;
     }
 

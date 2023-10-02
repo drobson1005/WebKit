@@ -33,6 +33,7 @@
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
 #include <stdint.h>
+#include <wtf/CheckedRef.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/RunLoop.h>
 #include <wtf/TypeCasts.h>
@@ -87,10 +88,6 @@ public:
     const WebCore::IntSize& size() const { return m_size; }
     bool setSize(const WebCore::IntSize&, const WebCore::IntSize& scrollOffset = { });
 
-#if USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
-    virtual void targetRefreshRateDidChange(unsigned) { }
-#endif
-
     virtual void minimumSizeForAutoLayoutDidChange() { }
     virtual void sizeToContentAutoSizeMaximumSizeDidChange() { }
     virtual void windowKindDidChange() { }
@@ -139,9 +136,11 @@ public:
 protected:
     DrawingAreaProxy(DrawingAreaType, WebPageProxy&);
 
+    Ref<WebPageProxy> protectedWebPageProxy() const;
+
     DrawingAreaType m_type;
     DrawingAreaIdentifier m_identifier;
-    WebPageProxy& m_webPageProxy;
+    CheckedRef<WebPageProxy> m_webPageProxy;
 
     WebCore::IntSize m_size;
     WebCore::IntSize m_scrollOffset;

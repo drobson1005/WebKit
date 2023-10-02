@@ -180,7 +180,7 @@ protected:
     FloatSize naturalSize() const override;
     bool hasVideo() const override { return m_cachedHasVideo; }
     bool hasAudio() const override { return m_cachedHasAudio; }
-    void setPageIsVisible(bool) final;
+    void setPageIsVisible(bool, String&& sceneIdentifier) final;
     MediaTime durationMediaTime() const override;
     MediaTime currentMediaTime() const override = 0;
     void seekToTarget(const SeekTarget&) final;
@@ -335,6 +335,7 @@ private:
     ThreadSafeWeakPtr<MediaPlayer> m_player;
 
     Function<void()> m_pendingSeek;
+    MediaTime m_lastSeekTime;
 
     mutable Lock m_queuedNotificationsLock;
     Deque<Notification> m_queuedNotifications WTF_GUARDED_BY_LOCK(m_queuedNotificationsLock);

@@ -32,60 +32,60 @@
 
 namespace WebCore {
 
-static FloatPoint offsetFromContainer(const RenderObject& renderer, RenderBlock& container)
+static FloatPoint offsetFromContainer(const RenderObject& renderer, RenderBlock& container, const FloatRect& referenceRect)
 {
     auto offsetFromContainingBlock = renderer.offsetFromContainer(container, LayoutPoint());
-    return FloatPoint(offsetFromContainingBlock);
+    return FloatPoint(FloatPoint(offsetFromContainingBlock) - referenceRect.location());
+}
+
+static FloatRoundedRect containingBlockRectForRenderer(const RenderObject& renderer, RenderBlock& container, const PathOperation& operation)
+{
+    auto referenceRect = snapRectToDevicePixelsIfNeeded(container.referenceBoxRect(operation.referenceBox()), downcast<RenderLayerModelObject>(renderer));
+    if (is<BoxPathOperation>(operation))
+        return FloatRoundedRect(container.style().getRoundedBorderFor(LayoutRect(referenceRect)));
+    return FloatRoundedRect(referenceRect);
+}
+
+static FloatPoint normalPositionForOffsetPath(PathOperation* operation, const FloatRect& referenceRect)
+{
+    if (is<RayPathOperation>(operation) || is<ShapePathOperation>(operation))
+        return referenceRect.center();
+    return { };
 }
 
 std::optional<MotionPathData> MotionPath::motionPathDataForRenderer(const RenderElement& renderer)
 {
     MotionPathData data;
     auto pathOperation = renderer.style().offsetPath();
-    if (!pathOperation || !is<RenderLayerModelObject>(renderer))
+    if (!is<RenderLayerModelObject>(renderer) || !pathOperation || (is<ShapePathOperation>(pathOperation) && is<BasicShapePath>(downcast<ShapePathOperation>(*pathOperation).shape())))
         return std::nullopt;
 
     auto startingPositionForOffsetPosition = [&](const LengthPoint& offsetPosition, const FloatRect& referenceRect, RenderBlock& container) -> FloatPoint {
-        // FIXME: Implement offset-position: normal.
+        // If offset-position is normal, the element does not have an offset starting position.
+        if (offsetPosition.x().isNormal())
+            return normalPositionForOffsetPath(pathOperation, referenceRect);
         // If offset-position is auto, use top / left corner of the box.
-        if (offsetPosition.x().isAuto() && offsetPosition.y().isAuto())
-            return offsetFromContainer(renderer, container);
+        if (offsetPosition.x().isAuto())
+            return offsetFromContainer(renderer, container, referenceRect);
         return floatPointForLengthPoint(offsetPosition, referenceRect.size());
     };
 
-    if (is<BoxPathOperation>(pathOperation)) {
-        if (auto* container = renderer.containingBlock()) {
-            auto& boxPathOperation = downcast<BoxPathOperation>(*pathOperation);
-            data.containingBlockBoundingRect = snapRectToDevicePixelsIfNeeded(container->referenceBoxRect(boxPathOperation.referenceBox()), downcast<RenderLayerModelObject>(renderer));
-            data.offsetFromContainingBlock = offsetFromContainer(renderer, *container);
-            return data;
-        }
-        return std::nullopt;
-    }
-    if (is<ShapePathOperation>(pathOperation)) {
-        if (auto* container = renderer.containingBlock()) {
-            auto& shapePathOperation = downcast<ShapePathOperation>(*pathOperation);
-            data.containingBlockBoundingRect = snapRectToDevicePixelsIfNeeded(container->referenceBoxRect(shapePathOperation.referenceBox()), downcast<RenderLayerModelObject>(renderer));
-            data.offsetFromContainingBlock = offsetFromContainer(renderer, *container);
-            return data;
-        }
-        return std::nullopt;
-    }
-    if (is<RayPathOperation>(pathOperation)) {
-        if (auto* container = renderer.containingBlock()) {
+    if (auto* container = renderer.containingBlock()) {
+        data.containingBlockBoundingRect = containingBlockRectForRenderer(renderer, *container, *pathOperation);
+        data.offsetFromContainingBlock = offsetFromContainer(renderer, *container, data.containingBlockBoundingRect.rect());
+
+        auto offsetPosition = renderer.style().offsetPosition();
+
+        if (is<ShapePathOperation>(pathOperation))
+            data.usedStartingPosition = startingPositionForOffsetPosition(offsetPosition, data.containingBlockBoundingRect.rect(), *container);
+        if (is<RayPathOperation>(pathOperation)) {
             auto& rayPathOperation = downcast<RayPathOperation>(*pathOperation);
-            auto pathReferenceBoxRect = snapRectToDevicePixelsIfNeeded(container->transformReferenceBoxRect(container->style()), downcast<RenderLayerModelObject>(renderer));
-
-            auto offsetPosition = renderer.style().offsetPosition();
             auto startingPosition = rayPathOperation.position();
-            auto usedStartingPosition = startingPosition.x().isAuto() ? startingPositionForOffsetPosition(offsetPosition, pathReferenceBoxRect, *container) : floatPointForLengthPoint(startingPosition, pathReferenceBoxRect.size());
-            data.usedStartingPosition = usedStartingPosition;
-            data.offsetFromContainingBlock = offsetFromContainer(renderer, *container);
-            data.containingBlockBoundingRect = pathReferenceBoxRect;
-
-            return data;
+            data.usedStartingPosition = startingPosition.x().isAuto() ? startingPositionForOffsetPosition(offsetPosition, data.containingBlockBoundingRect.rect(), *container) : floatPointForLengthPoint(startingPosition, data.containingBlockBoundingRect.rect().size());
         }
+        return data;
     }
+
     return std::nullopt;
 }
 
@@ -149,7 +149,7 @@ bool MotionPath::needsUpdateAfterContainingBlockLayout(const PathOperation& path
 
 double MotionPath::lengthForRayPath(const RayPathOperation& rayPathOperation, const MotionPathData& data)
 {
-    auto& boundingBox = data.containingBlockBoundingRect;
+    auto& boundingBox = data.containingBlockBoundingRect.rect();
     auto distances = distanceOfPointToSidesOfRect(boundingBox, data.usedStartingPosition);
 
     switch (rayPathOperation.size()) {
@@ -181,7 +181,7 @@ std::optional<Path> MotionPath::computePathForRay(const RayPathOperation& rayPat
 {
     auto motionPathData = data.motionPathData();
     auto elementBoundingBox = data.boundingBox();
-    if (!motionPathData || motionPathData->containingBlockBoundingRect.isZero())
+    if (!motionPathData || motionPathData->containingBlockBoundingRect.rect().isZero())
         return std::nullopt;
 
     double length = lengthForRayPath(rayPathOperation, *motionPathData);
@@ -197,19 +197,39 @@ std::optional<Path> MotionPath::computePathForRay(const RayPathOperation& rayPat
     return path;
 }
 
+static FloatRoundedRect offsetRectForData(const MotionPathData& data)
+{
+    auto rect = data.containingBlockBoundingRect;
+    auto shiftedPoint = data.offsetFromContainingBlock;
+    shiftedPoint.scale(-1);
+    rect.setLocation(shiftedPoint);
+    return rect;
+}
+
 std::optional<Path> MotionPath::computePathForBox(const BoxPathOperation&, const TransformOperationData& data)
 {
     if (auto motionPathData = data.motionPathData()) {
         Path path;
-        auto rect = motionPathData->containingBlockBoundingRect;
-        auto shiftedPoint = motionPathData->offsetFromContainingBlock;
-        shiftedPoint.scale(-1);
-        rect.moveBy(shiftedPoint);
-        path.addRect(rect);
+        path.addRoundedRect(offsetRectForData(*motionPathData), PathRoundedRect::Strategy::PreferBezier);
         return path;
     }
     return std::nullopt;
 }
 
+std::optional<Path> MotionPath::computePathForShape(const ShapePathOperation& pathOperation, const TransformOperationData& data)
+{
+    if (auto motionPathData = data.motionPathData()) {
+        auto& shape = pathOperation.basicShape();
+        auto containingBlockRect = offsetRectForData(*motionPathData).rect();
+        if (is<BasicShapeCircleOrEllipse>(shape)) {
+            auto& centerCoordShape = downcast<BasicShapeCircleOrEllipse>(shape);
+            if (centerCoordShape.positionWasOmitted())
+                return centerCoordShape.pathForCenterCoordinate(containingBlockRect, motionPathData->usedStartingPosition);
+        }
+        return pathOperation.pathForReferenceRect(containingBlockRect);
+    }
+    return pathOperation.pathForReferenceRect(data.boundingBox());
+
+}
 
 } // namespace WebCore

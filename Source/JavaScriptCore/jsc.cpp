@@ -142,6 +142,10 @@
 #include <arm/arch.h>
 #endif
 
+#if OS(DARWIN) && PLATFORM(MAC)
+#include <libproc.h>
+#endif
+
 #if OS(DARWIN)
 #include <wtf/spi/darwin/ProcessMemoryFootprint.h>
 #elif OS(LINUX)
@@ -1184,13 +1188,12 @@ private:
     }
 
     ShellSourceProvider(const String& source, const SourceOrigin& sourceOrigin, String&& sourceURL, const TextPosition& startPosition, SourceProviderSourceType sourceType)
-        : StringSourceProvider(source, sourceOrigin, WTFMove(sourceURL), startPosition, sourceType)
+        : StringSourceProvider(source, sourceOrigin, SourceTaintedOrigin::Untainted, WTFMove(sourceURL), startPosition, sourceType)
         // Workers started via $.agent.start are not shut down in a synchronous manner, and it
         // is possible the main thread terminates the process while a worker is writing its
         // bytecode cache, which results in intermittent test failures. As $.agent.start is only
         // a rarely used testing facility, we simply do not cache bytecode on these threads.
         , m_cacheEnabled(Worker::current().isMain() && !!Options::diskCachePath())
-
     {
     }
 
@@ -1294,7 +1297,7 @@ JSInternalPromise* GlobalObject::moduleLoaderFetch(JSGlobalObject* globalObject,
 #endif
 
     if (attributes && attributes->type() == ScriptFetchParameters::Type::JSON) {
-        auto source = SourceCode(StringSourceProvider::create(stringFromUTF(buffer), SourceOrigin { moduleURL }, WTFMove(moduleKey), TextPosition(), SourceProviderSourceType::JSON));
+        auto source = SourceCode(StringSourceProvider::create(stringFromUTF(buffer), SourceOrigin { moduleURL }, WTFMove(moduleKey), SourceTaintedOrigin::Untainted, TextPosition(), SourceProviderSourceType::JSON));
         auto sourceCode = JSSourceCode::create(vm, WTFMove(source));
         scope.release();
         promise->resolve(globalObject, sourceCode);
@@ -1697,7 +1700,10 @@ JSC_DEFINE_HOST_FUNCTION(functionRunString, (JSGlobalObject* globalObject, CallF
     realm->putDirect(vm, Identifier::fromString(vm, "arguments"_s), array);
 
     NakedPtr<Exception> exception;
-    evaluate(realm, jscSource(source, callFrame->callerSourceOrigin(vm)), JSValue(), exception);
+    {
+        SourceCode code = jscSource(source, callFrame->callerSourceOrigin(vm), String(), TextPosition(), SourceProviderSourceType::Program);
+        evaluate(realm, code, JSValue(), exception);
+    }
 
     if (exception) {
         if (vm.isTerminationException(exception.get()))
@@ -3195,10 +3201,12 @@ int main(int argc, char** argv)
     fegetenv( &env );
     env.__fpscr &= ~0x01000000u;
     fesetenv( &env );
+#endif
 
+#if OS(DARWIN) && PLATFORM(MAC)
     // Let the kernel kill us when OOM
     {
-        int retval = proc_setpcontrol(PC_KILL);
+        int retval = proc_setpcontrol(PROC_SETPC_TERMINATE);
         ASSERT_UNUSED(retval, !retval);
     }
 #endif

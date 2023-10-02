@@ -47,10 +47,12 @@ namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(LegacyRootInlineBox);
 
-struct SameSizeAsLegacyRootInlineBox : public LegacyInlineFlowBox, public CanMakeWeakPtr<LegacyRootInlineBox> {
-    unsigned variables[7];
+struct SameSizeAsLegacyRootInlineBox : LegacyInlineFlowBox, CanMakeWeakPtr<LegacyRootInlineBox>, CanMakeCheckedPtr {
+    unsigned lineBreakPos;
     WeakPtr<RenderObject> lineBreakObj;
-    void* pointers[2];
+    void* lineBreakContext;
+    int layoutUnits[6];
+    void* floats;
 };
 
 static_assert(sizeof(LegacyRootInlineBox) == sizeof(SameSizeAsLegacyRootInlineBox), "LegacyRootInlineBox should stay small");
@@ -213,13 +215,13 @@ RenderFragmentContainer* LegacyRootInlineBox::containingFragment() const
 {
     ContainingFragmentMap& fragmentMap = containingFragmentMap(blockFlow());
     bool hasContainingFragment = fragmentMap.contains(this);
-    RenderFragmentContainer* fragment = hasContainingFragment ? fragmentMap.get(this) : nullptr;
+    RenderFragmentContainer* fragment = hasContainingFragment ? fragmentMap.get(this).get() : nullptr;
 
 #ifndef NDEBUG
     if (hasContainingFragment) {
         RenderFragmentedFlow* fragmentedFlow = blockFlow().enclosingFragmentedFlow();
         const RenderFragmentContainerList& fragmentList = fragmentedFlow->renderFragmentContainerList();
-        ASSERT_WITH_SECURITY_IMPLICATION(fragmentList.contains(fragment));
+        ASSERT_WITH_SECURITY_IMPLICATION(fragmentList.contains(*fragment));
     }
 #endif
 
@@ -349,11 +351,6 @@ LayoutUnit LegacyRootInlineBox::lineSnapAdjustment(LayoutUnit delta) const
     if (!lineGrid || lineGrid->style().writingMode() != blockFlow().style().writingMode())
         return 0;
 
-    // Get the hypothetical line box used to establish the grid.
-    LegacyRootInlineBox* lineGridBox = lineGrid->lineGridBox();
-    if (!lineGridBox)
-        return 0;
-    
     LayoutUnit lineGridBlockOffset = lineGrid->isHorizontalWritingMode() ? lineGridOffset.height() : lineGridOffset.width();
     LayoutUnit blockOffset = blockFlow().isHorizontalWritingMode() ? layoutState->layoutOffset().height() : layoutState->layoutOffset().width();
 
@@ -361,14 +358,17 @@ LayoutUnit LegacyRootInlineBox::lineSnapAdjustment(LayoutUnit delta) const
     // as established by the line box.
     // FIXME: Need to handle crazy line-box-contain values that cause the root line box to not be considered. I assume
     // the grid should honor line-box-contain.
-    LayoutUnit gridLineHeight = lineGridBox->lineBoxBottom() - lineGridBox->lineBoxTop();
+    LayoutUnit gridLineHeight = lineGrid->style().computedLineHeight();
     if (!roundToInt(gridLineHeight))
         return 0;
 
-    LayoutUnit lineGridFontAscent = lineGrid->style().metricsOfPrimaryFont().ascent(baselineType());
-    LayoutUnit lineGridFontHeight { lineGridBox->logicalHeight() };
-    LayoutUnit firstTextTop { lineGridBlockOffset + lineGridBox->logicalTop() };
-    LayoutUnit firstLineTopWithLeading = lineGridBlockOffset + lineGridBox->lineBoxTop();
+    auto& gridFontMetrics = lineGrid->style().metricsOfPrimaryFont();
+    LayoutUnit lineGridFontAscent = gridFontMetrics.ascent(baselineType());
+    LayoutUnit lineGridFontHeight = gridFontMetrics.height();
+    LayoutUnit lineGridHalfLeading = (gridLineHeight - lineGridFontHeight) / 2;
+
+    LayoutUnit firstLineTop = lineGridBlockOffset + lineGrid->borderAndPaddingBefore();
+    LayoutUnit firstTextTop = firstLineTop + lineGridHalfLeading;
     LayoutUnit firstBaselinePosition = firstTextTop + lineGridFontAscent;
 
     LayoutUnit currentTextTop { blockOffset + logicalTop() + delta };
@@ -382,8 +382,8 @@ LayoutUnit LegacyRootInlineBox::lineSnapAdjustment(LayoutUnit delta) const
     LayoutUnit pageLogicalTop;
     if (layoutState->isPaginated() && layoutState->pageLogicalHeight()) {
         pageLogicalTop = blockFlow().pageLogicalTopForOffset(lineBoxTop() + delta);
-        if (pageLogicalTop > firstLineTopWithLeading)
-            firstTextTop = pageLogicalTop + lineGridBox->logicalTop() - lineGrid->borderAndPaddingBefore() + lineGridPaginationOrigin;
+        if (pageLogicalTop > firstLineTop)
+            firstTextTop = pageLogicalTop + lineGridHalfLeading + lineGridPaginationOrigin;
     }
 
     if (blockFlow().style().lineSnap() == LineSnap::Contain) {
@@ -691,7 +691,7 @@ void LegacyRootInlineBox::ascentAndDescentForBox(LegacyInlineBox& box, GlyphOver
         return;
     }
 
-    Vector<const Font*>* usedFonts = nullptr;
+    Vector<WeakPtr<const Font>>* usedFonts = nullptr;
     GlyphOverflow* glyphOverflow = nullptr;
     if (is<LegacyInlineTextBox>(box)) {
         GlyphOverflowAndFallbackFontsMap::iterator it = textBoxDataMap.find(&downcast<LegacyInlineTextBox>(box));

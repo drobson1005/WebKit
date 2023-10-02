@@ -27,6 +27,7 @@
 #include "config.h"
 #include "StyleFilterImage.h"
 
+#include "BitmapImage.h"
 #include "CSSFilter.h"
 #include "CSSFilterImageValue.h"
 #include "CSSValuePool.h"
@@ -133,15 +134,16 @@ RefPtr<Image> StyleFilterImage::image(const RenderElement* renderer, const Float
 
     cssFilter->setFilterRegion(sourceImageRect);
 
-    auto sourceImage = ImageBuffer::create(size, RenderingPurpose::DOM, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8, bufferOptionsForRendingMode(cssFilter->renderingMode()), { renderer->hostWindow() });
+    auto sourceImage = ImageBuffer::create(size, RenderingPurpose::DOM, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8, bufferOptionsForRendingMode(cssFilter->renderingMode()), renderer->hostWindow());
     if (!sourceImage)
         return &Image::nullImage();
 
-    auto filteredImage = sourceImage->filteredImage(*cssFilter, [&](GraphicsContext& context) {
+    auto filteredImage = sourceImage->filteredNativeImage(*cssFilter, [&](GraphicsContext& context) {
         context.drawImage(*image, sourceImageRect);
     });
-
-    return filteredImage ? filteredImage : &Image::nullImage();
+    if (!filteredImage)
+        return &Image::nullImage();
+    return BitmapImage::create(WTFMove(filteredImage));
 }
 
 bool StyleFilterImage::knownToBeOpaque(const RenderElement&) const

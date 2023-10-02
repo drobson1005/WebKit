@@ -286,6 +286,7 @@ MediaTime MediaPlayerPrivateRemote::currentMediaTime() const
 
 void MediaPlayerPrivateRemote::seekToTarget(const WebCore::SeekTarget& target)
 {
+    ALWAYS_LOG(LOGIDENTIFIER, target);
     m_seeking = true;
     m_cachedMediaTime = target.time;
     connection().send(Messages::RemoteMediaPlayerProxy::SeekToTarget(target), m_id);
@@ -331,6 +332,7 @@ void MediaPlayerPrivateRemote::networkStateChanged(RemoteMediaPlayerState&& stat
 
 void MediaPlayerPrivateRemote::setReadyState(MediaPlayer::ReadyState readyState)
 {
+    ALWAYS_LOG(LOGIDENTIFIER, readyState);
     m_cachedState.readyState = readyState;
     if (auto player = m_player.get())
         player->readyStateChanged();
@@ -338,6 +340,7 @@ void MediaPlayerPrivateRemote::setReadyState(MediaPlayer::ReadyState readyState)
 
 void MediaPlayerPrivateRemote::readyStateChanged(RemoteMediaPlayerState&& state)
 {
+    ALWAYS_LOG(LOGIDENTIFIER, state.readyState);
     updateCachedState(WTFMove(state));
     if (auto player = m_player.get()) {
         player->readyStateChanged();
@@ -359,10 +362,19 @@ void MediaPlayerPrivateRemote::muteChanged(bool muted)
         player->muteChanged(muted);
 }
 
+void MediaPlayerPrivateRemote::seeked(const MediaTime& time)
+{
+    ALWAYS_LOG(LOGIDENTIFIER, time);
+    m_seeking = false;
+    m_cachedMediaTime =  time;
+    m_cachedMediaTimeQueryTime = MonotonicTime::now();
+    if (auto player = m_player.get())
+        player->seeked(time);
+}
+
 void MediaPlayerPrivateRemote::timeChanged(RemoteMediaPlayerState&& state)
 {
-    if (!state.seeking)
-        m_seeking = false;
+    ALWAYS_LOG(LOGIDENTIFIER);
     updateCachedState(WTFMove(state));
     if (auto player = m_player.get())
         player->timeChanged();
@@ -557,7 +569,7 @@ void MediaPlayerPrivateRemote::prepareForRendering()
     connection().send(Messages::RemoteMediaPlayerProxy::PrepareForRendering(), m_id);
 }
 
-void MediaPlayerPrivateRemote::setPageIsVisible(bool visible)
+void MediaPlayerPrivateRemote::setPageIsVisible(bool visible, String&& sceneIdentifier)
 {
     if (m_pageIsVisible == visible)
         return;
@@ -565,7 +577,7 @@ void MediaPlayerPrivateRemote::setPageIsVisible(bool visible)
     ALWAYS_LOG(LOGIDENTIFIER, visible);
 
     m_pageIsVisible = visible;
-    connection().send(Messages::RemoteMediaPlayerProxy::SetPageIsVisible(visible), m_id);
+    connection().send(Messages::RemoteMediaPlayerProxy::SetPageIsVisible(visible, WTFMove(sceneIdentifier)), m_id);
 }
 
 void MediaPlayerPrivateRemote::setShouldMaintainAspectRatio(bool maintainRatio)
@@ -789,7 +801,7 @@ void MediaPlayerPrivateRemote::load(const URL& url, const ContentType& contentTy
     if (m_remoteEngineIdentifier == MediaPlayerEnums::MediaEngineIdentifier::AVFoundationMSE
         || (platformStrategies()->mediaStrategy().mockMediaSourceEnabled() && m_remoteEngineIdentifier == MediaPlayerEnums::MediaEngineIdentifier::MockMSE)) {
         auto identifier = RemoteMediaSourceIdentifier::generate();
-        connection().sendWithAsyncReply(Messages::RemoteMediaPlayerProxy::LoadMediaSource(url, contentType, DeprecatedGlobalSettings::webMParserEnabled(), identifier), [weakThis = WeakPtr { *this }, this](auto&& configuration) {
+        connection().sendWithAsyncReply(Messages::RemoteMediaPlayerProxy::LoadMediaSource(url, contentType, DeprecatedGlobalSettings::webMParserEnabled(), identifier), [weakThis = WeakPtr { *this }, this](RemoteMediaPlayerConfiguration&& configuration) {
             if (!weakThis)
                 return;
 
@@ -1037,7 +1049,7 @@ RefPtr<WebCore::VideoFrame> MediaPlayerPrivateRemote::videoFrameForCurrentTime()
     auto [result, changed] = sendResult.takeReply();
     if (changed) {
         if (result)
-            m_videoFrameForCurrentTime = RemoteVideoFrameProxy::create(connection(), videoFrameObjectHeapProxy(), WTFMove(*result));
+            m_videoFrameForCurrentTime = RemoteVideoFrameProxy::create(protectedConnection(), videoFrameObjectHeapProxy(), WTFMove(*result));
         else
             m_videoFrameForCurrentTime = nullptr;
     }

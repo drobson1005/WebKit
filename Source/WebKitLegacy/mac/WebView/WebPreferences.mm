@@ -1733,16 +1733,6 @@ static RetainPtr<NSString>& classIBCreatorID()
     [self _setBoolValue:enabled forKey:WebKitAcceleratedDrawingEnabledPreferenceKey];
 }
 
-- (BOOL)displayListDrawingEnabled
-{
-    return [self _boolValueForKey:WebKitDisplayListDrawingEnabledPreferenceKey];
-}
-
-- (void)setDisplayListDrawingEnabled:(BOOL)enabled
-{
-    [self _setBoolValue:enabled forKey:WebKitDisplayListDrawingEnabledPreferenceKey];
-}
-
 - (BOOL)resourceLoadStatisticsEnabled
 {
     return [self _boolValueForKey:WebKitResourceLoadStatisticsEnabledPreferenceKey];
@@ -1851,27 +1841,6 @@ static RetainPtr<NSString>& classIBCreatorID()
 - (void)setForceWebGLUsesLowPower:(BOOL)forceLowPower
 {
     [self _setBoolValue:forceLowPower forKey:WebKitForceWebGLUsesLowPowerPreferenceKey];
-}
-
-- (BOOL)isFrameFlatteningEnabled
-{
-    return [self _unsignedIntValueForKey:WebKitFrameFlatteningPreferenceKey] != WebKitFrameFlatteningDisabled;
-}
-
-- (void)setFrameFlatteningEnabled:(BOOL)flattening
-{
-    WebKitFrameFlattening value = flattening ? WebKitFrameFlatteningFullyEnabled : WebKitFrameFlatteningDisabled;
-    [self _setUnsignedIntValue:value forKey:WebKitFrameFlatteningPreferenceKey];
-}
-
-- (WebKitFrameFlattening)frameFlattening
-{
-    return static_cast<WebKitFrameFlattening>([self _unsignedIntValueForKey:WebKitFrameFlatteningPreferenceKey]);
-}
-
-- (void)setFrameFlattening:(WebKitFrameFlattening)flattening
-{
-    [self _setUnsignedIntValue:flattening forKey:WebKitFrameFlatteningPreferenceKey];
 }
 
 - (BOOL)asyncFrameScrollingEnabled
@@ -3370,5 +3339,13 @@ static RetainPtr<NSString>& classIBCreatorID()
     return NO;
 }
 
+- (BOOL)displayListDrawingEnabled
+{
+    return NO;
+}
+
+- (void)setDisplayListDrawingEnabled:(BOOL)enabled
+{
+}
 
 @end

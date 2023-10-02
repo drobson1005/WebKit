@@ -228,6 +228,7 @@ Modules/mediasource/VideoPlaybackQuality.cpp
 Modules/mediastream/CanvasCaptureMediaStreamTrack.cpp
 Modules/mediastream/MediaDeviceInfo.cpp
 Modules/mediastream/InputDeviceInfo.cpp
+Modules/mediastream/ImageCapture.cpp
 Modules/mediastream/MediaDevices.cpp
 Modules/mediastream/MediaStream.cpp
 Modules/mediastream/MediaStreamTrack.cpp
@@ -284,6 +285,8 @@ Modules/notifications/Notification.cpp
 Modules/notifications/NotificationController.cpp
 Modules/notifications/NotificationData.cpp
 Modules/notifications/NotificationEvent.cpp
+Modules/notifications/NotificationJSONParser.cpp
+Modules/notifications/NotificationPayload.cpp
 Modules/notifications/NotificationResourcesLoader.cpp
 Modules/paymentrequest/MerchantValidationEvent.cpp
 Modules/paymentrequest/PaymentAddress.cpp
@@ -308,6 +311,7 @@ Modules/push-api/PushDatabase.cpp
 Modules/push-api/PushEvent.cpp
 Modules/push-api/PushMessageCrypto.cpp
 Modules/push-api/PushMessageData.cpp
+Modules/push-api/PushNotificationEvent.cpp
 Modules/push-api/PushSubscription.cpp
 Modules/push-api/PushSubscriptionChangeEvent.cpp
 Modules/push-api/PushSubscriptionData.cpp
@@ -435,6 +439,7 @@ Modules/webauthn/fido/U2fResponseConverter.cpp
 Modules/webcodecs/WebCodecsAudioDecoder.cpp
 Modules/webcodecs/WebCodecsAudioData.cpp
 Modules/webcodecs/WebCodecsAudioDataAlgorithms.cpp
+Modules/webcodecs/WebCodecsAudioEncoder.cpp
 Modules/webcodecs/WebCodecsEncodedAudioChunk.cpp
 Modules/webcodecs/WebCodecsEncodedVideoChunk.cpp
 Modules/webcodecs/WebCodecsVideoDecoder.cpp
@@ -471,12 +476,18 @@ Modules/websockets/WebSocketExtensionParser.cpp
 Modules/websockets/WebSocketFrame.cpp
 Modules/websockets/WebSocketHandshake.cpp
 Modules/websockets/WorkerThreadableWebSocketChannel.cpp
+Modules/webtransport/DatagramSink.cpp
+Modules/webtransport/DatagramSource.cpp
 Modules/webtransport/WebTransport.cpp
 Modules/webtransport/WebTransportBidirectionalStream.cpp
+Modules/webtransport/WebTransportBidirectionalStreamConstructionParameters.cpp
+Modules/webtransport/WebTransportBidirectionalStreamSource.cpp
 Modules/webtransport/WebTransportDatagramDuplexStream.cpp
 Modules/webtransport/WebTransportError.cpp
 Modules/webtransport/WebTransportReceiveStream.cpp
+Modules/webtransport/WebTransportReceiveStreamSource.cpp
 Modules/webtransport/WebTransportSendStream.cpp
+Modules/webtransport/WebTransportSession.cpp
 Modules/webxr/NavigatorWebXR.cpp
 Modules/webxr/WebXRBoundedReferenceSpace.cpp
 Modules/webxr/WebXRFrame.cpp
@@ -504,6 +515,7 @@ Modules/webxr/XRInputSourceEvent.cpp
 Modules/webxr/XRInputSourcesChangeEvent.cpp
 Modules/webxr/XRReferenceSpaceEvent.cpp
 Modules/webxr/XRSessionEvent.cpp
+accessibility/AXCoreObject.cpp
 accessibility/AXGeometryManager.cpp
 accessibility/AXImage.cpp
 accessibility/AXLogger.cpp
@@ -768,6 +780,7 @@ crypto/algorithms/CryptoAlgorithmAES_KW.cpp
 crypto/algorithms/CryptoAlgorithmECDH.cpp
 crypto/algorithms/CryptoAlgorithmECDSA.cpp
 crypto/algorithms/CryptoAlgorithmEd25519.cpp
+crypto/algorithms/CryptoAlgorithmX25519.cpp
 crypto/algorithms/CryptoAlgorithmHKDF.cpp
 crypto/algorithms/CryptoAlgorithmHMAC.cpp
 crypto/algorithms/CryptoAlgorithmPBKDF2.cpp
@@ -1479,6 +1492,7 @@ html/canvas/CanvasRenderingContext.cpp
 html/canvas/CanvasRenderingContext2D.cpp
 html/canvas/CanvasRenderingContext2DBase.cpp
 html/canvas/CanvasStyle.cpp
+html/canvas/EXTBlendFuncExtended.cpp
 html/canvas/EXTBlendMinMax.cpp
 html/canvas/EXTClipControl.cpp
 html/canvas/EXTColorBufferFloat.cpp
@@ -1713,13 +1727,12 @@ layout/formattingContexts/flex/FlexLayout.cpp
 layout/formattingContexts/flex/FlexFormattingState.cpp
 layout/floats/FloatAvoider.cpp
 layout/floats/FloatingContext.cpp
-layout/floats/FloatingState.cpp
+layout/floats/PlacedFloats.cpp
+layout/formattingContexts/inline/AbstractLineBuilder.cpp
 layout/formattingContexts/inline/InlineContentBalancer.cpp
 layout/formattingContexts/inline/InlineContentBreaker.cpp
 layout/formattingContexts/inline/InlineFormattingContext.cpp
 layout/formattingContexts/inline/InlineFormattingGeometry.cpp
-layout/formattingContexts/inline/InlineFormattingQuirks.cpp
-layout/formattingContexts/inline/InlineFormattingState.cpp
 layout/formattingContexts/inline/InlineItem.cpp
 layout/formattingContexts/inline/InlineItemsBuilder.cpp
 layout/formattingContexts/inline/InlineLine.cpp
@@ -1728,12 +1741,14 @@ layout/formattingContexts/inline/InlineLineBoxBuilder.cpp
 layout/formattingContexts/inline/InlineLineBuilder.cpp
 layout/formattingContexts/inline/InlineLineBoxVerticalAligner.cpp
 layout/formattingContexts/inline/InlineTextItem.cpp
+layout/formattingContexts/inline/InlineQuirks.cpp
 layout/formattingContexts/inline/IntrinsicWidthHandler.cpp
 layout/formattingContexts/inline/TextOnlySimpleLineBuilder.cpp
 layout/formattingContexts/inline/display/InlineDisplayContent.cpp
 layout/formattingContexts/inline/display/InlineDisplayContentBuilder.cpp
 layout/formattingContexts/inline/display/InlineDisplayLineBuilder.cpp
 layout/formattingContexts/inline/invalidation/InlineInvalidation.cpp
+layout/formattingContexts/inline/ruby/RubyFormattingContext.cpp
 layout/formattingContexts/inline/text/TextUtil.cpp
 layout/integration/flex/LayoutIntegrationFlexLayout.cpp
 layout/integration/inline/InlineIteratorBox.cpp
@@ -2031,6 +2046,7 @@ page/scrolling/ThreadedScrollingCoordinator.cpp
 page/scrolling/ThreadedScrollingTree.cpp
 page/scrolling/ThreadedScrollingTreeScrollingNodeDelegate.cpp
 platform/AudioDecoder.cpp
+platform/AudioEncoder.cpp
 platform/CaretAnimator.cpp
 platform/CommonAtomStrings.cpp
 platform/ContentType.cpp
@@ -2275,6 +2291,7 @@ platform/graphics/MediaPlayerPrivate.cpp
 platform/graphics/MediaSourcePrivate.cpp
 platform/graphics/Model.cpp
 platform/graphics/NamedImageGeneratedImage.cpp
+platform/graphics/NullImageBufferBackend.cpp
 platform/graphics/NativeImage.cpp
 platform/graphics/Path.cpp
 platform/graphics/PathImpl.cpp
@@ -2527,7 +2544,6 @@ rendering/GridLayoutFunctions.cpp
 rendering/GridMasonryLayout.cpp
 rendering/GridTrackSizingAlgorithm.cpp
 rendering/GlyphDisplayListCache.cpp
-rendering/HighlightData.cpp
 rendering/HitTestLocation.cpp
 rendering/HitTestResult.cpp
 rendering/HitTestingTransformState.cpp
@@ -2575,6 +2591,7 @@ rendering/RenderFrameSet.cpp
 rendering/RenderGeometryMap.cpp
 rendering/RenderGrid.cpp
 rendering/RenderHTMLCanvas.cpp
+rendering/RenderHighlight.cpp
 rendering/RenderIFrame.cpp
 rendering/RenderImage.cpp
 rendering/RenderImageResource.cpp
@@ -2613,7 +2630,8 @@ rendering/RenderScrollbar.cpp
 rendering/RenderScrollbarPart.cpp
 rendering/RenderScrollbarTheme.cpp
 rendering/RenderSearchField.cpp
-rendering/RenderSelectionInfo.cpp
+rendering/RenderSelection.cpp
+rendering/RenderSelectionGeometry.cpp
 rendering/RenderSlider.cpp
 rendering/RenderTable.cpp
 rendering/RenderTableCaption.cpp
@@ -2634,7 +2652,6 @@ rendering/RenderVTTCue.cpp
 rendering/RenderVideo.cpp
 rendering/RenderView.cpp
 rendering/RenderWidget.cpp
-rendering/SelectionRangeData.cpp
 rendering/StyledMarkedText.cpp
 rendering/TableLayout.cpp
 rendering/TextBoxPainter.cpp
@@ -2685,6 +2702,8 @@ rendering/style/RenderStyle.cpp
 rendering/style/RenderStyleConstants.cpp
 rendering/style/SVGRenderStyle.cpp
 rendering/style/SVGRenderStyleDefs.cpp
+rendering/style/ScrollbarColor.cpp
+rendering/style/ScrollbarGutter.cpp
 rendering/style/ShadowData.cpp
 rendering/style/ShapeValue.cpp
 rendering/style/StyleBackgroundData.cpp
@@ -2715,26 +2734,26 @@ rendering/style/StyleNonInheritedData.cpp
 rendering/style/StylePaintImage.cpp
 rendering/style/StyleRareInheritedData.cpp
 rendering/style/StyleRareNonInheritedData.cpp
-rendering/style/ScrollbarColor.cpp
-rendering/style/ScrollbarGutter.cpp
 rendering/style/StyleSelfAlignmentData.cpp
 rendering/style/StyleSurroundData.cpp
 rendering/style/StyleTransformData.cpp
 rendering/style/StyleVisitedLinkColorData.cpp
 rendering/style/TextSizeAdjustment.cpp
 rendering/style/WillChangeData.cpp
-rendering/svg/LegacyRenderSVGContainer.cpp
-rendering/svg/LegacyRenderSVGEllipse.cpp
-rendering/svg/LegacyRenderSVGForeignObject.cpp
-rendering/svg/LegacyRenderSVGHiddenContainer.cpp
-rendering/svg/LegacyRenderSVGImage.cpp
-rendering/svg/LegacyRenderSVGModelObject.cpp
-rendering/svg/LegacyRenderSVGPath.cpp
-rendering/svg/LegacyRenderSVGRect.cpp
-rendering/svg/LegacyRenderSVGRoot.cpp
-rendering/svg/LegacyRenderSVGShape.cpp
-rendering/svg/LegacyRenderSVGTransformableContainer.cpp
-rendering/svg/LegacyRenderSVGViewportContainer.cpp
+rendering/svg/legacy/LegacyRenderSVGContainer.cpp
+rendering/svg/legacy/LegacyRenderSVGEllipse.cpp
+rendering/svg/legacy/LegacyRenderSVGForeignObject.cpp
+rendering/svg/legacy/LegacyRenderSVGHiddenContainer.cpp
+rendering/svg/legacy/LegacyRenderSVGImage.cpp
+rendering/svg/legacy/LegacyRenderSVGModelObject.cpp
+rendering/svg/legacy/LegacyRenderSVGPath.cpp
+rendering/svg/legacy/LegacyRenderSVGRect.cpp
+rendering/svg/legacy/LegacyRenderSVGResourceContainer.cpp
+rendering/svg/legacy/LegacyRenderSVGResourceClipper.cpp
+rendering/svg/legacy/LegacyRenderSVGRoot.cpp
+rendering/svg/legacy/LegacyRenderSVGShape.cpp
+rendering/svg/legacy/LegacyRenderSVGTransformableContainer.cpp
+rendering/svg/legacy/LegacyRenderSVGViewportContainer.cpp
 rendering/svg/RenderSVGBlock.cpp
 rendering/svg/RenderSVGContainer.cpp
 rendering/svg/RenderSVGEllipse.cpp
@@ -2748,8 +2767,6 @@ rendering/svg/RenderSVGModelObject.cpp
 rendering/svg/RenderSVGPath.cpp
 rendering/svg/RenderSVGRect.cpp
 rendering/svg/RenderSVGResource.cpp
-rendering/svg/RenderSVGResourceClipper.cpp
-rendering/svg/RenderSVGResourceContainer.cpp
 rendering/svg/RenderSVGResourceFilter.cpp
 rendering/svg/RenderSVGResourceFilterPrimitive.cpp
 rendering/svg/RenderSVGResourceGradient.cpp
@@ -2985,6 +3002,7 @@ svg/animation/SVGSMILElement.cpp
 svg/graphics/SVGImage.cpp
 svg/graphics/SVGImageCache.cpp
 svg/graphics/SVGImageForContainer.cpp
+svg/graphics/SVGResourceImage.cpp
 svg/graphics/filters/SVGFilter.cpp
 svg/properties/SVGAnimatedProperty.cpp
 svg/properties/SVGAnimationAdditiveValueFunctionImpl.cpp
@@ -3126,6 +3144,7 @@ WebCoreJSBuiltins.cpp
 // FIXME: We should probably move these into ${DerivedSources}/bindings/js/ so they get bundled with the custom bindings.
 
 JSANGLEInstancedArrays.cpp
+JSAacEncoderConfig.cpp
 JSAbortAlgorithm.cpp
 JSAbortController.cpp
 JSAbortSignal.cpp
@@ -3404,6 +3423,7 @@ JSDoubleRange.cpp
 JSDragEvent.cpp
 JSDynamicsCompressorNode.cpp
 JSDynamicsCompressorOptions.cpp
+JSEXTBlendFuncExtended.cpp
 JSEXTBlendMinMax.cpp
 JSEXTClipControl.cpp
 JSEXTColorBufferFloat.cpp
@@ -3475,6 +3495,8 @@ JSFileSystemFileHandle.cpp
 JSFileSystemHandle.cpp
 JSFileSystemSyncAccessHandle.cpp
 JSFillMode.cpp
+JSFillLightMode.cpp
+JSFlacEncoderConfig.cpp
 JSFocusEvent.cpp
 JSFocusOptions.cpp
 JSFontFace.cpp
@@ -3502,7 +3524,7 @@ JSGPUBufferBindingType.cpp
 JSGPUBufferDescriptor.cpp
 JSGPUBufferMapState.cpp
 JSGPUBufferUsage.cpp
-JSGPUCanvasCompositingAlphaMode.cpp
+JSGPUCanvasAlphaMode.cpp
 JSGPUCanvasConfiguration.cpp
 JSGPUCanvasContext.cpp
 JSGPUColorDict.cpp
@@ -3520,7 +3542,7 @@ JSGPUCompilationMessageType.cpp
 JSGPUComputePassDescriptor.cpp
 JSGPUComputePassEncoder.cpp
 JSGPUComputePassTimestampLocation.cpp
-JSGPUComputePassTimestampWrite.cpp
+JSGPUComputePassTimestampWrites.cpp
 JSGPUComputePipeline.cpp
 JSGPUComputePipelineDescriptor.cpp
 JSGPUCullMode.cpp
@@ -3586,7 +3608,7 @@ JSGPURenderPassDescriptor.cpp
 JSGPURenderPassEncoder.cpp
 JSGPURenderPassLayout.cpp
 JSGPURenderPassTimestampLocation.cpp
-JSGPURenderPassTimestampWrite.cpp
+JSGPURenderPassTimestampWrites.cpp
 JSGPURenderPipeline.cpp
 JSGPURenderPipelineDescriptor.cpp
 JSGPURequestAdapterOptions.cpp
@@ -3749,6 +3771,7 @@ JSImageBitmap.cpp
 JSImageBitmapOptions.cpp
 JSImageBitmapRenderingContext.cpp
 JSImageBitmapRenderingContextSettings.cpp
+JSImageCapture.cpp
 JSImageData.cpp
 JSImageDataSettings.cpp
 JSImageSmoothingQuality.cpp
@@ -3808,20 +3831,21 @@ JSMediaKeys.cpp
 JSMediaKeysRequirement.cpp
 JSMediaList.cpp
 JSMediaMetadata.cpp
-JSMediaSessionCoordinator.cpp
-JSMediaSessionCoordinatorState.cpp
 JSMediaMetadataInit.cpp
 JSMediaPositionState.cpp
 JSMediaQueryList.cpp
 JSMediaQueryListEvent.cpp
 JSMediaRecorder.cpp
 JSMediaRecorderErrorEvent.cpp
+JSMediaSessionCoordinator.cpp
+JSMediaSessionCoordinatorState.cpp
 JSMediaSessionActionDetails.cpp
 JSMediaSessionActionHandler.cpp
 JSMediaSessionAction.cpp
 JSMediaSessionPlaybackState.cpp
 JSMediaSessionReadyState.cpp
 JSMediaSession.cpp
+JSMediaSettingsRange.cpp
 JSMediaSource.cpp
 JSMediaStream.cpp
 JSMediaStreamAudioDestinationNode.cpp
@@ -3836,6 +3860,7 @@ JSMerchantValidationEvent.cpp
 JSMessageChannel.cpp
 JSMessageEvent.cpp
 JSMessagePort.cpp
+JSMeteringMode.cpp
 JSMouseEvent.cpp
 JSMouseEventInit.cpp
 JSMultiCacheQueryOptions.cpp
@@ -3880,6 +3905,7 @@ JSOfflineAudioContextOptions.cpp
 JSOffscreenCanvas.cpp
 JSOffscreenCanvasRenderingContext2D.cpp
 JSOptionalEffectTiming.cpp
+JSOpusEncoderConfig.cpp
 JSOscillatorNode.cpp
 JSOscillatorOptions.cpp
 JSOscillatorType.cpp
@@ -3940,6 +3966,7 @@ JSPermissionName.cpp
 JSPermissionState.cpp
 JSPermissionStatus.cpp
 JSPermissions.cpp
+JSPhotoCapabilities.cpp
 JSPictureInPictureEvent.cpp
 JSPictureInPictureWindow.cpp
 JSPlaneLayout.cpp
@@ -3964,6 +3991,8 @@ JSPushEvent.cpp
 JSPushEventInit.cpp
 JSPushManager.cpp
 JSPushMessageData.cpp
+JSPushNotificationEvent.cpp
+JSPushNotificationEventInit.cpp
 JSPushPermissionState.cpp
 JSPushSubscription.cpp
 JSPushSubscriptionChangeEvent.cpp
@@ -3971,6 +4000,7 @@ JSPushSubscriptionChangeEventInit.cpp
 JSPushSubscriptionJSON.cpp
 JSPushSubscriptionOptions.cpp
 JSPushSubscriptionOptionsInit.cpp
+JSRedEyeReduction.cpp
 JSRTCAnswerOptions.cpp
 JSRTCCertificate.cpp
 JSRTCConfiguration.cpp
@@ -4363,7 +4393,12 @@ JSWebCodecsAudioDataOutputCallback.cpp
 JSWebCodecsAudioDecoder.cpp
 JSWebCodecsAudioDecoderConfig.cpp
 JSWebCodecsAudioDecoderSupport.cpp
+JSWebCodecsAudioEncoder.cpp
+JSWebCodecsAudioEncoderConfig.cpp
+JSWebCodecsAudioEncoderSupport.cpp
 JSWebCodecsEncodedAudioChunk.cpp
+JSWebCodecsEncodedAudioChunkMetadata.cpp
+JSWebCodecsEncodedAudioChunkOutputCallback.cpp
 JSWebCodecsEncodedAudioChunkType.cpp
 JSWebCodecsEncodedVideoChunk.cpp
 JSWebCodecsEncodedVideoChunkMetadata.cpp
@@ -4491,6 +4526,7 @@ JSWritableStream.cpp
 JSWritableStreamDefaultController.cpp
 JSWritableStreamDefaultWriter.cpp
 JSWritableStreamSink.cpp
+JSX25519Params.cpp
 JSXMLDocument.cpp
 JSXMLHttpRequest.cpp
 JSXMLHttpRequestEventTarget.cpp

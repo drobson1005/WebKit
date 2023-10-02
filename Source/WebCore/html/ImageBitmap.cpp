@@ -96,17 +96,7 @@ RefPtr<ImageBuffer> ImageBitmap::createImageBuffer(ScriptExecutionContext& scrip
     }
 
     auto bufferOptions = bufferOptionsForRendingMode(renderingMode);
-
-    GraphicsClient* client = nullptr;
-    if (scriptExecutionContext.isDocument()) {
-        auto& document = downcast<Document>(scriptExecutionContext);
-        if (document.view() && document.view()->root()) {
-            client = document.view()->root()->hostWindow();
-        }
-    } else if (scriptExecutionContext.isWorkerGlobalScope())
-        client = downcast<WorkerGlobalScope>(scriptExecutionContext).workerClient();
-
-    return ImageBuffer::create(size, RenderingPurpose::Canvas, resolutionScale, *imageBufferColorSpace, PixelFormat::BGRA8, bufferOptions, { client });
+    return ImageBuffer::create(size, RenderingPurpose::Canvas, resolutionScale, *imageBufferColorSpace, PixelFormat::BGRA8, bufferOptions, scriptExecutionContext.graphicsClient());
 }
 
 void ImageBitmap::createCompletionHandler(ScriptExecutionContext& scriptExecutionContext, ImageBitmap::Source&& source, ImageBitmapOptions&& options, ImageBitmapCompletionHandler&& completionHandler)
@@ -247,14 +237,14 @@ static InterpolationQuality interpolationQualityForResizeQuality(ImageBitmapOpti
     case ImageBitmapOptions::ResizeQuality::Pixelated:
         return InterpolationQuality::DoNotInterpolate;
     case ImageBitmapOptions::ResizeQuality::Low:
-        return InterpolationQuality::Default; // Low is the default.
+        return InterpolationQuality::Low;
     case ImageBitmapOptions::ResizeQuality::Medium:
         return InterpolationQuality::Medium;
     case ImageBitmapOptions::ResizeQuality::High:
         return InterpolationQuality::High;
     }
     ASSERT_NOT_REACHED();
-    return InterpolationQuality::Default;
+    return InterpolationQuality::Low;
 }
 
 static AlphaPremultiplication alphaPremultiplicationForPremultiplyAlpha(ImageBitmapOptions::PremultiplyAlpha premultiplyAlpha)
@@ -666,7 +656,7 @@ void ImageBitmap::createCompletionHandler(ScriptExecutionContext& scriptExecutio
         return;
     }
 
-    auto imageForRender = existingImageBitmap->buffer()->copyImage();
+    auto imageForRender = BitmapImage::create(existingImageBitmap->buffer()->copyNativeImage());
 
     FloatRect destRect(FloatPoint(), outputSize);
     bitmapData->context().drawImage(*imageForRender, destRect, sourceRectangle.releaseReturnValue(), { interpolationQualityForResizeQuality(options.resizeQuality), options.resolvedImageOrientation(ImageOrientation::Orientation::None) });

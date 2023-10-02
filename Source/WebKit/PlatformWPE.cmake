@@ -89,6 +89,8 @@ list(APPEND WebKit_UNIFIED_SOURCE_LIST_FILES
     "SourcesWPE.txt"
 )
 
+list(APPEND WebCore_SERIALIZATION_IN_FILES SoupNetworkProxySettings.serialization.in)
+
 list(APPEND WebKit_DERIVED_SOURCES
     ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c
     ${WebKit_DERIVED_SOURCES_DIR}/WebKitDirectoryInputStreamData.cpp
@@ -368,6 +370,7 @@ list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBKIT_DIR}/UIProcess/Launcher/libwpe"
     "${WEBKIT_DIR}/UIProcess/Notifications/glib/"
     "${WEBKIT_DIR}/UIProcess/geoclue"
+    "${WEBKIT_DIR}/UIProcess/glib"
     "${WEBKIT_DIR}/UIProcess/gstreamer"
     "${WEBKIT_DIR}/UIProcess/linux"
     "${WEBKIT_DIR}/UIProcess/soup"
@@ -429,6 +432,15 @@ else ()
     )
     list(APPEND WebKit_LIBRARIES
         ${GSTREAMER_LIBRARIES}
+    )
+endif ()
+
+if (USE_LIBDRM)
+    list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
+        ${LIBDRM_INCLUDE_DIR}
+    )
+    list(APPEND WebKit_LIBRARIES
+        ${LIBDRM_LIBRARIES}
     )
 endif ()
 

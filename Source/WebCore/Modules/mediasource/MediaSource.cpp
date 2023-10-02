@@ -186,10 +186,12 @@ const PlatformTimeRanges& MediaSource::buffered() const
     return m_buffered;
 }
 
-void MediaSource::seekToTarget(const SeekTarget& target, CompletionHandler<void(const MediaTime&)>&& completionHandler)
+void MediaSource::waitForTarget(const SeekTarget& target, CompletionHandler<void(const MediaTime&)>&& completionHandler)
 {
-    if (isClosed())
+    if (isClosed()) {
+        completionHandler(MediaTime::invalidTime());
         return;
+    }
 
     ALWAYS_LOG(LOGIDENTIFIER, target.time);
 
@@ -256,8 +258,10 @@ void MediaSource::completeSeek()
         {
             auto seekTime = time;
             for (auto& result : seekResults) {
-                if (result.isInvalid())
+                if (result.isInvalid()) {
                     completionHandler(MediaTime::invalidTime());
+                    return;
+                }
                 if (abs(time - result) > abs(time - seekTime))
                     seekTime = result;
             }
@@ -276,10 +280,21 @@ void MediaSource::completeSeek()
     auto callbackAggregator = adoptRef(*new SeeksCallbackAggregator(seekTarget.time, *this, WTFMove(m_seekCompletedHandler)));
 
     for (auto& sourceBuffer : *m_activeSourceBuffers) {
-        sourceBuffer->seekToTarget(seekTarget, [callbackAggregator](const MediaTime& seekTime) {
+        sourceBuffer->computeSeekTime(seekTarget, [callbackAggregator](const MediaTime& seekTime) {
             callbackAggregator->seekResults.append(seekTime);
         });
     }
+}
+
+void MediaSource::seekToTime(const MediaTime& time, CompletionHandler<void()>&& completionHandler)
+{
+    if (isClosed()) {
+        completionHandler();
+        return;
+    }
+    for (auto& sourceBuffer : *m_activeSourceBuffers)
+        sourceBuffer->seekToTime(time);
+    completionHandler();
 }
 
 Ref<TimeRanges> MediaSource::seekable()
@@ -771,7 +786,7 @@ ExceptionOr<void> MediaSource::removeSourceBuffer(SourceBuffer& buffer)
     ASSERT(scriptExecutionContext());
     if (!scriptExecutionContext()->activeDOMObjectsAreStopped()) {
         // 4. Let SourceBuffer audioTracks list equal the AudioTrackList object returned by sourceBuffer.audioTracks.
-        auto* audioTracks = buffer.audioTracksIfExists();
+        RefPtr audioTracks = buffer.audioTracksIfExists();
 
         // 5. If the SourceBuffer audioTracks list is not empty, then run the following steps:
         if (audioTracks && audioTracks->length()) {
@@ -811,7 +826,7 @@ ExceptionOr<void> MediaSource::removeSourceBuffer(SourceBuffer& buffer)
         }
 
         // 6. Let SourceBuffer videoTracks list equal the VideoTrackList object returned by sourceBuffer.videoTracks.
-        auto* videoTracks = buffer.videoTracksIfExists();
+        RefPtr videoTracks = buffer.videoTracksIfExists();
 
         // 7. If the SourceBuffer videoTracks list is not empty, then run the following steps:
         if (videoTracks && videoTracks->length()) {
@@ -851,7 +866,7 @@ ExceptionOr<void> MediaSource::removeSourceBuffer(SourceBuffer& buffer)
         }
 
         // 8. Let SourceBuffer textTracks list equal the TextTrackList object returned by sourceBuffer.textTracks.
-        auto* textTracks = buffer.textTracksIfExists();
+        RefPtr textTracks = buffer.textTracksIfExists();
 
         // 9. If the SourceBuffer textTracks list is not empty, then run the following steps:
         if (textTracks && textTracks->length()) {

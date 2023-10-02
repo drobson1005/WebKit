@@ -193,8 +193,16 @@ static RenderingMode renderingModeForCGContext(CGContextRef cgContext, GraphicsC
     return RenderingMode::Unaccelerated;
 }
 
+static GraphicsContext::IsDeferred isDeferredForCGContext(CGContextRef cgContext)
+{
+    if (!cgContext || CGContextGetType(cgContext) == kCGContextTypeBitmap)
+        return GraphicsContext::IsDeferred::No;
+    // Other CGContexts are deferred (iosurface, display list) or potentially deferred.
+    return GraphicsContext::IsDeferred::Yes;
+}
+
 GraphicsContextCG::GraphicsContextCG(CGContextRef cgContext, CGContextSource source, std::optional<RenderingMode> knownRenderingMode)
-    : GraphicsContext(GraphicsContextState::basicChangeFlags, coreInterpolationQuality(cgContext))
+    : GraphicsContext(isDeferredForCGContext(cgContext), GraphicsContextState::basicChangeFlags, coreInterpolationQuality(cgContext))
     , m_cgContext(cgContext)
     , m_renderingMode(knownRenderingMode.value_or(renderingModeForCGContext(cgContext, source)))
     , m_isLayerCGContext(source == GraphicsContextCG::CGContextFromCALayer)
@@ -251,18 +259,18 @@ const DestinationColorSpace& GraphicsContextCG::colorSpace() const
     return *m_colorSpace;
 }
 
-void GraphicsContextCG::save()
+void GraphicsContextCG::save(GraphicsContextState::Purpose purpose)
 {
-    GraphicsContext::save();
+    GraphicsContext::save(purpose);
     CGContextSaveGState(contextForState());
 }
 
-void GraphicsContextCG::restore()
+void GraphicsContextCG::restore(GraphicsContextState::Purpose purpose)
 {
     if (!stackSize())
         return;
 
-    GraphicsContext::restore();
+    GraphicsContext::restore(purpose);
     CGContextRestoreGState(contextForState());
     m_userToDeviceTransformKnownToBeIdentity = false;
 }
@@ -1031,7 +1039,7 @@ void GraphicsContextCG::clipPath(const Path& path, WindRule clipRule)
 
 void GraphicsContextCG::clipToImageBuffer(ImageBuffer& imageBuffer, const FloatRect& destRect)
 {
-    auto nativeImage = imageBuffer.copyNativeImage(DontCopyBackingStore);
+    auto nativeImage = imageBuffer.createNativeImageReference();
     if (!nativeImage)
         return;
 
@@ -1054,13 +1062,12 @@ void GraphicsContextCG::beginTransparencyLayer(float opacity)
 {
     GraphicsContext::beginTransparencyLayer(opacity);
 
-    save();
+    save(GraphicsContextState::Purpose::TransparencyLayer);
 
     CGContextRef context = platformContext();
     CGContextSetAlpha(context, opacity);
     CGContextBeginTransparencyLayer(context, 0);
     
-    m_state.didBeginTransparencyLayer();
     m_userToDeviceTransformKnownToBeIdentity = false;
 }
 
@@ -1071,7 +1078,7 @@ void GraphicsContextCG::endTransparencyLayer()
     CGContextRef context = platformContext();
     CGContextEndTransparencyLayer(context);
 
-    restore();
+    restore(GraphicsContextState::Purpose::TransparencyLayer);
 }
 
 static void applyShadowOffsetWorkaroundIfNeeded(CGContextRef context, CGFloat& xOffset, CGFloat& yOffset)
@@ -1134,6 +1141,8 @@ void GraphicsContextCG::setCGShadow(const GraphicsDropShadow& shadow, bool shado
 
     if (renderingMode() != RenderingMode::Accelerated)
         applyShadowOffsetWorkaroundIfNeeded(context, xOffset, yOffset);
+
+    CGContextSetAlpha(context, shadow.opacity);
 
 #if HAVE(CGSTYLE_CREATE_SHADOW2)
     auto style = adoptCF(CGStyleCreateShadow2(CGSizeMake(xOffset, yOffset), blurRadius, cachedCGColor(shadow.color).get()));

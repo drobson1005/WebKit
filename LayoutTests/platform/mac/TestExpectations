@@ -96,6 +96,9 @@ media/track/track-description-cue.html [ Pass ]
 media/track/track-extended-descriptions.html [ Pass ]
 media/media-source/remoteplayback-from-source-element.html [ Pass ]
 
+# Variable size packet is only supported on Sonoma and later.
+[ Monterey Ventura ] media/media-webm-opus-variable-length.html [ Failure ]
+
 #//////////////////////////////////////////////////////////////////////////////////////////
 # End platform-specific directories.
 #//////////////////////////////////////////////////////////////////////////////////////////
@@ -198,7 +201,7 @@ fast/mediastream/RTCPeerConnection-stats.html [ Skip ]
 media/track/track-user-stylesheet.html [ Pass Crash ]
 media/track/track-webvtt-snap-to-lines-inline-style.html [ Pass Crash ]
 
-# webkit.org/b/258184 [ macOS ] 2x media/track/ tests are flaky crashes. 
+# webkit.org/b/258184 [ macOS ] 2x media/track/ tests are flaky crashes.
 [ Debug ] media/track/track-webvtt-no-snap-to-lines-overlap.html [ Pass Crash ]
 [ Debug ] media/track/track-webvtt-snap-to-lines-left-right.html [ Pass Crash ]
 
@@ -808,7 +811,7 @@ webkit.org/b/103926 media/track/opera/interfaces/TextTrackCue/snapToLines.html [
 webkit.org/b/103926 media/track/opera/interfaces/TextTrackCue/text.html [ Skip ]
 webkit.org/b/103926 media/track/opera/interfaces/TextTrackCue/vertical.html [ Skip ]
 webkit.org/b/103926 media/track/opera/track/webvtt/parsing/001.html [ Skip ]
-webkit.org/b/103926 media/track/opera/track/webvtt/parsing-cue-data/tests/entities.html [ Skip ] 
+webkit.org/b/103926 media/track/opera/track/webvtt/parsing-cue-data/tests/entities.html [ Skip ]
 webkit.org/b/103926 media/track/opera/track/webvtt/parsing-cue-data/tests/tags.html [ Skip ]
 webkit.org/b/103926 media/track/opera/track/webvtt/rendering/adhoc/12345_timestamps.html [ Skip ]
 webkit.org/b/103926 media/track/opera/track/webvtt/parsing-cue-data/tests/timestamps.html [ Skip ]
@@ -821,10 +824,9 @@ webkit.org/b/103926 media/track/opera/track/webvtt/rendering/adhoc/voice_with_ev
 webkit.org/b/131476 media/track/w3c/track/webvtt [ Skip ]
 
 webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_codecs_order_2.html [ Failure ]
-webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_codecs_order_3.html [ Failure ]
-webkit.org/b/75184 media/W3C/audio/canPlayType/canPlayType_supported_but_no_codecs_parameter_1.html [ Pass Failure ]
 webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_supported_but_no_codecs_parameter_2.html [ Failure ]
 webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_two_implies_one_3.html [ Failure ]
+webkit.org/b/75184 media/W3C/audio/canPlayType/canPlayType_supported_but_no_codecs_parameter_1.html [ Failure ]
 webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_two_implies_one_4.html [ Failure ]
 webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_two_implies_one_5.html [ Failure ]
 webkit.org/b/75184 media/W3C/video/canPlayType/canPlayType_two_implies_one_6.html [ Failure ]
@@ -1436,7 +1438,7 @@ webkit.org/b/190724 [ Debug ] http/tests/misc/large-js-program.py [ Pass Timeout
 
 webkit.org/b/191565 [ Debug ] imported/w3c/web-platform-tests/css/mediaqueries/test_media_queries.html [ Slow ]
 
-webkit.org/b/239405 fast/css/counters/element-removal-crash.xhtml [ Pass Failure ] 
+webkit.org/b/239405 fast/css/counters/element-removal-crash.xhtml [ Pass Failure ]
 
 webkit.org/b/190976 imported/w3c/web-platform-tests/media-source/mediasource-changetype-play.html [ Pass Failure ]
 
@@ -1458,11 +1460,11 @@ webkit.org/b/19650 accessibility/mac/press-not-work-for-disabled-menu-list.html 
 imported/w3c/web-platform-tests/pointerevents/capturing_boundary_event_handler_at_ua_shadowdom.html?touch [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/coalesced_events_attributes.html?touch [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/coalesced_events_attributes_under_load.html?touch [ Skip ]
-imported/w3c/web-platform-tests/pointerevents/compat/pointerevent_mouse-pointer-preventdefault.html [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/compat/pointerevent_mouseevent_key_pressed.html [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/compat/pointerevent_touch-action_two-finger_interaction.html [ Skip ]
+imported/w3c/web-platform-tests/pointerevents/pointerevent_after_target_appended.html?touch [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/pointerevent_after_target_removed.html?touch [ Skip ]
-imported/w3c/web-platform-tests/pointerevents/pointerevent_attributes_hoverable_pointers.html?mouse [ Skip ]
+webkit.org/b/262172 imported/w3c/web-platform-tests/pointerevents/pointerevent_attributes_hoverable_pointers.html?mouse [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/pointerevent_attributes_hoverable_pointers.html?pen [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/pointerevent_attributes_hoverable_rightbutton.html?mouse [ Skip ]
 imported/w3c/web-platform-tests/pointerevents/pointerevent_attributes_hoverable_rightbutton.html?pen [ Skip ]
@@ -2146,12 +2148,12 @@ webkit.org/b/228311 imported/w3c/web-platform-tests/css/css-scoping/css-scoping-
 
 webkit.org/b/229291 imported/w3c/web-platform-tests/html/rendering/replaced-elements/images/revoked-blob-print.html [ Pass ImageOnlyFailure ]
 
-#rdar://82146367 ([Mac, iOS Release] imported/w3c/web-platform-tests/worklets/layout-worklet-csp.https.html is a flaky failure) imported/w3c/web-platform-tests/worklets/layout-worklet-csp.https.html [ Pass Failure ] 
+#rdar://82146367 ([Mac, iOS Release] imported/w3c/web-platform-tests/worklets/layout-worklet-csp.https.html is a flaky failure) imported/w3c/web-platform-tests/worklets/layout-worklet-csp.https.html [ Pass Failure ]
 
 webkit.org/b/228176 [ BigSur ] fast/text/variable-system-font.html [ ImageOnlyFailure ]
 webkit.org/b/228176 [ Monterey ] fast/text/variable-system-font.html [ Pass ]
 
-#rdar://80333935 (REGRESSION (): [ Monterey wk2 arm64 ] fast/animation/request-animation-frame-throttling-detached-iframe.html and request-animation-frame-throttling-lowPowerMode.html failing) [ Monterey ] fast/animation/request-animation-frame-throttling-detached-iframe.html [ Pass Failure ]
+webkit.org/b/261316 [ Monterey+ Release ] fast/animation/request-animation-frame-throttling-detached-iframe.html [ Pass Failure ]
 
 webkit.org/b/229463 [ BigSur Debug ] http/tests/inspector/network/resource-mime-type.html [ Pass Failure Timeout ]
 
@@ -2214,36 +2216,6 @@ webkit.org/b/229521 pointer-lock/lock-already-locked.html [ Pass Failure ]
 webkit.org/b/228176 [ BigSur Monterey ] fast/text/variable-system-font-2.html [ Pass ]
 
 webkit.org/b/230327 imported/w3c/web-platform-tests/css/css-transforms/crashtests/transform-marquee-resize-div-image-001.html [ Pass Failure ]
-
-# rdar://83591040
-[ Monterey+ ] editing/mac/dictionary-lookup/dictionary-lookup-input.html [ Crash ]
-[ Monterey+ ] editing/mac/dictionary-lookup/dictionary-lookup-inside-selection.html [ Crash ]
-[ Monterey+ ] editing/mac/dictionary-lookup/dictionary-lookup-outside-selection.html [ Crash ]
-[ Monterey+ ] editing/mac/dictionary-lookup/dictionary-lookup-rtl.html [ Crash ]
-[ Monterey+ ] editing/mac/dictionary-lookup/dictionary-lookup.html [ Crash ]
-[ Monterey+ ] editing/selection/5354455-2.html [ Crash ]
-[ Monterey+ ] editing/selection/context-menu-on-text.html [ Crash ]
-[ Monterey+ ] editing/selection/context-menu-text-selection-lookup.html [ Crash ]
-
-# rdar://83592102
-[ Monterey+ ] editing/mac/selection/context-menu-select-editability.html [ Crash ]
-[ Monterey+ ] editing/mac/spelling/advance-to-next-misspelling.html [ Crash ]
-[ Monterey+ ] editing/selection/5354455-1.html [ Crash ]
-[ Monterey+ ] editing/spelling/context-menu-suggestions-multiword-selection.html [ Crash ]
-[ Monterey+ ] editing/spelling/context-menu-suggestions-subword-selection.html [ Crash ]
-[ Monterey+ ] editing/spelling/context-menu-suggestions.html [ Crash ]
-[ Monterey+ ] editing/mac/spelling/disable-automatic-spelling-correction-context-menu-item.html [ Crash ]
-[ Monterey+ ] editing/spelling/spellcheck-input-search-crash.html [ Crash ]
-[ Monterey+ ] editing/selection/empty-cell-right-click.html [ Crash ]
-[ Monterey+ ] editing/selection/minimal-user-select-crash.html [ Crash ]
-[ Monterey+ ] fast/events/context-no-deselect.html [ Crash ]
-[ Monterey+ ] fast/events/contextmenu-actions-in-selected-text.html [ Crash ]
-[ Monterey+ ] fast/events/contextmenu-dismiss-blink-caret.html [ Crash ]
-[ Monterey+ ] fast/events/contextmenu-reentrancy-crash.html [ Crash ]
-[ Monterey+ ] fast/forms/color/color-input-activate-crash.html [ Crash ]
-[ Monterey+ ] fast/forms/color/color-suggestion-picker-crash-on-set-value.html [ Crash ]
-[ Monterey+ ] fast/forms/color/input-color-onchange-event.html [ Crash ]
-[ Monterey+ ] fast/forms/color/input-color-readonly.html [ Crash ]
 
 webkit.org/b/170629  memory/memory-pressure-simulation.html [ Pass Failure Crash ]
 
@@ -2761,14 +2733,8 @@ webkit.org/b/252322 [ X86_64 ] media/media-source/media-source-video-renders.htm
 
 webkit.org/b/259712 [ Monterey+ ] media/media-source/media-source-paint-after-display-none.html [ Skip ]
 
-webkit.org/b/259489 [ Monterey+ ] http/tests/media/hls/track-in-band-multiple-cues.html [ Pass Failure ]
-
-webkit.org/b/259524 [ Monterey+ ] media/audioSession/audioSessionState.html [ Pass Failure ]
-
 # rdar://110876540 ASSERTION FAILED: firstChild(): [ macOS ] (258183)
 [ Debug ] media/modern-media-controls/tracks-support/text-track-selected-via-media-api.html [ Pass Crash ]
-
-webkit.org/b/259539 [ Debug ] storage/indexeddb/cursor-update.html [ Pass Failure Crash ]
 
 webkit.org/b/259190 http/tests/images/heic-as-heif.html [ Pass ImageOnlyFailure ]
 
@@ -2825,10 +2791,6 @@ fast/box-shadow/inset-box-shadow-fractional-radius.html [ ImageOnlyFailure ]
 # rdar://105307989 (REGRESSION ( Sonoma ): [ Sonoma ] svg/custom/hidpi-masking-clipping.svg is a consistent failure)
 svg/custom/hidpi-masking-clipping.svg [ Pass ImageOnlyFailure ]
 
-# rdar://110029481 (REGRESSION ( Sonoma ): [ Sonoma ] Two accessibility/mac/ tests are a consistent failure)
-accessibility/mac/basic-embed-pdf-accessibility.html [ Timeout ]
-accessibility/mac/iframe-pdf.html [ Timeout ]
-
 # rdar://111077813 (REGRESSION ( Sonoma ): [ Sonoma ] css3/color-filters/color-filter-caret-color.html is a consistent image failure)
 css3/color-filters/color-filter-caret-color.html [ ImageOnlyFailure ]
 fast/css/caret-color-fallback-to-color.html [ ImageOnlyFailure ]
@@ -2852,11 +2814,6 @@ imported/w3c/web-platform-tests/css/css-text/line-break/line-break-anywhere-over
 # rdar://106116937 ([UI-side compositing] fast/scrolling/mac/scrollbars/very-wide-overlay-scrollbar.html times out)
 fast/scrolling/mac/scrollbars/very-wide-overlay-scrollbar.html [ ImageOnlyFailure Timeout ]
 
-# rdar://111424377 (PROGRESSION (263656@main): [ Sonoma ] Three fast/scrolling/mac/scrollbars are a consistent failure or timeout)
-fast/scrolling/mac/scrollbars/overlay-scrollbar-reveal.html [ Timeout ]
-fast/scrolling/mac/scrollbars/scrollbar-state.html [ Timeout ]
-fast/scrolling/mac/scrollbars/overlay-scrollbar-state.html [ Timeout ]
-
 imported/w3c/web-platform-tests/css/css-text/word-break/auto [ Pass ]
 
 imported/w3c/web-platform-tests/css/css-text/word-break/auto/word-break-auto-000.html [ Pass ImageOnlyFailure Failure ]
@@ -2878,3 +2835,51 @@ webkit.org/b/260912 [ Monterey+ Debug ] imported/w3c/web-platform-tests/dom/node
 webkit.org/b/260936 webanimations/accelerated-transform-related-animation-property-order.html [ Pass ImageOnlyFailure ]
 
 webkit.org/b/261000 media/video-orientation-canvas.html [ Pass Failure ]
+
+# Initial css/compositing test import
+[ Release ] imported/w3c/web-platform-tests/css/compositing/mix-blend-mode/mix-blend-mode-blended-with-3D-transform.html [ ImageOnlyFailure ]
+[ Release ] imported/w3c/web-platform-tests/css/compositing/mix-blend-mode/mix-blend-mode-blended-with-transform-and-perspective.html [ ImageOnlyFailure ]
+[ Release ] imported/w3c/web-platform-tests/css/compositing/mix-blend-mode/mix-blend-mode-sibling-with-3D-transform.html [ ImageOnlyFailure ]
+[ Release ] imported/w3c/web-platform-tests/css/compositing/mix-blend-mode/mix-blend-mode-with-transform-and-preserve-3D.html [ ImageOnlyFailure ]
+
+webkit.org/b/157589 fast/text-autosizing/ios/text-autosizing-after-back.html [ Pass Timeout ]
+
+# webkit.org/b/261304 Batch mark expectations for flaky media tests
+[ Monterey+ Debug ] media/modern-media-controls/airplay-support/airplay-support-disable-event-listeners-with-hidden-controls.html [ Pass Failure ]
+[ Monterey+ ] media/media-source/media-source-fudge-factor.html [ Pass Failure Timeout ]
+[ Monterey+ Debug ] media/remove-from-document.html [ Pass Failure ]
+[ Monterey+ Debug ] media/media-event-listeners.html [ Pass Failure ]
+[ Monterey+ x86_64 ] media/video-object-fit.html [ Pass ImageOnlyFailure ]
+[ Monterey+ Debug ] media/modern-media-controls/volume-support/volume-support-click.html [ Pass Timeout ]
+[ Monterey+ Debug ] media/video-concurrent-playback.html [ Pass Failure ]
+
+# webkit.org/b/261308 Batch mark expectations for flaky imported/w3c/web-platform-tests
+[ Monterey+ ] imported/w3c/web-platform-tests/workers/WorkerGlobalScope_ErrorEvent_colno.htm [ Pass Failure ]
+[ Monterey+ Debug ] imported/w3c/web-platform-tests/encoding/streams/realms.window.html [ Pass Failure ]
+[ Monterey+ Debug ] imported/w3c/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-2.html [ Pass Timeout ]
+[ Monterey+ Debug ] imported/w3c/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-1.html [ Pass Failure Timeout ]
+[ Monterey+ Debug ] imported/w3c/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-3.html [ Pass Failure Timeout ]
+[ Monterey+ ] imported/w3c/web-platform-tests/workers/WorkerGlobalScope_ErrorEvent_filename.htm [ Pass Failure ]
+[ Monterey+ ] imported/w3c/web-platform-tests/css/css-writing-modes/forms/text-input-vertical-overflow-no-scroll.html [ Pass Failure Timeout ]
+[ Monterey+ Debug ] imported/w3c/web-platform-tests/html/browsers/browsing-the-web/navigating-across-documents/javascript-url-return-value-handling-dynamic.html [ Pass Failure ]
+
+webkit.org/b/261531 [ Monterey ] imported/w3c/web-platform-tests/css/css-transforms/3d-rendering-context-and-z-ordering-001.html [ ImageOnlyFailure ]
+webkit.org/b/261531 [ Monterey ] imported/w3c/web-platform-tests/css/css-transforms/transform3d-sorting-006.html [ ImageOnlyFailure ]
+webkit.org/b/261531 [ Monterey ] imported/w3c/web-platform-tests/css/css-transforms/transform3d-sorting-003.html [ ImageOnlyFailure ]
+webkit.org/b/261531 [ Monterey ] imported/w3c/web-platform-tests/css/css-transforms/transform3d-scale-004.html [ ImageOnlyFailure ]
+webkit.org/b/261531 [ Monterey ] imported/w3c/web-platform-tests/css/css-transforms/preserve3d-and-filter-no-perspective.html [ ImageOnlyFailure ]
+
+webkit.org/b/261911 media/media-source/media-managedmse-seek.html [ Pass ImageOnlyFailure ]
+
+webkit.org/b/261958 [ Release ] inspector/console/timestamp.html [ Pass Failure ]
+
+# Results changed with Sonoma
+[ Monterey Ventura ] imported/w3c/web-platform-tests/html/semantics/embedded-content/media-elements/mime-types/canPlayType.html [ Failure ]
+
+webkit.org/b/261306 imported/w3c/web-platform-tests/content-security-policy/reporting-api/report-to-directive-allowed-in-meta.https.sub.html [ Failure ]
+
+# webkit.org/b/262427 ([ Sonoma ] 4 tests under fast/forms are constantly failing.)
+[ Sonoma ] fast/forms/basic-inputs.html [ Failure ]
+[ Sonoma ] fast/forms/input-disabled-color.html [ Failure ]
+[ Sonoma ] fast/forms/number/number-appearance-spinbutton-disabled-readonly.html [ Failure ]
+[ Sonoma ] fast/forms/placeholder-pseudo-style.html [ Failure ]

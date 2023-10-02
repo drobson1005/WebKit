@@ -43,7 +43,7 @@
 namespace WebKit {
 using namespace WebCore;
 
-static IPC::Connection& getSourceConnection(bool shouldCaptureInGPUProcess)
+static Ref<IPC::Connection> getSourceConnection(bool shouldCaptureInGPUProcess)
 {
     ASSERT(isMainRunLoop());
 #if ENABLE(GPU_PROCESS)
@@ -110,6 +110,11 @@ void RemoteRealtimeMediaSourceProxy::applyConstraints(const MediaConstraints& co
     m_pendingApplyConstraintsCallbacks.append(WTFMove(completionHandler));
     // FIXME: Use sendAsyncWithReply.
     m_connection->send(Messages::UserMediaCaptureManagerProxy::ApplyConstraints { m_identifier, constraints }, 0);
+}
+
+void RemoteRealtimeMediaSourceProxy::getPhotoCapabilities(WebCore::RealtimeMediaSource::PhotoCapabilitiesHandler&& handler)
+{
+    m_connection->sendWithAsyncReply(Messages::UserMediaCaptureManagerProxy::GetPhotoCapabilities(identifier()), WTFMove(handler));
 }
 
 void RemoteRealtimeMediaSourceProxy::applyConstraintsSucceeded()

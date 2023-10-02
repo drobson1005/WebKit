@@ -32,6 +32,7 @@
 #include "Identifier.h"
 #include "JSString.h"
 #include "MacroAssemblerCodeRef.h"
+#include "MathCommon.h"
 #include "PageCount.h"
 #include "RegisterAtOffsetList.h"
 #include "WasmMemoryInformation.h"
@@ -658,21 +659,25 @@ struct UnlinkedWasmToWasmCall {
     size_t functionIndexSpace;
 };
 
+#if ENABLE(JIT)
 struct Entrypoint {
     WTF_MAKE_STRUCT_FAST_ALLOCATED;
     std::unique_ptr<Compilation> compilation;
     RegisterAtOffsetList calleeSaveRegisters;
 };
+#endif
 
 struct InternalFunction {
     WTF_MAKE_STRUCT_FAST_ALLOCATED;
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     StackMaps stackmaps;
 #endif
     Vector<UnlinkedHandlerInfo> exceptionHandlers;
+#if ENABLE(JIT)
     Vector<CCallHelpers::Label> bbqLoopEntrypoints;
     std::optional<CCallHelpers::Label> bbqSharedLoopEntrypoint;
     Entrypoint entrypoint;
+#endif
     unsigned osrEntryScratchBufferSize { 0 };
 };
 

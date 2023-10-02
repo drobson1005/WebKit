@@ -41,6 +41,7 @@
 #import "WKUIDelegatePrivate.h"
 #import "WKWebViewConfigurationInternal.h"
 #import "WKWebViewInternal.h"
+#import "WebExtensionAction.h"
 #import "WebExtensionTab.h"
 #import "WebExtensionURLSchemeHandler.h"
 #import "WebExtensionWindow.h"
@@ -65,9 +66,9 @@
 // This number was chosen arbitrarily based on testing with some popular extensions.
 static constexpr size_t maximumCachedPermissionResults = 256;
 
-static constexpr NSString *backgroundContentEventListenersKey = @"BackgroundContentEventListeners";
-static constexpr NSString *lastSeenBaseURLStateKey = @"LastSeenBaseURL";
-static constexpr NSString *lastSeenVersionStateKey = @"LastSeenVersion";
+static NSString * const backgroundContentEventListenersKey = @"BackgroundContentEventListeners";
+static NSString * const lastSeenBaseURLStateKey = @"LastSeenBaseURL";
+static NSString * const lastSeenVersionStateKey = @"LastSeenVersion";
 
 // Update this value when any changes are made to the WebExtensionEventListenerType enum.
 static constexpr NSInteger currentBackgroundPageListenerStateVersion = 1;
@@ -339,6 +340,16 @@ void WebExtensionContext::setInspectable(bool inspectable)
     m_inspectable = inspectable;
 
     m_backgroundWebView.get().inspectable = inspectable;
+
+    for (auto entry : m_actionMap) {
+        if (auto *webView = entry.value->popupWebView(WebExtensionAction::LoadOnFirstAccess::No))
+            webView.inspectable = inspectable;
+    }
+
+    if (m_defaultAction) {
+        if (auto *webView = m_defaultAction->popupWebView(WebExtensionAction::LoadOnFirstAccess::No))
+            webView.inspectable = inspectable;
+    }
 }
 
 const WebExtensionContext::InjectedContentVector& WebExtensionContext::injectedContents()
@@ -765,7 +776,7 @@ WebExtensionContext::PermissionMatchPatternsMap& WebExtensionContext::removeExpi
     return matchPatternMap;
 }
 
-bool WebExtensionContext::hasPermission(const String& permission, _WKWebExtensionTab *tab, OptionSet<PermissionStateOptions> options)
+bool WebExtensionContext::hasPermission(const String& permission, WebExtensionTab* tab, OptionSet<PermissionStateOptions> options)
 {
     ASSERT(!permission.isEmpty());
 
@@ -785,7 +796,7 @@ bool WebExtensionContext::hasPermission(const String& permission, _WKWebExtensio
     }
 }
 
-bool WebExtensionContext::hasPermission(const URL& url, _WKWebExtensionTab *tab, OptionSet<PermissionStateOptions> options)
+bool WebExtensionContext::hasPermission(const URL& url, WebExtensionTab* tab, OptionSet<PermissionStateOptions> options)
 {
     options.add(PermissionStateOptions::SkipRequestedPermissions);
 
@@ -826,11 +837,11 @@ bool WebExtensionContext::hasPermissions(PermissionsSet permissions, MatchPatter
     return true;
 }
 
-WebExtensionContext::PermissionState WebExtensionContext::permissionState(const String& permission, _WKWebExtensionTab *tab, OptionSet<PermissionStateOptions> options)
+WebExtensionContext::PermissionState WebExtensionContext::permissionState(const String& permission, WebExtensionTab* tab, OptionSet<PermissionStateOptions> options)
 {
     ASSERT(!permission.isEmpty());
 
-    if (tab && hasActiveUserGesture(tab)) {
+    if (tab && hasActiveUserGesture(*tab)) {
         // An active user gesture grants the "tabs" permission.
         if (permission == String(_WKWebExtensionPermissionTabs))
             return PermissionState::GrantedExplicitly;
@@ -854,7 +865,7 @@ WebExtensionContext::PermissionState WebExtensionContext::permissionState(const 
     return PermissionState::Unknown;
 }
 
-WebExtensionContext::PermissionState WebExtensionContext::permissionState(const URL& coreURL, _WKWebExtensionTab *tab, OptionSet<PermissionStateOptions> options)
+WebExtensionContext::PermissionState WebExtensionContext::permissionState(const URL& coreURL, WebExtensionTab* tab, OptionSet<PermissionStateOptions> options)
 {
     if (coreURL.isEmpty())
         return PermissionState::Unknown;
@@ -868,7 +879,7 @@ WebExtensionContext::PermissionState WebExtensionContext::permissionState(const 
     if (!WebExtensionMatchPattern::validSchemes().contains(url.scheme))
         return PermissionState::Unknown;
 
-    if (tab && [[m_temporaryTabPermissionMatchPatterns objectForKey:tab] matchesURL:url])
+    if (tab && [[m_temporaryTabPermissionMatchPatterns objectForKey:tab->delegate()] matchesURL:url])
         return PermissionState::GrantedExplicitly;
 
     bool skipRequestedPermissions = options.contains(PermissionStateOptions::SkipRequestedPermissions);
@@ -970,7 +981,7 @@ WebExtensionContext::PermissionState WebExtensionContext::permissionState(const 
     return cacheResultAndReturn(PermissionState::Unknown);
 }
 
-WebExtensionContext::PermissionState WebExtensionContext::permissionState(WebExtensionMatchPattern& pattern, _WKWebExtensionTab *tab, OptionSet<PermissionStateOptions> options)
+WebExtensionContext::PermissionState WebExtensionContext::permissionState(WebExtensionMatchPattern& pattern, WebExtensionTab* tab, OptionSet<PermissionStateOptions> options)
 {
     if (!pattern.isValid())
         return PermissionState::Unknown;
@@ -981,7 +992,7 @@ WebExtensionContext::PermissionState WebExtensionContext::permissionState(WebExt
     if (!pattern.matchesAllURLs() && !WebExtensionMatchPattern::validSchemes().contains(pattern.scheme()))
         return PermissionState::Unknown;
 
-    if (tab && [[m_temporaryTabPermissionMatchPatterns objectForKey:tab] matchesPattern:pattern.wrapper()])
+    if (tab && [[m_temporaryTabPermissionMatchPatterns objectForKey:tab->delegate()] matchesPattern:pattern.wrapper()])
         return PermissionState::GrantedExplicitly;
 
     // Access the maps here to remove any expired entries, and only do it once for this call.
@@ -1165,23 +1176,38 @@ RefPtr<WebExtensionWindow> WebExtensionContext::getWindow(WebExtensionWindowIden
     if (!isValid(identifier))
         return nullptr;
 
-    // FIXME: <https://webkit.org/b/260995> Use the page identifier to get the current window based on web view.
-    if (isCurrent(identifier))
-        return frontmostWindow();
+    RefPtr<WebExtensionWindow> result;
 
-    auto* window = m_windowMap.get(identifier);
-    if (!window) {
-        RELEASE_LOG_ERROR(Extensions, "Window %{public}llu was not found", identifier.toUInt64());
+    if (isCurrent(identifier)) {
+        if (webPageProxyIdentifier) {
+            if (auto tab = getTab(webPageProxyIdentifier.value()))
+                result = tab->window();
+        }
+
+        if (!result)
+            result = frontmostWindow();
+    } else
+        result = m_windowMap.get(identifier);
+
+    if (!result) {
+        if (isCurrent(identifier)) {
+            if (webPageProxyIdentifier)
+                RELEASE_LOG_ERROR(Extensions, "Current window for page %{public}llu was not found", webPageProxyIdentifier.value().toUInt64());
+            else
+                RELEASE_LOG_ERROR(Extensions, "Current window not found (no frontmost window)");
+        } else
+            RELEASE_LOG_ERROR(Extensions, "Window %{public}llu was not found", identifier.toUInt64());
+
         return nullptr;
     }
 
-    if (!window->isValid()) {
-        RELEASE_LOG_ERROR(Extensions, "Window %{public}llu has nil delegate; reference not removed via didCloseWindow: before release", identifier.toUInt64());
-        m_windowMap.remove(identifier);
+    if (!result->isValid()) {
+        RELEASE_LOG_ERROR(Extensions, "Window %{public}llu has nil delegate; reference not removed via didCloseWindow: before release", result->identifier().toUInt64());
+        m_windowMap.remove(result->identifier());
         return nullptr;
     }
 
-    return window;
+    return result;
 }
 
 Ref<WebExtensionTab> WebExtensionContext::getOrCreateTab(_WKWebExtensionTab *delegate)
@@ -1203,6 +1229,9 @@ Ref<WebExtensionTab> WebExtensionContext::getOrCreateTab(_WKWebExtensionTab *del
 
 RefPtr<WebExtensionTab> WebExtensionContext::getTab(WebExtensionTabIdentifier identifier)
 {
+    if (!isValid(identifier))
+        return nullptr;
+
     auto* tab = m_tabMap.get(identifier);
     if (!tab) {
         RELEASE_LOG_ERROR(Extensions, "Tab %{public}llu was not found", identifier.toUInt64());
@@ -1216,6 +1245,41 @@ RefPtr<WebExtensionTab> WebExtensionContext::getTab(WebExtensionTabIdentifier id
     }
 
     return tab;
+}
+
+RefPtr<WebExtensionTab> WebExtensionContext::getTab(WebPageProxyIdentifier webPageProxyIdentifier, std::optional<WebExtensionTabIdentifier> identifier)
+{
+    if (identifier)
+        return getTab(identifier.value());
+
+    RefPtr<WebExtensionTab> result;
+
+    for (auto& tab : openTabs()) {
+        for (WKWebView *webView in tab->webViews()) {
+            if (webView._page->identifier() == webPageProxyIdentifier) {
+                result = tab.ptr();
+                break;
+            }
+        }
+
+        if (result)
+            break;
+    }
+
+    // FIXME: <https://webkit.org/b/260154> Use the page identifier to get the current tab for popup pages.
+
+    if (!result) {
+        RELEASE_LOG_ERROR(Extensions, "Tab for page %{public}llu was not found", webPageProxyIdentifier.toUInt64());
+        return nullptr;
+    }
+
+    if (!result->isValid()) {
+        RELEASE_LOG_ERROR(Extensions, "Tab %{public}llu has nil delegate; reference not removed via didCloseTab: before release", result->identifier().toUInt64());
+        m_tabMap.remove(result->identifier());
+        return nullptr;
+    }
+
+    return result;
 }
 
 void WebExtensionContext::populateWindowsAndTabs()
@@ -1248,27 +1312,14 @@ void WebExtensionContext::populateWindowsAndTabs()
         m_focusedWindowIdentifier = !m_openWindowIdentifiers.isEmpty() ? std::optional(m_openWindowIdentifiers.first()) : std::nullopt;
 }
 
-WebExtensionContext::WindowVector WebExtensionContext::openWindows()
+WebExtensionContext::WindowVector WebExtensionContext::openWindows() const
 {
     WindowVector result;
-    result.reserveInitialCapacity(m_windowMap.size());
+    result.reserveInitialCapacity(m_openWindowIdentifiers.size());
 
-    for (auto& identifer : m_openWindowIdentifiers) {
-        if (auto window = getWindow(identifer))
+    for (auto& identifier : m_openWindowIdentifiers) {
+        if (auto window = m_windowMap.get(identifier))
             result.uncheckedAppend(*window);
-    }
-
-    return result;
-}
-
-WebExtensionContext::TabSet WebExtensionContext::openTabs()
-{
-    TabSet result;
-    result.reserveInitialCapacity(m_tabMap.size());
-
-    for (auto& tab : m_tabMap.values()) {
-        if (tab->isValid())
-            result.addVoid(tab);
     }
 
     return result;
@@ -1369,7 +1420,7 @@ void WebExtensionContext::didOpenTab(const WebExtensionTab& tab)
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    fireTabsCreatedEventIfNeeded(tab.parameters());
 }
 
 void WebExtensionContext::didCloseTab(const WebExtensionTab& tab, WindowIsClosing windowIsClosing)
@@ -1387,53 +1438,90 @@ void WebExtensionContext::didCloseTab(const WebExtensionTab& tab, WindowIsClosin
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    auto window = tab.window(WebExtensionTab::SkipContainsCheck::Yes);
+    auto windowIdentifier = window ? window->identifier() : WebExtensionWindowConstants::NoneIdentifier;
+
+    fireTabsRemovedEventIfNeeded(tab.identifier(), windowIdentifier, windowIsClosing);
 }
 
-void WebExtensionContext::didActivateTab(const WebExtensionTab& tab)
+void WebExtensionContext::didActivateTab(const WebExtensionTab& tab, const WebExtensionTab* previousTab)
 {
     ASSERT(tab.extensionContext() == this);
+    ASSERT(!previousTab || (previousTab && previousTab->extensionContext() == this));
     ASSERT(m_tabMap.contains(tab.identifier()));
     ASSERT(m_tabMap.get(tab.identifier()) == &tab);
+
+    didSelectOrDeselectTabs({ const_cast<WebExtensionTab&>(tab) });
 
     RELEASE_LOG_DEBUG(Extensions, "Activated tab %{public}llu", tab.identifier().toUInt64());
 
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    auto window = tab.window();
+    auto windowIdentifier = window ? window->identifier() : WebExtensionWindowConstants::NoneIdentifier;
+    auto previousTabIdentifier = previousTab ? previousTab->identifier() : WebExtensionTabConstants::NoneIdentifier;
+
+    fireTabsActivatedEventIfNeeded(previousTabIdentifier, tab.identifier(), windowIdentifier);
 }
 
-void WebExtensionContext::didSelectTabs(const TabSet& tabs)
+void WebExtensionContext::didSelectOrDeselectTabs(const TabSet& tabs)
 {
-#ifndef NDEBUG
-    for (auto& tab : tabs)
-        ASSERT(tab->extensionContext() == this);
-#endif
+    HashMap<WebExtensionWindowIdentifier, Vector<WebExtensionTabIdentifier>> windowToTabs;
 
-    for (auto& tab : tabs)
-        RELEASE_LOG_DEBUG(Extensions, "Selected tab %{public}llu", tab->identifier().toUInt64());
+    for (auto& tab : tabs) {
+        ASSERT(tab->extensionContext() == this);
+
+        auto window = tab->window();
+        if (!window)
+            continue;
+
+        windowToTabs.ensure(window->identifier(), [&] {
+            RELEASE_LOG_DEBUG(Extensions, "Selected tabs changed for window %{public}llu", window->identifier().toUInt64());
+
+            Vector<WebExtensionTabIdentifier> result;
+
+            for (auto& tab : window->tabs()) {
+                if (!tab->isSelected())
+                    continue;
+
+                RELEASE_LOG_DEBUG(Extensions, "Selected tab %{public}llu", tab->identifier().toUInt64());
+
+                result.append(tab->identifier());
+            }
+
+            return result;
+        });
+    }
 
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    for (auto& entry : windowToTabs)
+        fireTabsHighlightedEventIfNeeded(entry.value, entry.key);
 }
 
-void WebExtensionContext::didMoveTab(const WebExtensionTab& tab, uint64_t index, WebExtensionWindow* oldWindow)
+void WebExtensionContext::didMoveTab(const WebExtensionTab& tab, size_t oldIndex, const WebExtensionWindow* oldWindow)
 {
     ASSERT(tab.extensionContext() == this);
-    ASSERT(!oldWindow || oldWindow && oldWindow->extensionContext() == this);
+    ASSERT(!oldWindow || (oldWindow && oldWindow->extensionContext() == this));
 
     if (oldWindow)
-        RELEASE_LOG_DEBUG(Extensions, "Moved tab %{public}llu to index %{public}llu from window %{public}llu", tab.identifier().toUInt64(), index, oldWindow->identifier().toUInt64());
+        RELEASE_LOG_DEBUG(Extensions, "Moved tab %{public}llu to index %{public}zu from window %{public}llu", tab.identifier().toUInt64(), oldIndex, oldWindow->identifier().toUInt64());
     else
-        RELEASE_LOG_DEBUG(Extensions, "Moved tab %{public}llu to index %{public}llu (in same window)", tab.identifier().toUInt64(), index);
+        RELEASE_LOG_DEBUG(Extensions, "Moved tab %{public}llu to index %{public}zu (in same window)", tab.identifier().toUInt64(), oldIndex);
 
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    auto window = tab.window();
+    if (oldWindow && window && oldWindow != window) {
+        fireTabsDetachedEventIfNeeded(tab.identifier(), oldWindow->identifier(), oldIndex);
+        fireTabsAttachedEventIfNeeded(tab.identifier(), window->identifier(), tab.index());
+    } else {
+        auto windowIdentifier = window ? window->identifier() : WebExtensionWindowConstants::NoneIdentifier;
+        fireTabsMovedEventIfNeeded(tab.identifier(), windowIdentifier, oldIndex, tab.index());
+    }
 }
 
 void WebExtensionContext::didReplaceTab(const WebExtensionTab& oldTab, const WebExtensionTab& newTab)
@@ -1446,7 +1534,7 @@ void WebExtensionContext::didReplaceTab(const WebExtensionTab& oldTab, const Web
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    fireTabsReplacedEventIfNeeded(oldTab.identifier(), newTab.identifier());
 }
 
 void WebExtensionContext::didChangeTabProperties(const WebExtensionTab& tab, OptionSet<WebExtensionTab::ChangedProperties> properties)
@@ -1458,31 +1546,57 @@ void WebExtensionContext::didChangeTabProperties(const WebExtensionTab& tab, Opt
     if (!isLoaded())
         return;
 
-    // FIXME: Fire event here.
+    fireTabsUpdatedEventIfNeeded(tab.parameters(), tab.changedParameters(properties));
 }
 
-void WebExtensionContext::userGesturePerformed(_WKWebExtensionTab *tab)
+WebExtensionAction& WebExtensionContext::defaultAction()
 {
-    ASSERT(tab);
+    if (!m_defaultAction)
+        m_defaultAction = WebExtensionAction::create(*this);
+    return *m_defaultAction;
+}
 
+Ref<WebExtensionAction> WebExtensionContext::getOrCreateAction(WebExtensionTab* tab)
+{
+    if (!tab)
+        return defaultAction();
+
+    return m_actionMap.ensure(*tab, [&] {
+        return WebExtensionAction::create(*this, *tab);
+    }).iterator->value;
+}
+
+void WebExtensionContext::performAction(WebExtensionTab* tab)
+{
+    if (tab)
+        userGesturePerformed(*tab);
+
+    auto action = getOrCreateAction(tab);
+    if (action->hasPopup()) {
+        action->presentPopupWhenReady();
+        return;
+    }
+
+    // FIXME: <https://webkit.org/b/260154> Implement. Dispatch action event in main world pages.
+}
+
+void WebExtensionContext::userGesturePerformed(WebExtensionTab& tab)
+{
     // Nothing else to do if the extension does not have the activeTab permissions.
     if (!hasPermission(_WKWebExtensionPermissionActiveTab))
         return;
 
-    if (![tab respondsToSelector:@selector(urlForWebExtensionContext:)])
-        return;
-
-    NSURL *currentURL = [tab urlForWebExtensionContext:wrapper()];
+    NSURL *currentURL = tab.url();
     if (!currentURL)
         return;
 
-    _WKWebExtensionMatchPattern *pattern = [m_temporaryTabPermissionMatchPatterns objectForKey:tab];
+    _WKWebExtensionMatchPattern *pattern = [m_temporaryTabPermissionMatchPatterns objectForKey:tab.delegate()];
 
     // Nothing to do if the tab already has a pattern matching the current URL.
     if (pattern && [pattern matchesURL:currentURL])
         return;
 
-    // A pattern should not exist, since it should be cleared in cancelUserGesture
+    // A pattern should not exist, since it should be cleared in clearUserGesture
     // on any navigation between different hosts.
     ASSERT(!pattern);
 
@@ -1491,31 +1605,24 @@ void WebExtensionContext::userGesturePerformed(_WKWebExtensionTab *tab)
 
     // Grant the tab a temporary permission to access to a pattern matching the current URL's scheme and host for all paths.
     pattern = [_WKWebExtensionMatchPattern matchPatternWithScheme:currentURL.scheme host:currentURL.host path:@"/*"];
-    [m_temporaryTabPermissionMatchPatterns setObject:pattern forKey:tab];
+    [m_temporaryTabPermissionMatchPatterns setObject:pattern forKey:tab.delegate()];
 }
 
-bool WebExtensionContext::hasActiveUserGesture(_WKWebExtensionTab *tab) const
+bool WebExtensionContext::hasActiveUserGesture(WebExtensionTab& tab) const
 {
-    ASSERT(tab);
-
     if (!m_temporaryTabPermissionMatchPatterns)
         return false;
 
-    if (![tab respondsToSelector:@selector(urlForWebExtensionContext:)])
-        return false;
-
-    NSURL *currentURL = [tab urlForWebExtensionContext:wrapper()];
-    return [[m_temporaryTabPermissionMatchPatterns objectForKey:tab] matchesURL:currentURL];
+    NSURL *currentURL = tab.url();
+    return [[m_temporaryTabPermissionMatchPatterns objectForKey:tab.delegate()] matchesURL:currentURL];
 }
 
-void WebExtensionContext::cancelUserGesture(_WKWebExtensionTab *tab)
+void WebExtensionContext::clearUserGesture(WebExtensionTab& tab)
 {
-    ASSERT(tab);
-
     if (!m_temporaryTabPermissionMatchPatterns)
         return;
 
-    [m_temporaryTabPermissionMatchPatterns removeObjectForKey:tab];
+    [m_temporaryTabPermissionMatchPatterns removeObjectForKey:tab.delegate()];
 }
 
 void WebExtensionContext::setTestingMode(bool testingMode)
@@ -1527,18 +1634,41 @@ void WebExtensionContext::setTestingMode(bool testingMode)
     m_testingMode = testingMode;
 }
 
+WKWebView *WebExtensionContext::relatedWebView()
+{
+    if (m_backgroundWebView)
+        return m_backgroundWebView.get();
+
+    for (auto entry : m_actionMap) {
+        if (auto *webView = entry.value->popupWebView(WebExtensionAction::LoadOnFirstAccess::No))
+            return webView;
+    }
+
+    if (m_defaultAction) {
+        if (auto *webView = m_defaultAction->popupWebView(WebExtensionAction::LoadOnFirstAccess::No))
+            return webView;
+    }
+
+    return nil;
+}
+
 WKWebViewConfiguration *WebExtensionContext::webViewConfiguration()
 {
     ASSERT(isLoaded());
 
-    WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    WKWebViewConfiguration *configuration = [extensionController()->configuration().webViewConfiguration() copy];
+
+    // When using manifest v2 the web views need to use the same process.
+    if (extension().supportsManifestVersion(2))
+        configuration._relatedWebView = relatedWebView();
 
     // Use the weak property to avoid a reference cycle while an extension web view is being held by the context.
     configuration._weakWebExtensionController = extensionController()->wrapper();
+    configuration._webExtensionController = nil;
 
     configuration._processDisplayName = extension().webProcessDisplayName();
 
-    WKPreferences *preferences = configuration.preferences;
+    auto *preferences = configuration.preferences;
 #if PLATFORM(MAC)
     preferences._domTimersThrottlingEnabled = NO;
 #endif
@@ -2067,16 +2197,14 @@ void WebExtensionContext::removeInjectedContent(WebExtensionMatchPattern& patter
     }
 
     auto *tabsToRemove = [NSMutableSet set];
-    for (id<_WKWebExtensionTab> tab in m_temporaryTabPermissionMatchPatterns.get().keyEnumerator) {
-        if (![tab respondsToSelector:@selector(urlForWebExtensionContext:)])
-            continue;
-
-        NSURL *currentURL = [tab urlForWebExtensionContext:wrapper()];
+    for (id<_WKWebExtensionTab> tabDelegate in m_temporaryTabPermissionMatchPatterns.get().keyEnumerator) {
+        auto tab = getOrCreateTab(tabDelegate);
+        NSURL *currentURL = tab->url();
         if (!currentURL)
             continue;
 
         if (pattern.matchesURL(currentURL))
-            [tabsToRemove addObject:tab];
+            [tabsToRemove addObject:tabDelegate];
     }
 
     for (id tab in tabsToRemove)

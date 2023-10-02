@@ -85,6 +85,7 @@ protected:
     FixedVector<HandlerInfo> m_exceptionHandlers;
 };
 
+#if ENABLE(JIT)
 class JITCallee : public Callee {
 public:
     friend class Callee;
@@ -127,6 +128,34 @@ private:
     }
 };
 
+#else
+
+class JSEntrypointCallee final : public Callee {
+public:
+    friend class Callee;
+
+    static Ref<JSEntrypointCallee> create()
+    {
+        return adoptRef(*new JSEntrypointCallee);
+    }
+
+private:
+    JSEntrypointCallee()
+        : Callee(Wasm::CompilationMode::JSEntrypointMode)
+    {
+    }
+
+    std::tuple<void*, void*> rangeImpl() const
+    {
+        return { nullptr, nullptr };
+    }
+
+    CodePtr<WasmEntryPtrTag> entrypointImpl() const { return { }; }
+
+    RegisterAtOffsetList* calleeSaveRegistersImpl() { return nullptr; }
+};
+#endif // ENABLE(JIT)
+
 class WasmToJSCallee final : public Callee {
 public:
     friend class Callee;
@@ -149,7 +178,7 @@ private:
     RegisterAtOffsetList* calleeSaveRegistersImpl() { return nullptr; }
 };
 
-
+#if ENABLE(JIT)
 class JSToWasmICCallee final : public JITCallee {
 public:
     static Ref<JSToWasmICCallee> create()
@@ -165,9 +194,9 @@ private:
     {
     }
 };
+#endif
 
-
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
 
 struct WasmCodeOrigin {
     unsigned firstInlineCSI;
@@ -340,7 +369,7 @@ public:
 
     LLIntTierUpCounter& tierUpCounter() { return m_tierUpCounter; }
 
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     JITCallee* replacement(MemoryMode mode) { return m_replacements[static_cast<uint8_t>(mode)].get(); }
     void setReplacement(Ref<OptimizingJITCallee>&& replacement, MemoryMode mode)
     {
@@ -364,7 +393,7 @@ private:
     JS_EXPORT_PRIVATE RegisterAtOffsetList* calleeSaveRegistersImpl();
 
     uint32_t m_functionIndex { 0 };
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     RefPtr<OptimizingJITCallee> m_replacements[numberOfMemoryModes];
     RefPtr<OSREntryCallee> m_osrEntryCallees[numberOfMemoryModes];
 #endif
@@ -442,7 +471,7 @@ public:
     const JumpTable& jumpTable(unsigned tableIndex) const;
     unsigned numberOfJumpTables() const;
 
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     JITCallee* replacement(MemoryMode mode) { return m_replacements[static_cast<uint8_t>(mode)].get(); }
     void setReplacement(Ref<OptimizingJITCallee>&& replacement, MemoryMode mode)
     {
@@ -482,7 +511,7 @@ private:
     LLIntTierUpCounter m_tierUpCounter;
     FixedVector<JumpTable> m_jumpTables;
 
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     RefPtr<OptimizingJITCallee> m_replacements[numberOfMemoryModes];
     RefPtr<OSREntryCallee> m_osrEntryCallees[numberOfMemoryModes];
 #endif

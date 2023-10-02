@@ -30,16 +30,19 @@
 #include "ASTStringDumper.h"
 #include "ASTVisitor.h"
 #include "CompilationMessage.h"
+#include "ConstantFunctions.h"
 #include "ContextProviderInlines.h"
 #include "Overload.h"
 #include "TypeStore.h"
 #include "Types.h"
 #include "WGSLShaderModule.h"
 #include <wtf/DataLog.h>
+#include <wtf/SortedArrayMap.h>
 
 namespace WGSL {
 
 static constexpr bool shouldDumpInferredTypes = false;
+static constexpr bool shouldDumpConstantValues = false;
 
 struct Binding {
     enum Kind : uint8_t {
@@ -49,6 +52,7 @@ struct Binding {
 
     Kind kind;
     const struct Type* type;
+    std::optional<ConstantValue> constantValue;
 };
 
 class TypeChecker : public AST::Visitor, public ContextProvider<Binding> {
@@ -73,6 +77,7 @@ public:
 
     // Statements
     void visit(AST::AssignmentStatement&) override;
+    void visit(AST::CallStatement&) override;
     void visit(AST::CompoundAssignmentStatement&) override;
     void visit(AST::DecrementIncrementStatement&) override;
     void visit(AST::IfStatement&) override;
@@ -80,6 +85,7 @@ public:
     void visit(AST::ReturnStatement&) override;
     void visit(AST::CompoundStatement&) override;
     void visit(AST::ForStatement&) override;
+    void visit(AST::WhileStatement&) override;
 
     // Expressions
     void visit(AST::Expression&) override;
@@ -99,11 +105,9 @@ public:
     void visit(AST::AbstractFloatLiteral&) override;
 
     // Types
-    void visit(AST::TypeName&) override;
-    void visit(AST::ArrayTypeName&) override;
-    void visit(AST::NamedTypeName&) override;
-    void visit(AST::ParameterizedTypeName&) override;
-    void visit(AST::ReferenceTypeName&) override;
+    void visit(AST::ArrayTypeExpression&) override;
+    void visit(AST::ElaboratedTypeExpression&) override;
+    void visit(AST::ReferenceTypeExpression&) override;
 
 private:
     enum class VariableKind : uint8_t {
@@ -123,19 +127,29 @@ private:
     void typeError(InferBottom, const SourceSpan&, Arguments&&...);
 
     const Type* infer(AST::Expression&);
-    const Type* resolve(AST::TypeName&);
+    const Type* resolve(AST::Expression&);
     const Type* lookupType(const AST::Identifier&);
     void inferred(const Type*);
     bool unify(const Type*, const Type*) WARN_UNUSED_RETURN;
     bool isBottom(const Type*) const;
     void introduceType(const AST::Identifier&, const Type*);
-    void introduceValue(const AST::Identifier&, const Type*);
+    void introduceValue(const AST::Identifier&, const Type*, std::optional<ConstantValue> = std::nullopt);
 
     template<typename TargetConstructor, typename... Arguments>
     void allocateSimpleConstructor(ASCIILiteral, TargetConstructor, Arguments&&...);
+    void allocateTextureStorageConstructor(ASCIILiteral, Types::TextureStorage::Kind);
+
+    std::optional<AccessMode> accessMode(AST::Expression&);
+    std::optional<TexelFormat> texelFormat(AST::Expression&);
+    std::optional<AddressSpace> addressSpace(AST::Expression&);
 
     template<typename CallArguments>
     const Type* chooseOverload(const char*, const SourceSpan&, const String&, CallArguments&& valueArguments, const Vector<const Type*>& typeArguments);
+
+    template<typename Node>
+    void setConstantValue(Node&, const ConstantValue&);
+
+    using ConstantFunction = ConstantValue(*)(AST::CallExpression&, const FixedVector<ConstantValue>&);
 
     ShaderModule& m_shaderModule;
     const Type* m_inferredType { nullptr };
@@ -144,6 +158,7 @@ private:
     Vector<Error> m_errors;
     // FIXME: maybe these should live in the context
     HashMap<String, Vector<OverloadCandidate>> m_overloadedOperations;
+    HashMap<String, ConstantFunction> m_constantFunctions;
 };
 
 TypeChecker::TypeChecker(ShaderModule& shaderModule)
@@ -155,7 +170,87 @@ TypeChecker::TypeChecker(ShaderModule& shaderModule)
     introduceType(AST::Identifier::make("u32"_s), m_types.u32Type());
     introduceType(AST::Identifier::make("f32"_s), m_types.f32Type());
     introduceType(AST::Identifier::make("sampler"_s), m_types.samplerType());
+    introduceType(AST::Identifier::make("sampler_comparison"_s), m_types.samplerComparisonType());
     introduceType(AST::Identifier::make("texture_external"_s), m_types.textureExternalType());
+
+    introduceType(AST::Identifier::make("texture_depth_2d"_s), m_types.textureDepth2dType());
+    introduceType(AST::Identifier::make("texture_depth_2d_array"_s), m_types.textureDepth2dArrayType());
+    introduceType(AST::Identifier::make("texture_depth_cube"_s), m_types.textureDepthCubeType());
+    introduceType(AST::Identifier::make("texture_depth_cube_array"_s), m_types.textureDepthCubeArrayType());
+    introduceType(AST::Identifier::make("texture_depth_multisampled_2d"_s), m_types.textureDepthMultisampled2dType());
+
+    introduceType(AST::Identifier::make("ptr"_s), m_types.typeConstructorType(
+        "ptr"_s,
+        [this](AST::ElaboratedTypeExpression& type) -> const Type* {
+            auto argumentCount = type.arguments().size();
+            if (argumentCount < 2) {
+                typeError(InferBottom::No, type.span(), "'ptr' requires at least 2 template argument");
+                return m_types.bottomType();
+            }
+
+            if (argumentCount > 3) {
+                typeError(InferBottom::No, type.span(), "'ptr' requires at most 3 template argument");
+                return m_types.bottomType();
+            }
+
+            auto maybeAddressSpace = addressSpace(type.arguments()[0]);
+            if (!maybeAddressSpace)
+                return m_types.bottomType();
+
+            auto* elementType = resolve(type.arguments()[1]);
+            if (isBottom(elementType))
+                return m_types.bottomType();
+
+            AccessMode accessMode;
+            if (argumentCount > 2) {
+                if (*maybeAddressSpace != AddressSpace::Storage) {
+                    typeError(InferBottom::No, type.arguments()[2].span(), "only pointers in <storage> address space may specify an access mode");
+                    return m_types.bottomType();
+                }
+
+                auto maybeAccessMode = this->accessMode(type.arguments()[2]);
+                if (!maybeAccessMode)
+                    return m_types.bottomType();
+                accessMode = *maybeAccessMode;
+            } else {
+                switch (*maybeAddressSpace) {
+                case AddressSpace::Function:
+                case AddressSpace::Private:
+                case AddressSpace::Workgroup:
+                    accessMode = AccessMode::ReadWrite;
+                    break;
+                case AddressSpace::Uniform:
+                case AddressSpace::Storage:
+                case AddressSpace::Handle:
+                    accessMode = AccessMode::Read;
+                    break;
+                }
+            }
+
+            return m_types.pointerType(*maybeAddressSpace, elementType, accessMode);
+        }
+    ));
+
+    introduceType(AST::Identifier::make("atomic"_s), m_types.typeConstructorType(
+        "atomic"_s,
+        [this](AST::ElaboratedTypeExpression& type) -> const Type* {
+            if (type.arguments().size() != 1) {
+                typeError(InferBottom::No, type.span(), "'atomic' requires 1 template arguments");
+                return m_types.bottomType();
+            }
+
+            auto* elementType = resolve(type.arguments()[0]);
+            if (isBottom(elementType))
+                return m_types.bottomType();
+
+            if (elementType != m_types.i32Type() && elementType != m_types.u32Type()) {
+                typeError(InferBottom::No, type.arguments()[0].span(), "atomic only supports i32 or u32 types");
+                return m_types.bottomType();
+            }
+
+            return m_types.atomicType(elementType);
+        }
+    ));
 
     allocateSimpleConstructor("vec2"_s, &TypeStore::vectorType, 2);
     allocateSimpleConstructor("vec3"_s, &TypeStore::vectorType, 3);
@@ -177,13 +272,56 @@ TypeChecker::TypeChecker(ShaderModule& shaderModule)
     allocateSimpleConstructor("texture_cube"_s, &TypeStore::textureType, Types::Texture::Kind::TextureCube);
     allocateSimpleConstructor("texture_cube_array"_s, &TypeStore::textureType, Types::Texture::Kind::TextureCubeArray);
     allocateSimpleConstructor("texture_multisampled_2d"_s, &TypeStore::textureType, Types::Texture::Kind::TextureMultisampled2d);
-    allocateSimpleConstructor("texture_storage_1d"_s, &TypeStore::textureType, Types::Texture::Kind::TextureStorage1d);
-    allocateSimpleConstructor("texture_storage_2d"_s, &TypeStore::textureType, Types::Texture::Kind::TextureStorage2d);
-    allocateSimpleConstructor("texture_storage_2d_array"_s, &TypeStore::textureType, Types::Texture::Kind::TextureStorage2dArray);
-    allocateSimpleConstructor("texture_storage_3d"_s, &TypeStore::textureType, Types::Texture::Kind::TextureStorage3d);
+
+    allocateTextureStorageConstructor("texture_storage_1d"_s, Types::TextureStorage::Kind::TextureStorage1d);
+    allocateTextureStorageConstructor("texture_storage_2d"_s, Types::TextureStorage::Kind::TextureStorage2d);
+    allocateTextureStorageConstructor("texture_storage_2d_array"_s, Types::TextureStorage::Kind::TextureStorage2dArray);
+    allocateTextureStorageConstructor("texture_storage_3d"_s, Types::TextureStorage::Kind::TextureStorage3d);
+
+    introduceValue(AST::Identifier::make("read"_s), m_types.accessModeType());
+    introduceValue(AST::Identifier::make("write"_s), m_types.accessModeType());
+    introduceValue(AST::Identifier::make("read_write"_s), m_types.accessModeType());
+
+    introduceValue(AST::Identifier::make("bgra8unorm"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("r32float"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("r32sint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("r32uint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rg32float"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rg32sint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rg32uint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba16float"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba16sint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba16uint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba32float"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba32sint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba32uint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba8sint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba8snorm"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba8uint"_s), m_types.texelFormatType());
+    introduceValue(AST::Identifier::make("rgba8unorm"_s), m_types.texelFormatType());
+
+    introduceValue(AST::Identifier::make("function"_s), m_types.addressSpaceType());
+    introduceValue(AST::Identifier::make("private"_s), m_types.addressSpaceType());
+    introduceValue(AST::Identifier::make("workgroup"_s), m_types.addressSpaceType());
+    introduceValue(AST::Identifier::make("uniform"_s), m_types.addressSpaceType());
+    introduceValue(AST::Identifier::make("storage"_s), m_types.addressSpaceType());
 
     // This file contains the declarations generated from `TypeDeclarations.rb`
 #include "TypeDeclarations.h" // NOLINT
+
+    m_constantFunctions.add("pow"_s, constantPow);
+    m_constantFunctions.add("vec2"_s, constantVector2);
+    m_constantFunctions.add("vec2f"_s, constantVector2);
+    m_constantFunctions.add("vec2i"_s, constantVector2);
+    m_constantFunctions.add("vec2u"_s, constantVector2);
+    m_constantFunctions.add("vec3i"_s, constantVector3);
+    m_constantFunctions.add("vec3"_s, constantVector3);
+    m_constantFunctions.add("vec3f"_s, constantVector3);
+    m_constantFunctions.add("vec3u"_s, constantVector3);
+    m_constantFunctions.add("vec4u"_s, constantVector4);
+    m_constantFunctions.add("vec4"_s, constantVector4);
+    m_constantFunctions.add("vec4f"_s, constantVector4);
+    m_constantFunctions.add("vec4i"_s, constantVector4);
 }
 
 std::optional<FailedCheck> TypeChecker::check()
@@ -236,28 +374,35 @@ void TypeChecker::visitVariable(AST::Variable& variable, VariableKind variableKi
     visitAttributes(variable.attributes());
 
     const Type* result = nullptr;
+    std::optional<ConstantValue> value;
     if (variable.maybeTypeName())
         result = resolve(*variable.maybeTypeName());
     if (variable.maybeInitializer()) {
         auto* initializerType = infer(*variable.maybeInitializer());
+        if (variable.flavor() == AST::VariableFlavor::Const)
+            value = variable.maybeInitializer()->constantValue();
         if (auto* reference = std::get_if<Types::Reference>(initializerType)) {
             initializerType = reference->element;
             variable.maybeInitializer()->m_inferredType = initializerType;
         }
 
-        if (!result)
-            result = initializerType;
-        else if (unify(result, initializerType))
+        if (!result) {
+            if (variable.flavor() == AST::VariableFlavor::Const)
+                result = initializerType;
+            else
+                result = concretize(initializerType, m_types);
+        } else if (unify(result, initializerType))
             variable.maybeInitializer()->m_inferredType = result;
         else
             typeError(InferBottom::No, variable.span(), "cannot initialize var of type '", *result, "' with value of type '", *initializerType, "'");
+
     }
     if (variable.flavor() == AST::VariableFlavor::Var) {
         AddressSpace addressSpace;
         AccessMode accessMode;
         if (auto* maybeQualifier = variable.maybeQualifier()) {
-            addressSpace = static_cast<AddressSpace>(maybeQualifier->storageClass());
-            accessMode = static_cast<AccessMode>(maybeQualifier->accessMode());
+            addressSpace = maybeQualifier->addressSpace();
+            accessMode = maybeQualifier->accessMode();
         } else if (variableKind == VariableKind::Local) {
             addressSpace = AddressSpace::Function;
             accessMode = AccessMode::ReadWrite;
@@ -267,15 +412,15 @@ void TypeChecker::visitVariable(AST::Variable& variable, VariableKind variableKi
         }
         result = m_types.referenceType(addressSpace, result, accessMode);
         if (auto* maybeTypeName = variable.maybeTypeName()) {
-            auto& referenceType = m_shaderModule.astBuilder().construct<AST::ReferenceTypeName>(
+            auto& referenceType = m_shaderModule.astBuilder().construct<AST::ReferenceTypeExpression>(
                 maybeTypeName->span(),
                 *maybeTypeName
             );
-            referenceType.m_resolvedType = result;
+            referenceType.m_inferredType = result;
             variable.m_referenceType = &referenceType;
         }
     }
-    introduceValue(variable.name(), result);
+    introduceValue(variable.name(), result, value);
 }
 
 void TypeChecker::visit(AST::Function& function)
@@ -285,8 +430,10 @@ void TypeChecker::visit(AST::Function& function)
     Vector<const Type*> parameters;
     const Type* result;
     parameters.reserveInitialCapacity(function.parameters().size());
-    for (auto& parameter : function.parameters())
+    for (auto& parameter : function.parameters()) {
+        visitAttributes(parameter.attributes());
         parameters.append(resolve(parameter.typeName()));
+    }
     if (function.maybeReturnType())
         result = resolve(*function.maybeReturnType());
     else
@@ -405,6 +552,13 @@ void TypeChecker::visit(AST::AssignmentStatement& statement)
         typeError(InferBottom::No, statement.span(), "cannot assign value of type '", *rhs, "' to '", *reference->element, "'");
 }
 
+void TypeChecker::visit(AST::CallStatement& statement)
+{
+    auto* result = infer(statement.call());
+    // FIXME: this should check if the function has a must_use attribute
+    UNUSED_PARAM(result);
+}
+
 void TypeChecker::visit(AST::CompoundAssignmentStatement& statement)
 {
     // FIXME: Implement type checking - infer is called to avoid ASSERT in
@@ -478,6 +632,7 @@ void TypeChecker::visit(AST::CompoundStatement& statement)
 
 void TypeChecker::visit(AST::ForStatement& statement)
 {
+    ContextScope forScope(this);
     if (auto* initializer = statement.maybeInitializer())
         AST::Visitor::visit(*initializer);
 
@@ -489,6 +644,15 @@ void TypeChecker::visit(AST::ForStatement& statement)
 
     if (auto* update = statement.maybeUpdate())
         AST::Visitor::visit(*update);
+
+    visit(statement.body());
+}
+
+void TypeChecker::visit(AST::WhileStatement& statement)
+{
+    auto* testType = infer(statement.test());
+    if (!unify(m_types.boolType(), testType))
+        typeError(InferBottom::No, statement.test().span(), "while condition must be bool, got ", *testType);
 
     visit(statement.body());
 }
@@ -601,26 +765,29 @@ void TypeChecker::visit(AST::IdentifierExpression& identifier)
     }
 
     inferred(binding->type);
+    if (binding->constantValue.has_value())
+        setConstantValue(identifier, *binding->constantValue);
 }
 
 void TypeChecker::visit(AST::CallExpression& call)
 {
     auto& target = call.target();
-    bool isNamedType = is<AST::NamedTypeName>(target);
-    bool isParameterizedType = is<AST::ParameterizedTypeName>(target);
+    bool isNamedType = is<AST::IdentifierExpression>(target);
+    bool isParameterizedType = is<AST::ElaboratedTypeExpression>(target);
     if (isNamedType || isParameterizedType) {
         Vector<const Type*> typeArguments;
         String targetName = [&]() -> String {
             if (isNamedType)
-                return downcast<AST::NamedTypeName>(target).name();
-            auto& parameterizedType = downcast<AST::ParameterizedTypeName>(target);
-            typeArguments.append(resolve(parameterizedType.elementType()));
-            return parameterizedType.base();
+                return downcast<AST::IdentifierExpression>(target).identifier();
+            auto& elaborated = downcast<AST::ElaboratedTypeExpression>(target);
+            for (auto& argument : elaborated.arguments())
+                typeArguments.append(resolve(argument));
+            return elaborated.base();
         }();
 
         auto* targetBinding = isNamedType ? readVariable(targetName) : nullptr;
         if (targetBinding) {
-            target.m_resolvedType = targetBinding->type;
+            target.m_inferredType = targetBinding->type;
             if (targetBinding->kind == Binding::Type) {
                 if (auto* structType = std::get_if<Types::Struct>(targetBinding->type)) {
                     auto numberOfArguments = call.arguments().size();
@@ -662,6 +829,11 @@ void TypeChecker::visit(AST::CallExpression& call)
                         RELEASE_ASSERT_NOT_REACHED();
                     }
                 }
+
+                if (auto* matrixType = std::get_if<Types::Matrix>(targetBinding->type)) {
+                    typeArguments.append(matrixType->element);
+                    targetName = makeString("mat", String::number(matrixType->columns), "x", String::number(matrixType->rows));
+                }
             }
 
             if (targetBinding->kind == Binding::Value) {
@@ -692,7 +864,23 @@ void TypeChecker::visit(AST::CallExpression& call)
 
         auto* result = chooseOverload("initializer", call.span(), targetName, call.arguments(), typeArguments);
         if (result) {
-            target.m_resolvedType = result;
+            // FIXME: this will go away once we track used intrinsics properly
+            if (targetName == "workgroupUniformLoad"_s)
+                m_shaderModule.setUsesWorkgroupUniformLoad();
+            target.m_inferredType = result;
+
+            auto it = m_constantFunctions.find(targetName);
+            if (it != m_constantFunctions.end()) {
+                unsigned argumentCount = call.arguments().size();
+                FixedVector<ConstantValue> arguments(argumentCount);
+                for (unsigned i = 0; i < argumentCount; ++i) {
+                    auto value = call.arguments()[i].constantValue();
+                    if (!value.has_value())
+                        return;
+                    arguments[i] = *value;
+                }
+                setConstantValue(call, it->value(call, WTFMove(arguments)));
+            }
             return;
         }
 
@@ -703,8 +891,8 @@ void TypeChecker::visit(AST::CallExpression& call)
         return;
     }
 
-    if (is<AST::ArrayTypeName>(target)) {
-        AST::ArrayTypeName& array = downcast<AST::ArrayTypeName>(target);
+    if (is<AST::ArrayTypeExpression>(target)) {
+        AST::ArrayTypeExpression& array = downcast<AST::ArrayTypeExpression>(target);
         const Type* elementType = nullptr;
         unsigned elementCount;
 
@@ -714,11 +902,19 @@ void TypeChecker::visit(AST::CallExpression& call)
                 return;
             }
             elementType = resolve(*array.maybeElementType());
-            elementCount = *extractInteger(*array.maybeElementCount());
+
+            auto elementCountType = infer(*array.maybeElementCount());
+            if (!unify(m_types.i32Type(), elementCountType) && !unify(m_types.u32Type(), elementCountType)) {
+                typeError(array.span(), "array count must be an i32 or u32 value, found '", *elementCountType, "'");
+                return;
+            }
+
+            elementCount = array.maybeElementCount()->constantValue()->toInt();
             if (!elementCount) {
                 typeError(call.span(), "array count must be greater than 0");
                 return;
             }
+
             unsigned numberOfArguments = call.arguments().size();
             if (numberOfArguments && numberOfArguments != elementCount) {
                 const char* errorKind = call.arguments().size() < elementCount ? "few" : "many";
@@ -760,6 +956,17 @@ void TypeChecker::visit(AST::CallExpression& call)
         }
         auto* result = m_types.arrayType(elementType, { elementCount });
         inferred(result);
+
+        unsigned argumentCount = call.arguments().size();
+        FixedVector<ConstantValue> arguments(argumentCount);
+        for (unsigned i = 0; i < argumentCount; ++i) {
+            auto value = call.arguments()[i].constantValue();
+            if (!value.has_value())
+                return;
+            arguments[i] = *value;
+        }
+        setConstantValue(call, ConstantArray(WTFMove(arguments)));
+
         return;
     }
 
@@ -772,45 +979,44 @@ void TypeChecker::visit(AST::UnaryExpression& unary)
 }
 
 // Literal Expressions
-void TypeChecker::visit(AST::BoolLiteral&)
+void TypeChecker::visit(AST::BoolLiteral& literal)
 {
     inferred(m_types.boolType());
+    literal.setConstantValue(literal.value());
 }
 
-void TypeChecker::visit(AST::Signed32Literal&)
+void TypeChecker::visit(AST::Signed32Literal& literal)
 {
     inferred(m_types.i32Type());
+    literal.setConstantValue(literal.value());
 }
 
-void TypeChecker::visit(AST::Float32Literal&)
+void TypeChecker::visit(AST::Float32Literal& literal)
 {
     inferred(m_types.f32Type());
+    literal.setConstantValue(literal.value());
 }
 
-void TypeChecker::visit(AST::Unsigned32Literal&)
+void TypeChecker::visit(AST::Unsigned32Literal& literal)
 {
     inferred(m_types.u32Type());
+    literal.setConstantValue(literal.value());
 }
 
-void TypeChecker::visit(AST::AbstractIntegerLiteral&)
+void TypeChecker::visit(AST::AbstractIntegerLiteral& literal)
 {
     inferred(m_types.abstractIntType());
+    literal.setConstantValue(literal.value());
 }
 
-void TypeChecker::visit(AST::AbstractFloatLiteral&)
+void TypeChecker::visit(AST::AbstractFloatLiteral& literal)
 {
     inferred(m_types.abstractFloatType());
+    literal.setConstantValue(literal.value());
 }
 
 // Types
-void TypeChecker::visit(AST::TypeName&)
-{
-    // NOTE: this should never be called directly, only through `resolve`, which
-    // captures the inferred type
-    ASSERT_NOT_REACHED();
-}
-
-void TypeChecker::visit(AST::ArrayTypeName& array)
+void TypeChecker::visit(AST::ArrayTypeExpression& array)
 {
     // FIXME: handle the case where there is no element type
     ASSERT(array.maybeElementType());
@@ -823,11 +1029,19 @@ void TypeChecker::visit(AST::ArrayTypeName& array)
 
     std::optional<unsigned> size;
     if (array.maybeElementCount()) {
-        size = extractInteger(*array.maybeElementCount());
-        if (!size) {
+        auto elementCountType = infer(*array.maybeElementCount());
+        if (!unify(m_types.i32Type(), elementCountType) && !unify(m_types.u32Type(), elementCountType)) {
+            typeError(array.span(), "array count must be an i32 or u32 value, found '", *elementCountType, "'");
+            return;
+        }
+
+        auto value = array.maybeElementCount()->constantValue();
+        if (!value.has_value()) {
             typeError(array.span(), "array count must evaluate to a constant integer expression or override variable");
             return;
         }
+
+        size = value->toInt();
     }
 
     inferred(m_types.arrayType(elementType, size));
@@ -849,12 +1063,7 @@ const Type* TypeChecker::lookupType(const AST::Identifier& name)
     return binding->type;
 }
 
-void TypeChecker::visit(AST::NamedTypeName& namedType)
-{
-    inferred(lookupType(namedType.name()));
-}
-
-void TypeChecker::visit(AST::ParameterizedTypeName& type)
+void TypeChecker::visit(AST::ElaboratedTypeExpression& type)
 {
     auto* base = lookupType(type.base());
     if (isBottom(base)) {
@@ -871,7 +1080,7 @@ void TypeChecker::visit(AST::ParameterizedTypeName& type)
     inferred(constructor->construct(type));
 }
 
-void TypeChecker::visit(AST::ReferenceTypeName&)
+void TypeChecker::visit(AST::ReferenceTypeExpression&)
 {
     // FIXME: we don't yet parse reference types
     ASSERT_NOT_REACHED();
@@ -953,7 +1162,7 @@ const Type* TypeChecker::vectorFieldAccess(const Types::Vector& vector, AST::Fie
         return nullptr;
     }
 
-    return m_types.vectorType(vector.element, length);
+    return m_types.vectorType(length, vector.element);
 }
 
 template<typename CallArguments>
@@ -1027,10 +1236,13 @@ const Type* TypeChecker::infer(AST::Expression& expression)
     return inferredType;
 }
 
-const Type* TypeChecker::resolve(AST::TypeName& type)
+const Type* TypeChecker::resolve(AST::Expression& type)
 {
     ASSERT(!m_inferredType);
-    AST::Visitor::visit(type);
+    if (is<AST::IdentifierExpression>(type))
+        inferred(lookupType(downcast<AST::IdentifierExpression>(type).identifier()));
+    else
+        AST::Visitor::visit(type);
     ASSERT(m_inferredType);
 
     if (shouldDumpInferredTypes) {
@@ -1040,7 +1252,7 @@ const Type* TypeChecker::resolve(AST::TypeName& type)
         dataLogLn(*m_inferredType);
     }
 
-    type.m_resolvedType = m_inferredType;
+    type.m_inferredType = m_inferredType;
     const Type* inferredType = m_inferredType;
     m_inferredType = nullptr;
 
@@ -1077,13 +1289,15 @@ bool TypeChecker::isBottom(const Type* type) const
 
 void TypeChecker::introduceType(const AST::Identifier& name, const Type* type)
 {
-    if (!introduceVariable(name, { Binding::Type, type }))
+    if (!introduceVariable(name, { Binding::Type, type, std::nullopt }))
         typeError(InferBottom::No, name.span(), "redeclaration of '", name, "'");
 }
 
-void TypeChecker::introduceValue(const AST::Identifier& name, const Type* type)
+void TypeChecker::introduceValue(const AST::Identifier& name, const Type* type, std::optional<ConstantValue> value)
 {
-    if (!introduceVariable(name, { Binding::Value, type }))
+    if (shouldDumpConstantValues && value.has_value())
+        dataLogLn("> Assigning value: ", name, " => ", value);
+    if (!introduceVariable(name, { Binding::Value, type , value }))
         typeError(InferBottom::No, name.span(), "redeclaration of '", name, "'");
 }
 
@@ -1111,14 +1325,102 @@ void TypeChecker::allocateSimpleConstructor(ASCIILiteral name, TargetConstructor
 {
     introduceType(AST::Identifier::make(name), m_types.typeConstructorType(
         name,
-        [this, constructor, arguments...](AST::ParameterizedTypeName& type) -> const Type* {
-            auto* elementType = resolve(type.elementType());
+        [this, constructor, arguments...](AST::ElaboratedTypeExpression& type) -> const Type* {
+            if (type.arguments().size() != 1) {
+                typeError(InferBottom::No, type.span(), "'", type.base(), "' requires 1 template argument");
+                return m_types.bottomType();
+            }
+            auto* elementType = resolve(type.arguments().first());
             if (isBottom(elementType))
                 return m_types.bottomType();
 
-            return (m_types.*constructor)(elementType, arguments...);
+            return (m_types.*constructor)(arguments..., elementType);
         }
     ));
 }
+
+void TypeChecker::allocateTextureStorageConstructor(ASCIILiteral name, Types::TextureStorage::Kind kind)
+{
+    introduceType(AST::Identifier::make(name), m_types.typeConstructorType(
+        name,
+        [this, kind](AST::ElaboratedTypeExpression& type) -> const Type* {
+            if (type.arguments().size() != 2) {
+                typeError(InferBottom::No, type.span(), "'", type.base(), "' requires 2 template argument");
+                return m_types.bottomType();
+            }
+
+            auto maybeFormat = texelFormat(type.arguments()[0]);
+            if (!maybeFormat)
+                return m_types.bottomType();
+
+            auto maybeAccess = accessMode(type.arguments()[1]);
+            if (!maybeAccess)
+                return m_types.bottomType();
+            return m_types.textureStorageType(kind, *maybeFormat, *maybeAccess);
+        }
+    ));
+}
+
+std::optional<TexelFormat> TypeChecker::texelFormat(AST::Expression& expression)
+{
+    auto* formatType = infer(expression);
+    if (!unify(formatType, m_types.texelFormatType())) {
+        typeError(InferBottom::No, expression.span(), "cannot use '", *formatType, "' as texel format");
+        return std::nullopt;
+    }
+
+    ASSERT(is<AST::IdentifierExpression>(expression));
+    auto& formatName = downcast<AST::IdentifierExpression>(expression).identifier();
+
+    auto* format = parseTexelFormat(formatName.id());
+    ASSERT(format);
+    return { *format };
+}
+
+std::optional<AccessMode> TypeChecker::accessMode(AST::Expression& expression)
+{
+    auto* accessType = infer(expression);
+    if (!unify(accessType, m_types.accessModeType())) {
+        typeError(InferBottom::No, expression.span(), "cannot use '", *accessType, "' as access mode");
+        return std::nullopt;
+    }
+
+    ASSERT(is<AST::IdentifierExpression>(expression));
+    auto& accessName = downcast<AST::IdentifierExpression>(expression).identifier();
+
+    auto* accessMode = parseAccessMode(accessName.id());
+    ASSERT(accessMode);
+    return { *accessMode };
+}
+
+std::optional<AddressSpace> TypeChecker::addressSpace(AST::Expression& expression)
+{
+    auto* addressSpaceType = infer(expression);
+    if (!unify(addressSpaceType, m_types.addressSpaceType())) {
+        typeError(InferBottom::No, expression.span(), "cannot use '", *addressSpaceType, "' as address space");
+        return std::nullopt;
+    }
+
+    ASSERT(is<AST::IdentifierExpression>(expression));
+    auto& addressSpaceName = downcast<AST::IdentifierExpression>(expression).identifier();
+
+    auto* addressSpace = parseAddressSpace(addressSpaceName.id());
+    ASSERT(addressSpace);
+    return { *addressSpace };
+}
+
+template<typename Node>
+void TypeChecker::setConstantValue(Node& expression, const ConstantValue& value)
+{
+    using namespace Types;
+
+    if (shouldDumpConstantValues) {
+        dataLog("> Setting constantValue for expression: ");
+        dumpNode(WTF::dataFile(), expression);
+        dataLogLn(" = ", value);
+    }
+    expression.setConstantValue(value);
+}
+
 
 } // namespace WGSL

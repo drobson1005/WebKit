@@ -91,8 +91,7 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
     void setNetworkState(MediaPlayer::NetworkState);
 
     void seekInternal();
-    void waitForSeekCompleted();
-    void seekCompleted();
+    void maybeCompleteSeek();
     void setLoadingProgresssed(bool flag) { m_loadingProgressed = flag; }
     void setHasAvailableVideoFrame(bool);
     bool hasAvailableVideoFrame() const override;
@@ -201,7 +200,7 @@ private:
     bool hasVideo() const override;
     bool hasAudio() const override;
 
-    void setPageIsVisible(bool) final;
+    void setPageIsVisible(bool, String&& sceneIdentifier) final;
 
     MediaTime durationMediaTime() const override;
     MediaTime startTime() const override;
@@ -344,6 +343,7 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
     bool m_hasAvailableVideoFrame { false };
     bool m_allRenderersHaveAvailableSamples { false };
     bool m_visible { false };
+    bool m_flushingActiveSourceBuffersDueToVisibilityChange { false };
     RetainPtr<CVOpenGLTextureRef> m_lastTexture;
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
     RefPtr<MediaPlaybackTarget> m_playbackTarget;

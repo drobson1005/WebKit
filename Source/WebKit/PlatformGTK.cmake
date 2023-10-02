@@ -62,6 +62,8 @@ list(APPEND WebKit_MESSAGES_IN_FILES
     WebProcess/gtk/GtkSettingsManagerProxy
 )
 
+list(APPEND WebCore_SERIALIZATION_IN_FILES SoupNetworkProxySettings.serialization.in)
+
 list(APPEND WebKit_DERIVED_SOURCES
     ${WebKitGTK_DERIVED_SOURCES_DIR}/InspectorGResourceBundle.c
     ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitDirectoryInputStreamData.cpp
@@ -341,6 +343,15 @@ if (USE_WPE_RENDERER)
     list(APPEND WebKit_LIBRARIES
       WPE::libwpe
       ${WPEBACKEND_FDO_LIBRARIES}
+    )
+endif ()
+
+if (USE_LIBDRM)
+    list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
+        ${LIBDRM_INCLUDE_DIR}
+    )
+    list(APPEND WebKit_LIBRARIES
+        ${LIBDRM_LIBRARIES}
     )
 endif ()
 

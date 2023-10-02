@@ -33,6 +33,7 @@
 #include "MessageSenderInlines.h"
 #include "ShareableBitmap.h"
 #include "UpdateInfo.h"
+#include "WebDisplayRefreshMonitor.h"
 #include "WebPage.h"
 #include "WebPageCreationParameters.h"
 #include "WebPageInlines.h"
@@ -69,12 +70,6 @@ DrawingAreaCoordinatedGraphics::DrawingAreaCoordinatedGraphics(WebPage& webPage,
 #endif
 
     updatePreferences(parameters.store);
-
-    if (m_alwaysUseCompositing) {
-        enterAcceleratedCompositingMode(nullptr);
-        if (!parameters.isProcessSwap)
-            sendEnterAcceleratedCompositingModeIfNeeded();
-    }
 }
 
 DrawingAreaCoordinatedGraphics::~DrawingAreaCoordinatedGraphics() = default;
@@ -289,6 +284,16 @@ void DrawingAreaCoordinatedGraphics::didChangeViewportAttributes(ViewportAttribu
     else if (m_previousLayerTreeHost)
         m_previousLayerTreeHost->didChangeViewportAttributes(WTFMove(attrs));
 }
+
+bool DrawingAreaCoordinatedGraphics::enterAcceleratedCompositingModeIfNeeded()
+{
+    ASSERT(!m_layerTreeHost);
+    if (!m_alwaysUseCompositing)
+        return false;
+
+    enterAcceleratedCompositingMode(nullptr);
+    return true;
+}
 #endif
 
 void DrawingAreaCoordinatedGraphics::setDeviceScaleFactor(float deviceScaleFactor)
@@ -380,9 +385,13 @@ void DrawingAreaCoordinatedGraphics::layerHostDidFlushLayers()
 
 RefPtr<DisplayRefreshMonitor> DrawingAreaCoordinatedGraphics::createDisplayRefreshMonitor(PlatformDisplayID displayID)
 {
+#if HAVE(DISPLAY_LINK)
+    return WebDisplayRefreshMonitor::create(displayID);
+#else
     if (!m_layerTreeHost || m_wantsToExitAcceleratedCompositingMode || exitAcceleratedCompositingModePending())
         return nullptr;
     return m_layerTreeHost->createDisplayRefreshMonitor(displayID);
+#endif
 }
 
 void DrawingAreaCoordinatedGraphics::activityStateDidChange(OptionSet<ActivityState> changed, ActivityStateChangeID, CompletionHandler<void()>&& completionHandler)
@@ -438,15 +447,6 @@ void DrawingAreaCoordinatedGraphics::updateGeometry(const IntSize& size, Complet
     }
 
     completionHandler();
-}
-
-void DrawingAreaCoordinatedGraphics::targetRefreshRateDidChange(unsigned rate)
-{
-    UNUSED_PARAM(rate);
-#if !USE(GRAPHICS_LAYER_TEXTURE_MAPPER)
-    if (m_layerTreeHost)
-        m_layerTreeHost->targetRefreshRateDidChange(rate);
-#endif
 }
 
 void DrawingAreaCoordinatedGraphics::displayDidRefresh()
@@ -574,22 +574,26 @@ void DrawingAreaCoordinatedGraphics::enterAcceleratedCompositingMode(GraphicsLay
     m_exitCompositingTimer.stop();
     m_wantsToExitAcceleratedCompositingMode = false;
 
+#if !HAVE(DISPLAY_LINK)
     auto changeWindowScreen = [&] {
         // In order to ensure that we get a unique DisplayRefreshMonitor per-DrawingArea (necessary because ThreadedDisplayRefreshMonitor
         // is driven by the ThreadedCompositor of the drawing area), give each page a unique DisplayID derived from DrawingArea's unique ID.
         Ref { m_webPage.get() }->windowScreenDidChange(m_layerTreeHost->displayID(), std::nullopt);
     };
+#endif
 
     ASSERT(!m_layerTreeHost);
     if (m_previousLayerTreeHost) {
         m_layerTreeHost = WTFMove(m_previousLayerTreeHost);
+#if !HAVE(DISPLAY_LINK)
         changeWindowScreen();
+#endif
         m_layerTreeHost->setIsDiscardable(false);
         m_layerTreeHost->resumeRendering();
         if (!m_layerTreeStateIsFrozen)
             m_layerTreeHost->setLayerFlushSchedulingEnabled(true);
     } else {
-#if USE(GRAPHICS_LAYER_TEXTURE_MAPPER)
+#if USE(GRAPHICS_LAYER_TEXTURE_MAPPER) || HAVE(DISPLAY_LINK)
         m_layerTreeHost = makeUnique<LayerTreeHost>(m_webPage);
 #elif USE(COORDINATED_GRAPHICS)
         m_layerTreeHost = makeUnique<LayerTreeHost>(m_webPage, std::numeric_limits<uint32_t>::max() - m_identifier.toUInt64());
@@ -597,7 +601,9 @@ void DrawingAreaCoordinatedGraphics::enterAcceleratedCompositingMode(GraphicsLay
         m_layerTreeHost = nullptr;
         return;
 #endif
+#if !HAVE(DISPLAY_LINK)
         changeWindowScreen();
+#endif
         if (m_layerTreeStateIsFrozen)
             m_layerTreeHost->setLayerFlushSchedulingEnabled(false);
         if (m_isPaintingSuspended)
@@ -651,9 +657,11 @@ void DrawingAreaCoordinatedGraphics::exitAcceleratedCompositingMode()
     m_previousLayerTreeHost->setLayerFlushSchedulingEnabled(false);
     m_discardPreviousLayerTreeHostTimer.startOneShot(5_s);
 
-    // Always use the primary display ID (0) when not in accelerated compositing mode.
     Ref webPage = m_webPage.get();
+#if !HAVE(DISPLAY_LINK)
+    // Always use the primary display ID (0) when not in accelerated compositing mode.
     webPage->windowScreenDidChange(0, std::nullopt);
+#endif
 
     m_dirtyRegion = webPage->bounds();
 

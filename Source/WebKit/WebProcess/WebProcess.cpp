@@ -175,7 +175,7 @@
 #include <WebCore/ImageDecoderCG.h>
 #endif
 
-#if PLATFORM(MAC)
+#if HAVE(DISPLAY_LINK)
 #include <WebCore/DisplayRefreshMonitorManager.h>
 #endif
 
@@ -515,7 +515,7 @@ void WebProcess::initializeWebProcess(WebProcessCreationParameters&& parameters)
     SandboxExtension::consumePermanently(parameters.additionalSandboxExtensionHandles);
 
     if (!parameters.injectedBundlePath.isEmpty())
-        m_injectedBundle = InjectedBundle::create(parameters, transformHandlesToObjects(parameters.initializationUserData.object()).get());
+        m_injectedBundle = InjectedBundle::create(parameters, transformHandlesToObjects(parameters.initializationUserData.object()));
 
     for (auto& supplement : m_supplements.values())
         supplement->initialize(parameters);
@@ -854,7 +854,7 @@ void WebProcess::createWebPage(PageIdentifier pageID, WebPageCreationParameters&
     if (result.isNewEntry) {
         ASSERT(!result.iterator->value);
         auto page = WebPage::create(pageID, WTFMove(parameters));
-        result.iterator->value = page.ptr();
+        result.iterator->value = page.copyRef();
 
 #if ENABLE(GPU_PROCESS)
         if (RefPtr gpuProcessConnection = m_gpuProcessConnection)
@@ -1127,7 +1127,7 @@ void WebProcess::handleInjectedBundleMessage(const String& messageName, const Us
     if (!injectedBundle)
         return;
 
-    injectedBundle->didReceiveMessage(messageName, transformHandlesToObjects(messageBody.object()).get());
+    injectedBundle->didReceiveMessage(messageName, transformHandlesToObjects(messageBody.object()));
 }
 
 void WebProcess::setInjectedBundleParameter(const String& key, const IPC::DataReference& value)
@@ -1404,24 +1404,24 @@ void WebProcess::remotePostMessage(WebCore::FrameIdentifier identifier, std::opt
     domWindow->postMessageFromRemoteFrame(*globalObject, target, message);
 }
 
-void WebProcess::renderTreeAsText(WebCore::FrameIdentifier frameIdentifier, size_t baseIndent, OptionSet<WebCore::RenderAsTextFlag> behavior, CompletionHandler<void(String)>&& completionHandler)
+void WebProcess::renderTreeAsText(WebCore::FrameIdentifier frameIdentifier, size_t baseIndent, OptionSet<WebCore::RenderAsTextFlag> behavior, CompletionHandler<void(String&&)>&& completionHandler)
 {
     RefPtr webFrame = WebProcess::singleton().webFrame(frameIdentifier);
     if (!webFrame) {
         ASSERT_NOT_REACHED();
-        return completionHandler({ });
+        return completionHandler("Test Error - WebFrame missing in web process"_s);
     }
 
     RefPtr coreLocalFrame = webFrame->coreLocalFrame();
     if (!coreLocalFrame) {
         ASSERT_NOT_REACHED();
-        return completionHandler({ });
+        return completionHandler("Test Error - WebFrame missing LocalFrame in web process"_s);
     }
 
     auto* renderer = coreLocalFrame->contentRenderer();
     if (!renderer) {
         ASSERT_NOT_REACHED();
-        return completionHandler({ });
+        return completionHandler("Test Error - WebFrame missing RenderView in web process"_s);
     }
 
     auto ts = WebCore::createTextStream(*renderer);
@@ -1607,6 +1607,11 @@ void WebProcess::prepareToSuspend(bool isSuspensionImminent, MonotonicTime estim
     suspendAllMediaBuffering();
     if (auto* platformMediaSessionManager = PlatformMediaSessionManager::sharedManagerIfExists())
         platformMediaSessionManager->processWillSuspend();
+#endif
+
+#if !ENABLE(WEBPROCESS_CACHE)
+    if (!m_suppressMemoryPressureHandler)
+        releaseMemory([] { });
 #endif
 
     freezeAllLayerTrees();
@@ -2143,7 +2148,7 @@ void WebProcess::setClientBadge(WebPageProxyIdentifier pageIdentifier, const Web
     parentProcessConnection()->send(Messages::WebProcessProxy::SetClientBadge(pageIdentifier, origin, badge), 0);
 }
 
-#if HAVE(CVDISPLAYLINK)
+#if HAVE(DISPLAY_LINK)
 void WebProcess::displayDidRefresh(uint32_t displayID, const DisplayUpdate& displayUpdate)
 {
     ASSERT(RunLoop::isMain());
@@ -2354,6 +2359,23 @@ bool WebProcess::allowsFirstPartyForCookies(const URL& firstParty)
     return AuxiliaryProcess::allowsFirstPartyForCookies(firstParty, [&] {
         return AuxiliaryProcess::allowsFirstPartyForCookies(WebCore::RegistrableDomain { firstParty }, m_allowedFirstPartiesForCookies);
     });
+}
+
+WebTransportSession* WebProcess::webTransportSession(WebTransportSessionIdentifier identifier)
+{
+    return m_webTransportSessions.get(identifier).get();
+}
+
+void WebProcess::addWebTransportSession(WebTransportSessionIdentifier identifier, WebTransportSession& session)
+{
+    ASSERT(!m_webTransportSessions.contains(identifier));
+    m_webTransportSessions.set(identifier, session);
+}
+
+void WebProcess::removeWebTransportSession(WebTransportSessionIdentifier identifier)
+{
+    ASSERT(m_webTransportSessions.contains(identifier));
+    m_webTransportSessions.remove(identifier);
 }
 
 } // namespace WebKit

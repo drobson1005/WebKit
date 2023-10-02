@@ -990,6 +990,7 @@ inline void BuilderCustom::applyValueFontFamily(BuilderState& builderState, CSSV
             else {
                 isGenericFamily = true;
                 family = CSSPropertyParserHelpers::genericFontFamily(contentValue.valueID());
+                ASSERT(!family.isEmpty());
             }
             if (family.isNull())
                 continue;
@@ -1992,7 +1993,7 @@ inline void BuilderCustom::applyInitialCustomProperty(BuilderState& builderState
         return;
     }
 
-    auto invalid = CSSCustomPropertyValue::createUnresolved(name, CSSValueInvalid);
+    auto invalid = CSSCustomPropertyValue::createWithID(name, CSSValueInvalid);
     applyValueCustomProperty(builderState, registered, invalid.get());
 }
 

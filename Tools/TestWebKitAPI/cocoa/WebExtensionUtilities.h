@@ -25,18 +25,18 @@
 
 #pragma once
 
+#if ENABLE(WK_WEB_EXTENSIONS)
+
 #include "TestCocoa.h"
+#include "TestWebExtensionsDelegate.h"
 #include "Utilities.h"
 #include "WTFTestUtilities.h"
-#include <WebKit/_WKWebExtensionContextPrivate.h>
-#include <WebKit/_WKWebExtensionControllerConfigurationPrivate.h>
-#include <WebKit/_WKWebExtensionControllerDelegatePrivate.h>
-#include <WebKit/_WKWebExtensionControllerPrivate.h>
-#include <WebKit/_WKWebExtensionPrivate.h>
-#include <WebKit/_WKWebExtensionTab.h>
-#include <WebKit/_WKWebExtensionWindow.h>
 
 #ifdef __OBJC__
+
+@class TestWebExtensionTab;
+@class TestWebExtensionWindow;
+@class TestWebExtensionsDelegate;
 
 @interface TestWebExtensionManager : NSObject
 
@@ -47,6 +47,15 @@
 @property (nonatomic, strong) _WKWebExtensionController *controller;
 @property (nonatomic, weak) id <_WKWebExtensionControllerDelegate> controllerDelegate;
 
+@property (nonatomic, readonly, strong) TestWebExtensionsDelegate *internalDelegate;
+@property (nonatomic, readonly, strong) TestWebExtensionWindow *defaultWindow;
+@property (nonatomic, readonly, strong) TestWebExtensionTab *defaultTab;
+@property (nonatomic, readonly, copy) NSArray<TestWebExtensionWindow *> *windows;
+
+- (TestWebExtensionWindow *)openNewWindow;
+- (void)focusWindow:(TestWebExtensionWindow *)window;
+- (void)closeWindow:(TestWebExtensionWindow *)window;
+
 @property (nonatomic, readonly, strong) NSString *yieldMessage;
 
 - (void)load;
@@ -56,12 +65,43 @@
 @end
 
 @interface TestWebExtensionTab : NSObject <_WKWebExtensionTab>
+
+- (instancetype)initWithWindow:(id<_WKWebExtensionWindow>)window extensionController:(_WKWebExtensionController *)extensionController NS_DESIGNATED_INITIALIZER;
+
+@property (nonatomic, weak) id<_WKWebExtensionWindow> window;
+@property (nonatomic, strong) WKWebView *mainWebView;
+
+@property (nonatomic, weak) id<_WKWebExtensionTab> parentTab;
+
+@property (nonatomic, getter=isPinned) bool pinned;
+@property (nonatomic, getter=isMuted) bool muted;
+@property (nonatomic, getter=isSelected) bool selected;
+@property (nonatomic, getter=isShowingReaderMode) bool showingReaderMode;
+
+@property (nonatomic, copy) void (^toggleReaderMode)(void);
+@property (nonatomic, copy) NSLocale *(^detectWebpageLocale)(void);
+
+@property (nonatomic, copy) void (^reload)(void);
+@property (nonatomic, copy) void (^reloadFromOrigin)(void);
+@property (nonatomic, copy) void (^goBack)(void);
+@property (nonatomic, copy) void (^goForward)(void);
+@property (nonatomic, copy) void (^duplicate)(_WKWebExtensionTabCreationOptions *, void (^completionHandler)(id<_WKWebExtensionTab>, NSError *));
+
 @end
 
 @interface TestWebExtensionWindow : NSObject <_WKWebExtensionWindow>
 
+- (instancetype)initWithExtensionController:(_WKWebExtensionController *)extensionController NS_DESIGNATED_INITIALIZER;
+
 @property (nonatomic, copy) NSArray<id<_WKWebExtensionTab>> *tabs;
 @property (nonatomic, strong) id<_WKWebExtensionTab> activeTab;
+
+- (TestWebExtensionTab *)openNewTab;
+- (TestWebExtensionTab *)openNewTabAtIndex:(NSUInteger)index;
+
+- (void)closeTab:(id<_WKWebExtensionTab>)tab;
+- (void)replaceTab:(id<_WKWebExtensionTab>)oldTab withTab:(id<_WKWebExtensionTab>)newTab;
+- (void)moveTab:(id<_WKWebExtensionTab>)oldTab toIndex:(NSUInteger)newIndex;
 
 @property (nonatomic) _WKWebExtensionWindowState windowState;
 @property (nonatomic) _WKWebExtensionWindowType windowType;
@@ -81,6 +121,7 @@
 OBJC_CLASS TestWebExtensionManager;
 OBJC_CLASS TestWebExtensionTab;
 OBJC_CLASS TestWebExtensionWindow;
+OBJC_CLASS TestWebExtensionsDelegate;
 
 #endif // __OBJC__
 
@@ -89,6 +130,7 @@ namespace TestWebKitAPI::Util {
 #ifdef __OBJC__
 
 inline NSString *constructScript(NSArray *lines) { return [lines componentsJoinedByString:@"\n"]; }
+inline NSString *constructJSArrayOfStrings(NSArray *elements) { return [NSString stringWithFormat:@"['%@']", [elements componentsJoinedByString:@"', '"]]; }
 
 #endif
 
@@ -98,3 +140,5 @@ RetainPtr<TestWebExtensionManager> loadAndRunExtension(NSDictionary *resources);
 RetainPtr<TestWebExtensionManager> loadAndRunExtension(NSURL *baseURL);
 
 } // namespace TestWebKitAPI::Util
+
+#endif // ENABLE(WK_WEB_EXTENSIONS)

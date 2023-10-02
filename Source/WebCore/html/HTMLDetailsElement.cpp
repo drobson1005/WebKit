@@ -97,7 +97,7 @@ HTMLDetailsElement::HTMLDetailsElement(const QualifiedName& tagName, Document& d
 
 RenderPtr<RenderElement> HTMLDetailsElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    return createRenderer<RenderBlockFlow>(*this, WTFMove(style));
+    return createRenderer<RenderBlockFlow>(RenderObject::Type::BlockFlow, *this, WTFMove(style));
 }
 
 void HTMLDetailsElement::didAddUserAgentShadowRoot(ShadowRoot& root)
@@ -159,6 +159,15 @@ void HTMLDetailsElement::attributeChanged(const QualifiedName& name, const AtomS
             if (m_isOpen) {
                 root->appendChild(*m_defaultSlot);
                 queueDetailsToggleEventTask(DetailsState::Closed, DetailsState::Open);
+                if (auto& name = attributeWithoutSynchronization(nameAttr); document().settings().detailsNameAttributeEnabled() && !name.isEmpty()) {
+                    Vector<RefPtr<HTMLDetailsElement>> otherElementsInNameGroup;
+                    for (auto& detailsElement : descendantsOfType<HTMLDetailsElement>(rootNode())) {
+                        if (&detailsElement != this && detailsElement.attributeWithoutSynchronization(nameAttr) == name)
+                            otherElementsInNameGroup.append(&detailsElement);
+                    }
+                    for (RefPtr otherDetailsElement : otherElementsInNameGroup)
+                        otherDetailsElement->removeAttribute(openAttr);
+                }
             } else {
                 root->removeChild(*m_defaultSlot);
                 queueDetailsToggleEventTask(DetailsState::Open, DetailsState::Closed);

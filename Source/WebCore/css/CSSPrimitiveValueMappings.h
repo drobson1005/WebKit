@@ -736,6 +736,14 @@ constexpr CSSValueID toCSSValueID(DisplayType e)
         return CSSValueContents;
     case DisplayType::FlowRoot:
         return CSSValueFlowRoot;
+    case DisplayType::Ruby:
+        return CSSValueRuby;
+    case DisplayType::RubyBlock:
+        return CSSValueBlockRuby;
+    case DisplayType::RubyBase:
+        return CSSValueRubyBase;
+    case DisplayType::RubyAnnotation:
+        return CSSValueRubyText;
     }
     ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
     return CSSValueInvalid;
@@ -743,12 +751,66 @@ constexpr CSSValueID toCSSValueID(DisplayType e)
 
 template<> constexpr DisplayType fromCSSValueID(CSSValueID valueID)
 {
-    if (valueID == CSSValueNone)
+    switch (valueID) {
+    case CSSValueInline:
+        return DisplayType::Inline;
+    case CSSValueBlock:
+        return DisplayType::Block;
+    case CSSValueListItem:
+        return DisplayType::ListItem;
+    case CSSValueInlineBlock:
+        return DisplayType::InlineBlock;
+    case CSSValueTable:
+        return DisplayType::Table;
+    case CSSValueInlineTable:
+        return DisplayType::InlineTable;
+    case CSSValueTableRowGroup:
+        return DisplayType::TableRowGroup;
+    case CSSValueTableHeaderGroup:
+        return DisplayType::TableHeaderGroup;
+    case CSSValueTableFooterGroup:
+        return DisplayType::TableFooterGroup;
+    case CSSValueTableRow:
+        return DisplayType::TableRow;
+    case CSSValueTableColumnGroup:
+        return DisplayType::TableColumnGroup;
+    case CSSValueTableColumn:
+        return DisplayType::TableColumn;
+    case CSSValueTableCell:
+        return DisplayType::TableCell;
+    case CSSValueTableCaption:
+        return DisplayType::TableCaption;
+    case CSSValueWebkitBox:
+        return DisplayType::Box;
+    case CSSValueWebkitInlineBox:
+        return DisplayType::InlineBox;
+    case CSSValueFlex:
+        return DisplayType::Flex;
+    case CSSValueInlineFlex:
+        return DisplayType::InlineFlex;
+    case CSSValueGrid:
+        return DisplayType::Grid;
+    case CSSValueInlineGrid:
+        return DisplayType::InlineGrid;
+    case CSSValueNone:
         return DisplayType::None;
-
-    DisplayType display = static_cast<DisplayType>(valueID - CSSValueInline);
-    ASSERT(display >= DisplayType::Inline && display <= DisplayType::None);
-    return display;
+    case CSSValueContents:
+        return DisplayType::Contents;
+    case CSSValueFlowRoot:
+        return DisplayType::FlowRoot;
+    case CSSValueRuby:
+        return DisplayType::Ruby;
+    case CSSValueBlockRuby:
+        return DisplayType::RubyBlock;
+    case CSSValueRubyBase:
+        return DisplayType::RubyBase;
+    case CSSValueRubyText:
+        return DisplayType::RubyAnnotation;
+    default:
+        break;
+    }
+    ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
+    return DisplayType::Inline;
 }
 
 #define TYPE EmptyCell
@@ -1833,7 +1895,7 @@ template<> constexpr WindRule fromCSSValueID(CSSValueID valueID)
 }
 
 #define TYPE AlignmentBaseline
-#define FOR_EACH(CASE) CASE(AfterEdge) CASE(Alphabetic) CASE(Auto) CASE(Baseline) \
+#define FOR_EACH(CASE) CASE(AfterEdge) CASE(Alphabetic) CASE(Baseline) \
     CASE(BeforeEdge) CASE(Central) CASE(Hanging) CASE(Ideographic) CASE(Mathematical) \
     CASE(Middle) CASE(TextAfterEdge) CASE(TextBeforeEdge)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
@@ -1952,32 +2014,6 @@ enum LengthConversion {
     PercentConversion = 1 << 3,
     CalculatedConversion = 1 << 4
 };
-
-inline bool CSSPrimitiveValue::convertingToLengthHasRequiredConversionData(int lengthConversion, const CSSToLengthConversionData& conversionData) const
-{
-    // FIXME: We should probably make CSSPrimitiveValue::computeLengthDouble and
-    // CSSPrimitiveValue::computeNonCalcLengthDouble (which has the style assertion)
-    // return std::optional<double> instead of having this check here.
-
-    bool isFixedNumberConversion = lengthConversion & (FixedIntegerConversion | FixedFloatConversion);
-    auto dependencies = computedStyleDependencies();
-    if (!dependencies.rootProperties.isEmpty() && !conversionData.rootStyle())
-        return !isFixedNumberConversion;
-
-    if (!dependencies.properties.isEmpty() && !conversionData.style())
-        return !isFixedNumberConversion;
-
-    if (dependencies.containerDimensions && !conversionData.elementForContainerUnitResolution())
-        return !isFixedNumberConversion;
-
-    if (isViewportPercentageLength() && conversionData.defaultViewportFactor().isEmpty())
-        return !isFixedNumberConversion;
-
-    if (primitiveUnitType() == CSSUnitType::CSS_CALC)
-        return m_value.calc->convertingToLengthHasRequiredConversionData(lengthConversion, conversionData);
-
-    return true;
-}
 
 template<int supported> Length CSSPrimitiveValue::convertToLength(const CSSToLengthConversionData& conversionData) const
 {

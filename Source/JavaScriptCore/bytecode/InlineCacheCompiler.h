@@ -197,11 +197,12 @@ inline bool canUseMegamorphicPutById(VM& vm, UniquedStringImpl* uid)
 
 class InlineCacheCompiler {
 public:
-    InlineCacheCompiler(VM& vm, JSGlobalObject* globalObject, ECMAMode ecmaMode, StructureStubInfo& stubInfo)
+    InlineCacheCompiler(JITType jitType, VM& vm, JSGlobalObject* globalObject, ECMAMode ecmaMode, StructureStubInfo& stubInfo)
         : m_vm(vm)
         , m_globalObject(globalObject)
         , m_stubInfo(&stubInfo)
         , m_ecmaMode(ecmaMode)
+        , m_jitType(jitType)
     {
     }
 
@@ -234,7 +235,6 @@ public:
 
     const ScalarRegisterSet& liveRegistersForCall();
 
-    CallSiteIndex callSiteIndexForExceptionHandlingOrOriginal();
     DisposableCallSiteIndex callSiteIndexForExceptionHandling();
 
     const HandlerInfo& originalExceptionHandler();
@@ -285,7 +285,15 @@ public:
 
     AccessGenerationResult regenerate(const GCSafeConcurrentJSLocker&, PolymorphicAccess&, CodeBlock*);
 
+    static MacroAssemblerCodeRef<JITThunkPtrTag> generateSlowPathCode(VM&, AccessType);
+
+    static void emitDataICPrologue(CCallHelpers&);
+    static void emitDataICEpilogue(CCallHelpers&);
+
+    bool useHandlerIC() const;
+
 private:
+    CallSiteIndex callSiteIndexForExceptionHandlingOrOriginal();
     const ScalarRegisterSet& liveRegistersToPreserveAtExceptionHandlingCallSite();
 
     void emitDOMJITGetter(GetterSetterAccessCase&, const DOMJIT::GetterSetter*, GPRReg baseForGetGPR);
@@ -297,6 +305,7 @@ private:
     JSGlobalObject* const m_globalObject;
     StructureStubInfo* m_stubInfo { nullptr };
     const ECMAMode m_ecmaMode { ECMAMode::sloppy() };
+    JITType m_jitType;
     CCallHelpers* m_jit { nullptr };
     ScratchRegisterAllocator* m_allocator { nullptr };
     MacroAssembler::JumpList m_success;

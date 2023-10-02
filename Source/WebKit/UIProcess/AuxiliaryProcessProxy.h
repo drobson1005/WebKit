@@ -50,8 +50,7 @@ class SandboxExtensionHandle;
 
 struct AuxiliaryProcessCreationParameters;
 
-class AuxiliaryProcessProxy : public ThreadSafeRefCounted<AuxiliaryProcessProxy, WTF::DestructionThread::MainRunLoop>, public CanMakeThreadSafeCheckedPtr,
-    public ResponsivenessTimer::Client, private ProcessLauncher::Client, public IPC::Connection::Client {
+class AuxiliaryProcessProxy : public ThreadSafeRefCounted<AuxiliaryProcessProxy, WTF::DestructionThread::MainRunLoop>, public ResponsivenessTimer::Client, private ProcessLauncher::Client, public IPC::Connection::Client {
     WTF_MAKE_NONCOPYABLE(AuxiliaryProcessProxy);
 
 protected:
@@ -85,13 +84,13 @@ public:
     template<typename T>
     bool send(T&& message, const ObjectIdentifierGenericBase& destinationID, OptionSet<IPC::SendOption> sendOptions = { })
     {
-        return send<T>(WTFMove(message), destinationID.toUInt64(), sendOptions);
+        return send<T>(std::forward<T>(message), destinationID.toUInt64(), sendOptions);
     }
     
     template<typename T>
     SendSyncResult<T> sendSync(T&& message, const ObjectIdentifierGenericBase& destinationID, IPC::Timeout timeout = 1_s, OptionSet<IPC::SendSyncOption> sendSyncOptions = { })
     {
-        return sendSync<T>(WTFMove(message), destinationID.toUInt64(), timeout, sendSyncOptions);
+        return sendSync<T>(std::forward<T>(message), destinationID.toUInt64(), timeout, sendSyncOptions);
     }
 
     IPC::Connection* connection() const
@@ -267,7 +266,7 @@ AuxiliaryProcessProxy::AsyncReplyID AuxiliaryProcessProxy::sendWithAsyncReply(T&
 
     auto encoder = makeUniqueRef<IPC::Encoder>(T::name(), destinationID);
     encoder.get() << message.arguments();
-    auto handler = IPC::Connection::makeAsyncReplyHandler<T>(WTFMove(completionHandler));
+    auto handler = IPC::Connection::makeAsyncReplyHandler<T>(std::forward<C>(completionHandler));
     auto replyID = handler.replyID;
     if (sendMessage(WTFMove(encoder), sendOptions, WTFMove(handler), shouldStartProcessThrottlerActivity))
         return replyID;

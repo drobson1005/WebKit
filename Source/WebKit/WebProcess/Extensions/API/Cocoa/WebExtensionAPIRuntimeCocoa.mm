@@ -39,11 +39,13 @@
 #import "WebExtensionAPINamespace.h"
 #import "WebExtensionAPIPort.h"
 #import "WebExtensionContextMessages.h"
+#import "WebExtensionFrameIdentifier.h"
 #import "WebExtensionMessageSenderParameters.h"
 #import "WebExtensionUtilities.h"
 #import "WebProcess.h"
 #import <WebCore/SecurityOrigin.h>
 #import <wtf/BlockPtr.h>
+#import <wtf/CallbackAggregator.h>
 
 static NSString * const idKey = @"id";
 static NSString * const frameIdKey = @"frameId";
@@ -51,6 +53,43 @@ static NSString * const tabKey = @"tab";
 static NSString * const urlKey = @"url";
 static NSString * const originKey = @"origin";
 static NSString * const nameKey = @"name";
+static NSString * const reasonKey = @"reason";
+static NSString * const previousVersionKey = @"previousVersion";
+
+namespace WebKit {
+
+using ReplyCallbackAggregator = EagerCallbackAggregator<void(id)>;
+
+}
+
+@interface _WKReplyCallbackAggregator : NSObject
+
+- (instancetype)initWithAggregator:(WebKit::ReplyCallbackAggregator&)aggregator;
+
+@property (nonatomic, readonly) WebKit::ReplyCallbackAggregator& aggregator;
+
+@end
+
+@implementation _WKReplyCallbackAggregator {
+    RefPtr<WebKit::ReplyCallbackAggregator> _aggregator;
+}
+
+- (instancetype)initWithAggregator:(WebKit::ReplyCallbackAggregator&)aggregator
+{
+    if (!(self = [super init]))
+        return nil;
+
+    _aggregator = &aggregator;
+
+    return self;
+}
+
+- (WebKit::ReplyCallbackAggregator&)aggregator
+{
+    return *_aggregator;
+}
+
+@end
 
 namespace WebKit {
 
@@ -122,24 +161,31 @@ bool WebExtensionAPIRuntime::isPropertyAllowed(ASCIILiteral name, WebPage*)
     return false;
 }
 
-NSURL *WebExtensionAPIRuntime::getURL(NSString *resourcePath, NSString **errorString)
+NSURL *WebExtensionAPIRuntime::getURL(NSString *resourcePath, NSString **outExceptionString)
 {
-    URL baseURL = extensionContext().baseURL();
-    return resourcePath.length ? URL { baseURL, resourcePath } : baseURL;
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/getURL
+
+    return URL { extensionContext().baseURL(), resourcePath };
 }
 
 NSDictionary *WebExtensionAPIRuntime::getManifest()
 {
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/getManifest
+
     return extensionContext().manifest();
 }
 
 NSString *WebExtensionAPIRuntime::runtimeIdentifier()
 {
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/id
+
     return extensionContext().uniqueIdentifier();
 }
 
 void WebExtensionAPIRuntime::getPlatformInfo(Ref<WebExtensionCallbackHandler>&& callback)
 {
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/getPlatformInfo
+
 #if PLATFORM(MAC)
     static NSString * const osValue = @"mac";
 #elif PLATFORM(IOS_FAMILY)
@@ -164,8 +210,84 @@ void WebExtensionAPIRuntime::getPlatformInfo(Ref<WebExtensionCallbackHandler>&& 
     callback->call(platformInfo);
 }
 
+void WebExtensionAPIRuntime::getBackgroundPage(Ref<WebExtensionCallbackHandler>&& callback)
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/getBackgroundPage
+
+    if (auto backgroundPage = extensionContext().backgroundPage()) {
+        callback->call(toWindowObject(callback->globalContext(), *backgroundPage));
+        return;
+    }
+
+    WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::RuntimeGetBackgroundPage(), [protectedThis = Ref { *this }, callback = WTFMove(callback)](std::optional<WebCore::PageIdentifier> pageIdentifier, std::optional<String> error) {
+        if (error) {
+            callback->reportError(error.value());
+            return;
+        }
+
+        if (!pageIdentifier) {
+            callback->call(NSNull.null);
+            return;
+        }
+
+        auto* page = WebProcess::singleton().webPage(pageIdentifier.value());
+        if (!page) {
+            callback->call(NSNull.null);
+            return;
+        }
+
+        callback->call(toWindowObject(callback->globalContext(), *page));
+    }, extensionContext().identifier());
+}
+
+double WebExtensionAPIRuntime::getFrameId(JSValue *target)
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/getFrameId
+
+    if (!target)
+        return WebExtensionFrameConstants::None;
+
+    auto frame = WebFrame::contentFrameForWindowOrFrameElement(target.context.JSGlobalContextRef, target.JSValueRef);
+    if (!frame)
+        return WebExtensionFrameConstants::None;
+
+    return toWebAPI(toWebExtensionFrameIdentifier(*frame));
+}
+
+void WebExtensionAPIRuntime::setUninstallURL(URL, Ref<WebExtensionCallbackHandler>&& callback)
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/setUninstallURL
+
+    // FIXME: rdar://58000001 Consider implementing runtime.setUninstallURL(), matching the behavior of other browsers.
+
+    callback->call();
+}
+
+void WebExtensionAPIRuntime::openOptionsPage(Ref<WebExtensionCallbackHandler>&& callback)
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/openOptionsPage
+
+    WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::RuntimeOpenOptionsPage(), [protectedThis = Ref { *this }, callback = WTFMove(callback)](std::optional<String> error) {
+        if (error) {
+            callback->reportError(error.value());
+            return;
+        }
+
+        callback->call();
+    }, extensionContext().identifier());
+}
+
+void WebExtensionAPIRuntime::reload()
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/reload
+
+    WebProcess::singleton().send(Messages::WebExtensionContext::RuntimeReload(), extensionContext().identifier());
+}
+
 JSValue *WebExtensionAPIRuntime::lastError()
 {
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/lastError
+
     m_lastErrorAccessed = true;
 
     return m_lastError.get();
@@ -294,6 +416,26 @@ WebExtensionAPIEvent& WebExtensionAPIRuntime::onConnect()
     return *m_onConnect;
 }
 
+WebExtensionAPIEvent& WebExtensionAPIRuntime::onInstalled()
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/onInstalled
+
+    if (!m_onInstalled)
+        m_onInstalled = WebExtensionAPIEvent::create(forMainWorld(), runtime(), extensionContext(), WebExtensionEventListenerType::RuntimeOnInstalled);
+
+    return *m_onInstalled;
+}
+
+WebExtensionAPIEvent& WebExtensionAPIRuntime::onStartup()
+{
+    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/onStartup
+
+    if (!m_onStartup)
+        m_onStartup = WebExtensionAPIEvent::create(forMainWorld(), runtime(), extensionContext(), WebExtensionEventListenerType::RuntimeOnStartup);
+
+    return *m_onStartup;
+}
+
 NSDictionary *toWebAPI(const WebExtensionMessageSenderParameters& parameters)
 {
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
@@ -321,13 +463,7 @@ void WebExtensionContextProxy::internalDispatchRuntimeMessageEvent(WebCore::DOMW
     id message = parseJSON(messageJSON, { JSONOptions::FragmentsAllowed });
     auto *senderInfo = toWebAPI(senderParameters);
 
-    __block bool anyListenerHandledMessage = false;
-    bool sentReply = false;
-
-    __block auto handleReply = [&sentReply, completionHandler = WTFMove(completionHandler)](id replyMessage) mutable {
-        if (sentReply)
-            return;
-
+    auto callbackAggregator = ReplyCallbackAggregator::create([completionHandler = WTFMove(completionHandler)](id replyMessage) mutable {
         NSString *replyMessageJSON;
         if (JSValue *value = dynamic_objc_cast<JSValue>(replyMessage))
             replyMessageJSON = value._toJSONString;
@@ -337,11 +473,14 @@ void WebExtensionContextProxy::internalDispatchRuntimeMessageEvent(WebCore::DOMW
         if (replyMessageJSON.length > webExtensionMaxMessageLength)
             replyMessageJSON = nil;
 
-        sentReply = true;
         completionHandler(replyMessageJSON ? std::optional(String(replyMessageJSON)) : std::nullopt);
-    };
+    }, nil);
 
-    enumerateFramesAndNamespaceObjects(makeBlockPtr(^(WebFrame& frame, WebExtensionAPINamespace& namespaceObject) {
+    // This ObjC wrapper is need for the inner reply block, which is required to be a compiled block.
+    auto *callbackAggregatorWrapper = [[_WKReplyCallbackAggregator alloc] initWithAggregator:callbackAggregator];
+
+    bool anyListenerHandledMessage = false;
+    enumerateFramesAndNamespaceObjects([&, callbackAggregatorWrapper = RetainPtr { callbackAggregatorWrapper }](WebFrame& frame, WebExtensionAPINamespace& namespaceObject) {
         // Skip all frames that don't match if a target frame identifier is specified.
         if (frameIdentifier && !matchesFrame(frameIdentifier.value(), frame))
             return;
@@ -351,8 +490,11 @@ void WebExtensionContextProxy::internalDispatchRuntimeMessageEvent(WebCore::DOMW
             return;
 
         for (auto& listener : namespaceObject.runtime().onMessage().listeners()) {
+            // Using BlockPtr for this call does not work, since JSValue needs a compiled block
+            // with a signature to translate the JS function arguments. Having the block capture
+            // callbackAggregatorWrapper ensures that callbackAggregator remains in scope.
             id returnValue = listener->call(message, senderInfo, ^(id replyMessage) {
-                handleReply(replyMessage);
+                callbackAggregatorWrapper.get().aggregator(replyMessage);
             });
 
             if (dynamic_objc_cast<NSNumber>(returnValue).boolValue) {
@@ -370,13 +512,13 @@ void WebExtensionContextProxy::internalDispatchRuntimeMessageEvent(WebCore::DOMW
                 if (error)
                     return;
 
-                handleReply(replyMessage);
+                callbackAggregatorWrapper.get().aggregator(replyMessage);
             }];
         }
-    }).get(), world);
+    }, world);
 
-    if (!sentReply && !anyListenerHandledMessage)
-        handleReply(nil);
+    if (!anyListenerHandledMessage)
+        callbackAggregator.get()(nil);
 }
 
 void WebExtensionContextProxy::dispatchRuntimeMessageEvent(WebExtensionContentWorldType contentWorldType, const String& messageJSON, std::optional<WebExtensionFrameIdentifier> frameIdentifier, const WebExtensionMessageSenderParameters& senderParameters, CompletionHandler<void(std::optional<String> replyJSON)>&& completionHandler)
@@ -443,6 +585,45 @@ void WebExtensionContextProxy::dispatchRuntimeConnectEvent(WebExtensionContentWo
         ASSERT_NOT_REACHED();
         return;
     }
+}
+
+inline NSString *toWebAPI(WebExtensionContext::InstallReason installReason)
+{
+    switch (installReason) {
+    case WebExtensionContext::InstallReason::None:
+        ASSERT_NOT_REACHED();
+        return nil;
+
+    case WebExtensionContext::InstallReason::ExtensionInstall:
+        return @"install";
+
+    case WebExtensionContext::InstallReason::ExtensionUpdate:
+        return @"update";
+
+    case WebExtensionContext::InstallReason::BrowserUpdate:
+        return @"browser_update";
+    }
+}
+
+void WebExtensionContextProxy::dispatchRuntimeInstalledEvent(WebExtensionContext::InstallReason installReason, String previousVersion)
+{
+    NSDictionary *details;
+
+    if (installReason == WebExtensionContext::InstallReason::ExtensionUpdate)
+        details = @{ reasonKey: toWebAPI(installReason), previousVersionKey: (NSString *)previousVersion };
+    else
+        details = @{ reasonKey: toWebAPI(installReason) };
+
+    enumerateNamespaceObjects([&](auto& namespaceObject) {
+        namespaceObject.runtime().onInstalled().invokeListenersWithArgument(details);
+    });
+}
+
+void WebExtensionContextProxy::dispatchRuntimeStartupEvent()
+{
+    enumerateNamespaceObjects([&](auto& namespaceObject) {
+        namespaceObject.runtime().onStartup().invokeListeners();
+    });
 }
 
 } // namespace WebKit

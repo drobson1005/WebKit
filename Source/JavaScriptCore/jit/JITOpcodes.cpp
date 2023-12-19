@@ -158,13 +158,11 @@ void JIT::emit_op_instanceof(const JSInstruction* currentInstruction)
     using BaselineJITRegisters::Instanceof::protoJSR;
     using BaselineJITRegisters::Instanceof::stubInfoGPR;
 
-    emitGetVirtualRegisters({
-        { value, valueJSR },
-        { proto, protoJSR }
-    });
+    emitGetVirtualRegister(value, valueJSR);
+    emitGetVirtualRegister(proto, protoJSR);
 
     auto [ stubInfo, stubInfoIndex ] = addUnlinkedStructureStubInfo();
-    loadConstant(stubInfoIndex, stubInfoGPR);
+    loadStructureStubInfo(stubInfoIndex, stubInfoGPR);
 
     // Check that proto are cells. baseVal must be a cell - this is checked by the get_by_id for Symbol.hasInstance.
     emitJumpSlowCaseIfNotJSCell(valueJSR, value);
@@ -195,7 +193,7 @@ void JIT::emitSlow_op_instanceof(const JSInstruction*, Vector<SlowCaseEntry>::it
     JITInstanceOfGenerator& gen = m_instanceOfs[m_instanceOfIndex++];
     linkAllSlowCases(iter);
     gen.reportBaselineDataICSlowPathBegin(label());
-    emitNakedNearCall(InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>());
+    nearCallThunk(CodeLocationLabel { InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>() });
 }
 
 void JIT::emit_op_is_empty(const JSInstruction* currentInstruction)
@@ -241,6 +239,20 @@ void JIT::emit_op_typeof_is_undefined(const JSInstruction* currentInstruction)
     notMasqueradesAsUndefined.link(this);
     done.link(this);
     boxBoolean(regT0, jsRegT10);
+    emitPutVirtualRegister(dst, jsRegT10);
+}
+
+void JIT::emit_op_typeof_is_function(const JSInstruction* currentInstruction)
+{
+    auto bytecode = currentInstruction->as<OpTypeofIsFunction>();
+    VirtualRegister dst = bytecode.m_dst;
+    VirtualRegister value = bytecode.m_operand;
+
+    emitGetVirtualRegister(value, jsRegT10);
+    auto isNotCell = branchIfNotCell(jsRegT10);
+    addSlowCase(branchIfObject(jsRegT10.payloadGPR()));
+    isNotCell.link(this);
+    moveTrustedValue(jsBoolean(false), jsRegT10);
     emitPutVirtualRegister(dst, jsRegT10);
 }
 
@@ -421,15 +433,8 @@ void JIT::emit_op_set_function_name(const JSInstruction* currentInstruction)
     constexpr GPRReg functionGPR = preferredArgumentGPR<SlowOperation, 1>();
     constexpr JSValueRegs nameJSR = preferredArgumentJSR<SlowOperation, 2>();
 
-#if USE(JSVALUE32_64)
     emitGetVirtualRegisterPayload(bytecode.m_function, functionGPR);
     emitGetVirtualRegister(bytecode.m_name, nameJSR);
-#else
-    emitGetVirtualRegisters({
-        { bytecode.m_function, JSValueRegs { functionGPR } },
-        { bytecode.m_name, nameJSR }
-    });
-#endif
     loadGlobalObject(globalObjectGPR);
     callOperation(operationSetFunctionName, globalObjectGPR, functionGPR, nameJSR);
 }
@@ -453,7 +458,7 @@ void JIT::emit_op_jfalse(const JSInstruction* currentInstruction)
     using BaselineJITRegisters::JFalse::valueJSR;
 
     emitGetVirtualRegister(bytecode.m_condition, valueJSR);
-    emitNakedNearCall(vm().getCTIStub(valueIsFalseyGenerator).retaggedCode<NoPtrTag>());
+    nearCallThunk(CodeLocationLabel { vm().getCTIStub(valueIsFalseyGenerator).retaggedCode<NoPtrTag>() });
     addJump(branchTest32(NonZero, regT0), target);
 }
 
@@ -611,10 +616,8 @@ void JIT::emit_op_jneq_ptr(const JSInstruction* currentInstruction)
 void JIT::emit_op_eq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpEq>();
-    emitGetVirtualRegisters({
-        { bytecode.m_lhs, JSValueRegs { regT0 } },
-        { bytecode.m_rhs, JSValueRegs { regT1 } }
-    });
+    emitGetVirtualRegister(bytecode.m_lhs, regT0);
+    emitGetVirtualRegister(bytecode.m_rhs, regT1);
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     compare32(Equal, regT1, regT0, regT0);
     boxBoolean(regT0, jsRegT10);
@@ -625,10 +628,8 @@ void JIT::emit_op_jeq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpJeq>();
     unsigned target = jumpTarget(currentInstruction, bytecode.m_targetLabel);
-    emitGetVirtualRegisters({
-        { bytecode.m_lhs, JSValueRegs { regT0 } },
-        { bytecode.m_rhs, JSValueRegs { regT1 } }
-    });
+    emitGetVirtualRegister(bytecode.m_lhs, regT0);
+    emitGetVirtualRegister(bytecode.m_rhs, regT1);
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     addJump(branch32(Equal, regT0, regT1), target);
 }
@@ -643,7 +644,7 @@ void JIT::emit_op_jtrue(const JSInstruction* currentInstruction)
     using BaselineJITRegisters::JTrue::valueJSR;
 
     emitGetVirtualRegister(bytecode.m_condition, valueJSR);
-    emitNakedNearCall(vm().getCTIStub(valueIsTruthyGenerator).retaggedCode<NoPtrTag>());
+    nearCallThunk(CodeLocationLabel { vm().getCTIStub(valueIsTruthyGenerator).retaggedCode<NoPtrTag>() });
     addJump(branchTest32(NonZero, regT0), target);
 }
 
@@ -681,10 +682,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::valueIsTruthyGenerator(VM& vm)
 void JIT::emit_op_neq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpNeq>();
-    emitGetVirtualRegisters({
-        { bytecode.m_lhs, JSValueRegs { regT0 } },
-        { bytecode.m_rhs, JSValueRegs { regT1 } }
-    });
+    emitGetVirtualRegister(bytecode.m_lhs, regT0);
+    emitGetVirtualRegister(bytecode.m_rhs, regT1);
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     compare32(NotEqual, regT1, regT0, regT0);
     boxBoolean(regT0, jsRegT10);
@@ -696,10 +695,8 @@ void JIT::emit_op_jneq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpJneq>();
     unsigned target = jumpTarget(currentInstruction, bytecode.m_targetLabel);
-    emitGetVirtualRegisters({
-        { bytecode.m_lhs, JSValueRegs { regT0 } },
-        { bytecode.m_rhs, JSValueRegs { regT1 } }
-    });
+    emitGetVirtualRegister(bytecode.m_lhs, regT0);
+    emitGetVirtualRegister(bytecode.m_rhs, regT1);
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     addJump(branch32(NotEqual, regT0, regT1), target);
 }
@@ -716,7 +713,7 @@ void JIT::emit_op_throw(const JSInstruction* currentInstruction)
 
     emitGetVirtualRegister(bytecode.m_value, thrownValueJSR);
     move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
-    emitNakedNearJump(vm().getCTIStub(op_throw_handlerGenerator).code());
+    jumpThunk(CodeLocationLabel { vm().getCTIStub(op_throw_handlerGenerator).retaggedCode<NoPtrTag>() });
 }
 
 MacroAssemblerCodeRef<JITThunkPtrTag> JIT::op_throw_handlerGenerator(VM& vm)
@@ -760,10 +757,8 @@ void JIT::compileOpStrictEq(const JSInstruction* currentInstruction)
     VirtualRegister src1 = bytecode.m_lhs;
     VirtualRegister src2 = bytecode.m_rhs;
 
-    emitGetVirtualRegisters({
-        { src1, JSValueRegs { regT0 } },
-        { src2, JSValueRegs { regT1 } }
-    });
+    emitGetVirtualRegister(src1, regT0);
+    emitGetVirtualRegister(src2, regT1);
 
 #if USE(BIGINT32)
     /* At a high level we do (assuming 'type' to be StrictEq):
@@ -848,10 +843,8 @@ void JIT::compileOpStrictEqJump(const JSInstruction* currentInstruction)
     VirtualRegister src1 = bytecode.m_lhs;
     VirtualRegister src2 = bytecode.m_rhs;
 
-    emitGetVirtualRegisters({
-        { src1, JSValueRegs { regT0 } },
-        { src2, JSValueRegs { regT1 } }
-    });
+    emitGetVirtualRegister(src1, regT0);
+    emitGetVirtualRegister(src2, regT1);
 
 #if USE(BIGINT32)
     /* At a high level we do (assuming 'type' to be StrictEq):
@@ -1259,7 +1252,7 @@ void JIT::emit_op_enter(const JSInstruction*)
 
     move(TrustedImm32(canBeOptimized()), canBeOptimizedGPR);
     move(TrustedImm32(localsToInit), localsToInitGPR);
-    emitNakedNearCall(vm().getCTIStub(op_enter_handlerGenerator).retaggedCode<NoPtrTag>());
+    nearCallThunk(CodeLocationLabel { vm().getCTIStub(op_enter_handlerGenerator).retaggedCode<NoPtrTag>() });
 
     emitGetScope(m_profiledCodeBlock->scopeRegister());
     emitCheckTraps();
@@ -1604,7 +1597,7 @@ void JIT::emitSlow_op_check_traps(const JSInstruction*, Vector<SlowCaseEntry>::i
     using BaselineJITRegisters::CheckTraps::bytecodeOffsetGPR;
 
     move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
-    emitNakedNearCall(vm().getCTIStub(op_check_traps_handlerGenerator).retaggedCode<NoPtrTag>());
+    nearCallThunk(CodeLocationLabel { vm().getCTIStub(op_check_traps_handlerGenerator).retaggedCode<NoPtrTag>() });
 }
 
 MacroAssemblerCodeRef<JITThunkPtrTag> JIT::op_check_traps_handlerGenerator(VM& vm)
@@ -1622,16 +1615,14 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::op_check_traps_handlerGenerator(VM& v
     jit.prepareCallOperation(vm);
     loadGlobalObject(jit, globalObjectGPR);
     jit.setupArguments<decltype(operationHandleTraps)>(globalObjectGPR);
-    CCallHelpers::Call operation = jit.call(OperationPtrTag);
+    jit.callOperation<OperationPtrTag>(operationHandleTraps);
 
     jit.emitCTIThunkEpilogue();
 
     // Tail call to exception check thunk
-    Jump exceptionCheck = jit.jump();
+    jit.jumpThunk(CodeLocationLabel { vm.getCTIStub(CommonJITThunkID::CheckException).retaggedCode<NoPtrTag>() });
 
     LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::ExtraCTIThunk);
-    patchBuffer.link<OperationPtrTag>(operation, operationHandleTraps);
-    patchBuffer.link(exceptionCheck, CodeLocationLabel(vm.getCTIStub(checkExceptionGenerator).retaggedCode<NoPtrTag>()));
     return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "Baseline: op_check_traps_handler");
 }
 
@@ -1855,15 +1846,8 @@ void JIT::emit_op_log_shadow_chicken_tail(const JSInstruction* currentInstructio
         GPRReg scratch2Reg = regT2;
         ensureShadowChickenPacket(vm(), shadowPacketReg, scratch1Reg, scratch2Reg);
     }
-#if USE(JSVALUE32_64)
     emitGetVirtualRegister(bytecode.m_thisValue, jsRegT32);
     emitGetVirtualRegisterPayload(bytecode.m_scope, regT4);
-#else
-    emitGetVirtualRegisters({
-        { bytecode.m_thisValue, jsRegT32 },
-        { bytecode.m_scope, JSValueRegs { regT4 } }
-    });
-#endif
     loadPtr(addressFor(CallFrameSlot::codeBlock), regT1);
     logShadowChickenTailPacket(shadowPacketReg, jsRegT32, regT4, regT1, CallSiteIndex(m_bytecodeIndex));
 }

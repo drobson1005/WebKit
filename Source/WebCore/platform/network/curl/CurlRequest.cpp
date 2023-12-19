@@ -278,7 +278,11 @@ size_t CurlRequest::didReceiveHeader(String&& header)
     static constexpr auto emptyLineLF = "\n"_s;
 
     if (isCompletedOrCancelled())
+#if LIBCURL_VERSION_NUM >= 0x075700
         return CURL_WRITEFUNC_ERROR;
+#else
+        return 0;
+#endif
 
     // libcurl sends all headers that libcurl received to application.
     // So, in digest authentication, a block of response headers are received twice consecutively from libcurl.
@@ -346,10 +350,14 @@ size_t CurlRequest::didReceiveHeader(String&& header)
 
 // called with data after all headers have been processed via headerCallback
 
-size_t CurlRequest::didReceiveData(const SharedBuffer& buffer)
+size_t CurlRequest::didReceiveData(std::span<const uint8_t> receivedData)
 {
     if (isCompletedOrCancelled())
+#if LIBCURL_VERSION_NUM >= 0x075700
         return CURL_WRITEFUNC_ERROR;
+#else
+        return 0;
+#endif
 
     if (needToInvokeDidReceiveResponse()) {
         // Pause until completeDidReceiveResponse() is called.
@@ -366,22 +374,25 @@ size_t CurlRequest::didReceiveData(const SharedBuffer& buffer)
         return CURL_WRITEFUNC_PAUSE;
     }
 
-    auto receiveBytes = buffer.size();
-    m_totalReceivedSize += receiveBytes;
+    m_totalReceivedSize += receivedData.size();
 
-    if (receiveBytes) {
+    if (receivedData.size()) {
         if (m_multipartHandle) {
-            m_multipartHandle->didReceiveMessage(buffer);
+            m_multipartHandle->didReceiveMessage(receivedData);
             if (m_multipartHandle->hasError())
+#if LIBCURL_VERSION_NUM >= 0x075700
                 return CURL_WRITEFUNC_ERROR;
+#else
+                return 0;
+#endif
         } else {
-            callClient([buffer = Ref { buffer }](CurlRequest& request, CurlRequestClient& client) {
-                client.curlDidReceiveData(request, buffer);
+            callClient([buffer = SharedBuffer::create(receivedData)](CurlRequest& request, CurlRequestClient& client) mutable {
+                client.curlDidReceiveData(request, WTFMove(buffer));
             });
         }
     }
 
-    return receiveBytes;
+    return receivedData.size();
 }
 
 void CurlRequest::didReceiveHeaderFromMultipart(Vector<String>&& headers)
@@ -406,16 +417,14 @@ void CurlRequest::didReceiveHeaderFromMultipart(Vector<String>&& headers)
     });
 }
 
-void CurlRequest::didReceiveDataFromMultipart(Ref<SharedBuffer>&& buffer)
+void CurlRequest::didReceiveDataFromMultipart(std::span<const uint8_t> receivedData)
 {
     if (isCompletedOrCancelled())
         return;
 
-    auto receiveBytes = buffer->size();
-
-    if (receiveBytes) {
-        callClient([buffer = WTFMove(buffer)](CurlRequest& request, CurlRequestClient& client) {
-            client.curlDidReceiveData(request, buffer.get());
+    if (receivedData.size()) {
+        callClient([buffer = SharedBuffer::create(receivedData)](CurlRequest& request, CurlRequestClient& client) mutable {
+            client.curlDidReceiveData(request, WTFMove(buffer));
         });
     }
 }
@@ -639,7 +648,7 @@ size_t CurlRequest::didReceiveHeaderCallback(char* ptr, size_t blockSize, size_t
 
 size_t CurlRequest::didReceiveDataCallback(char* ptr, size_t blockSize, size_t numberOfBlocks, void* userData)
 {
-    return static_cast<CurlRequest*>(userData)->didReceiveData(SharedBuffer::create(ptr, blockSize * numberOfBlocks));
+    return static_cast<CurlRequest*>(userData)->didReceiveData({ reinterpret_cast<const uint8_t*>(ptr), blockSize * numberOfBlocks });
 }
 
 int CurlRequest::didReceiveDebugInfoCallback(CURL*, curl_infotype type, char* data, size_t size, void* userData)

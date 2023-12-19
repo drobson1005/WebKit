@@ -28,6 +28,7 @@
 #include "TaskSource.h"
 #include <optional>
 #include <wtf/ApproximateTime.h>
+#include <wtf/CheckedRef.h>
 #include <wtf/Function.h>
 #include <wtf/Markable.h>
 #include <wtf/MonotonicTime.h>
@@ -135,8 +136,7 @@ protected:
     void run(std::optional<ApproximateTime> deadline = std::nullopt);
     void clearAllTasks();
 
-    // FIXME: Account for fully-activeness of each document.
-    bool hasTasksForFullyActiveDocument() const { return !m_tasks.isEmpty(); }
+    bool hasTasksForFullyActiveDocument() const;
 
 private:
     virtual void scheduleToRun() = 0;
@@ -153,7 +153,7 @@ private:
     mutable Markable<MonotonicTime> m_nextTimerFireTimeCache;
 };
 
-class EventLoopTaskGroup : public CanMakeWeakPtr<EventLoopTaskGroup> {
+class EventLoopTaskGroup : public CanMakeWeakPtr<EventLoopTaskGroup>, public CanMakeCheckedPtr {
     WTF_MAKE_NONCOPYABLE(EventLoopTaskGroup);
     WTF_MAKE_FAST_ALLOCATED;
 
@@ -233,6 +233,8 @@ public:
 
 private:
     enum class State : uint8_t { Running, Suspended, ReadyToStop, Stopped };
+
+    RefPtr<EventLoop> protectedEventLoop() const;
 
     WeakPtr<EventLoop> m_eventLoop;
     WeakHashSet<EventLoopTimer> m_timers;

@@ -98,8 +98,8 @@ public:
     const_iterator find(const U& value) const
     {
         increaseOperationCountSinceLastCleanup();
-        if (auto* pointer = value.weakPtrFactory().m_impl.pointer(); pointer && *pointer)
-            return WeakHashSetConstIterator(*this, m_set.find(pointer));
+        if (auto* impl = value.weakPtrFactory().impl(); impl && *impl)
+            return WeakHashSetConstIterator(*this, m_set.find(impl));
         return end();
     }
 
@@ -122,8 +122,8 @@ public:
     bool remove(const U& value)
     {
         amortizedCleanupIfNeeded();
-        if (auto* pointer = value.weakPtrFactory().m_impl.pointer(); pointer && *pointer)
-            return m_set.remove(*pointer);
+        if (auto* impl = value.weakPtrFactory().impl(); impl && *impl)
+            return m_set.remove(*impl);
         return false;
     }
 
@@ -144,8 +144,8 @@ public:
     bool contains(const U& value) const
     {
         increaseOperationCountSinceLastCleanup();
-        if (auto* pointer = value.weakPtrFactory().m_impl.pointer(); pointer && *pointer)
-            return m_set.contains(*pointer);
+        if (auto* impl = value.weakPtrFactory().impl(); impl && *impl)
+            return m_set.contains(*impl);
         return false;
     }
 
@@ -230,24 +230,8 @@ private:
     mutable unsigned m_maxOperationCountWithoutCleanup { 0 };
 };
 
-template<typename MapFunction, typename T, typename WeakMapImpl>
-struct Mapper<MapFunction, const WeakHashSet<T, WeakMapImpl>&, void> {
-    using SourceItemType = T&;
-    using DestinationItemType = typename std::invoke_result<MapFunction, SourceItemType&>::type;
-
-    static Vector<DestinationItemType> map(const WeakHashSet<T, WeakMapImpl>& source, const MapFunction& mapFunction)
-    {
-        Vector<DestinationItemType> result;
-        result.reserveInitialCapacity(source.computeSize());
-        for (auto& item : source)
-            result.unsafeAppendWithoutCapacityCheck(mapFunction(item));
-        return result;
-    }
-};
-
-template<typename MapFunction, typename T, typename WeakMapImpl>
-struct Mapper<MapFunction, WeakHashSet<T, WeakMapImpl>&, void> : Mapper<MapFunction, const WeakHashSet<T, WeakMapImpl> &, void> {
-};
+template<typename T, typename WeakMapImpl>
+size_t containerSize(const WeakHashSet<T, WeakMapImpl>& container) { return container.computeSize(); }
 
 template<typename T, typename WeakMapImpl>
 inline auto copyToVector(const WeakHashSet<T, WeakMapImpl>& collection) -> Vector<WeakPtr<T, WeakMapImpl>>

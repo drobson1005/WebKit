@@ -37,8 +37,14 @@
 #import "WKNavigationDelegatePrivate.h"
 #import "WKUIDelegatePrivate.h"
 #import "WKWebViewConfigurationPrivate.h"
-#import "WKWebViewPrivate.h"
+#import "WKWebViewInternal.h"
 #import "WebExtensionContext.h"
+#import "WebExtensionContextProxyMessages.h"
+#import "WebExtensionMenuItem.h"
+#import "WebExtensionMenuItemContextParameters.h"
+#import "WebExtensionMenuItemParameters.h"
+#import "WebPageProxy.h"
+#import "WebProcessProxy.h"
 #import "_WKWebExtensionActionInternal.h"
 #import "_WKWebExtensionControllerDelegatePrivate.h"
 #import <wtf/BlockPtr.h>
@@ -133,7 +139,7 @@ constexpr NSTimeInterval popoverShowTimeout = 1;
 
     _webExtensionAction->popupSizeDidChange();
 
-    if (intrinsicContentSize.width >= popoverMinimumWidth && intrinsicContentSize.height >= popoverMinimumHeight)
+    if (intrinsicContentSize.width >= popoverMinimumWidth && intrinsicContentSize.height >= popoverMinimumHeight && !self.loading)
         _webExtensionAction->readyToPresentPopup();
 }
 
@@ -145,31 +151,54 @@ WebExtensionAction::WebExtensionAction(WebExtensionContext& extensionContext)
     : m_extensionContext(extensionContext)
 {
     auto delegate = extensionContext.extensionController()->delegate();
-    m_respondsToPresentPopup = [delegate respondsToSelector:@selector(webExtensionController:presentActionPopup:forExtensionContext:completionHandler:)];
+    m_respondsToPresentPopup = [delegate respondsToSelector:@selector(webExtensionController:presentPopupForAction:forExtensionContext:completionHandler:)];
 
     if (!m_respondsToPresentPopup)
-        RELEASE_LOG_ERROR(Extensions, "%{public}@ does not implement the webExtensionController:presentActionPopup:forExtensionContext:completionHandler: method", delegate.debugDescription);
+        RELEASE_LOG_ERROR(Extensions, "%{public}@ does not implement the webExtensionController:presentPopupForAction:forExtensionContext:completionHandler: method", delegate.debugDescription);
 }
 
 WebExtensionAction::WebExtensionAction(WebExtensionContext& extensionContext, WebExtensionTab& tab)
-    : m_extensionContext(extensionContext)
-    , m_tab(&tab)
+    : WebExtensionAction(extensionContext)
 {
-    auto delegate = extensionContext.extensionController()->delegate();
-    m_respondsToPresentPopup = [delegate respondsToSelector:@selector(webExtensionController:presentActionPopup:forExtensionContext:completionHandler:)];
+    m_tab = &tab;
+}
 
-    if (!m_respondsToPresentPopup)
-        RELEASE_LOG_ERROR(Extensions, "%{public}@ does not implement the webExtensionController:presentActionPopup:forExtensionContext:completionHandler: method", delegate.debugDescription);
+WebExtensionAction::WebExtensionAction(WebExtensionContext& extensionContext, WebExtensionWindow& window)
+    : WebExtensionAction(extensionContext)
+{
+    m_window = &window;
 }
 
 bool WebExtensionAction::operator==(const WebExtensionAction& other) const
 {
-    return this == &other || (m_extensionContext == other.m_extensionContext && m_tab == other.m_tab);
+    return this == &other || (m_extensionContext == other.m_extensionContext && m_tab == other.m_tab && m_window == other.m_window);
 }
 
 WebExtensionContext* WebExtensionAction::extensionContext() const
 {
     return m_extensionContext.get();
+}
+
+void WebExtensionAction::clearCustomizations()
+{
+    if (!m_customIcons && !m_customPopupPath.isNull() && !m_customLabel.isNull() && !m_customBadgeText.isNull() && !m_customEnabled && !m_blockedResourceCount)
+        return;
+
+    m_customIcons = nil;
+    m_customPopupPath = nullString();
+    m_customLabel = nullString();
+    m_customBadgeText = nullString();
+    m_customEnabled = std::nullopt;
+    m_blockedResourceCount = 0;
+
+    propertiesDidChange();
+}
+
+void WebExtensionAction::clearBlockedResourceCount()
+{
+    m_blockedResourceCount = 0;
+
+    propertiesDidChange();
 }
 
 void WebExtensionAction::propertiesDidChange()
@@ -188,6 +217,9 @@ CocoaImage *WebExtensionAction::icon(CGSize idealSize)
         return extensionContext()->extension().bestImageInIconsDictionary(m_customIcons.get(), idealSize.width > idealSize.height ? idealSize.width : idealSize.height);
 
     if (m_tab)
+        return extensionContext()->getAction(m_tab->window().get())->icon(idealSize);
+
+    if (m_window)
         return extensionContext()->defaultAction().icon(idealSize);
 
     return extensionContext()->extension().actionIcon(idealSize);
@@ -195,7 +227,7 @@ CocoaImage *WebExtensionAction::icon(CGSize idealSize)
 
 void WebExtensionAction::setIconsDictionary(NSDictionary *icons)
 {
-    m_customIcons = icons;
+    m_customIcons = icons.count ? icons : nil;
 
     propertiesDidChange();
 }
@@ -209,6 +241,9 @@ String WebExtensionAction::popupPath() const
         return m_customPopupPath;
 
     if (m_tab)
+        return extensionContext()->getAction(m_tab->window().get())->popupPath();
+
+    if (m_window)
         return extensionContext()->defaultAction().popupPath();
 
     return extensionContext()->extension().actionPopupPath();
@@ -216,6 +251,9 @@ String WebExtensionAction::popupPath() const
 
 void WebExtensionAction::setPopupPath(String path)
 {
+    if (m_customPopupPath == path)
+        return;
+
     m_customPopupPath = path;
 
     propertiesDidChange();
@@ -223,13 +261,13 @@ void WebExtensionAction::setPopupPath(String path)
 
 WKWebView *WebExtensionAction::popupWebView(LoadOnFirstAccess loadOnFirstAccess)
 {
-    if (!hasPopup())
+    if (!presentsPopup())
         return nil;
 
     if (m_popupWebView || loadOnFirstAccess == LoadOnFirstAccess::No)
         return m_popupWebView.get();
 
-    auto *webViewConfiguration = extensionContext()->webViewConfiguration();
+    auto *webViewConfiguration = extensionContext()->webViewConfiguration(WebExtensionContext::WebViewPurpose::Popup);
     webViewConfiguration.suppressesIncrementalRendering = YES;
 
     m_popupWebViewDelegate = [[_WKWebExtensionActionWebViewDelegate alloc] initWithWebExtensionAction:*this];
@@ -259,6 +297,11 @@ WKWebView *WebExtensionAction::popupWebView(LoadOnFirstAccess loadOnFirstAccess)
     ]];
 #endif // USE(APPKIT)
 
+    auto popupPage = m_popupWebView.get()._page;
+    auto tabIdentifier = m_tab ? std::optional(m_tab->identifier()) : std::nullopt;
+    auto windowIdentifier = m_window ? std::optional(m_window->identifier()) : std::nullopt;
+    popupPage->process().send(Messages::WebExtensionContextProxy::AddPopupPageIdentifier(popupPage->webPageID(), tabIdentifier, windowIdentifier), extensionContext()->identifier());
+
     auto url = URL { extensionContext()->baseURL(), popupPath() };
     [m_popupWebView loadRequest:[NSURLRequest requestWithURL:url]];
 
@@ -278,8 +321,8 @@ void WebExtensionAction::presentPopupWhenReady()
     }
 
     // Delay showing the popup until a minimum size or a timeout is reached.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(popoverShowTimeout * NSEC_PER_SEC)), dispatch_get_main_queue(), makeBlockPtr([protectecThis = Ref { *this }] {
-        protectecThis->readyToPresentPopup();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(popoverShowTimeout * NSEC_PER_SEC)), dispatch_get_main_queue(), makeBlockPtr([this, protectedThis = Ref { *this }] {
+        readyToPresentPopup();
     }).get());
 
     popupWebView(LoadOnFirstAccess::Yes);
@@ -296,9 +339,9 @@ void WebExtensionAction::readyToPresentPopup()
         auto* extensionController = extensionContext()->extensionController();
         auto delegate = extensionController->delegate();
 
-        [delegate webExtensionController:extensionController->wrapper() presentActionPopup:wrapper() forExtensionContext:extensionContext()->wrapper() completionHandler:makeBlockPtr([protectecThis = Ref { *this }](NSError *error) {
+        [delegate webExtensionController:extensionController->wrapper() presentPopupForAction:wrapper() forExtensionContext:extensionContext()->wrapper() completionHandler:makeBlockPtr([this, protectedThis = Ref { *this }](NSError *error) {
             if (error)
-                protectecThis->closePopupWebView();
+                closePopupWebView();
         }).get()];
     }).get());
 }
@@ -321,25 +364,35 @@ void WebExtensionAction::closePopupWebView()
     m_popupPresented = false;
 }
 
-String WebExtensionAction::displayLabel() const
+String WebExtensionAction::label(FallbackWhenEmpty fallback) const
 {
     if (!extensionContext())
         return emptyString();
 
-    if (!m_customLabel.isEmpty())
-        return m_customLabel;
+    if (!m_customLabel.isNull()) {
+        if (!m_customLabel.isEmpty() || fallback == FallbackWhenEmpty::No)
+            return m_customLabel;
+
+        return extensionContext()->extension().displayName();
+    }
 
     if (m_tab)
-        return extensionContext()->defaultAction().displayLabel();
+        return extensionContext()->getAction(m_tab->window().get())->label();
 
-    if (auto *defaultLabel = extensionContext()->extension().displayActionLabel())
+    if (m_window)
+        return extensionContext()->defaultAction().label();
+
+    if (auto *defaultLabel = extensionContext()->extension().displayActionLabel(); defaultLabel.length || fallback == FallbackWhenEmpty::No)
         return defaultLabel;
 
     return extensionContext()->extension().displayName();
 }
 
-void WebExtensionAction::setDisplayLabel(String label)
+void WebExtensionAction::setLabel(String label)
 {
+    if (m_customLabel == label)
+        return;
+
     m_customLabel = label;
 
     propertiesDidChange();
@@ -353,7 +406,13 @@ String WebExtensionAction::badgeText() const
     if (!m_customBadgeText.isNull())
         return m_customBadgeText;
 
+    if (m_blockedResourceCount)
+        return String::number(m_blockedResourceCount);
+
     if (m_tab)
+        return extensionContext()->getAction(m_tab->window().get())->badgeText();
+
+    if (m_window)
         return extensionContext()->defaultAction().badgeText();
 
     return emptyString();
@@ -361,7 +420,20 @@ String WebExtensionAction::badgeText() const
 
 void WebExtensionAction::setBadgeText(String badgeText)
 {
+    if (m_customBadgeText == badgeText)
+        return;
+
     m_customBadgeText = badgeText;
+
+    propertiesDidChange();
+}
+
+void WebExtensionAction::incrementBlockedResourceCount(ssize_t amount)
+{
+    m_blockedResourceCount += amount;
+
+    if (m_blockedResourceCount < 0)
+        m_blockedResourceCount = 0;
 
     propertiesDidChange();
 }
@@ -375,6 +447,9 @@ bool WebExtensionAction::isEnabled() const
         return m_customEnabled.value();
 
     if (m_tab)
+        return extensionContext()->getAction(m_tab->window().get())->isEnabled();
+
+    if (m_window)
         return extensionContext()->defaultAction().isEnabled();
 
     return true;
@@ -382,9 +457,24 @@ bool WebExtensionAction::isEnabled() const
 
 void WebExtensionAction::setEnabled(std::optional<bool> enabled)
 {
+    if (m_customEnabled == enabled)
+        return;
+
     m_customEnabled = enabled;
 
     propertiesDidChange();
+}
+
+NSArray *WebExtensionAction::platformMenuItems() const
+{
+    if (!extensionContext())
+        return @[ ];
+
+    WebExtensionMenuItemContextParameters contextParameters;
+    contextParameters.types = WebExtensionMenuItemContextType::Action;
+    contextParameters.tabIdentifier = m_tab ? std::optional { m_tab->identifier() } : std::nullopt;
+
+    return WebExtensionMenuItem::matchingPlatformMenuItems(extensionContext()->mainMenuItems(), contextParameters, webExtensionActionMenuItemTopLevelLimit);
 }
 
 } // namespace WebKit

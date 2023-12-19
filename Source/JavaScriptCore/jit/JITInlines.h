@@ -87,30 +87,6 @@ ALWAYS_INLINE void JIT::emitLoadCharacterString(RegisterID src, RegisterID dst, 
     done.link(this);
 }
 
-ALWAYS_INLINE JIT::Call JIT::emitNakedNearCall(CodePtr<NoPtrTag> target)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-    Call nakedCall = nearCall();
-    m_nearCalls.append(NearCallRecord(nakedCall, target.retagged<JSInternalPtrTag>()));
-    return nakedCall;
-}
-
-ALWAYS_INLINE JIT::Call JIT::emitNakedNearTailCall(CodePtr<NoPtrTag> target)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-    Call nakedCall = nearTailCall();
-    m_nearCalls.append(NearCallRecord(nakedCall, target.retagged<JSInternalPtrTag>()));
-    return nakedCall;
-}
-
-ALWAYS_INLINE JIT::Jump JIT::emitNakedNearJump(CodePtr<JITThunkPtrTag> target)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-    Jump nakedJump = jump();
-    m_nearJumps.append(NearJumpRecord(nakedJump, CodeLocationLabel(target)));
-    return nakedJump;
-}
-
 ALWAYS_INLINE void JIT::updateTopCallFrame()
 {
     uint32_t locationBits = CallSiteIndex(m_bytecodeIndex.offset()).bits();
@@ -345,60 +321,6 @@ ALWAYS_INLINE double JIT::getOperandConstantDouble(VirtualRegister src)
 }
 #endif
 
-ALWAYS_INLINE void JIT::emitGetVirtualRegisters(std::initializer_list<std::tuple<VirtualRegister, JSValueRegs>> tuples)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-#if USE(JSVALUE64)
-    Vector<std::tuple<VirtualRegister, JSValueRegs>, 8> targets;
-#if ASSERT_ENABLED
-    ScalarRegisterSet registerSet;
-#endif
-    for (auto [ src, dst ] : tuples) {
-#if ASSERT_ENABLED
-        ASSERT(!registerSet.contains(dst.payloadGPR(), IgnoreVectors));
-        registerSet.add(dst.payloadGPR(), IgnoreVectors);
-#endif
-        if (src.isConstant())
-            emitGetVirtualRegister(src, dst);
-        else
-            targets.append(std::tuple { src, dst });
-    }
-
-    std::sort(targets.begin(), targets.end(),
-        [](const auto& lhs, const auto& rhs) {
-            auto [lsrc, ldst] = lhs;
-            auto [rsrc, rdst] = rhs;
-            UNUSED_PARAM(ldst);
-            UNUSED_PARAM(rdst);
-            return lsrc.offset() < rsrc.offset();
-        });
-
-    unsigned index = 0;
-    while (index < targets.size()) {
-        if ((index + 1) == targets.size()) {
-            auto [src, dst] = targets[index];
-            emitGetVirtualRegister(src, dst);
-            ++index;
-            continue;
-        }
-
-        auto [src1, dst1] = targets[index];
-        auto [src2, dst2] = targets[index + 1];
-        if ((src1.offset() + 1) == src2.offset()) {
-            loadPair64(addressFor(src1), dst1.payloadGPR(), dst2.payloadGPR());
-            index += 2;
-            continue;
-        }
-
-        emitGetVirtualRegister(src1, dst1);
-        ++index;
-    }
-#else
-    for (auto [ src, dst ] : tuples)
-        emitGetVirtualRegister(src, dst);
-#endif
-}
-
 ALWAYS_INLINE void JIT::emitGetVirtualRegister(VirtualRegister src, JSValueRegs dst)
 {
     ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
@@ -555,7 +477,7 @@ ALWAYS_INLINE void JIT::materializePointerIntoMetadata(const Bytecode& bytecode,
 
 ALWAYS_INLINE void JIT::loadConstant(CCallHelpers& jit, JITConstantPool::Constant constantIndex, GPRReg result)
 {
-    jit.loadPtr(Address(s_constantsGPR, BaselineJITData::offsetOfData() + static_cast<uintptr_t>(constantIndex) * sizeof(void*)), result);
+    jit.loadPtr(Address(s_constantsGPR, BaselineJITData::offsetOfTrailingData() + static_cast<uintptr_t>(constantIndex) * sizeof(void*)), result);
 }
 
 ALWAYS_INLINE void JIT::loadGlobalObject(CCallHelpers& jit, GPRReg result)
@@ -571,6 +493,16 @@ ALWAYS_INLINE void JIT::loadConstant(JITConstantPool::Constant constantIndex, GP
 ALWAYS_INLINE void JIT::loadGlobalObject(GPRReg result)
 {
     loadGlobalObject(*this, result);
+}
+
+ALWAYS_INLINE void JIT::loadStructureStubInfo(CCallHelpers& jit, StructureStubInfoIndex index, GPRReg result)
+{
+    jit.subPtr(s_constantsGPR, TrustedImm32(static_cast<uintptr_t>(index.m_index + 1) * sizeof(StructureStubInfo)), result);
+}
+
+ALWAYS_INLINE void JIT::loadStructureStubInfo(StructureStubInfoIndex index, GPRReg result)
+{
+    loadStructureStubInfo(*this, index, result);
 }
 
 ALWAYS_INLINE static void loadAddrOfCodeBlockConstantBuffer(JIT &jit, GPRReg dst)

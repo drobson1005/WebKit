@@ -30,7 +30,6 @@
 #include "RenderBoxModelObjectInlines.h"
 #include "RenderElementInlines.h"
 #include "RenderStyleSetters.h"
-#include "RenderTextFragment.h"
 #include "RenderTheme.h"
 #include "RenderTreeBuilder.h"
 #include "StyleInheritedData.h"
@@ -49,6 +48,7 @@ WTF_MAKE_ISO_ALLOCATED_IMPL(RenderButton);
 RenderButton::RenderButton(HTMLFormControlElement& element, RenderStyle&& style)
     : RenderFlexibleBox(Type::Button, element, WTFMove(style))
 {
+    ASSERT(isRenderButton());
 }
 
 RenderButton::~RenderButton() = default;

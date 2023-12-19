@@ -35,6 +35,7 @@
 #include "CallFrameShuffler.h"
 #include "CodeBlock.h"
 #include "JITInlines.h"
+#include "JITThunks.h"
 #include "ScratchRegisterAllocator.h"
 #include "SetupVarargsFrame.h"
 #include "SlowPathCall.h"
@@ -50,20 +51,7 @@ void JIT::emit_op_ret(const JSInstruction* currentInstruction)
     // Return the result in returnValueGPR (returnValueGPR2/returnValueGPR on 32-bit).
     auto bytecode = currentInstruction->as<OpRet>();
     emitGetVirtualRegister(bytecode.m_value, returnValueJSR);
-    emitNakedNearJump(vm().getCTIStub(returnFromBaselineGenerator).code());
-}
-
-MacroAssemblerCodeRef<JITThunkPtrTag> JIT::returnFromBaselineGenerator(VM&)
-{
-    CCallHelpers jit;
-
-    jit.checkStackPointerAlignment();
-    jit.emitRestoreCalleeSavesFor(&RegisterAtOffsetList::llintBaselineCalleeSaveRegisters());
-    jit.emitFunctionEpilogue();
-    jit.ret();
-
-    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::ExtraCTIThunk);
-    return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "Baseline: op_ret_handler");
+    jumpThunk(CodeLocationLabel { vm().getCTIStub(CommonJITThunkID::ReturnFromBaseline).retaggedCode<NoPtrTag>() });
 }
 
 template<typename Op>
@@ -189,15 +177,8 @@ void JIT::compileCallDirectEval(const OpCallDirectEval& bytecode)
 
     resetSP();
 
-#if USE(JSVALUE32_64)
     emitGetVirtualRegister(bytecode.m_thisValue, thisValueJSR);
     emitGetVirtualRegisterPayload(bytecode.m_scope, scopeGPR);
-#else
-    emitGetVirtualRegisters({
-        { bytecode.m_thisValue, thisValueJSR },
-        { bytecode.m_scope, JSValueRegs { scopeGPR } }
-    });
-#endif
     callOperation(bytecode.m_ecmaMode.isStrict() ? operationCallDirectEvalStrict : operationCallDirectEvalSloppy, calleeFrameGPR, scopeGPR, thisValueJSR);
     addSlowCase(branchIfEmpty(returnValueJSR));
 
@@ -462,7 +443,7 @@ void JIT::emit_op_iterator_open(const JSInstruction* instruction)
 
     moveValueRegs(returnValueJSR, baseJSR);
     auto [ stubInfo, stubInfoIndex ] = addUnlinkedStructureStubInfo();
-    loadConstant(stubInfoIndex, stubInfoGPR);
+    loadStructureStubInfo(stubInfoIndex, stubInfoGPR);
 
     emitJumpSlowCaseIfNotJSCell(baseJSR);
 
@@ -508,7 +489,7 @@ void JIT::emitSlow_op_iterator_open(const JSInstruction* instruction, Vector<Slo
 
     JITGetByIdGenerator& gen = m_getByIds[m_getByIdIndex++];
     gen.reportBaselineDataICSlowPathBegin(label());
-    emitNakedNearCall(InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>());
+    nearCallThunk(CodeLocationLabel { InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>() });
     static_assert(BaselineJITRegisters::GetById::resultJSR == returnValueJSR);
     jump().linkTo(fastPathResumePoint(), this);
 
@@ -557,7 +538,7 @@ void JIT::emit_op_iterator_next(const JSInstruction* instruction)
     addSlowCase(branchIfNotObject(baseJSR.payloadGPR()));
     {
         auto [ stubInfo, stubInfoIndex ] = addUnlinkedStructureStubInfo();
-        loadConstant(stubInfoIndex, stubInfoGPR);
+        loadStructureStubInfo(stubInfoIndex, stubInfoGPR);
 
         JITGetByIdGenerator gen(
             nullptr, stubInfo, JITType::BaselineJIT, CodeOrigin(m_bytecodeIndex), CallSiteIndex(BytecodeIndex(m_bytecodeIndex.offset())), RegisterSetBuilder::stubUnavailableRegisters(),
@@ -586,7 +567,7 @@ void JIT::emit_op_iterator_next(const JSInstruction* instruction)
 
         emitGetVirtualRegister(bytecode.m_value, baseJSR);
         auto [ stubInfo, stubInfoIndex ] = addUnlinkedStructureStubInfo();
-        loadConstant(stubInfoIndex, stubInfoGPR);
+        loadStructureStubInfo(stubInfoIndex, stubInfoGPR);
 
         JITGetByIdGenerator gen(
             nullptr, stubInfo, JITType::BaselineJIT, CodeOrigin(m_bytecodeIndex), CallSiteIndex(BytecodeIndex(m_bytecodeIndex.offset())), RegisterSetBuilder::stubUnavailableRegisters(),
@@ -629,7 +610,7 @@ void JIT::emitSlow_op_iterator_next(const JSInstruction* instruction, Vector<Slo
     {
         JITGetByIdGenerator& gen = m_getByIds[m_getByIdIndex++];
         gen.reportBaselineDataICSlowPathBegin(label());
-        emitNakedNearCall(InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>());
+        nearCallThunk(CodeLocationLabel { InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>() });
         static_assert(BaselineJITRegisters::GetById::resultJSR == returnValueJSR);
         emitJumpSlowToHotForCheckpoint(jump());
     }
@@ -638,7 +619,7 @@ void JIT::emitSlow_op_iterator_next(const JSInstruction* instruction, Vector<Slo
         linkAllSlowCases(iter);
         JITGetByIdGenerator& gen = m_getByIds[m_getByIdIndex++];
         gen.reportBaselineDataICSlowPathBegin(label());
-        emitNakedNearCall(InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>());
+        nearCallThunk(CodeLocationLabel { InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>() });
         static_assert(BaselineJITRegisters::GetById::resultJSR == returnValueJSR);
     }
 }

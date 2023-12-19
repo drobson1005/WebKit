@@ -38,7 +38,7 @@
 #include "MacroAssembler.h"
 #include "MacroAssemblerCodeRef.h"
 #include <wtf/DataLog.h>
-#include <wtf/FastMalloc.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace JSC {
 
@@ -57,7 +57,8 @@ namespace JSC {
 //   * The value referenced by a DataLabel may be set.
 //
 class LinkBuffer {
-    WTF_MAKE_NONCOPYABLE(LinkBuffer); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(LinkBuffer);
+    WTF_MAKE_TZONE_ALLOCATED(LinkBuffer);
     
     template<PtrTag tag> using CodeRef = MacroAssemblerCodeRef<tag>;
     typedef MacroAssembler::Label Label;
@@ -457,9 +458,6 @@ private:
 
 #define FINALIZE_CODE(linkBufferReference, resultPtrTag, ...)  \
     FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly()), linkBufferReference, resultPtrTag, __VA_ARGS__)
-
-#define FINALIZE_BASELINE_CODE(linkBufferReference, resultPtrTag, ...)  \
-    FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly() || Options::dumpBaselineDisassembly()), linkBufferReference, resultPtrTag, __VA_ARGS__)
 
 #define FINALIZE_DFG_CODE(linkBufferReference, resultPtrTag, ...)  \
     FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly() || Options::dumpDFGDisassembly()), linkBufferReference, resultPtrTag, __VA_ARGS__)

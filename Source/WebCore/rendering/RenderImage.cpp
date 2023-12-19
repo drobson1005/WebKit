@@ -145,8 +145,8 @@ void RenderImage::collectSelectionGeometries(Vector<SelectionGeometry>& geometri
 
 using namespace HTMLNames;
 
-RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, StyleImage* styleImage, const float imageDevicePixelRatio)
-    : RenderReplaced(type, element, WTFMove(style), IntSize())
+RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, OptionSet<RenderElementType> typeFlags, StyleImage* styleImage, const float imageDevicePixelRatio)
+    : RenderReplaced(type, element, WTFMove(style), IntSize(), typeFlags | RenderElementType::RenderImageFlag)
     , m_imageResource(styleImage ? makeUnique<RenderImageResourceStyleImage>(*styleImage) : makeUnique<RenderImageResource>())
     , m_hasImageOverlay(is<HTMLElement>(element) && ImageOverlay::hasOverlay(downcast<HTMLElement>(element)))
     , m_imageDevicePixelRatio(imageDevicePixelRatio)
@@ -158,8 +158,13 @@ RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, Style
 #endif
 }
 
+RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, StyleImage* styleImage, const float imageDevicePixelRatio)
+    : RenderImage(type, element, WTFMove(style), RenderElementType::RenderImageFlag, styleImage, imageDevicePixelRatio)
+{
+}
+
 RenderImage::RenderImage(Type type, Document& document, RenderStyle&& style, StyleImage* styleImage)
-    : RenderReplaced(type, document, WTFMove(style), IntSize())
+    : RenderReplaced(type, document, WTFMove(style), IntSize(), RenderElementType::RenderImageFlag)
     , m_imageResource(styleImage ? makeUnique<RenderImageResourceStyleImage>(*styleImage) : makeUnique<RenderImageResource>())
 {
 }
@@ -769,7 +774,7 @@ LayoutUnit RenderImage::minimumReplacedHeight() const
     return imageResource().errorOccurred() ? intrinsicSize().height() : 0_lu;
 }
 
-HTMLMapElement* RenderImage::imageMap() const
+RefPtr<HTMLMapElement> RenderImage::imageMap() const
 {
     auto* imageElement = element();
     if (!imageElement || !is<HTMLImageElement>(imageElement))
@@ -783,7 +788,7 @@ bool RenderImage::nodeAtPoint(const HitTestRequest& request, HitTestResult& resu
     bool inside = RenderReplaced::nodeAtPoint(request, tempResult, locationInContainer, accumulatedOffset, hitTestAction);
 
     if (tempResult.innerNode() && element()) {
-        if (HTMLMapElement* map = imageMap()) {
+        if (RefPtr map = imageMap()) {
             LayoutRect contentBox = contentBoxRect();
             float scaleFactor = 1 / style().effectiveZoom();
             LayoutPoint mapLocation = locationInContainer.point() - toLayoutSize(accumulatedOffset) - locationOffset() - toLayoutSize(contentBox.location());
@@ -883,8 +888,7 @@ void RenderImage::computeIntrinsicRatioInformation(FloatSize& intrinsicSize, Flo
 
     // Don't compute an intrinsic ratio to preserve historical WebKit behavior if we're painting alt text and/or a broken image.
     if (shouldDisplayBrokenImageIcon()) {
-        if (settings().aspectRatioOfImgFromWidthAndHeightEnabled()
-            && style().aspectRatioType() == AspectRatioType::AutoAndRatio && !isShowingAltText())
+        if (style().aspectRatioType() == AspectRatioType::AutoAndRatio && !isShowingAltText())
             intrinsicRatio = FloatSize::narrowPrecision(style().aspectRatioLogicalWidth(), style().aspectRatioLogicalHeight());
         else
             intrinsicRatio = { 1.0, 1.0 };

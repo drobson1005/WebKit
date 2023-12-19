@@ -44,6 +44,7 @@ namespace WebKit {
 
 class WebExtensionContext;
 class WebExtensionTab;
+class WebExtensionWindow;
 
 class WebExtensionAction : public API::ObjectImpl<API::Object::Type::WebExtensionAction>, public CanMakeWeakPtr<WebExtensionAction> {
     WTF_MAKE_NONCOPYABLE(WebExtensionAction);
@@ -57,29 +58,38 @@ public:
 
     explicit WebExtensionAction(WebExtensionContext&);
     explicit WebExtensionAction(WebExtensionContext&, WebExtensionTab&);
+    explicit WebExtensionAction(WebExtensionContext&, WebExtensionWindow&);
 
     enum class LoadOnFirstAccess { No, Yes };
+    enum class FallbackWhenEmpty { No, Yes };
 
     bool operator==(const WebExtensionAction&) const;
 
     WebExtensionContext* extensionContext() const;
     WebExtensionTab* tab() { return m_tab.get(); }
+    WebExtensionWindow* window() { return m_window.get(); }
+
+    void clearCustomizations();
+    void clearBlockedResourceCount();
 
     void propertiesDidChange();
 
     CocoaImage *icon(CGSize);
     void setIconsDictionary(NSDictionary *);
 
-    String displayLabel() const;
-    void setDisplayLabel(String);
+    String label(FallbackWhenEmpty = FallbackWhenEmpty::Yes) const;
+    void setLabel(String);
 
     String badgeText() const;
     void setBadgeText(String);
 
+    void incrementBlockedResourceCount(ssize_t amount);
+
     bool isEnabled() const;
     void setEnabled(std::optional<bool>);
 
-    bool hasPopup() const { return !popupPath().isEmpty(); }
+    bool presentsPopup() const { return !popupPath().isEmpty(); }
+    bool canProgrammaticallyPresentPopup() const { return m_respondsToPresentPopup; }
 
     String popupPath() const;
     void setPopupPath(String);
@@ -91,6 +101,8 @@ public:
     void popupDidClose();
     void closePopupWebView();
 
+    NSArray *platformMenuItems() const;
+
 #ifdef __OBJC__
     _WKWebExtensionAction *wrapper() const { return (_WKWebExtensionAction *)API::ObjectImpl<API::Object::Type::WebExtensionAction>::wrapper(); }
 #endif
@@ -98,6 +110,7 @@ public:
 private:
     WeakPtr<WebExtensionContext> m_extensionContext;
     RefPtr<WebExtensionTab> m_tab;
+    RefPtr<WebExtensionWindow> m_window;
 
     RetainPtr<_WKWebExtensionActionWebView> m_popupWebView;
     RetainPtr<_WKWebExtensionActionWebViewDelegate> m_popupWebViewDelegate;
@@ -106,6 +119,7 @@ private:
     RetainPtr<NSDictionary> m_customIcons;
     String m_customLabel;
     String m_customBadgeText;
+    ssize_t m_blockedResourceCount { 0 };
     std::optional<bool> m_customEnabled;
     bool m_popupPresented { false };
     bool m_respondsToPresentPopup { false };

@@ -27,7 +27,7 @@
 #pragma once
 
 #include <WebCore/ChromeClient.h>
-#include <wtf/CheckedRef.h>
+#include <wtf/WeakRef.h>
 
 namespace WebCore {
 class HTMLImageElement;
@@ -388,10 +388,8 @@ private:
 
     void setTextIndicator(const WebCore::TextIndicatorData&) const final;
 
-#if ENABLE(WEB_CRYPTO)
     bool wrapCryptoKey(const Vector<uint8_t>&, Vector<uint8_t>&) const final;
     bool unwrapCryptoKey(const Vector<uint8_t>&, Vector<uint8_t>&) const final;
-#endif
 
 #if ENABLE(TELEPHONE_NUMBER_DETECTION) && PLATFORM(MAC)
     void handleTelephoneNumberClick(const String& number, const WebCore::IntPoint&, const WebCore::IntRect&) final;
@@ -502,7 +500,7 @@ private:
     mutable bool m_cachedMainFrameHasHorizontalScrollbar { false };
     mutable bool m_cachedMainFrameHasVerticalScrollbar { false };
 
-    CheckedRef<WebPage> m_page;
+    WeakRef<WebPage> m_page;
 };
 
 class AXRelayProcessSuspendedNotification {
@@ -514,7 +512,7 @@ public:
 
     void sendProcessSuspendMessage(bool suspended);
 private:
-    CheckedRef<WebPage> m_page;
+    WeakRef<WebPage> m_page;
     AutomaticallySend m_automaticallySend;
 };
 

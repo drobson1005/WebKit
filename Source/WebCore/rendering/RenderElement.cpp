@@ -81,6 +81,7 @@
 #include "RenderText.h"
 #include "RenderTheme.h"
 #include "RenderTreeBuilder.h"
+#include "RenderTreeBuilderRuby.h"
 #include "RenderView.h"
 #include "ResolvedStyle.h"
 #include "SVGElementTypeHelpers.h"
@@ -116,8 +117,8 @@ struct SameSizeAsRenderElement : public RenderObject {
 
 static_assert(sizeof(RenderElement) == sizeof(SameSizeAsRenderElement), "RenderElement should stay small");
 
-inline RenderElement::RenderElement(Type type, ContainerNode& elementOrDocument, RenderStyle&& style, OptionSet<RenderElementType> flags)
-    : RenderObject(type, elementOrDocument, flags)
+inline RenderElement::RenderElement(Type type, ContainerNode& elementOrDocument, RenderStyle&& style, OptionSet<TypeFlag> flags, TypeSpecificFlags typeSpecificFlags)
+    : RenderObject(type, elementOrDocument, flags, typeSpecificFlags)
     , m_firstChild(nullptr)
     , m_ancestorLineBoxDirty(false)
     , m_hasInitializedStyle(false)
@@ -140,13 +141,13 @@ inline RenderElement::RenderElement(Type type, ContainerNode& elementOrDocument,
     ASSERT(RenderObject::isRenderElement());
 }
 
-RenderElement::RenderElement(Type type, Element& element, RenderStyle&& style, OptionSet<RenderElementType> baseTypeFlags)
-    : RenderElement(type, static_cast<ContainerNode&>(element), WTFMove(style), baseTypeFlags)
+RenderElement::RenderElement(Type type, Element& element, RenderStyle&& style, OptionSet<TypeFlag> baseTypeFlags, TypeSpecificFlags typeSpecificFlags)
+    : RenderElement(type, static_cast<ContainerNode&>(element), WTFMove(style), baseTypeFlags, typeSpecificFlags)
 {
 }
 
-RenderElement::RenderElement(Type type, Document& document, RenderStyle&& style, OptionSet<RenderElementType> baseTypeFlags)
-    : RenderElement(type, static_cast<ContainerNode&>(document), WTFMove(style), baseTypeFlags)
+RenderElement::RenderElement(Type type, Document& document, RenderStyle&& style, OptionSet<TypeFlag> baseTypeFlags, TypeSpecificFlags typeSpecificFlags)
+    : RenderElement(type, static_cast<ContainerNode&>(document), WTFMove(style), baseTypeFlags, typeSpecificFlags)
 {
 }
 
@@ -780,7 +781,13 @@ void RenderElement::propagateStyleToAnonymousChildren(StylePropagationType propa
         if (is<RenderFragmentedFlow>(elementChild.get()))
             continue;
 
-        auto newStyle = RenderStyle::createAnonymousStyleWithDisplay(style(), elementChild->style().display());
+        auto newStyle = [&] {
+            auto display = elementChild->style().display();
+            if (display == DisplayType::RubyBase || display == DisplayType::Ruby)
+                return createAnonymousStyleForRuby(style(), display);
+            return RenderStyle::createAnonymousStyleWithDisplay(style(), display);
+        }();
+
         if (style().specifiesColumns()) {
             if (elementChild->style().specifiesColumns())
                 newStyle.inheritColumnPropertiesFrom(style());
@@ -1019,7 +1026,7 @@ void RenderElement::styleDidChange(StyleDifference diff, const RenderStyle* oldS
     bool shouldCheckIfInAncestorChain = false;
     if (frame().settings().cssScrollAnchoringEnabled() && (style().outOfFlowPositionStyleDidChange(oldStyle) || (shouldCheckIfInAncestorChain = style().scrollAnchoringSuppressionStyleDidChange(oldStyle)))) {
         LOG_WITH_STREAM(ScrollAnchoring, stream << "RenderElement::styleDidChange() found node with style change: " << *this << " from: " << oldStyle->position() <<" to: " << style().position());
-        auto* controller = findScrollAnchoringControllerForRenderer(*this);
+        auto* controller = searchParentChainForScrollAnchoringController(*this);
         if (controller && (!shouldCheckIfInAncestorChain || (shouldCheckIfInAncestorChain && controller->isInScrollAnchoringAncestorChain(*this))))
             controller->notifyChildHadSuppressingStyleChange();
     }
@@ -2052,7 +2059,7 @@ ImageOrientation RenderElement::imageOrientation() const
 
 void RenderElement::adjustFragmentedFlowStateOnContainingBlockChangeIfNeeded(const RenderStyle& oldStyle, const RenderStyle& newStyle)
 {
-    if (fragmentedFlowState() == NotInsideFragmentedFlow)
+    if (fragmentedFlowState() == FragmentedFlowState::NotInsideFlow)
         return;
 
     // Make sure we invalidate the containing block cache for flows when the contianing block context changes
@@ -2084,7 +2091,7 @@ void RenderElement::adjustFragmentedFlowStateOnContainingBlockChangeIfNeeded(con
 
 void RenderElement::removeFromRenderFragmentedFlow()
 {
-    ASSERT(fragmentedFlowState() != NotInsideFragmentedFlow);
+    ASSERT(fragmentedFlowState() != FragmentedFlowState::NotInsideFlow);
     // Sometimes we remove the element from the flow, but it's not destroyed at that time.
     // It's only until later when we actually destroy it and remove all the children from it.
     // Currently, that happens for firstLetter elements and list markers.
@@ -2105,7 +2112,7 @@ void RenderElement::removeFromRenderFragmentedFlowIncludingDescendants(bool shou
             continue;
         }
         if (shouldUpdateState)
-            child->setFragmentedFlowState(NotInsideFragmentedFlow);
+            child->setFragmentedFlowState(FragmentedFlowState::NotInsideFlow);
     }
 
     // We have to ask for our containing flow thread as it may be above the removed sub-tree.
@@ -2113,7 +2120,7 @@ void RenderElement::removeFromRenderFragmentedFlowIncludingDescendants(bool shou
     while (enclosingFragmentedFlow) {
         enclosingFragmentedFlow->removeFlowChildInfo(*this);
 
-        if (enclosingFragmentedFlow->fragmentedFlowState() == NotInsideFragmentedFlow)
+        if (enclosingFragmentedFlow->fragmentedFlowState() == FragmentedFlowState::NotInsideFlow)
             break;
         auto* parent = enclosingFragmentedFlow->parent();
         if (!parent)
@@ -2124,7 +2131,7 @@ void RenderElement::removeFromRenderFragmentedFlowIncludingDescendants(bool shou
         downcast<RenderBlock>(*this).setCachedEnclosingFragmentedFlowNeedsUpdate();
 
     if (shouldUpdateState)
-        setFragmentedFlowState(NotInsideFragmentedFlow);
+        setFragmentedFlowState(FragmentedFlowState::NotInsideFlow);
 }
 
 void RenderElement::resetEnclosingFragmentedFlowAndChildInfoIncludingDescendants(RenderFragmentedFlow* fragmentedFlow)

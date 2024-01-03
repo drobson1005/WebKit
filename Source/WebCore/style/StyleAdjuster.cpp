@@ -337,10 +337,11 @@ OptionSet<EventListenerRegionType> Adjuster::computeEventListenerRegionTypes(con
 #endif
 
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
-    if (document.page() && document.page()->shouldBuildInteractionRegions() && eventTarget.isNode()) {
-        const auto& node = downcast<Node>(eventTarget);
-        if (node.willRespondToMouseClickEventsWithEditability(node.computeEditabilityForMouseClickEvents(&style)))
-            types.add(EventListenerRegionType::MouseClick);
+    if (document.page() && document.page()->shouldBuildInteractionRegions()) {
+        if (const auto* node = dynamicDowncast<Node>(eventTarget)) {
+            if (node->willRespondToMouseClickEventsWithEditability(node->computeEditabilityForMouseClickEvents(&style)))
+                types.add(EventListenerRegionType::MouseClick);
+        }
     }
 #else
     UNUSED_PARAM(document);
@@ -561,7 +562,7 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
             style.setTextSecurity(style.inputSecurity() == InputSecurity::Auto ? TextSecurity::Disc : TextSecurity::None);
 
         // Disallow -webkit-user-modify on :pseudo and ::pseudo elements.
-        if (!m_element->shadowPseudoId().isNull())
+        if (!m_element->pseudo().isNull())
             style.setUserModify(UserModify::ReadOnly);
 
         if (is<HTMLMarqueeElement>(*m_element)) {

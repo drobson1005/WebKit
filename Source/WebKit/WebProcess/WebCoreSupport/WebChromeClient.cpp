@@ -162,7 +162,7 @@ using namespace WebCore;
 using namespace HTMLNames;
 
 AXRelayProcessSuspendedNotification::AXRelayProcessSuspendedNotification(Ref<WebPage> page, AutomaticallySend automaticallySend)
-    : m_page(page)
+    : m_page(page.get())
     , m_automaticallySend(automaticallySend)
 {
     if (m_automaticallySend == AutomaticallySend::Yes)
@@ -318,13 +318,14 @@ Page* WebChromeClient::createWindow(LocalFrame& frame, const WindowFeatures& win
         modifiersForNavigationAction(navigationAction),
         mouseButton(navigationAction),
         syntheticClickType(navigationAction),
-        webProcess.userGestureTokenIdentifier(navigationAction.userGestureToken()),
+        webProcess.userGestureTokenIdentifier(navigationAction.requester()->pageID, navigationAction.userGestureToken()),
         navigationAction.userGestureToken() ? navigationAction.userGestureToken()->authorizationToken() : std::nullopt,
         protectedPage()->canHandleRequest(navigationAction.originalRequest()),
         navigationAction.shouldOpenExternalURLsPolicy(),
         navigationAction.downloadAttribute(),
         mouseEventData ? mouseEventData->locationInRootViewCoordinates : FloatPoint { },
         { }, /* redirectResponse */
+        navigationAction.isRequestFromClientOrUserInput(),
         false, /* treatAsSameOriginNavigation */
         false, /* hasOpenedFrames */
         false, /* openedByDOMWithOpener */
@@ -1467,8 +1468,6 @@ void WebChromeClient::handleAutoplayEvent(AutoplayEvent event, OptionSet<Autopla
     protectedPage()->send(Messages::WebPageProxy::HandleAutoplayEvent(event, flags));
 }
 
-#if ENABLE(WEB_CRYPTO)
-
 bool WebChromeClient::wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey) const
 {
     auto sendResult = WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::WrapCryptoKey(key), page().identifier());
@@ -1490,8 +1489,6 @@ bool WebChromeClient::unwrapCryptoKey(const Vector<uint8_t>& wrappedKey, Vector<
     std::tie(succeeded, key) = sendResult.takeReply();
     return succeeded;
 }
-
-#endif
 
 #if ENABLE(APP_HIGHLIGHTS)
 void WebChromeClient::storeAppHighlight(WebCore::AppHighlight&& highlight) const

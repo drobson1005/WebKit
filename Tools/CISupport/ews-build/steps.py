@@ -1,4 +1,4 @@
-# Copyright (C) 2018-2023 Apple Inc. All rights reserved.
+# Copyright (C) 2018-2024 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -35,7 +35,7 @@ from .layout_test_failures import LayoutTestFailures
 from .send_email import send_email_to_patch_author, send_email_to_bot_watchers, send_email_to_github_admin, FROM_EMAIL
 from .results_db import ResultsDatabase
 from .twisted_additions import TwistedAdditions
-from .utils import load_password
+from .utils import load_password, get_custom_suffix
 
 import json
 import mock
@@ -49,13 +49,15 @@ if sys.version_info < (3, 5):
     print('ERROR: Please use Python 3. This code is not compatible with Python 2.')
     sys.exit(1)
 
-custom_suffix = '-uat' if load_password('BUILDBOT_UAT') else ''
+custom_suffix = get_custom_suffix()
 BUG_SERVER_URL = 'https://bugs.webkit.org/'
 COMMITS_INFO_URL = 'https://commits.webkit.org/'
 S3URL = 'https://s3-us-west-2.amazonaws.com/'
-S3_RESULTS_URL = 'https://ews-build{}.s3-us-west-2.amazonaws.com/'.format(custom_suffix)
+S3_BUCKET = f'ews-archives.webkit{custom_suffix}.org'
+S3_RESULTS_URL = f'https://ews-build{custom_suffix}.s3-us-west-2.amazonaws.com/'
 CURRENT_HOSTNAME = socket.gethostname().strip()
-EWS_BUILD_HOSTNAME = 'ews-build.webkit.org'
+EWS_BUILD_HOSTNAMES = ['ews-build.webkit.org', 'ews-build']
+TESTING_ENVIRONMENT_HOSTNAMES = ['ews-build.webkit-uat.org', 'ews-build-uat', 'ews-build.webkit-dev.org', 'ews-build-dev']
 EWS_URL = 'https://ews.webkit.org/'
 RESULTS_DB_URL = 'https://results.webkit.org/'
 RESULTS_SERVER_API_KEY = 'RESULTS_SERVER_API_KEY'
@@ -2101,8 +2103,8 @@ class ValidateCommitterAndReviewer(buildstep.BuildStep, GitHubMixin, AddToLogMix
 
 class DetermineLabelOwner(buildstep.BuildStep, GitHubMixin, AddToLogMixin):
     name = 'determine-label-owner'
-    flunkOnFailure = False
-    haltOnFailure = False
+    flunkOnFailure = True
+    haltOnFailure = True
 
     @defer.inlineCallbacks
     def run(self):
@@ -2178,7 +2180,7 @@ class SetCommitQueueMinusFlagOnPatch(buildstep.BuildStep, BugzillaMixin):
         build_finish_summary = self.getProperty('build_finish_summary', None)
 
         rc = SKIPPED
-        if CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME:
+        if CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES:
             rc = yield self.set_cq_minus_flag_on_patch(patch_id)
         if build_finish_summary:
             self.build.buildFinished([build_finish_summary], FAILURE)
@@ -2210,7 +2212,7 @@ class BlockPullRequest(buildstep.BuildStep, GitHubMixin, AddToLogMixin):
         repository_url = self.getProperty('repository', '')
         pr_json = yield self.get_pr_json(pr_number, repository_url)
 
-        if CURRENT_HOSTNAME != EWS_BUILD_HOSTNAME:
+        if CURRENT_HOSTNAME not in EWS_BUILD_HOSTNAMES:
             yield self._addToLog('stdio', 'Skipping this step on non-production instance.\n')
         else:
             is_hash_outdated = yield self._is_hash_outdated(pr_json)
@@ -2304,7 +2306,7 @@ class RemoveLabelsFromPullRequest(buildstep.BuildStep, GitHubMixin, AddToLogMixi
         return buildstep.BuildStep.getResultSummary(self)
 
     def doStepIf(self, step):
-        return self.getProperty('github.number') and CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME
+        return self.getProperty('github.number') and CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES
 
     def hideStepIf(self, results, step):
         return not self.doStepIf(step)
@@ -2690,7 +2692,7 @@ class LeaveComment(buildstep.BuildStep, BugzillaMixin, GitHubMixin):
         return buildstep.BuildStep.getResultSummary(self)
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES
 
 
 class UnApplyPatch(CleanWorkingDirectory):
@@ -3121,20 +3123,22 @@ class BuildLogLineObserver(ParseByLineLogObserver):
             self.error_context_buffer = []
 
 
-class CompileWebKit(shell.Compile, AddToLogMixin):
+class CompileWebKit(shell.Compile, AddToLogMixin, ShellMixin):
     name = 'compile-webkit'
     description = ['compiling']
     descriptionDone = ['Compiled WebKit']
     env = {'MFLAGS': ''}
     warningPattern = '.*arning: .*'
     haltOnFailure = False
-    command = ['perl', 'Tools/Scripts/build-webkit', WithProperties('--%(configuration)s')]
+    build_command = ['perl', 'Tools/Scripts/build-webkit', WithProperties('--%(configuration)s')]
+    filter_command = ['perl', 'Tools/Scripts/filter-build-webkit', '-logfile', 'build-log.txt']
     VALID_ADDITIONAL_ARGUMENTS_LIST = []  # If additionalArguments is added to config.json for CompileWebKit step, it should be added here as well.
+    APPLE_PLATFORMS = ('mac', 'ios', 'tvos', 'watchos')
 
     def __init__(self, skipUpload=False, **kwargs):
         self.skipUpload = skipUpload
         self.cancelled_due_to_huge_logs = False
-        super().__init__(logEnviron=False, **kwargs)
+        super().__init__(timeout=60 * 60, logEnviron=False, **kwargs)
 
     def doStepIf(self, step):
         return not (self.getProperty('fast_commit_queue') and self.getProperty('buildername', '').lower() == 'commit-queue')
@@ -3149,31 +3153,40 @@ class CompileWebKit(shell.Compile, AddToLogMixin):
         else:
             self.addLogObserver('stdio', BuildLogLineObserver(self.errorReceived, thresholdExceedCallBack=self.handleExcessiveLogging))
 
+        build_command = [part.getRenderingFor(self.build) if isinstance(part, WithProperties) else part for part in self.build_command]
+
         additionalArguments = self.getProperty('additionalArguments')
         for additionalArgument in (additionalArguments or []):
             if additionalArgument in self.VALID_ADDITIONAL_ARGUMENTS_LIST:
-                self.command += [additionalArgument]
-        if platform in ('mac', 'ios', 'tvos', 'watchos'):
+                build_command += [additionalArgument]
+        if platform in self.APPLE_PLATFORMS:
             # FIXME: Once WK_VALIDATE_DEPENDENCIES is set via xcconfigs, it can
             # be removed here. We can't have build-webkit pass this by default
             # without invalidating local builds made by Xcode, and we set it
             # via xcconfigs until all building of Xcode-based webkit is done in
             # workspaces (rdar://88135402).
             if architecture:
-                self.setCommand(self.command + ['--architecture', architecture])
-            self.setCommand(self.command + ['WK_VALIDATE_DEPENDENCIES=YES'])
+                build_command += ['--architecture', f'"{architecture}"']
+            if CompileJSC.name not in self.name:
+                build_command += ['-hideShellScriptEnvironment']
+            build_command += ['WK_VALIDATE_DEPENDENCIES=YES']
             if buildOnly:
                 # For build-only bots, the expectation is that tests will be run on separate machines,
                 # so we need to package debug info as dSYMs. Only generating line tables makes
                 # this much faster than full debug info, and crash logs still have line numbers.
                 # Some projects (namely lldbWebKitTester) require full debug info, and may override this.
-                self.setCommand(self.command + ['DEBUG_INFORMATION_FORMAT=dwarf-with-dsym'])
-                self.setCommand(self.command + ['CLANG_DEBUG_INFORMATION_LEVEL=$(WK_OVERRIDE_DEBUG_INFORMATION_LEVEL:default=line-tables-only)'])
+                build_command += ['DEBUG_INFORMATION_FORMAT=dwarf-with-dsym', 'CLANG_DEBUG_INFORMATION_LEVEL=$(WK_OVERRIDE_DEBUG_INFORMATION_LEVEL:default=line-tables-only)']
         if platform == 'gtk':
             prefix = os.path.join("/app", "webkit", "WebKitBuild", self.getProperty("configuration"), "install")
-            self.setCommand(self.command + [f'--prefix={prefix}'])
+            build_command += [f'--prefix={prefix}']
 
-        self.setCommand(self.command + customBuildFlag(platform, self.getProperty('fullPlatform')))
+        build_command += customBuildFlag(platform, self.getProperty('fullPlatform'))
+
+        # filter-build-webkit is specifically designed for Xcode and doesn't work generally
+        if platform in self.APPLE_PLATFORMS:
+            self.setCommand(self.shell_command(f"{' '.join(build_command)} 2>&1 | {' '.join(self.filter_command)}"))
+        else:
+            self.setCommand(build_command)
 
         return shell.Compile.start(self)
 
@@ -3187,9 +3200,26 @@ class CompileWebKit(shell.Compile, AddToLogMixin):
         self.build.stopBuild(reason=MSG_FOR_EXCESSIVE_LOGS, results=FAILURE)
         self.build.buildFinished([MSG_FOR_EXCESSIVE_LOGS], FAILURE)
 
+    def follow_up_steps(self):
+        if self.getProperty('platform') in self.APPLE_PLATFORMS and CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES + TESTING_ENVIRONMENT_HOSTNAMES:
+            return [
+                GenerateS3URL(
+                    f"{self.getProperty('fullPlatform')}-{self.getProperty('architecture')}-{self.getProperty('configuration')}-{self.name}",
+                    extension='txt',
+                    content_type='text/plain',
+                ), UploadFileToS3(
+                    'build-log.txt',
+                    links={self.name: 'Full build log'},
+                    content_type='text/plain',
+                )
+            ]
+        return []
+
     def evaluateCommand(self, cmd):
+        steps_to_add = self.follow_up_steps()
+
         if cmd.didFail():
-            steps_to_add = [UnApplyPatch(), RevertPullRequestChanges(), ValidateChange(verifyBugClosed=False, addURLs=False)]
+            steps_to_add += [UnApplyPatch(), RevertPullRequestChanges(), ValidateChange(verifyBugClosed=False, addURLs=False)]
             platform = self.getProperty('platform')
             if platform == 'wpe':
                 steps_to_add.append(InstallWpeDependencies())
@@ -3200,16 +3230,17 @@ class CompileWebKit(shell.Compile, AddToLogMixin):
             else:
                 steps_to_add.append(CompileWebKitWithoutChange())
             steps_to_add.append(AnalyzeCompileWebKitResults())
-            # Using a single addStepsAfterCurrentStep because of https://github.com/buildbot/buildbot/issues/4874
-            self.build.addStepsAfterCurrentStep(steps_to_add)
         else:
             triggers = self.getProperty('triggers', None)
             if triggers or not self.skipUpload:
-                steps_to_add = [ArchiveBuiltProduct()]
-                if CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME:
-                    steps_to_add.extend([GenerateS3URL(), UploadFileToS3()])
+                steps_to_add += [ArchiveBuiltProduct()]
+                if CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES + TESTING_ENVIRONMENT_HOSTNAMES:
+                    steps_to_add.extend([
+                        GenerateS3URL(f"{self.getProperty('fullPlatform')}-{self.getProperty('architecture')}-{self.getProperty('configuration')}"),
+                        UploadFileToS3(f"WebKitBuild/{self.getProperty('configuration')}.zip", links={self.name: 'Archive'}),
+                    ])
                 else:
-                    # S3 might not be configured on uat or local instances, achieve similar functionality without S3.
+                    # S3 might not be configured on local instances, achieve similar functionality without S3.
                     steps_to_add.extend([UploadBuiltProduct()])
                 if triggers:
                     steps_to_add.append(Trigger(
@@ -3217,7 +3248,9 @@ class CompileWebKit(shell.Compile, AddToLogMixin):
                         patch=bool(self.getProperty('patch_id')),
                         pull_request=bool(self.getProperty('github.number')),
                     ))
-                self.build.addStepsAfterCurrentStep(steps_to_add)
+
+        # Using a single addStepsAfterCurrentStep because of https://github.com/buildbot/buildbot/issues/4874
+        self.build.addStepsAfterCurrentStep(steps_to_add)
 
         return super().evaluateCommand(cmd)
 
@@ -3243,6 +3276,9 @@ class CompileWebKitWithoutChange(CompileWebKit):
 
     def evaluateCommand(self, cmd):
         rc = shell.Compile.evaluateCommand(self, cmd)
+
+        self.build.addStepsAfterCurrentStep(self.follow_up_steps())
+
         if rc == FAILURE and self.retry_build_on_failure:
             message = 'Unable to build WebKit without change, retrying build'
             self.descriptionDone = message
@@ -3462,7 +3498,7 @@ class AnalyzeCompileWebKitResults(buildstep.BuildStep, BugzillaMixin, GitHubMixi
 class CompileJSC(CompileWebKit):
     name = 'compile-jsc'
     descriptionDone = ['Compiled JSC']
-    command = ['perl', 'Tools/Scripts/build-jsc', WithProperties('--%(configuration)s')]
+    build_command = ['perl', 'Tools/Scripts/build-jsc', WithProperties('--%(configuration)s')]
 
     def start(self):
         self.setProperty('group', 'jsc')
@@ -3637,7 +3673,7 @@ class AnalyzeJSCTestsResults(buildstep.BuildStep, AddToLogMixin):
             # If we've made it here, then jsc-tests and re-run-jsc-tests failed, which means
             # there should have been some test failures. Otherwise there is some unexpected issue.
             clean_tree_run_status = self.getProperty('clean_tree_run_status', FAILURE)
-            if clean_tree_run_status == SUCCESS:
+            if clean_tree_run_status in [SUCCESS, WARNINGS]:
                 return self.report_failure(set(), set())
             # TODO: email EWS admins
             return self.retry_build('Unexpected infrastructure issue, retrying build')
@@ -4017,6 +4053,16 @@ class RunWebKitTests(shell.Test, AddToLogMixin):
                     KillOldProcesses(),
                     ReRunWebKitTests(),
                 ]
+            else:
+                steps_to_add += [
+                    UnApplyPatch(),
+                    RevertPullRequestChanges(),
+                    ValidateChange(verifyBugClosed=False, addURLs=False),
+                    CompileWebKitWithoutChange(retry_build_on_failure=True),
+                    ValidateChange(verifyBugClosed=False, addURLs=False),
+                    KillOldProcesses(),
+                    RunWebKitTestsWithoutChange(),
+                ]
             self.build.addStepsAfterCurrentStep(steps_to_add)
 
         return rc
@@ -4234,7 +4280,7 @@ class RunWebKitTestsWithoutChange(RunWebKitTests):
 
     def setLayoutTestCommand(self):
         super().setLayoutTestCommand()
-        if CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME and self.getProperty('github.base.ref', DEFAULT_BRANCH) == DEFAULT_BRANCH:
+        if CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES and self.getProperty('github.base.ref', DEFAULT_BRANCH) == DEFAULT_BRANCH:
             self.setCommand(
                 self.command + [
                     '--builder-name', self.getProperty('buildername', ''),
@@ -4464,7 +4510,7 @@ class AnalyzeLayoutTestsResults(buildstep.BuildStep, BugzillaMixin, GitHubMixin)
             # If we've made it here, then layout-tests and re-run-layout-tests failed, which means
             # there should have been some test failures. Otherwise there is some unexpected issue.
             clean_tree_run_status = self.getProperty('clean_tree_run_status', FAILURE)
-            if clean_tree_run_status == SUCCESS:
+            if clean_tree_run_status in [SUCCESS, WARNINGS]:
                 rc = yield self.report_failure(set())
                 return defer.returnValue(rc)
             self.send_email_for_infrastructure_issue('Both first and second layout-test runs with patch generated no list of results but exited with error, and the clean_tree without change retry also failed.')
@@ -4924,47 +4970,80 @@ class UploadBuiltProduct(transfer.FileUpload):
 class UploadFileToS3(shell.ShellCommandNewStyle, AddToLogMixin):
     name = 'upload-file-to-s3'
     descriptionDone = name
-    haltOnFailure = False
-    flunkOnFailure = False
+    haltOnFailure = True
+    flunkOnFailure = True
 
-    def __init__(self, **kwargs):
-        super().__init__(timeout=30 * 60, logEnviron=False, **kwargs)
+    def __init__(self, file, links=None, content_type=None, **kwargs):
+        super().__init__(timeout=31 * 60, logEnviron=False, **kwargs)
+        self.file = file
+        self.links = links or dict()
+        self.content_type = content_type
+
+    def getLastBuildStepByName(self, name):
+        for step in reversed(self.build.executedSteps):
+            if name in step.name:
+                return step
+        return None
 
     @defer.inlineCallbacks
     def run(self):
         s3url = self.build.s3url
-        steps_to_add = [UploadBuiltProduct(), TransferToS3()]
         if not s3url:
             rc = FAILURE
             yield self._addToLog('stdio', f'Failed to get s3url: {s3url}')
-            self.build.addStepsAfterCurrentStep(steps_to_add)
             return defer.returnValue(rc)
 
         self.env = dict(UPLOAD_URL=s3url)
-        configuration = self.getProperty('configuration')
-        workersrc = f'WebKitBuild/{configuration}.zip'
 
-        self.command = ['python3', 'Tools/Scripts/upload-file-to-url', '--filename', workersrc]
+        self.command = [
+            'python3', 'Tools/Scripts/upload-file-to-url',
+            '--filename', self.file,
+        ]
+        if self.content_type:
+            self.command += ['--content-type', self.content_type]
+
         rc = yield super().run()
-        if rc in [FAILURE, EXCEPTION]:
-            self.build.addStepsAfterCurrentStep(steps_to_add)
+
+        if rc in [SUCCESS, WARNINGS] and getattr(self.build, 's3_archives', None):
+            for step_name, message in self.links.items():
+                step = self.getLastBuildStepByName(step_name)
+                if not step:
+                    continue
+                step.addURL(message, self.build.s3_archives[-1])
+
         return defer.returnValue(rc)
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES + TESTING_ENVIRONMENT_HOSTNAMES
+
+    def getResultSummary(self):
+        if self.results == FAILURE:
+            return {'step': 'Failed to upload archive to S3. Please inform an admin.'}
+        if self.results == SKIPPED:
+            return {'step': 'Skipped upload to S3'}
+        if self.results in [SUCCESS, WARNINGS]:
+            return {'step': 'Uploaded archive to S3'}
+        return super().getResultSummary()
 
 
 class GenerateS3URL(master.MasterShellCommandNewStyle):
     name = 'generate-s3-url'
     descriptionDone = ['Generated S3 URL']
-    identifier = WithProperties('%(fullPlatform)s-%(architecture)s-%(configuration)s')
-    change_id = WithProperties('%(change_id)s')
-    command = ['python3', '../Shared/generate-s3-url', '--change-id', change_id, '--identifier', identifier]
     haltOnFailure = False
     flunkOnFailure = False
 
-    def __init__(self, **kwargs):
-        kwargs['command'] = self.command
+    def __init__(self, identifier, extension='zip', content_type=None, **kwargs):
+        self.identifier = identifier
+        self.extension = extension
+        kwargs['command'] = [
+            'python3', '../Shared/generate-s3-url',
+            '--change-id', WithProperties('%(change_id)s'),
+            '--identifier', self.identifier,
+        ]
+        if extension:
+            kwargs['command'] += ['--extension', extension]
+        if content_type:
+            kwargs['command'] += ['--content-type', content_type]
         super().__init__(logEnviron=False, **kwargs)
 
     @defer.inlineCallbacks
@@ -4974,15 +5053,19 @@ class GenerateS3URL(master.MasterShellCommandNewStyle):
 
         rc = yield super().run()
 
+        self.build.s3url = ''
+        if not getattr(self.build, 's3_archives', None):
+            self.build.s3_archives = []
+
         log_text = self.log_observer.getStdout() + self.log_observer.getStderr()
         match = re.search(r'S3 URL: (?P<url>[^\s]+)', log_text)
         # Sample log: S3 URL: https://s3-us-west-2.amazonaws.com/ews-archives.webkit.org/ios-simulator-12-x86_64-release/123456.zip
 
-        self.build.s3url = ''
         build_url = f'{self.master.config.buildbotURL}#/builders/{self.build._builderid}/builds/{self.build.number}'
         if match:
             self.build.s3url = match.group('url')
             print(f'build: {build_url}, url for GenerateS3URL: {self.build.s3url}')
+            self.build.s3_archives.append(S3URL + f"{S3_BUCKET}/{self.identifier}/{self.getProperty('change_id')}.{self.extension}")
             defer.returnValue(rc)
         else:
             print(f'build: {build_url}, logs for GenerateS3URL:\n{log_text}')
@@ -4992,7 +5075,7 @@ class GenerateS3URL(master.MasterShellCommandNewStyle):
         return results == SUCCESS
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES + TESTING_ENVIRONMENT_HOSTNAMES
 
     def getResultSummary(self):
         if self.results == FAILURE:
@@ -5031,7 +5114,7 @@ class TransferToS3(master.MasterShellCommandNewStyle):
         defer.returnValue(rc)
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES + TESTING_ENVIRONMENT_HOSTNAMES
 
     def hideStepIf(self, results, step):
         return results == SUCCESS and self.getProperty('sensitive', False)
@@ -5043,9 +5126,11 @@ class TransferToS3(master.MasterShellCommandNewStyle):
 
 
 class DownloadBuiltProduct(shell.ShellCommand):
-    command = ['python3', 'Tools/CISupport/download-built-product',
-               WithProperties('--%(configuration)s'),
-               WithProperties(S3URL + 'ews-archives.webkit.org/%(fullPlatform)s-%(architecture)s-%(configuration)s/%(change_id)s.zip')]
+    command = [
+        'python3', 'Tools/CISupport/download-built-product',
+        WithProperties('--%(configuration)s'),
+        WithProperties(S3URL + S3_BUCKET + '/%(fullPlatform)s-%(architecture)s-%(configuration)s/%(change_id)s.zip'),
+    ]
     name = 'download-built-product'
     description = ['downloading built product']
     descriptionDone = ['Downloaded built product']
@@ -5060,8 +5145,8 @@ class DownloadBuiltProduct(shell.ShellCommand):
         super().__init__(logEnviron=False, **kwargs)
 
     def start(self):
-        # Only try to download from S3 on the official deployment <https://webkit.org/b/230006>
-        if CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME:
+        # Only try to download from S3 on the official deployments <https://webkit.org/b/230006>
+        if CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES + TESTING_ENVIRONMENT_HOSTNAMES:
             return shell.ShellCommand.start(self)
         self.build.addStepsAfterCurrentStep([DownloadBuiltProductFromMaster()])
         self.finished(SKIPPED)
@@ -5780,7 +5865,7 @@ class PushCommitToWebKitRepo(shell.ShellCommand):
         return shell.ShellCommand.getResultSummary(self)
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES
 
     def hash_from_commit_text(self, commit_text):
         match = self.HASH_RE.search(commit_text)
@@ -6427,7 +6512,7 @@ class PushPullRequestBranch(shell.ShellCommandNewStyle):
         return super().getResultSummary()
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME and self.getProperty('github.number') and self.getProperty('github.head.ref') and self.getProperty('github.head.repo.full_name')
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES and self.getProperty('github.number') and self.getProperty('github.head.ref') and self.getProperty('github.head.repo.full_name')
 
     def hideStepIf(self, results, step):
         return not self.doStepIf(step)
@@ -6537,7 +6622,7 @@ class UpdatePullRequest(shell.ShellCommandNewStyle, GitHubMixin, AddToLogMixin):
         return defer.returnValue(rc)
 
     def doStepIf(self, step):
-        return CURRENT_HOSTNAME == EWS_BUILD_HOSTNAME and self.getProperty('github.number')
+        return CURRENT_HOSTNAME in EWS_BUILD_HOSTNAMES and self.getProperty('github.number')
 
     def hideStepIf(self, results, step):
         return not self.doStepIf(step)

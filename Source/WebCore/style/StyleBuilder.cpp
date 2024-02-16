@@ -39,11 +39,13 @@
 #include "CSSValuePool.h"
 #include "CustomPropertyRegistry.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "HTMLElement.h"
 #include "PaintWorkletGlobalScope.h"
-#include "RenderStyle.h"
+#include "RenderStyleInlines.h"
 #include "Settings.h"
 #include "StyleBuilderGenerated.h"
+#include "StyleCustomPropertyData.h"
 #include "StyleFontSizeFunctions.h"
 #include "StylePropertyShorthand.h"
 
@@ -387,6 +389,48 @@ Ref<CSSValue> Builder::resolveVariableReferences(CSSPropertyID propertyID, CSSVa
         return CSSPrimitiveValue::create(CSSValueUnset);
 
     return *variableValue;
+}
+
+RefPtr<const CSSCustomPropertyValue> Builder::resolveCustomPropertyForContainerQueries(const CSSCustomPropertyValue& value)
+{
+    if (value.containsCSSWideKeyword()) {
+        auto name = value.name();
+        auto* registered = m_state.document().customPropertyRegistry().get(name);
+        bool isInherited = !registered || registered->inherits;
+
+        auto initial = [&]() -> RefPtr<const CSSCustomPropertyValue> {
+            if (registered)
+                return registered->initialValue;
+            return nullptr;
+        };
+
+        auto inherit = [&]() -> RefPtr<const CSSCustomPropertyValue> {
+            auto parentValue = isInherited
+                ? m_state.parentStyle().inheritedCustomProperties().get(name)
+                : m_state.parentStyle().nonInheritedCustomProperties().get(name);
+            if (parentValue)
+                return parentValue;
+
+            return initial();
+        };
+
+        auto valueId = std::get<CSSValueID>(value.value());
+        switch (valueId) {
+        case CSSValueInitial:
+            return initial();
+        case CSSValueInherit:
+            return inherit();
+        case CSSValueUnset:
+            return isInherited ? inherit() : initial();
+        case CSSValueRevert:
+        case CSSValueRevertLayer:
+            return nullptr;
+        default:
+            ASSERT_NOT_REACHED();
+            return nullptr;
+        }
+    }
+    return resolveCustomPropertyValue(const_cast<CSSCustomPropertyValue&>(value));
 }
 
 RefPtr<CSSCustomPropertyValue> Builder::resolveCustomPropertyValue(CSSCustomPropertyValue& value)

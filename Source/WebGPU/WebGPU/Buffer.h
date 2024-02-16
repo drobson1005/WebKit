@@ -32,16 +32,18 @@
 #import <wtf/RangeSet.h>
 #import <wtf/Ref.h>
 #import <wtf/RefCounted.h>
+#import <wtf/WeakPtr.h>
 
 struct WGPUBufferImpl {
 };
 
 namespace WebGPU {
 
+class CommandEncoder;
 class Device;
 
 // https://gpuweb.github.io/gpuweb/#gpubuffer
-class Buffer : public WGPUBufferImpl, public RefCounted<Buffer> {
+class Buffer : public WGPUBufferImpl, public RefCounted<Buffer>, public CanMakeWeakPtr<Buffer> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     enum class State : uint8_t;
@@ -68,7 +70,7 @@ public:
     void unmap();
     void setLabel(String&&);
 
-    bool isValid() const { return m_buffer; }
+    bool isValid() const;
 
     // https://gpuweb.github.io/gpuweb/#buffer-state
     enum class State : uint8_t {
@@ -86,10 +88,13 @@ public:
 
     Device& device() const { return m_device; }
     bool isDestroyed() const;
+    void setCommandEncoder(CommandEncoder&, bool mayModifyBuffer = false) const;
+    uint32_t maxIndex(MTLIndexType) const;
 
 private:
     Buffer(id<MTLBuffer>, uint64_t size, WGPUBufferUsageFlags, State initialState, MappingRange initialMappingRange, Device&);
     Buffer(Device&);
+    void recomputeMaxIndexValues() const;
 
     bool validateGetMappedRange(size_t offset, size_t rangeSize) const;
     NSString* errorValidatingMapAsync(WGPUMapModeFlags, size_t offset, size_t rangeSize) const;
@@ -107,9 +112,11 @@ private:
     using MappedRanges = RangeSet<Range<size_t>>;
     MappedRanges m_mappedRanges;
     WGPUMapModeFlags m_mapMode { WGPUMapMode_None };
-    Vector<uint8_t> m_emptyBuffer;
 
     const Ref<Device> m_device;
+    mutable WeakPtr<CommandEncoder> m_commandEncoder;
+    mutable uint16_t m_max16BitIndex { 0 };
+    mutable uint32_t m_max32BitIndex { 0 };
 };
 
 } // namespace WebGPU

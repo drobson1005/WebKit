@@ -26,7 +26,6 @@
 #include "config.h"
 #include "WebSWContextManagerConnection.h"
 
-#include "DataReference.h"
 #include "FormDataReference.h"
 #include "Logging.h"
 #include "NetworkConnectionToWebProcessMessages.h"
@@ -43,7 +42,6 @@
 #include "WebCookieJar.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebDatabaseProvider.h"
-#include "WebDocumentLoader.h"
 #include "WebLocalFrameLoaderClient.h"
 #include "WebMessagePortChannelProvider.h"
 #include "WebNotificationClient.h"
@@ -290,7 +288,7 @@ void WebSWContextManagerConnection::fireActivateEvent(ServiceWorkerIdentifier id
         serviceWorkerThreadProxy->fireActivateEvent();
 }
 
-void WebSWContextManagerConnection::firePushEvent(ServiceWorkerIdentifier identifier, const std::optional<IPC::DataReference>& ipcData, std::optional<NotificationPayload>&& proposedPayload, CompletionHandler<void(bool, std::optional<NotificationPayload>&&)>&& callback)
+void WebSWContextManagerConnection::firePushEvent(ServiceWorkerIdentifier identifier, std::optional<std::span<const uint8_t>> ipcData, std::optional<NotificationPayload>&& proposedPayload, CompletionHandler<void(bool, std::optional<NotificationPayload>&&)>&& callback)
 {
     assertIsCurrent(m_queue.get());
 

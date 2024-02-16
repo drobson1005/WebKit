@@ -66,8 +66,15 @@ bool ManagedMediaSource::isTypeSupported(ScriptExecutionContext& context, const 
     return MediaSource::isTypeSupported(context, type);
 }
 
+void ManagedMediaSource::elementDetached()
+{
+    setStreaming(false);
+}
+
 void ManagedMediaSource::setStreaming(bool streaming)
 {
+    assertIsCurrent(m_dispatcher);
+
     if (m_streaming == streaming)
         return;
     ALWAYS_LOG(LOGIDENTIFIER, streaming);
@@ -123,44 +130,42 @@ bool ManagedMediaSource::isBuffered(const PlatformTimeRanges& ranges) const
 
 void ManagedMediaSource::ensurePrefsRead()
 {
+    assertIsCurrent(m_dispatcher);
+
     if (m_lowThreshold && m_highThreshold)
         return;
-    ASSERT(mediaElement());
-    m_lowThreshold = mediaElement()->document().settings().managedMediaSourceLowThreshold();
-    m_highThreshold = mediaElement()->document().settings().managedMediaSourceHighThreshold();
+    m_lowThreshold = settings().managedMediaSourceLowThreshold();
+    m_highThreshold = settings().managedMediaSourceHighThreshold();
 }
 
 void ManagedMediaSource::monitorSourceBuffers()
 {
-    if (isClosed()) {
-        setStreaming(false);
-        return;
-    }
+    ensureWeakOnDispatcher([this] {
+        MediaSource::monitorSourceBuffers();
 
-    MediaSource::monitorSourceBuffers();
-
-    if (!activeSourceBuffers() || !activeSourceBuffers()->length()) {
-        setStreaming(true);
-        return;
-    }
-    auto currentTime = this->currentTime();
-
-    ensurePrefsRead();
-
-    auto limitAhead = [&] (double upper) {
-        MediaTime aheadTime = currentTime + MediaTime::createWithDouble(upper);
-        return isEnded() ? std::min(duration(), aheadTime) : aheadTime;
-    };
-    if (!m_streaming) {
-        PlatformTimeRanges neededBufferedRange { currentTime, std::max(currentTime, limitAhead(*m_lowThreshold)) };
-        if (!isBuffered(neededBufferedRange))
+        if (!activeSourceBuffers() || !activeSourceBuffers()->length()) {
             setStreaming(true);
-        return;
-    }
+            return;
+        }
+        auto currentTime = this->currentTime();
 
-    PlatformTimeRanges neededBufferedRange { currentTime, limitAhead(*m_highThreshold) };
-    if (isBuffered(neededBufferedRange))
-        setStreaming(false);
+        ensurePrefsRead();
+
+        auto limitAhead = [&] (double upper) {
+            MediaTime aheadTime = currentTime + MediaTime::createWithDouble(upper);
+            return isEnded() ? std::min(duration(), aheadTime) : aheadTime;
+        };
+        if (!m_streaming) {
+            PlatformTimeRanges neededBufferedRange { currentTime, std::max(currentTime, limitAhead(*m_lowThreshold)) };
+            if (!isBuffered(neededBufferedRange))
+                setStreaming(true);
+            return;
+        }
+
+        PlatformTimeRanges neededBufferedRange { currentTime, limitAhead(*m_highThreshold) };
+        if (isBuffered(neededBufferedRange))
+            setStreaming(false);
+    });
 }
 
 void ManagedMediaSource::streamingTimerFired()
@@ -168,18 +173,6 @@ void ManagedMediaSource::streamingTimerFired()
     ALWAYS_LOG(LOGIDENTIFIER, "Disabling streaming due to policy ", *m_highThreshold);
     m_streamingAllowed = false;
     notifyElementUpdateMediaState();
-}
-
-bool ManagedMediaSource::isOpen() const
-{
-#if !ENABLE(WIRELESS_PLAYBACK_TARGET)
-    return MediaSource::isOpen();
-#else
-    return MediaSource::isOpen()
-        && (mediaElement() && (!mediaElement()->document().settings().managedMediaSourceNeedsAirPlay()
-            || mediaElement()->isWirelessPlaybackTargetDisabled()
-            || mediaElement()->hasWirelessPlaybackTargetAlternative()));
-#endif
 }
 
 } // namespace WebCore

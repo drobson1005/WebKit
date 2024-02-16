@@ -29,10 +29,10 @@
 #if HAVE(APP_SSO)
 
 #import "APINavigationAction.h"
-#import "DataReference.h"
 #import "WebFrameProxy.h"
 #import "WebPageProxy.h"
 #import "WebProcessProxy.h"
+#import <WebCore/HTTPStatusCodes.h>
 #import <WebCore/ResourceResponse.h>
 #import <wtf/RunLoop.h>
 
@@ -84,7 +84,7 @@ void SubFrameSOAuthorizationSession::abortInternal()
 void SubFrameSOAuthorizationSession::completeInternal(const WebCore::ResourceResponse& response, NSData *data)
 {
     AUTHORIZATIONSESSION_RELEASE_LOG("completeInternal: httpState=%d", response.httpStatusCode());
-    if (response.httpStatusCode() != 200) {
+    if (response.httpStatusCode() != httpStatus200OK) {
         fallBackToWebPathInternal();
         return;
     }
@@ -129,7 +129,7 @@ void SubFrameSOAuthorizationSession::loadRequestToFrame()
         page->setShouldSuppressSOAuthorizationInNextNavigationPolicyDecision();
         auto& url = m_requestsToLoad.first().first;
         WTF::switchOn(m_requestsToLoad.first().second, [&](const Vector<uint8_t>& data) {
-            frame->loadData(IPC::DataReference(data), "text/html"_s, "UTF-8"_s, url);
+            frame->loadData(data, "text/html"_s, "UTF-8"_s, url);
         }, [&](const String& referrer) {
             frame->loadURL(url, referrer);
         });

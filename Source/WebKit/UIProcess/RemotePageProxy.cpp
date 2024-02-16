@@ -82,11 +82,30 @@ void RemotePageProxy::injectPageIntoNewProcess()
     auto parameters = page->creationParameters(m_process, *drawingArea);
     parameters.subframeProcessPageParameters = WebPageCreationParameters::SubframeProcessPageParameters {
         URL(page->currentURL()),
-        page->mainFrame()->frameTreeCreationParameters()
+        page->mainFrame()->frameTreeCreationParameters(),
+        page->mainFrameWebsitePoliciesData() ? std::make_optional(*page->mainFrameWebsitePoliciesData()) : std::nullopt
     };
     parameters.isProcessSwap = true; // FIXME: This should be a parameter to creationParameters rather than doctoring up the parameters afterwards. <rdar://116201784>
     parameters.topContentInset = 0;
     m_process->send(Messages::WebProcess::CreateWebPage(m_webPageID, WTFMove(parameters)), 0);
+}
+
+void RemotePageProxy::processDidTerminate(WebCore::ProcessIdentifier processIdentifier)
+{
+    if (m_page && m_page->drawingArea())
+        m_page->drawingArea()->remotePageProcessCrashed(processIdentifier);
+    for (auto& frame : m_frames)
+        frame.remoteProcessDidTerminate();
+}
+
+void RemotePageProxy::addFrame(WebFrameProxy& frame)
+{
+    m_frames.add(frame);
+}
+
+void RemotePageProxy::removeFrame(WebFrameProxy& frame)
+{
+    m_frames.remove(frame);
 }
 
 RemotePageProxy::~RemotePageProxy()
@@ -139,11 +158,11 @@ void RemotePageProxy::handleMessage(const String& messageName, const WebKit::Use
     m_page->handleMessageShared(m_process, messageName, messageBody);
 }
 
-void RemotePageProxy::decidePolicyForResponse(FrameInfoData&& frameInfo, uint64_t navigationID, const WebCore::ResourceResponse& response, const WebCore::ResourceRequest& request, bool canShowMIMEType, const String& downloadAttribute, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
+void RemotePageProxy::decidePolicyForResponse(FrameInfoData&& frameInfo, uint64_t navigationID, const WebCore::ResourceResponse& response, const WebCore::ResourceRequest& request, bool canShowMIMEType, const String& downloadAttribute, bool isShowingInitialAboutBlank, WebCore::CrossOriginOpenerPolicyValue activeDocumentCOOPValue, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
 {
     if (!m_page)
         return completionHandler({ });
-    m_page->decidePolicyForResponseShared(m_process.copyRef(), m_page->webPageID(), WTFMove(frameInfo), navigationID, response, request, canShowMIMEType, downloadAttribute, WTFMove(completionHandler));
+    m_page->decidePolicyForResponseShared(m_process.copyRef(), m_page->webPageID(), WTFMove(frameInfo), navigationID, response, request, canShowMIMEType, downloadAttribute, isShowingInitialAboutBlank, activeDocumentCOOPValue, WTFMove(completionHandler));
 }
 
 void RemotePageProxy::didCommitLoadForFrame(WebCore::FrameIdentifier frameID, FrameInfoData&& frameInfo, WebCore::ResourceRequest&& request, uint64_t navigationID, const String& mimeType, bool frameHasCustomContentProvider, WebCore::FrameLoadType frameLoadType, const WebCore::CertificateInfo& certificateInfo, bool usedLegacyTLS, bool privateRelayed, bool containsPluginDocument, WebCore::HasInsecureContent hasInsecureContent, WebCore::MouseEventPolicy mouseEventPolicy, const UserData& userData)
@@ -155,18 +174,18 @@ void RemotePageProxy::didCommitLoadForFrame(WebCore::FrameIdentifier frameID, Fr
     frame->commitProvisionalFrame(frameID, WTFMove(frameInfo), WTFMove(request), navigationID, mimeType, frameHasCustomContentProvider, frameLoadType, certificateInfo, usedLegacyTLS, privateRelayed, containsPluginDocument, hasInsecureContent, mouseEventPolicy, userData); // Will delete |this|.
 }
 
-void RemotePageProxy::decidePolicyForNavigationActionAsync(FrameInfoData&& frameInfo, uint64_t navigationID, NavigationActionData&& navigationActionData, FrameInfoData&& originatingFrameInfo, std::optional<WebPageProxyIdentifier> originatingPageID, const WebCore::ResourceRequest& originalRequest, WebCore::ResourceRequest&& request, IPC::FormDataReference&& requestBody, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
+void RemotePageProxy::decidePolicyForNavigationActionAsync(NavigationActionData&& data, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
 {
     if (!m_page)
         return completionHandler({ });
-    m_page->decidePolicyForNavigationActionAsyncShared(m_process.copyRef(), m_webPageID, WTFMove(frameInfo), navigationID, WTFMove(navigationActionData), WTFMove(originatingFrameInfo), originatingPageID, originalRequest, WTFMove(request), WTFMove(requestBody), WTFMove(completionHandler));
+    m_page->decidePolicyForNavigationActionAsyncShared(m_process.copyRef(), WTFMove(data), WTFMove(completionHandler));
 }
 
-void RemotePageProxy::decidePolicyForNavigationActionSync(FrameInfoData&& frameInfo, uint64_t navigationID, NavigationActionData&& navigationActionData, FrameInfoData&& originatingFrameInfo, std::optional<WebPageProxyIdentifier> originatingPageID, const WebCore::ResourceRequest& originalRequest, WebCore::ResourceRequest&& request, IPC::FormDataReference&& requestBody, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
+void RemotePageProxy::decidePolicyForNavigationActionSync(NavigationActionData&& data, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
 {
     if (!m_page)
         return completionHandler({ });
-    m_page->decidePolicyForNavigationActionSyncShared(m_process.copyRef(), m_webPageID, WTFMove(frameInfo), navigationID, WTFMove(navigationActionData), WTFMove(originatingFrameInfo), originatingPageID, originalRequest, WTFMove(request), WTFMove(requestBody), WTFMove(completionHandler));
+    m_page->decidePolicyForNavigationActionSyncShared(m_process.copyRef(), WTFMove(data), WTFMove(completionHandler));
 }
 
 void RemotePageProxy::didFailProvisionalLoadForFrame(FrameInfoData&& frameInfo, WebCore::ResourceRequest&& request, uint64_t navigationID, const String& provisionalURL, const WebCore::ResourceError& error, WebCore::WillContinueLoading willContinueLoading, const UserData& userData, WebCore::WillInternallyHandleFailure willInternallyHandleFailure)

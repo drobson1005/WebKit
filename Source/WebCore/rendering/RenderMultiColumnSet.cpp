@@ -55,8 +55,8 @@ RenderMultiColumnSet::RenderMultiColumnSet(RenderFragmentedFlow& fragmentedFlow,
 RenderMultiColumnSet* RenderMultiColumnSet::nextSiblingMultiColumnSet() const
 {
     for (RenderObject* sibling = nextSibling(); sibling; sibling = sibling->nextSibling()) {
-        if (is<RenderMultiColumnSet>(*sibling))
-            return downcast<RenderMultiColumnSet>(sibling);
+        if (auto multiColumnSet = dynamicDowncast<RenderMultiColumnSet>(*sibling))
+            return multiColumnSet;
     }
     return nullptr;
 }
@@ -64,8 +64,8 @@ RenderMultiColumnSet* RenderMultiColumnSet::nextSiblingMultiColumnSet() const
 RenderMultiColumnSet* RenderMultiColumnSet::previousSiblingMultiColumnSet() const
 {
     for (RenderObject* sibling = previousSibling(); sibling; sibling = sibling->previousSibling()) {
-        if (is<RenderMultiColumnSet>(*sibling))
-            return downcast<RenderMultiColumnSet>(sibling);
+        if (auto* multiColumnSet = dynamicDowncast<RenderMultiColumnSet>(*sibling))
+            return multiColumnSet;
     }
     return nullptr;
 }
@@ -1045,10 +1045,10 @@ void RenderMultiColumnSet::updateHitTestResult(HitTestResult& result, const Layo
     
     // Note this does not work with column spans, but once we implement RenderPageSet, we can move this code
     // over there instead (and spans of course won't be allowed on pages).
-    if (auto* node = nodeForHitTest()) {
-        result.setInnerNode(node);
+    if (RefPtr node = nodeForHitTest()) {
+        result.setInnerNode(node.get());
         if (!result.innerNonSharedNode())
-            result.setInnerNonSharedNode(node);
+            result.setInnerNonSharedNode(node.get());
         LayoutPoint adjustedPoint = translateFragmentPointToFragmentedFlow(point);
         view().offsetForContents(adjustedPoint);
         result.setLocalPoint(adjustedPoint);

@@ -97,6 +97,10 @@
 #include "WebFullScreenManagerProxy.h"
 #endif
 
+#if USE(GTK4) && defined(GTK_ACCESSIBILITY_ATSPI)
+#include <gtk/a11y/gtkatspi.h>
+#endif
+
 using namespace WebKit;
 using namespace WebCore;
 
@@ -289,7 +293,6 @@ struct _WebKitWebViewBasePrivate {
     RefPtr<WebPageProxy> pageProxy;
     IntSize viewSize { };
 #if USE(GTK4)
-    Vector<GRefPtr<GdkEvent>> keyEventsToPropagate;
     Vector<GRefPtr<GdkEvent>> wheelEventsToPropagate;
 #else
     bool shouldForwardNextKeyEvent { false };
@@ -301,7 +304,11 @@ struct _WebKitWebViewBasePrivate {
     CString tooltipText;
     IntRect tooltipArea;
     WebHitTestResultData::IsScrollbar mouseIsOverScrollbar;
-#if !USE(GTK4)
+#if USE(GTK4)
+#ifdef GTK_ACCESSIBILITY_ATSPI
+    GRefPtr<GtkAccessible> socketAccessible;
+#endif
+#else
     GRefPtr<AtkObject> accessible;
 #endif
     GtkWidget* dialog { nullptr };
@@ -377,7 +384,16 @@ struct _WebKitWebViewBasePrivate {
  */
 
 #if USE(GTK4)
+
+#ifdef GTK_ACCESSIBILITY_ATSPI
+static void webkitWebViewBaseAccessibleInterfaceInit(GtkAccessibleInterface*);
+
+WEBKIT_DEFINE_TYPE_WITH_CODE(WebKitWebViewBase, webkit_web_view_base, GTK_TYPE_WIDGET,
+    G_IMPLEMENT_INTERFACE(GTK_TYPE_ACCESSIBLE, webkitWebViewBaseAccessibleInterfaceInit))
+#else
 WEBKIT_DEFINE_TYPE(WebKitWebViewBase, webkit_web_view_base, GTK_TYPE_WIDGET)
+#endif // GTK_ACCESSIBILITY_ATSPI
+
 #else
 WEBKIT_DEFINE_TYPE(WebKitWebViewBase, webkit_web_view_base, GTK_TYPE_CONTAINER)
 #endif
@@ -386,6 +402,27 @@ WEBKIT_DEFINE_TYPE(WebKitWebViewBase, webkit_web_view_base, GTK_TYPE_CONTAINER)
 static void webkitWebViewBaseDidEnterFullScreen(WebKitWebViewBase*);
 static void webkitWebViewBaseDidExitFullScreen(WebKitWebViewBase*);
 static void webkitWebViewBaseRequestExitFullScreen(WebKitWebViewBase*);
+#endif
+
+#if USE(GTK4) && defined(GTK_ACCESSIBILITY_ATSPI)
+static GtkAccessible* webkitWebViewBaseAccessibleGetFirstAccessibleChild(GtkAccessible* accessible)
+{
+    WebKitWebViewBase* webView = WEBKIT_WEB_VIEW_BASE(accessible);
+
+    if (webView->priv->socketAccessible)
+        return GTK_ACCESSIBLE(g_object_ref(webView->priv->socketAccessible.get()));
+
+    if (auto* widget = gtk_widget_get_first_child(GTK_WIDGET(webView)))
+        return GTK_ACCESSIBLE(g_object_ref(widget));
+
+    return nullptr;
+}
+
+static void
+webkitWebViewBaseAccessibleInterfaceInit(GtkAccessibleInterface* iface)
+{
+    iface->get_first_accessible_child = webkitWebViewBaseAccessibleGetFirstAccessibleChild;
+}
 #endif
 
 static void webkitWebViewBaseUpdateDisplayID(WebKitWebViewBase* webViewBase, GdkMonitor* monitor)
@@ -814,10 +851,8 @@ static void webkitWebViewBaseDispose(GObject* gobject)
     g_clear_pointer(&webView->priv->emojiChooser, gtk_widget_unparent);
 #else
     g_clear_pointer(&webView->priv->dialog, gtk_widget_destroy);
-#if ENABLE(ACCESSIBILITY)
     if (webView->priv->accessible)
         webkitWebViewAccessibleSetWebView(WEBKIT_WEB_VIEW_ACCESSIBLE(webView->priv->accessible.get()), nullptr);
-#endif // ENABLE(ACCESSIBILITY)
 #endif
 
     webkitWebViewBaseSetToplevelOnScreenWindow(webView, nullptr);
@@ -1072,15 +1107,6 @@ static void webkitWebViewBaseUnmap(GtkWidget* widget)
     webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::IsVisible);
 }
 
-static bool shouldForwardKeyEvent(WebKitWebViewBase* webViewBase, GdkEvent* event)
-{
-#if USE(GTK4)
-    return event && webViewBase->priv->keyEventsToPropagate.removeFirst(event);
-#else
-    return std::exchange(webViewBase->priv->shouldForwardNextKeyEvent, false);
-#endif
-}
-
 static bool shouldForwardWheelEvent(WebKitWebViewBase* webViewBase, GdkEvent* event)
 {
 #if USE(GTK4)
@@ -1127,6 +1153,11 @@ static gboolean webkitWebViewBaseFocusOutEvent(GtkWidget* widget, GdkEventFocus*
     webViewBase->priv->inputMethodFilter.notifyFocusedOut();
 
     return GTK_WIDGET_CLASS(webkit_web_view_base_parent_class)->focus_out_event(widget, event);
+}
+
+static bool shouldForwardKeyEvent(WebKitWebViewBase* webViewBase, GdkEvent* event)
+{
+    return std::exchange(webViewBase->priv->shouldForwardNextKeyEvent, false);
 }
 
 static gboolean webkitWebViewBaseKeyPressEvent(GtkWidget* widget, GdkEventKey* keyEvent)
@@ -1211,18 +1242,60 @@ static void webkitWebViewBaseFocusLeave(WebKitWebViewBase* webViewBase, GtkEvent
     webViewBase->priv->inputMethodFilter.notifyFocusedOut();
 }
 
+void webkitWebViewBaseProcessAcceleratorsForKeyPressEvent(WebKitWebViewBase* webViewBase, GdkEvent* event)
+{
+    // Event processing in GTK is synchronous, but in WebKit it is asynchronous because we don't
+    // want to block the UI process waiting for the web process to decide whether a DOM event has
+    // been handled (e.g. by using Event.stopPropagation). In GTK 3, we used a complicated scheme to
+    // synthesize and reinject new key and wheel events to continue event processing when the event
+    // is not handled by the web content, which the GTK developers did not approve of. We originally
+    // attempted this for GTK 4 as well, but it never worked properly, and GTK's support for event
+    // injection has been deprecated. Instead, the WebKitWebViewBase now always handles all events
+    // (by always returning GDK_EVENT_STOP).
+    //
+    // Web browsers must forward most key events to the web view for processing before they are
+    // processed by the window, because processing key press events on the window will activate
+    // action accelerators, but web content should be allowed to override most accelerators. E.g.
+    // on Google Docs Ctrl+O should open Google's document chooser, not the browser's file chooser,
+    // and Ctrl+F should open Google's find, not the browser's. See key_pressed_cb and
+    // should_view_receive_key_press_event_first in Epiphany's ephy-window.c for what this looks
+    // like on the browser side. (Those functions contain a comment that refers to this code in
+    // WebKit, so please update the comment there if needed when changing the code here.)
+    //
+    // This all creates a new problem with key events. If the browser implements the above strategy
+    // properly, then the browser's GtkWindow will never see the events and accelerators will not
+    // run, so we need to manually activate them here. (This function is called by PageClientImpl
+    // only after determining that the web process has not handled the event.) It's safe to do this
+    // even if the window already processed the events before WebKit, because in that case, no
+    // accelerator was activated (or it would have handled the event), so we'll fail to find any
+    // matching accelerator here. This clever strategy was proposed by Benjamin Otte.
+
+    GApplication* app = g_application_get_default();
+    if (!app || !GTK_IS_APPLICATION(app))
+        return;
+
+    ASSERT(gdk_event_get_event_type(event) == GDK_KEY_PRESS);
+    if (gdk_key_event_is_modifier(event))
+        return;
+
+    GUniquePtr<char> accelerator(gtk_accelerator_name(gdk_key_event_get_keyval(event), gdk_event_get_modifier_state(event)));
+    GUniquePtr<char*> actions(gtk_application_get_actions_for_accel(GTK_APPLICATION(app), accelerator.get()));
+    for (int i = 0; actions.get()[i]; ++i) {
+        const char* detailedAction = actions.get()[i];
+        GUniqueOutPtr<char> actionName;
+        GRefPtr<GVariant> targetValue;
+        GUniqueOutPtr<GError> error;
+        if (g_action_parse_detailed_name(detailedAction, &actionName.outPtr(), &targetValue.outPtr(), &error.outPtr()))
+            gtk_widget_activate_action_variant(GTK_WIDGET(webViewBase), actionName.get(), targetValue.get());
+        else
+            g_warning("Failed to parse detailed action %s: %s", detailedAction, error->message);
+    }
+}
+
 static gboolean webkitWebViewBaseKeyPressed(WebKitWebViewBase* webViewBase, unsigned keyval, unsigned, GdkModifierType state, GtkEventController* controller)
 {
     WebKitWebViewBasePrivate* priv = webViewBase->priv;
     auto* event = gtk_event_controller_get_current_event(controller);
-
-    // Since WebProcess key event handling is not synchronous, handle the event in two passes.
-    // When WebProcess processes the input event, it will call PageClientImpl::doneWithKeyEvent
-    // with event handled status which determines whether to pass the input event to parent or not
-    // using gdk_display_put_event().
-    if (shouldForwardKeyEvent(webViewBase, event))
-        return GDK_EVENT_PROPAGATE;
-
     bool isAutoRepeat = priv->keyAutoRepeatHandler.keyPress(gdk_key_event_get_keycode(event));
 
 #if ENABLE(DEVELOPER_MODE) && OS(LINUX)
@@ -1971,7 +2044,7 @@ static gboolean webkitWebViewBaseQueryTooltip(GtkWidget* widget, gint /* x */, g
     return TRUE;
 }
 
-#if !USE(GTK4) && ENABLE(ACCESSIBILITY)
+#if !USE(GTK4)
 static AtkObject* webkitWebViewBaseGetAccessible(GtkWidget* widget)
 {
     WebKitWebViewBasePrivate* priv = WEBKIT_WEB_VIEW_BASE(widget)->priv;
@@ -2289,7 +2362,7 @@ static void webkitWebViewBaseConstructed(GObject* object)
     gtk_widget_set_can_focus(viewWidget, TRUE);
 
     WebKitWebViewBasePrivate* priv = WEBKIT_WEB_VIEW_BASE(object)->priv;
-    priv->pageClient = makeUnique<PageClientImpl>(viewWidget);
+    priv->pageClient = makeUniqueWithoutRefCountedCheck<PageClientImpl>(viewWidget);
     gtk_widget_set_parent(priv->keyBindingTranslator.widget(), viewWidget);
 
 #if ENABLE(DRAG_SUPPORT)
@@ -2397,6 +2470,8 @@ static void webkitWebViewBaseConstructed(GObject* object)
     };
     g_signal_connect_object(settings, "notify::gtk-theme-name", G_CALLBACK(callback), viewWidget, G_CONNECT_SWAPPED);
     g_signal_connect_object(settings, "notify::gtk-application-prefer-dark-theme", G_CALLBACK(callback), viewWidget, G_CONNECT_SWAPPED);
+
+    priv->displayID = ScreenManager::singleton().primaryDisplayID();
 }
 
 static void webkit_web_view_base_class_init(WebKitWebViewBaseClass* webkitWebViewBaseClass)
@@ -2444,7 +2519,7 @@ static void webkit_web_view_base_class_init(WebKitWebViewBaseClass* webkitWebVie
     widgetClass->touch_event = webkitWebViewBaseTouchEvent;
 #endif
     widgetClass->query_tooltip = webkitWebViewBaseQueryTooltip;
-#if !USE(GTK4) && ENABLE(ACCESSIBILITY)
+#if !USE(GTK4)
     widgetClass->get_accessible = webkitWebViewBaseGetAccessible;
 #endif
 #if USE(GTK4)
@@ -2564,17 +2639,13 @@ void webkitWebViewBaseDidPerformDragControllerAction(WebKitWebViewBase* webViewB
 }
 #endif // ENABLE(DRAG_SUPPORT)
 
+#if !USE(GTK4)
 void webkitWebViewBasePropagateKeyEvent(WebKitWebViewBase* webkitWebViewBase, GdkEvent* event)
 {
-#if USE(GTK4)
-    webkitWebViewBase->priv->keyEventsToPropagate.append(event);
-    // Note: the docs for gdk_display_put_event lie - this adds to the end of the queue, not the front.
-    gdk_display_put_event(gtk_widget_get_display(GTK_WIDGET(webkitWebViewBase)), event);
-#else
     webkitWebViewBase->priv->shouldForwardNextKeyEvent = true;
     gtk_main_do_event(event);
-#endif
 }
+#endif
 
 void webkitWebViewBasePropagateWheelEvent(WebKitWebViewBase* webkitWebViewBase, GdkEvent* event)
 {
@@ -3407,3 +3478,34 @@ void webkitWebViewBaseCallAfterNextPresentationUpdate(WebKitWebViewBase* webView
 {
     webkitWebViewBaseNextPresentationUpdateMonitorStart(webViewBase, WTFMove(callback));
 }
+
+#if USE(GTK4)
+void webkitWebViewBaseSetPlugID(WebKitWebViewBase* webViewBase, const String& plugID)
+{
+#ifdef GTK_ACCESSIBILITY_ATSPI
+    WebKitWebViewBasePrivate* priv = webViewBase->priv;
+
+    if (priv->socketAccessible) {
+        gtk_accessible_set_accessible_parent(priv->socketAccessible.get(), nullptr, nullptr);
+        priv->socketAccessible = nullptr;
+    }
+
+    Vector<String> tokens = plugID.split(':');
+    RELEASE_ASSERT(tokens.size() == 2);
+
+    GUniqueOutPtr<GError> error;
+    GUniquePtr<char> busName(g_strdup_printf(":%s", tokens[0].utf8().data()));
+
+    priv->socketAccessible = adoptGRef(gtk_at_spi_socket_new(busName.get(), tokens[1].utf8().data(), &error.outPtr()));
+
+    if (priv->socketAccessible) {
+        auto* widget = gtk_widget_get_first_child(GTK_WIDGET(webViewBase));
+        gtk_accessible_set_accessible_parent(priv->socketAccessible.get(), GTK_ACCESSIBLE(webViewBase), GTK_ACCESSIBLE(widget));
+    } else
+        g_warning("Error creating WebKitWebView a11y socket: %s", error->message);
+#else
+    UNUSED_PARAM(webViewBase);
+    UNUSED_PARAM(plugID);
+#endif // GTK_ACCESSIBILITY_ATSPI
+}
+#endif

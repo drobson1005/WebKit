@@ -155,7 +155,7 @@ static bool isRootFrame(const Frame& frame)
     return true;
 }
 
-LocalFrame::LocalFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& frameLoaderClient, FrameIdentifier identifier, HTMLFrameOwnerElement* ownerElement, Frame* parent)
+LocalFrame::LocalFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& frameLoaderClient, FrameIdentifier identifier, HTMLFrameOwnerElement* ownerElement, Frame* parent, Frame* opener)
     : Frame(page, identifier, FrameType::Local, ownerElement, parent)
     , m_loader(makeUniqueRef<FrameLoader>(*this, WTFMove(frameLoaderClient)))
     , m_script(makeUniqueRef<ScriptController>(*this))
@@ -180,6 +180,8 @@ LocalFrame::LocalFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& frameLoad
 
     if (isRootFrame())
         page.addRootFrame(*this);
+
+    setOpener(opener);
 }
 
 void LocalFrame::init()
@@ -187,19 +189,19 @@ void LocalFrame::init()
     checkedLoader()->init();
 }
 
-Ref<LocalFrame> LocalFrame::createMainFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier)
+Ref<LocalFrame> LocalFrame::createMainFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier, Frame* opener)
 {
-    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, nullptr, nullptr));
+    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, nullptr, nullptr, opener));
 }
 
 Ref<LocalFrame> LocalFrame::createSubframe(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier, HTMLFrameOwnerElement& ownerElement)
 {
-    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, &ownerElement, ownerElement.document().frame()));
+    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, &ownerElement, ownerElement.document().frame(), nullptr));
 }
 
 Ref<LocalFrame> LocalFrame::createSubframeHostedInAnotherProcess(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier, Frame& parent)
 {
-    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, nullptr, &parent));
+    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, nullptr, &parent, nullptr));
 }
 
 LocalFrame::~LocalFrame()
@@ -500,7 +502,10 @@ String LocalFrame::searchForLabelsBeforeElement(const Vector<String>& labels, El
     RefPtr<Node> n;
     for (n = NodeTraversal::previous(*element); n && lengthSearched < charsSearchedThreshold; n = NodeTraversal::previous(*n)) {
         // We hit another form element or the start of the form - bail out
-        if (is<HTMLFormElement>(*n) || (is<Element>(*n) && downcast<Element>(*n).isValidatedFormListedElement()))
+        if (is<HTMLFormElement>(*n))
+            break;
+
+        if (RefPtr element = dynamicDowncast<Element>(*n); element && element->isValidatedFormListedElement())
             break;
 
         if (n->hasTagName(tdTag) && !startingTableCell)
@@ -827,8 +832,7 @@ void LocalFrame::willDetachPage()
 
     // FIXME: It's unclear as to why this is called more than once, but it is,
     // so page() could be NULL.
-    // Unable to ref the page as it may have started destruction.
-    if (WeakPtr page = this->page()) {
+    if (RefPtrAllowingPartiallyDestroyed<Page> page = this->page()) {
         CheckedRef focusController = page->focusController();
         if (focusController->focusedFrame() == this)
             focusController->setFocusedFrame(nullptr);
@@ -989,6 +993,11 @@ FrameView* LocalFrame::virtualView() const
     return m_view.get();
 }
 
+FrameLoaderClient& LocalFrame::loaderClient()
+{
+    return loader().client();
+}
+
 String LocalFrame::trackedRepaintRectsAsText() const
 {
     if (!m_view)
@@ -1023,7 +1032,7 @@ void LocalFrame::setPageAndTextZoomFactors(float pageZoomFactor, float textZoomF
 
     // Respect SVGs zoomAndPan="disabled" property in standalone SVG documents.
     // FIXME: How to handle compound documents + zoomAndPan="disabled"? Needs SVG WG clarification.
-    if (is<SVGDocument>(*document) && !downcast<SVGDocument>(*document).zoomAndPanEnabled())
+    if (RefPtr svgDocument = dynamicDowncast<SVGDocument>(*document); svgDocument && !svgDocument->zoomAndPanEnabled())
         return;
 
     std::optional<ScrollPosition> scrollPositionAfterZoomed;
@@ -1131,7 +1140,7 @@ FloatSize LocalFrame::screenSize() const
     if (!m_overrideScreenSize.isEmpty())
         return m_overrideScreenSize;
 
-    auto defaultSize = screenRect(view()).size();
+    auto defaultSize = screenRect(protectedView().get()).size();
     RefPtr document = this->document();
     if (!document)
         return defaultSize;
@@ -1229,9 +1238,11 @@ LocalFrame* LocalFrame::contentFrameFromWindowOrFrameElement(JSContextRef contex
         return window->frame();
 
     auto* jsNode = JSC::jsDynamicCast<JSNode*>(value);
-    if (!jsNode || !is<HTMLFrameOwnerElement>(jsNode->wrapped()))
+    if (!jsNode)
         return nullptr;
-    return dynamicDowncast<LocalFrame>(downcast<HTMLFrameOwnerElement>(jsNode->wrapped()).contentFrame());
+
+    RefPtr frameOwner = dynamicDowncast<HTMLFrameOwnerElement>(jsNode->wrapped());
+    return frameOwner ? dynamicDowncast<LocalFrame>(frameOwner->contentFrame()) : nullptr;
 }
 
 CheckedRef<EventHandler> LocalFrame::checkedEventHandler()
@@ -1274,6 +1285,11 @@ void LocalFrame::frameWasDisconnectedFromOwner() const
     protectedDocument()->detachFromFrame();
 }
 
+CheckedRef<FrameSelection> LocalFrame::checkedSelection() const
+{
+    return document()->selection();
+}
+
 #if ENABLE(WINDOW_PROXY_PROPERTY_ACCESS_NOTIFICATION)
 
 void LocalFrame::didAccessWindowProxyPropertyViaOpener(WindowProxyProperty property)
@@ -1294,6 +1310,20 @@ void LocalFrame::didAccessWindowProxyPropertyViaOpener(WindowProxyProperty prope
 }
 
 #endif
+
+String LocalFrame::customUserAgent() const
+{
+    if (RefPtr documentLoader = loader().activeDocumentLoader())
+        return documentLoader->customUserAgent();
+    return { };
+}
+
+String LocalFrame::customUserAgentAsSiteSpecificQuirks() const
+{
+    if (RefPtr documentLoader = loader().activeDocumentLoader())
+        return documentLoader->customUserAgentAsSiteSpecificQuirks();
+    return { };
+}
 
 } // namespace WebCore
 

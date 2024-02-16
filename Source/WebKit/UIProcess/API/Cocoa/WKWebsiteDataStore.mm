@@ -32,6 +32,7 @@
 #import "BackgroundFetchState.h"
 #import "CompletionHandlerCallChecker.h"
 #import "NetworkProcessProxy.h"
+#import "RestrictedOpenerType.h"
 #import "ShouldGrandfatherStatistics.h"
 #import "WKError.h"
 #import "WKHTTPCookieStoreInternal.h"
@@ -79,6 +80,8 @@ public:
         , m_hasRequestBackgroundFetchPermissionSelector([m_delegate.get() respondsToSelector:@selector(requestBackgroundFetchPermission:frameOrigin:decisionHandler:)])
         , m_hasNotifyBackgroundFetchChangeSelector([m_delegate.get() respondsToSelector:@selector(notifyBackgroundFetchChange:change:)])
         , m_hasWindowProxyPropertyAccessSelector([m_delegate.get() respondsToSelector:@selector(websiteDataStore:domain:didOpenDomainViaWindowOpen:withProperty:directly:)])
+        , m_hasDidAllowPrivateTokenUsageByThirdPartyForTestingSelector([m_delegate.get() respondsToSelector:@selector(websiteDataStore:didAllowPrivateTokenUsageByThirdPartyForTesting:forResourceURL:)])
+        , m_hasDidExceedMemoryFootprintThresholdSelector([m_delegate.get() respondsToSelector:@selector(websiteDataStore:domain:didExceedMemoryFootprintThreshold:withPageCount:processLifetime:inForeground:)])
     {
     }
 
@@ -290,6 +293,22 @@ private:
         [m_delegate.getAutoreleased() websiteDataStore:m_dataStore.getAutoreleased() domain:parentDomain.string() didOpenDomainViaWindowOpen:childDomain.string() withProperty:windowProxyProperty directly:directlyAccessedProperty];
     }
 
+    void didAllowPrivateTokenUsageByThirdPartyForTesting(bool wasAllowed, WTF::URL&& resourceURL) final
+    {
+        if (!m_hasDidAllowPrivateTokenUsageByThirdPartyForTestingSelector)
+            return;
+
+        [m_delegate.getAutoreleased() websiteDataStore:m_dataStore.getAutoreleased() didAllowPrivateTokenUsageByThirdPartyForTesting:wasAllowed forResourceURL:resourceURL];
+    }
+
+    void didExceedMemoryFootprintThreshold(size_t footprint, const String& domain, unsigned pageCount, Seconds processLifetime, bool inForeground)
+    {
+        if (!m_hasDidExceedMemoryFootprintThresholdSelector)
+            return;
+
+        [m_delegate.getAutoreleased() websiteDataStore:m_dataStore.getAutoreleased() domain:(NSString *)domain didExceedMemoryFootprintThreshold:footprint withPageCount:pageCount processLifetime:processLifetime.seconds() inForeground:inForeground];
+    }
+
     WeakObjCPtr<WKWebsiteDataStore> m_dataStore;
     WeakObjCPtr<id <_WKWebsiteDataStoreDelegate> > m_delegate;
     bool m_hasRequestStorageSpaceSelector { false };
@@ -303,6 +322,8 @@ private:
     bool m_hasRequestBackgroundFetchPermissionSelector { false };
     bool m_hasNotifyBackgroundFetchChangeSelector { false };
     bool m_hasWindowProxyPropertyAccessSelector { false };
+    bool m_hasDidAllowPrivateTokenUsageByThirdPartyForTestingSelector { false };
+    bool m_hasDidExceedMemoryFootprintThresholdSelector { false };
 };
 
 @implementation WKWebsiteDataStore {
@@ -874,6 +895,11 @@ static Vector<WebKit::WebsiteDataRecord> toWebsiteDataRecords(NSArray *dataRecor
     });
 }
 
+- (void)_setPrivateTokenIPCForTesting:(bool)enabled
+{
+    _websiteDataStore->setPrivateTokenIPCForTesting(enabled);
+}
+
 - (id <_WKWebsiteDataStoreDelegate>)_delegate
 {
     return _delegate.get().get();
@@ -1203,6 +1229,11 @@ static Vector<WebKit::WebsiteDataRecord> toWebsiteDataRecords(NSArray *dataRecor
 
         return completionHandlerCopy(nil);
     });
+}
+
+- (void)_setRestrictedOpenerTypeForTesting:(_WKRestrictedOpenerType)openerType forDomain:(NSString *)domain
+{
+    _websiteDataStore->setRestrictedOpenerTypeForDomainForTesting(WebCore::RegistrableDomain::fromRawString(domain), static_cast<WebKit::RestrictedOpenerType>(openerType));
 }
 
 @end

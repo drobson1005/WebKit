@@ -50,6 +50,7 @@
 #include "SVGRootInlineBox.h"
 #include "SVGTextElement.h"
 #include "SVGURIReference.h"
+#include "SVGVisitedRendererTracking.h"
 #include "TransformState.h"
 #include "VisiblePosition.h"
 #include <wtf/IsoMallocInlines.h>
@@ -73,6 +74,11 @@ RenderSVGText::~RenderSVGText()
 SVGTextElement& RenderSVGText::textElement() const
 {
     return downcast<SVGTextElement>(RenderSVGBlock::graphicsElement());
+}
+
+Ref<SVGTextElement> RenderSVGText::protectedTextElement() const
+{
+    return textElement();
 }
 
 bool RenderSVGText::isChildAllowed(const RenderObject& child, const RenderStyle&) const
@@ -319,9 +325,6 @@ void RenderSVGText::layout()
 
     LayoutRepainter repainter(*this, isLayerBasedSVGEngineEnabled() ? checkForRepaintDuringLayout() : SVGRenderSupport::checkForSVGRepaintDuringLayout(*this));
 
-    // FIXME: [LBSE] Upstream SVGLengthContext changes
-    // textElement().updateLengthContext();
-
     bool updateCachedBoundariesInParents = false;
     auto previousReferenceBoxRect = transformReferenceBoxRect();
 
@@ -415,6 +418,7 @@ void RenderSVGText::layout()
     if (isLayerBasedSVGEngineEnabled()) {
         updateLayerTransform();
         updateCachedBoundariesInParents = false; // No longer needed for LBSE.
+        layoutChanged = false; // No longer needed for LBSE.
     } else {
         if (m_needsTransformUpdate) {
             if (previousReferenceBoxRect != transformReferenceBoxRect())
@@ -447,12 +451,17 @@ bool RenderSVGText::nodeAtFloatPoint(const HitTestRequest& request, HitTestResul
     if (isVisible || !hitRules.requireVisible) {
         if ((hitRules.canHitStroke && (style().svgStyle().hasStroke() || !hitRules.requireStroke))
             || (hitRules.canHitFill && (style().svgStyle().hasFill() || !hitRules.requireFill))) {
-            FloatPoint localPoint = valueOrDefault(localToParentTransform().inverse()).mapPoint(pointInParent);
+            static NeverDestroyed<SVGVisitedRendererTracking::VisitedSet> s_visitedSet;
 
-            if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
+            SVGVisitedRendererTracking recursionTracking(s_visitedSet);
+            if (recursionTracking.isVisiting(*this))
                 return false;
 
-            SVGHitTestCycleDetectionScope hitTestScope(*this);
+            SVGVisitedRendererTracking::Scope recursionScope(recursionTracking, *this);
+
+            FloatPoint localPoint = valueOrDefault(localToParentTransform().inverse()).mapPoint(pointInParent);
+            if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
+                return false;
 
             HitTestLocation hitTestLocation(LayoutPoint(flooredIntPoint(localPoint)));
             return RenderBlock::nodeAtPoint(request, result, hitTestLocation, LayoutPoint(), hitTestAction);
@@ -475,14 +484,21 @@ bool RenderSVGText::nodeAtPoint(const HitTestRequest& request, HitTestResult& re
     if (isVisible || !hitRules.requireVisible) {
         if ((hitRules.canHitStroke && (style().svgStyle().hasStroke() || !hitRules.requireStroke))
         || (hitRules.canHitFill && (style().svgStyle().hasFill() || !hitRules.requireFill))) {
+            static NeverDestroyed<SVGVisitedRendererTracking::VisitedSet> s_visitedSet;
+
+            SVGVisitedRendererTracking recursionTracking(s_visitedSet);
+            if (recursionTracking.isVisiting(*this))
+                return false;
+
+            SVGVisitedRendererTracking::Scope recursionScope(recursionTracking, *this);
+
             auto localPoint = locationInContainer.point();
             auto coordinateSystemOriginTranslation = nominalSVGLayoutLocation() - adjustedLocation;
             localPoint.move(coordinateSystemOriginTranslation);
 
-            if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
+            if (!pointInSVGClippingArea(localPoint))
                 return false;
 
-            SVGHitTestCycleDetectionScope hitTestScope(*this);
             return RenderBlock::nodeAtPoint(request, result, locationInContainer, accumulatedOffset, hitTestAction);
         }
     }
@@ -493,7 +509,7 @@ bool RenderSVGText::nodeAtPoint(const HitTestRequest& request, HitTestResult& re
 void RenderSVGText::applyTransform(TransformationMatrix& transform, const RenderStyle& style, const FloatRect& boundingBox, OptionSet<RenderStyle::TransformOperationOption> options) const
 {
     ASSERT(document().settings().layerBasedSVGEngineEnabled());
-    applySVGTransform(transform, textElement(), style, boundingBox, std::nullopt, std::nullopt, options);
+    applySVGTransform(transform, protectedTextElement(), style, boundingBox, std::nullopt, std::nullopt, options);
 }
 #endif
 
@@ -522,7 +538,7 @@ void RenderSVGText::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
             return;
 
         if (paintInfo.phase == PaintPhase::ClippingMask) {
-            paintSVGClippingMask(paintInfo);
+            paintSVGClippingMask(paintInfo, objectBoundingBox());
             return;
         }
 
@@ -574,11 +590,11 @@ void RenderSVGText::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 FloatRect RenderSVGText::strokeBoundingBox() const
 {
     FloatRect strokeBoundaries = objectBoundingBox();
-    const SVGRenderStyle& svgStyle = style().svgStyle();
-    if (!svgStyle.hasStroke())
+    if (!style().svgStyle().hasStroke())
         return strokeBoundaries;
 
-    SVGLengthContext lengthContext(&textElement());
+    Ref textElement = this->textElement();
+    SVGLengthContext lengthContext(textElement.ptr());
     strokeBoundaries.inflate(lengthContext.valueForLength(style().strokeWidth()));
     return strokeBoundaries;
 }
@@ -586,8 +602,14 @@ FloatRect RenderSVGText::strokeBoundingBox() const
 FloatRect RenderSVGText::repaintRectInLocalCoordinates(RepaintRectCalculation repaintRectCalculation) const
 {
 #if ENABLE(LAYER_BASED_SVG_ENGINE)
-    if (document().settings().layerBasedSVGEngineEnabled())
-        return SVGBoundingBoxComputation::computeRepaintBoundingBox(*this);
+    if (document().settings().layerBasedSVGEngineEnabled()) {
+        auto repaintRect = SVGBoundingBoxComputation::computeRepaintBoundingBox(*this);
+
+        if (const auto* textShadow = style().textShadow())
+            textShadow->adjustRectForShadow(repaintRect);
+
+        return repaintRect;
+    }
 #endif
 
     FloatRect repaintRect = strokeBoundingBox();

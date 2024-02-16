@@ -158,7 +158,7 @@ VisiblePosition RenderSVGInlineText::positionForPoint(const LayoutPoint& point, 
     if (!firstTextBox() || text().isEmpty())
         return createVisiblePosition(0, Affinity::Downstream);
 
-    float baseline = m_scaledFont.metricsOfPrimaryFont().floatAscent();
+    float baseline = m_scaledFont.metricsOfPrimaryFont().ascent().value_or(0);
 
     RenderBlock* containingBlock = this->containingBlock();
     ASSERT(containingBlock);
@@ -199,7 +199,7 @@ VisiblePosition RenderSVGInlineText::positionForPoint(const LayoutPoint& point, 
     if (!closestDistanceFragment)
         return createVisiblePosition(0, Affinity::Downstream);
 
-    int offset = closestDistanceBox->offsetForPositionInFragment(*closestDistanceFragment, absolutePoint.x() - closestDistancePosition, true);
+    int offset = closestDistanceBox->offsetForPositionInFragment(*closestDistanceFragment, absolutePoint.x() - closestDistancePosition);
     return createVisiblePosition(offset + closestDistanceBox->start(), offset > 0 ? Affinity::Upstream : Affinity::Downstream);
 }
 
@@ -232,7 +232,7 @@ void RenderSVGInlineText::computeNewScaledFontForStyle(const RenderObject& rende
     auto fontDescription = style.fontDescription();
 
     // FIXME: We need to better handle the case when we compute very small fonts below (below 1pt).
-    fontDescription.setComputedSize(Style::computedFontSizeFromSpecifiedSizeForSVGInlineText(fontDescription.computedSize(), fontDescription.isAbsoluteSize(), scalingFactor, renderer.document()));
+    fontDescription.setComputedSize(Style::computedFontSizeFromSpecifiedSizeForSVGInlineText(fontDescription.computedSize(), fontDescription.isAbsoluteSize(), scalingFactor, renderer.protectedDocument()));
 
     // SVG controls its own glyph orientation, so don't allow writing-mode
     // to affect it.
@@ -240,7 +240,7 @@ void RenderSVGInlineText::computeNewScaledFontForStyle(const RenderObject& rende
         fontDescription.setOrientation(FontOrientation::Horizontal);
 
     scaledFont = FontCascade(WTFMove(fontDescription));
-    scaledFont.update(&renderer.document().fontSelector());
+    scaledFont.update(renderer.document().protectedFontSelector().ptr());
 }
 
 SVGInlineTextBox* RenderSVGInlineText::firstTextBox() const

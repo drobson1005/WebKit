@@ -74,7 +74,7 @@ static CaptureSourceOrError initializeCoreAudioCaptureSource(Ref<CoreAudioCaptur
 {
     if (constraints) {
         if (auto result = source->applyConstraints(*constraints))
-            return CaptureSourceOrError({ WTFMove(result->badConstraint), MediaAccessDenialReason::InvalidConstraint });
+            return CaptureSourceOrError(CaptureSourceError { result->invalidConstraint });
     }
     return CaptureSourceOrError(WTFMove(source));
 }
@@ -364,7 +364,7 @@ void CoreAudioCaptureSource::handleNewCurrentMicrophoneDevice(const CaptureDevic
     if (!isProducingData() || persistentID() == device.persistentId())
         return;
     
-    RELEASE_LOG_INFO(WebRTC, "CoreAudioCaptureSource switching from '%s' to '%s'", name().string().utf8().data(), device.label().utf8().data());
+    RELEASE_LOG_INFO(WebRTC, "CoreAudioCaptureSource switching from '%s' to '%s'", name().utf8().data(), device.label().utf8().data());
     
     setName(AtomString { device.label() });
     setPersistentId(device.persistentId());

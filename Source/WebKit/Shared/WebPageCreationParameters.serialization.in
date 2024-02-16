@@ -46,6 +46,9 @@ headers: "ArgumentCoders.h"
 
     std::optional<WebCore::FloatRect> viewExposedRect;
 
+    std::optional<uint32_t> displayID;
+    std::optional<unsigned> nominalFramesPerSecond;
+
     bool alwaysShowsHorizontalScroller;
     bool alwaysShowsVerticalScroller;
 
@@ -135,6 +138,9 @@ headers: "ArgumentCoders.h"
     Vector<WebKit::SandboxExtension::Handle> gpuIOKitExtensionHandles;
     Vector<WebKit::SandboxExtension::Handle> gpuMachExtensionHandles;
 #endif
+#if PLATFORM(MAC)
+    WebKit::SandboxExtension::Handle renderServerMachExtensionHandle;
+#endif
 #if HAVE(STATIC_FONT_REGISTRY)
     Vector<WebKit::SandboxExtension::Handle> fontMachExtensionHandles;
 #endif
@@ -189,6 +195,7 @@ headers: "ArgumentCoders.h"
     bool userScriptsShouldWaitUntilNotification;
     bool loadsSubresources;
     std::optional<MemoryCompactLookupOnlyRobinHoodHashSet<String>> allowedNetworkHosts;
+    std::optional<std::pair<uint16_t, uint16_t>> portsForUpgradingInsecureSchemeForTesting;
 
     bool crossOriginAccessControlCheckEnabled;
     String processDisplayName;
@@ -255,4 +262,5 @@ headers: "ArgumentCoders.h"
 [Nested] struct WebKit::WebPageCreationParameters::SubframeProcessPageParameters {
     URL initialMainDocumentURL;
     WebKit::FrameTreeCreationParameters frameTreeParameters;
+    std::optional<WebKit::WebsitePoliciesData> websitePoliciesData;
 }

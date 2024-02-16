@@ -100,12 +100,12 @@ void CachedResourceRequest::updateForAccessControl(Document& document)
     updateRequestForAccessControl(m_resourceRequest, *m_origin, m_options.storedCredentialsPolicy);
 }
 
-void upgradeInsecureResourceRequestIfNeeded(ResourceRequest& request, Document& document)
+void upgradeInsecureResourceRequestIfNeeded(ResourceRequest& request, Document& document, ContentSecurityPolicy::AlwaysUpgradeRequest alwaysUpgradeRequest)
 {
     URL url = request.url();
 
     ASSERT(document.contentSecurityPolicy());
-    document.checkedContentSecurityPolicy()->upgradeInsecureRequestIfNeeded(url, ContentSecurityPolicy::InsecureRequestType::Load);
+    document.checkedContentSecurityPolicy()->upgradeInsecureRequestIfNeeded(url, ContentSecurityPolicy::InsecureRequestType::Load, alwaysUpgradeRequest);
 
     if (url == request.url())
         return;
@@ -113,9 +113,9 @@ void upgradeInsecureResourceRequestIfNeeded(ResourceRequest& request, Document& 
     request.setURL(url);
 }
 
-void CachedResourceRequest::upgradeInsecureRequestIfNeeded(Document& document)
+void CachedResourceRequest::upgradeInsecureRequestIfNeeded(Document& document, ContentSecurityPolicy::AlwaysUpgradeRequest alwaysUpgradeRequest)
 {
-    upgradeInsecureResourceRequestIfNeeded(m_resourceRequest, document);
+    upgradeInsecureResourceRequestIfNeeded(m_resourceRequest, document, alwaysUpgradeRequest);
 }
 
 void CachedResourceRequest::setDomainForCachePartition(Document& document)
@@ -146,9 +146,7 @@ static String acceptHeaderValueForImageResource()
 {
     static MainThreadNeverDestroyed<String> staticPrefix = [] {
         StringBuilder builder;
-#if HAVE(WEBP) || USE(WEBP)
         builder.append("image/webp,"_s);
-#endif
 #if HAVE(AVIF) || USE(AVIF)
         builder.append("image/avif,"_s);
 #endif

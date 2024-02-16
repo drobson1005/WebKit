@@ -32,6 +32,7 @@
 
 #import "CocoaHelpers.h"
 #import "Logging.h"
+#import "WebExtensionConstants.h"
 #import "_WKWebExtensionSQLiteDatabase.h"
 #import "_WKWebExtensionSQLiteHelpers.h"
 #import "_WKWebExtensionSQLiteRow.h"
@@ -77,9 +78,16 @@ using namespace WebKit;
     auto *database = _database;
     _database = nil;
 
-    dispatch_sync(_databaseQueue, ^{
-        [database close];
-    });
+    if (NSThread.isMainThread) {
+        dispatch_sync(_databaseQueue, ^{
+            [database close];
+        });
+
+        return;
+    }
+
+    dispatch_assert_queue(_databaseQueue);
+    [database close];
 }
 
 - (void)deleteDatabaseWithCompletionHandler:(void (^)(NSString *errorMessage))completionHandler

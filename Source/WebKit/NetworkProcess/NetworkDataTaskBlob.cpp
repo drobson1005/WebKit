@@ -33,7 +33,6 @@
 #include "NetworkDataTaskBlob.h"
 
 #include "AuthenticationManager.h"
-#include "DataReference.h"
 #include "Download.h"
 #include "Logging.h"
 #include "NetworkProcess.h"
@@ -268,7 +267,7 @@ void NetworkDataTaskBlob::dispatchDidReceiveResponse()
     response.setHTTPStatusText(m_isRangeRequest ? httpPartialContentText : httpOKText);
 
     response.setHTTPHeaderField(HTTPHeaderName::ContentType, m_blobData->contentType());
-    response.setTextEncodingName(extractCharsetFromMediaType(m_blobData->contentType()).toAtomString());
+    response.setTextEncodingName(extractCharsetFromMediaType(m_blobData->contentType()).toString());
     response.setHTTPHeaderField(HTTPHeaderName::ContentLength, String::number(m_totalRemainingSize));
     addPolicyContainerHeaders(response, m_blobData->policyContainer());
 
@@ -505,7 +504,7 @@ void NetworkDataTaskBlob::didFailDownload(const ResourceError& error)
     else {
         auto* download = m_networkProcess->downloadManager().download(m_pendingDownloadID);
         ASSERT(download);
-        download->didFail(error, IPC::DataReference());
+        download->didFail(error, { });
     }
 }
 

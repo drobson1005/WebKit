@@ -35,6 +35,7 @@
 #include "AuthenticationChallengeProxy.h"
 #include "AuthenticationManager.h"
 #include "BackgroundFetchState.h"
+#include "DidFilterKnownLinkDecoration.h"
 #include "DownloadProxy.h"
 #include "DownloadProxyMap.h"
 #include "DownloadProxyMessages.h"
@@ -380,7 +381,7 @@ void NetworkProcessProxy::dataTaskDidReceiveResponse(DataTaskIdentifier identifi
         completionHandler(false);
 }
 
-void NetworkProcessProxy::dataTaskDidReceiveData(DataTaskIdentifier identifier, const IPC::DataReference& data)
+void NetworkProcessProxy::dataTaskDidReceiveData(DataTaskIdentifier identifier, std::span<const uint8_t> data)
 {
     MESSAGE_CHECK(decltype(m_dataTasks)::isValidKey(identifier));
     if (auto task = m_dataTasks.get(identifier))
@@ -579,6 +580,10 @@ void NetworkProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Con
     
 #if USE(RUNNINGBOARD)
     m_throttler.didConnectToProcess(*this);
+#if USE(EXTENSIONKIT)
+    if (launcher)
+        launcher->releaseLaunchGrant();
+#endif
 #endif
 }
 
@@ -677,6 +682,12 @@ void NetworkProcessProxy::resourceLoadDidCompleteWithError(WebPageProxyIdentifie
         return;
 
     page->resourceLoadDidCompleteWithError(WTFMove(loadInfo), WTFMove(response), WTFMove(error));
+}
+
+void NetworkProcessProxy::didAllowPrivateTokenUsageByThirdPartyForTesting(PAL::SessionID sessionID, bool wasAllowed, URL&& resourceURL)
+{
+    if (auto* store = websiteDataStoreFromSessionID(sessionID))
+        store->didAllowPrivateTokenUsageByThirdPartyForTesting(wasAllowed, WTFMove(resourceURL));
 }
 
 void NetworkProcessProxy::dumpResourceLoadStatistics(PAL::SessionID sessionID, CompletionHandler<void(String)>&& completionHandler)
@@ -1201,12 +1212,12 @@ void NetworkProcessProxy::notifyWebsiteDataScanForRegistrableDomainsFinished()
     WebProcessProxy::notifyWebsiteDataScanForRegistrableDomainsFinished();
 }
 
-void NetworkProcessProxy::didCommitCrossSiteLoadWithDataTransfer(PAL::SessionID sessionID, const RegistrableDomain& fromDomain, const RegistrableDomain& toDomain, OptionSet<WebCore::CrossSiteNavigationDataTransfer::Flag> navigationDataTransfer, WebPageProxyIdentifier webPageProxyID, PageIdentifier webPageID)
+void NetworkProcessProxy::didCommitCrossSiteLoadWithDataTransfer(PAL::SessionID sessionID, const RegistrableDomain& fromDomain, const RegistrableDomain& toDomain, OptionSet<WebCore::CrossSiteNavigationDataTransfer::Flag> navigationDataTransfer, WebPageProxyIdentifier webPageProxyID, PageIdentifier webPageID, DidFilterKnownLinkDecoration didFilterKnownLinkDecoration)
 {
     if (!canSendMessage())
         return;
 
-    send(Messages::NetworkProcess::DidCommitCrossSiteLoadWithDataTransfer(sessionID, fromDomain, toDomain, navigationDataTransfer, webPageProxyID, webPageID), 0);
+    send(Messages::NetworkProcess::DidCommitCrossSiteLoadWithDataTransfer(sessionID, fromDomain, toDomain, navigationDataTransfer, webPageProxyID, webPageID, didFilterKnownLinkDecoration), 0);
 }
 
 void NetworkProcessProxy::didCommitCrossSiteLoadWithDataTransferFromPrevalentResource(WebPageProxyIdentifier pageID)
@@ -1221,14 +1232,14 @@ void NetworkProcessProxy::didCommitCrossSiteLoadWithDataTransferFromPrevalentRes
     page->didCommitCrossSiteLoadWithDataTransferFromPrevalentResource();
 }
 
-void NetworkProcessProxy::setCrossSiteLoadWithLinkDecorationForTesting(PAL::SessionID sessionID, const RegistrableDomain& fromDomain, const RegistrableDomain& toDomain, CompletionHandler<void()>&& completionHandler)
+void NetworkProcessProxy::setCrossSiteLoadWithLinkDecorationForTesting(PAL::SessionID sessionID, const RegistrableDomain& fromDomain, const RegistrableDomain& toDomain, bool wasFiltered, CompletionHandler<void()>&& completionHandler)
 {
     if (!canSendMessage()) {
         completionHandler();
         return;
     }
     
-    sendWithAsyncReply(Messages::NetworkProcess::SetCrossSiteLoadWithLinkDecorationForTesting(sessionID, fromDomain, toDomain), WTFMove(completionHandler));
+    sendWithAsyncReply(Messages::NetworkProcess::SetCrossSiteLoadWithLinkDecorationForTesting(sessionID, fromDomain, toDomain, wasFiltered ? DidFilterKnownLinkDecoration::Yes : DidFilterKnownLinkDecoration::No), WTFMove(completionHandler));
 }
 
 void NetworkProcessProxy::resetCrossSiteLoadsWithLinkDecorationForTesting(PAL::SessionID sessionID, CompletionHandler<void()>&& completionHandler)
@@ -1293,18 +1304,6 @@ void NetworkProcessProxy::setManagedDomainsForResourceLoadStatistics(PAL::Sessio
     sendWithAsyncReply(Messages::NetworkProcess::SetManagedDomainsForResourceLoadStatistics(sessionID, appBoundDomains), [completionHandler = WTFMove(completionHandler)]() mutable {
         completionHandler();
     });
-}
-#endif
-
-#if ENABLE(APPLE_PAY_REMOTE_UI_USES_SCENE)
-void NetworkProcessProxy::getWindowSceneIdentifierForPaymentPresentation(WebPageProxyIdentifier webPageProxyIdentifier, CompletionHandler<void(const String&)>&& completionHandler)
-{
-    auto page = WebProcessProxy::webPage(webPageProxyIdentifier);
-    if (!page) {
-        completionHandler(nullString());
-        return;
-    }
-    completionHandler(page->pageClient().sceneID());
 }
 #endif
 

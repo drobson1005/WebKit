@@ -103,6 +103,27 @@ static WeakPtr<GPUProcessProxy>& singleton()
     return singleton;
 }
 
+static RefPtr<GPUProcessProxy>& keptAliveGPUProcessProxy()
+{
+    static MainThreadNeverDestroyed<RefPtr<GPUProcessProxy>> keptAliveGPUProcessProxy;
+    return keptAliveGPUProcessProxy.get();
+}
+
+void GPUProcessProxy::keepProcessAliveTemporarily()
+{
+    ASSERT(isMainRunLoop());
+    static constexpr auto durationToKeepGPUProcessAliveAfterDestruction = 1_min;
+
+    if (!singleton())
+        return;
+
+    keptAliveGPUProcessProxy() = singleton().get();
+    static NeverDestroyed<RunLoop::Timer> releaseGPUProcessTimer(RunLoop::main(), [] {
+        keptAliveGPUProcessProxy() = nullptr;
+    });
+    releaseGPUProcessTimer.get().startOneShot(durationToKeepGPUProcessAliveAfterDestruction);
+}
+
 Ref<GPUProcessProxy> GPUProcessProxy::getOrCreate()
 {
     ASSERT(RunLoop::isMain());
@@ -110,7 +131,7 @@ Ref<GPUProcessProxy> GPUProcessProxy::getOrCreate()
         ASSERT(existingGPUProcess->state() != State::Terminated);
         return *existingGPUProcess;
     }
-    auto gpuProcess = adoptRef(*new GPUProcessProxy);
+    Ref gpuProcess = adoptRef(*new GPUProcessProxy);
     singleton() = gpuProcess;
     return gpuProcess;
 }
@@ -121,13 +142,9 @@ GPUProcessProxy* GPUProcessProxy::singletonIfCreated()
 }
 
 #if USE(SANDBOX_EXTENSIONS_FOR_CACHE_AND_TEMP_DIRECTORY_ACCESS)
-static String gpuProcessCachesDirectory(bool isExtension)
+static String gpuProcessCachesDirectory()
 {
-    ASCIILiteral cacheDirectory;
-    if (isExtension)
-        cacheDirectory = "/Library/Caches/com.apple.WebKit.GPUExtension/"_s;
-    else
-        cacheDirectory = "/Library/Caches/com.apple.WebKit.GPU/"_s;
+    constexpr ASCIILiteral cacheDirectory = "/Library/Caches/com.apple.WebKit.GPU/"_s;
 
     String path = WebsiteDataStore::cacheDirectoryInContainerOrHomeDirectory(cacheDirectory);
 
@@ -165,11 +182,7 @@ GPUProcessProxy::GPUProcessProxy()
     parameters.parentPID = getCurrentProcessID();
 
 #if USE(SANDBOX_EXTENSIONS_FOR_CACHE_AND_TEMP_DIRECTORY_ACCESS)
-    bool isExtension = false;
-#if USE(EXTENSIONKIT)
-    isExtension = !!extensionProcess();
-#endif
-    auto containerCachesDirectory = resolveAndCreateReadWriteDirectoryForSandboxExtension(gpuProcessCachesDirectory(isExtension));
+    auto containerCachesDirectory = resolveAndCreateReadWriteDirectoryForSandboxExtension(gpuProcessCachesDirectory());
     auto containerTemporaryDirectory = WebsiteDataStore::defaultResolvedContainerTemporaryDirectory();
 
     if (!containerCachesDirectory.isEmpty()) {
@@ -439,6 +452,11 @@ void GPUProcessProxy::promptForGetDisplayMedia(WebCore::DisplayCapturePromptType
 {
     sendWithAsyncReply(Messages::GPUProcess::PromptForGetDisplayMedia { type }, WTFMove(completionHandler));
 }
+
+void GPUProcessProxy::cancelGetDisplayMediaPrompt()
+{
+    send(Messages::GPUProcess::CancelGetDisplayMediaPrompt { }, 0);
+}
 #endif
 
 void GPUProcessProxy::getLaunchOptions(ProcessLauncher::LaunchOptions& launchOptions)
@@ -460,14 +478,18 @@ void GPUProcessProxy::processWillShutDown(IPC::Connection& connection)
 
 #if ENABLE(VP9)
 std::optional<bool> GPUProcessProxy::s_hasVP9HardwareDecoder;
-std::optional<bool> GPUProcessProxy::s_hasVP9ExtensionSupport;
+#endif
+#if ENABLE(AV1)
+std::optional<bool> GPUProcessProxy::s_hasAV1HardwareDecoder;
 #endif
 
 void GPUProcessProxy::createGPUProcessConnection(WebProcessProxy& webProcessProxy, IPC::Connection::Handle&& connectionIdentifier, GPUProcessConnectionParameters&& parameters)
 {
 #if ENABLE(VP9)
     parameters.hasVP9HardwareDecoder = s_hasVP9HardwareDecoder;
-    parameters.hasVP9ExtensionSupport = s_hasVP9ExtensionSupport;
+#endif
+#if ENABLE(AV1)
+    parameters.hasAV1HardwareDecoder = s_hasAV1HardwareDecoder;
 #endif
 
     if (auto* store = webProcessProxy.websiteDataStore())
@@ -512,6 +534,8 @@ void GPUProcessProxy::gpuProcessExited(ProcessTerminationReason reason)
 
 #endif
 
+    if (keptAliveGPUProcessProxy() == this)
+        keptAliveGPUProcessProxy() = nullptr;
     if (singleton() == this)
         singleton() = nullptr;
 
@@ -567,6 +591,12 @@ void GPUProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Connect
     
 #if USE(RUNNINGBOARD)
     m_throttler.didConnectToProcess(*this);
+#if USE(EXTENSIONKIT)
+    // FIXME: this should be moved to AuxiliaryProcessProxy::didFinishLaunching along with m_throttler.didConnectToProcess.
+    // This FIXME applies to all process proxy subclasses.
+    if (launcher)
+        launcher->releaseLaunchGrant();
+#endif
 #endif
 
 #if PLATFORM(COCOA)

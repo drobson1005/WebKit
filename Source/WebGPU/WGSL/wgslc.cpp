@@ -132,11 +132,26 @@ static int runWGSL(const CommandLine& options)
 
     String entrypointName = String::fromLatin1(options.entrypoint());
     auto prepareResult = WGSL::prepare(shaderModule, entrypointName, std::nullopt);
+
+    if (auto* error = std::get_if<WGSL::Error>(&prepareResult)) {
+        dataLogLn(*error);
+        return EXIT_FAILURE;
+    }
+
+    auto& result = std::get<WGSL::PrepareResult>(prepareResult);
+    if (entrypointName != "_"_s && !result.entryPoints.contains(entrypointName)) {
+        dataLogLn("WGSL source does not contain entrypoint named '", entrypointName, "'");
+        return EXIT_FAILURE;
+    }
+
+    HashMap<String, WGSL::ConstantValue> constantValues;
+    auto msl = WGSL::generate(result.callGraph, constantValues);
+
     if (options.dumpASTAtEnd())
         WGSL::AST::dumpAST(shaderModule);
 
     if (options.dumpGeneratedCode())
-        printf("%s", prepareResult.msl.utf8().data());
+        printf("%s", msl.utf8().data());
 
     return EXIT_SUCCESS;
 }

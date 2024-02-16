@@ -820,9 +820,9 @@ inline void BuilderCustom::applyValueWebkitTextSizeAdjust(BuilderState& builderS
 {
     auto& primitiveValue = downcast<CSSPrimitiveValue>(value);
     if (primitiveValue.valueID() == CSSValueAuto)
-        builderState.style().setTextSizeAdjust(TextSizeAdjustment(AutoTextSizeAdjustment));
+        builderState.style().setTextSizeAdjust(TextSizeAdjustment::autoAdjust());
     else if (primitiveValue.valueID() == CSSValueNone)
-        builderState.style().setTextSizeAdjust(TextSizeAdjustment(NoTextSizeAdjustment));
+        builderState.style().setTextSizeAdjust(TextSizeAdjustment::none());
     else
         builderState.style().setTextSizeAdjust(TextSizeAdjustment(primitiveValue.floatValue()));
 
@@ -1401,7 +1401,7 @@ inline void BuilderCustom::applyInheritStroke(BuilderState& builderState)
 inline void BuilderCustom::applyValueStroke(BuilderState& builderState, CSSValue& value)
 {
     auto& svgStyle = builderState.style().accessSVGStyle();
-    const auto* localValue = value.isPrimitiveValue() ? &downcast<CSSPrimitiveValue>(value) : nullptr;
+    const auto* localValue = dynamicDowncast<CSSPrimitiveValue>(value);
     String url;
     if (auto* list = dynamicDowncast<CSSValueList>(value)) {
         url = downcast<CSSPrimitiveValue>(list->item(0))->stringValue();
@@ -1439,7 +1439,7 @@ inline void BuilderCustom::applyValueContent(BuilderState& builderState, CSSValu
 
     auto processAttrContent = [&](const CSSPrimitiveValue& primitiveValue) -> AtomString {
         // FIXME: Can a namespace be specified for an attr(foo)?
-        if (builderState.style().styleType() == PseudoId::None)
+        if (builderState.style().pseudoElementType() == PseudoId::None)
             builderState.style().setHasAttrContent();
         else
             const_cast<RenderStyle&>(builderState.parentStyle()).setHasAttrContent();

@@ -31,6 +31,7 @@
 #include "CachedFontLoadRequest.h"
 #include "CachedSVGFont.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "Font.h"
 #include "FontCache.h"
 #include "FontCascadeDescription.h"
@@ -167,7 +168,7 @@ void CSSFontFaceSource::load(Document* document)
                     if (auto otfFont = convertSVGToOTFFont(*fontElement))
                         m_generatedOTFBuffer = SharedBuffer::create(WTFMove(otfFont.value()));
                     if (m_generatedOTFBuffer) {
-                        m_inDocumentCustomPlatformData = createFontCustomPlatformData(*m_generatedOTFBuffer, String());
+                        m_inDocumentCustomPlatformData = FontCustomPlatformData::create(*m_generatedOTFBuffer, String());
                         success = static_cast<bool>(m_inDocumentCustomPlatformData);
                     }
                 }

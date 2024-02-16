@@ -54,7 +54,7 @@ CSSParserContext::CSSParserContext(CSSParserMode mode, const URL& baseURL)
     , mode(mode)
 {
     // FIXME: We should turn all of the features on from their WebCore Settings defaults.
-    if (mode == UASheetMode) {
+    if (isUASheetBehavior(mode)) {
         colorMixEnabled = true;
         focusVisibleEnabled = true;
         lightDarkEnabled = true;
@@ -70,6 +70,11 @@ CSSParserContext::CSSParserContext(CSSParserMode mode, const URL& baseURL)
     }
 
     StaticCSSValuePool::init();
+}
+
+CSSParserContext::CSSParserContext(const Document& document)
+{
+    *this = document.cssParserContext();
 }
 
 CSSParserContext::CSSParserContext(const Document& document, const URL& sheetBaseURL, const String& charset)
@@ -101,6 +106,8 @@ CSSParserContext::CSSParserContext(const Document& document, const URL& sheetBas
     , cssPaintingAPIEnabled { document.settings().cssPaintingAPIEnabled() }
 #endif
     , cssScopeAtRuleEnabled { document.settings().cssScopeAtRuleEnabled() }
+    , cssStartingStyleAtRuleEnabled { document.settings().cssStartingStyleAtRuleEnabled() }
+    , cssStyleQueriesEnabled { document.settings().cssStyleQueriesEnabled() }
     , cssTextUnderlinePositionLeftRightEnabled { document.settings().cssTextUnderlinePositionLeftRightEnabled() }
     , cssWordBreakAutoPhraseEnabled { document.settings().cssWordBreakAutoPhraseEnabled() }
     , popoverAttributeEnabled { document.settings().popoverAttributeEnabled() }

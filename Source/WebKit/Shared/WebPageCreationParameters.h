@@ -37,6 +37,7 @@
 #include "WebPageProxyIdentifier.h"
 #include "WebPreferencesStore.h"
 #include "WebURLSchemeHandlerIdentifier.h"
+#include "WebsitePoliciesData.h"
 #include <WebCore/ActivityState.h>
 #include <WebCore/Color.h>
 #include <WebCore/ContentSecurityPolicy.h>
@@ -104,6 +105,9 @@ struct WebPageCreationParameters {
     WebCore::FloatSize maximumUnobscuredSize;
 
     std::optional<WebCore::FloatRect> viewExposedRect;
+
+    std::optional<uint32_t> displayID;
+    std::optional<unsigned> nominalFramesPerSecond;
 
     bool alwaysShowsHorizontalScroller;
     bool alwaysShowsVerticalScroller;
@@ -196,6 +200,9 @@ struct WebPageCreationParameters {
     Vector<SandboxExtension::Handle> gpuIOKitExtensionHandles;
     Vector<SandboxExtension::Handle> gpuMachExtensionHandles;
 #endif
+#if PLATFORM(MAC)
+    SandboxExtension::Handle renderServerMachExtensionHandle;
+#endif
 #if HAVE(STATIC_FONT_REGISTRY)
     Vector<SandboxExtension::Handle> fontMachExtensionHandles;
 #endif
@@ -251,6 +258,7 @@ struct WebPageCreationParameters {
     bool userScriptsShouldWaitUntilNotification { true };
     bool loadsSubresources { true };
     std::optional<MemoryCompactLookupOnlyRobinHoodHashSet<String>> allowedNetworkHosts;
+    std::optional<std::pair<uint16_t, uint16_t>> portsForUpgradingInsecureSchemeForTesting;
 
     bool crossOriginAccessControlCheckEnabled { true };
     String processDisplayName;
@@ -299,6 +307,7 @@ struct WebPageCreationParameters {
     struct SubframeProcessPageParameters {
         URL initialMainDocumentURL;
         FrameTreeCreationParameters frameTreeParameters;
+        std::optional<WebsitePoliciesData> websitePoliciesData;
     };
     std::optional<SubframeProcessPageParameters> subframeProcessPageParameters;
     std::optional<WebCore::FrameIdentifier> openerFrameIdentifier;

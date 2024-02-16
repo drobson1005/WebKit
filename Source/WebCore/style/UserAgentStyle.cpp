@@ -31,9 +31,12 @@
 
 #include "CSSCounterStyleRegistry.h"
 #include "CSSCounterStyleRule.h"
+#include "CSSKeyframesRule.h"
 #include "CSSValuePool.h"
 #include "Chrome.h"
 #include "ChromeClient.h"
+#include "Document.h"
+#include "DocumentInlines.h"
 #include "ElementInlines.h"
 #include "FullscreenManager.h"
 #include "HTMLAnchorElement.h"
@@ -58,6 +61,7 @@
 #include "RenderTheme.h"
 #include "RuleSetBuilder.h"
 #include "SVGElement.h"
+#include "StyleResolver.h"
 #include "StyleSheetContents.h"
 #include "UserAgentStyleSheets.h"
 #include <wtf/NeverDestroyed.h>
@@ -126,6 +130,15 @@ void static addToCounterStyleRegistry(StyleSheetContents& sheet)
             CSSCounterStyleRegistry::addUserAgentCounterStyle(counterStyleRule->descriptors());
     }
     CSSCounterStyleRegistry::resolveUserAgentReferences();
+}
+
+void static addUserAgentKeyframes(StyleSheetContents& sheet)
+{
+    // This does not handle nested rules.
+    for (auto& rule : sheet.childRules()) {
+        if (auto* styleRuleKeyframes = dynamicDowncast<StyleRuleKeyframes>(rule.get()))
+            Style::Resolver::addUserAgentKeyframeStyle(*styleRuleKeyframes);
+    }
 }
 
 void UserAgentStyle::addToDefaultStyle(StyleSheetContents& sheet)
@@ -258,7 +271,7 @@ void UserAgentStyle::ensureDefaultStyleSheetsForElement(const Element& element)
     }
 
 #if ENABLE(FULLSCREEN_API)
-    if (!fullscreenStyleSheet && element.document().fullscreenManager().isFullscreen()) {
+    if (CheckedPtr fullscreenManager = element.document().fullscreenManagerIfExists(); !fullscreenStyleSheet && fullscreenManager && fullscreenManager->isFullscreen()) {
         fullscreenStyleSheet = parseUASheet(StringImpl::createWithoutCopying(fullscreenUserAgentStyleSheet, sizeof(fullscreenUserAgentStyleSheet)));
         addToDefaultStyle(*fullscreenStyleSheet);
     }
@@ -274,6 +287,7 @@ void UserAgentStyle::ensureDefaultStyleSheetsForElement(const Element& element)
     if (!viewTransitionsStyleSheet && element.document().settings().viewTransitionsEnabled()) {
         viewTransitionsStyleSheet = parseUASheet(StringImpl::createWithoutCopying(viewTransitionsUserAgentStyleSheet, sizeof(viewTransitionsUserAgentStyleSheet)));
         addToDefaultStyle(*viewTransitionsStyleSheet);
+        addUserAgentKeyframes(*viewTransitionsStyleSheet);
     }
 
     ASSERT(defaultStyle->features().idsInRules.isEmpty());

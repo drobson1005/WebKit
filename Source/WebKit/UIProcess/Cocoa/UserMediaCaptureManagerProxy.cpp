@@ -183,18 +183,20 @@ public:
 
             m_source->removeVideoFrameObserver(*this);
 
-            m_source->applyConstraints(WTFMove(constraints), [this, weakThis = WTFMove(weakThis), &constraints, callback = WTFMove(callback)](auto&& result) mutable {
+            m_source->applyConstraints(WTFMove(constraints), [this, weakThis = WTFMove(weakThis), &constraints, callback = WTFMove(callback)](auto&& error) mutable {
                 if (!weakThis) {
                     callback(RealtimeMediaSource::ApplyConstraintsError { { }, { } });
                     return;
                 }
 
-                if (!result && updateVideoConstraints(constraints))
+                if (!error) {
+                    updateVideoConstraints(constraints);
                     m_settings = { };
+                }
 
                 m_source->addVideoFrameObserver(*this, { m_widthConstraint, m_heightConstraint }, m_frameRateConstraint);
 
-                callback(WTFMove(result));
+                callback(WTFMove(error));
             });
 
             return GenericPromise::createAndResolve();
@@ -480,7 +482,7 @@ CaptureSourceOrError UserMediaCaptureManagerProxy::createCameraSource(const Capt
     return source;
 }
 
-void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstraints(RealtimeMediaSourceIdentifier id, const CaptureDevice& device, WebCore::MediaDeviceHashSalts&& hashSalts, const MediaConstraints& mediaConstraints, bool shouldUseGPUProcessRemoteFrames, PageIdentifier pageIdentifier, CreateSourceCallback&& completionHandler)
+void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstraints(RealtimeMediaSourceIdentifier id, const CaptureDevice& device, WebCore::MediaDeviceHashSalts&& hashSalts, MediaConstraints&& mediaConstraints, bool shouldUseGPUProcessRemoteFrames, PageIdentifier pageIdentifier, CreateSourceCallback&& completionHandler)
 {
     if (!m_connectionProxy->willStartCapture(device.type())) {
         completionHandler({ "Request is not allowed"_s, WebCore::MediaAccessDenialReason::PermissionDenied }, { }, { });
@@ -545,9 +547,9 @@ void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstrai
         return;
     }
 
-    proxy->applyConstraints(WTFMove(const_cast<WebCore::MediaConstraints&>(*constraints)), [proxy = WTFMove(proxy), id, completionHandler = WTFMove(completionHandler), completeSetup = WTFMove(completeSetup)](auto&& result) mutable {
-        if (result) {
-            completionHandler({ WTFMove(result->badConstraint), WebCore::MediaAccessDenialReason::InvalidConstraint }, { }, { });
+    proxy->applyConstraints(WTFMove(mediaConstraints), [proxy = WTFMove(proxy), id, completionHandler = WTFMove(completionHandler), completeSetup = WTFMove(completeSetup)](auto&& error) mutable {
+        if (error) {
+            completionHandler(CaptureSourceError { error->invalidConstraint }, { }, { });
             return;
         }
 
@@ -609,7 +611,7 @@ void UserMediaCaptureManagerProxy::applyConstraints(RealtimeMediaSourceIdentifie
             return;
 
         if (result) {
-            m_connectionProxy->connection().send(Messages::UserMediaCaptureManager::ApplyConstraintsFailed(id, result->badConstraint, result->message), 0);
+            m_connectionProxy->connection().send(Messages::UserMediaCaptureManager::ApplyConstraintsFailed(id, result->invalidConstraint, result->message), 0);
             return;
         }
 

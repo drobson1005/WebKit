@@ -80,6 +80,11 @@ SVGSVGElement& LegacyRenderSVGRoot::svgSVGElement() const
     return downcast<SVGSVGElement>(nodeForNonAnonymous());
 }
 
+Ref<SVGSVGElement> LegacyRenderSVGRoot::protectedSVGSVGElement() const
+{
+    return svgSVGElement();
+}
+
 bool LegacyRenderSVGRoot::hasIntrinsicAspectRatio() const
 {
     return computeIntrinsicAspectRatio();
@@ -121,7 +126,7 @@ void LegacyRenderSVGRoot::computeIntrinsicRatioInformation(FloatSize& intrinsicS
 
 bool LegacyRenderSVGRoot::isEmbeddedThroughSVGImage() const
 {
-    return isInSVGImage(&svgSVGElement());
+    return isInSVGImage(protectedSVGSVGElement().ptr());
 }
 
 bool LegacyRenderSVGRoot::isEmbeddedThroughFrameContainingSVGDocument() const
@@ -481,8 +486,6 @@ bool LegacyRenderSVGRoot::nodeAtPoint(const HitTestRequest& request, HitTestResu
     LayoutPoint pointInParent = locationInContainer.point() - toLayoutSize(accumulatedOffset);
     LayoutPoint pointInBorderBox = pointInParent - toLayoutSize(location());
 
-    ASSERT(SVGHitTestCycleDetectionScope::isEmpty());
-
     // Test SVG content if the point is in our content box or it is inside the visualOverflowRect and the overflow is visible.
     // FIXME: This should be an intersection when rect-based hit tests are supported by nodeAtFloatPoint.
     if (contentBoxRect().contains(pointInBorderBox) || (!shouldApplyViewportClip() && visualOverflowRect().contains(pointInParent))) {
@@ -492,10 +495,8 @@ bool LegacyRenderSVGRoot::nodeAtPoint(const HitTestRequest& request, HitTestResu
             // FIXME: nodeAtFloatPoint() doesn't handle rect-based hit tests yet.
             if (child->nodeAtFloatPoint(request, result, localPoint, hitTestAction)) {
                 updateHitTestResult(result, pointInBorderBox);
-                if (result.addNodeToListBasedTestResult(child->node(), request, locationInContainer) == HitTestProgress::Stop) {
-                    ASSERT(SVGHitTestCycleDetectionScope::isEmpty());
+                if (result.addNodeToListBasedTestResult(child->protectedNode().get(), request, locationInContainer) == HitTestProgress::Stop)
                     return true;
-                }
             }
         }
     }
@@ -509,12 +510,10 @@ bool LegacyRenderSVGRoot::nodeAtPoint(const HitTestRequest& request, HitTestResu
         LayoutRect boundsRect(accumulatedOffset + location(), size());
         if (locationInContainer.intersects(boundsRect)) {
             updateHitTestResult(result, pointInBorderBox);
-            if (result.addNodeToListBasedTestResult(nodeForHitTest(), request, locationInContainer, boundsRect) == HitTestProgress::Stop)
+            if (result.addNodeToListBasedTestResult(protectedNodeForHitTest().get(), request, locationInContainer, boundsRect) == HitTestProgress::Stop)
                 return true;
         }
     }
-
-    ASSERT(SVGHitTestCycleDetectionScope::isEmpty());
 
     return false;
 }

@@ -83,13 +83,16 @@ public:
     String badgeText() const;
     void setBadgeText(String);
 
+    bool hasUnreadBadgeText() const;
+    void setHasUnreadBadgeText(bool);
+
     void incrementBlockedResourceCount(ssize_t amount);
 
     bool isEnabled() const;
     void setEnabled(std::optional<bool>);
 
     bool presentsPopup() const { return !popupPath().isEmpty(); }
-    bool canProgrammaticallyPresentPopup() const { return m_respondsToPresentPopup; }
+    bool canProgrammaticallyPresentPopup() const;
 
     String popupPath() const;
     void setPopupPath(String);
@@ -108,6 +111,8 @@ public:
 #endif
 
 private:
+    WebExtensionAction* fallbackAction() const;
+
     WeakPtr<WebExtensionContext> m_extensionContext;
     RefPtr<WebExtensionTab> m_tab;
     RefPtr<WebExtensionWindow> m_window;
@@ -121,8 +126,8 @@ private:
     String m_customBadgeText;
     ssize_t m_blockedResourceCount { 0 };
     std::optional<bool> m_customEnabled;
-    bool m_popupPresented { false };
-    bool m_respondsToPresentPopup { false };
+    std::optional<bool> m_hasUnreadBadgeText;
+    bool m_popupPresented : 1 { false };
 };
 
 } // namespace WebKit

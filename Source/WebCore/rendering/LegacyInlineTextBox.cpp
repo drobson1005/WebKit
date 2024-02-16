@@ -32,6 +32,7 @@
 #include "ElementRuleCollector.h"
 #include "EventRegion.h"
 #include "FloatRoundedRect.h"
+#include "GlyphDisplayListCache.h"
 #include "GraphicsContext.h"
 #include "HitTestResult.h"
 #include "ImageBuffer.h"
@@ -61,7 +62,6 @@
 #include "TextBoxSelectableRange.h"
 #include "TextDecorationPainter.h"
 #include "TextPaintStyle.h"
-#include "TextPainter.h"
 #include <stdio.h>
 #include <wtf/IsoMallocInlines.h>
 #include <wtf/text/CString.h>
@@ -86,7 +86,8 @@ LegacyInlineTextBox::~LegacyInlineTextBox()
 {
     if (!knownToHaveNoOverflow() && gTextBoxesWithOverflow)
         gTextBoxesWithOverflow->remove(this);
-    TextPainter::removeGlyphDisplayList(*this);
+    if (isInGlyphDisplayListCache())
+        removeBoxFromGlyphDisplayListCache(*this);
 }
 
 bool LegacyInlineTextBox::hasTextContent() const
@@ -335,7 +336,7 @@ bool LegacyInlineTextBox::nodeAtPoint(const HitTestRequest& request, HitTestResu
 
     if (locationInContainer.intersects(rect)) {
         renderer().updateHitTestResult(result, flipForWritingMode(locationInContainer.point() - toLayoutSize(accumulatedOffset)));
-        if (result.addNodeToListBasedTestResult(renderer().nodeForHitTest(), request, locationInContainer, rect) == HitTestProgress::Stop)
+        if (result.addNodeToListBasedTestResult(renderer().protectedNodeForHitTest().get(), request, locationInContainer, rect) == HitTestProgress::Stop)
             return true;
     }
     return false;
@@ -446,7 +447,11 @@ String LegacyInlineTextBox::text(bool ignoreCombinedText, bool ignoreHyphen) con
 
 const RenderCombineText* LegacyInlineTextBox::combinedText() const
 {
-    return lineStyle().hasTextCombine() && is<RenderCombineText>(renderer()) && downcast<RenderCombineText>(renderer()).isCombined() ? &downcast<RenderCombineText>(renderer()) : nullptr;
+    if (!lineStyle().hasTextCombine())
+        return nullptr;
+
+    auto* renderCombineText = dynamicDowncast<RenderCombineText>(renderer());
+    return renderCombineText && renderCombineText->isCombined() ? renderCombineText : nullptr;
 }
 
 ExpansionBehavior LegacyInlineTextBox::expansionBehavior() const

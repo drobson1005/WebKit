@@ -41,6 +41,9 @@ typedef struct CATransform3D CATransform3D;
 #if USE(CG)
 typedef struct CGAffineTransform CGAffineTransform;
 #endif
+#if USE(SKIA)
+class SkM44;
+#endif
 
 #if PLATFORM(WIN) || (PLATFORM(GTK) && OS(WINDOWS))
 #if COMPILER(MINGW) && !COMPILER(MINGW64)
@@ -132,7 +135,7 @@ public:
     static TransformationMatrix fromProjection(double fovUp, double fovDown, double fovLeft, double fovRight, double depthNear, double depthFar);
     static TransformationMatrix fromProjection(double fovy, double aspect, double depthNear, double depthFar);
 
-    static const TransformationMatrix identity;
+    WEBCORE_EXPORT static const TransformationMatrix identity;
 
     void setMatrix(double a, double b, double c, double d, double e, double f)
     {
@@ -395,6 +398,10 @@ public:
 #if USE(CG)
     WEBCORE_EXPORT TransformationMatrix(const CGAffineTransform&);
     WEBCORE_EXPORT operator CGAffineTransform() const;
+#endif
+#if USE(SKIA)
+    TransformationMatrix(const SkM44&);
+    operator SkM44() const;
 #endif
 
 #if PLATFORM(WIN) || (PLATFORM(GTK) && OS(WINDOWS))

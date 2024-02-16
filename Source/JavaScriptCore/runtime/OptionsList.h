@@ -144,6 +144,7 @@ bool canUseHandlerIC();
     v(Bool, dumpBBQDisassembly, false, Normal, "dumps disassembly of BBQ Wasm code upon compilation") \
     v(Bool, dumpOMGDisassembly, false, Normal, "dumps disassembly of OMG Wasm code upon compilation") \
     v(Bool, logJITCodeForPerf, false, Configurable, nullptr) \
+    v(OptionString, jitDumpDirectory, nullptr, Normal, "Directory to place JITDump") \
     v(OptionRange, bytecodeRangeToJITCompile, nullptr, Normal, "bytecode size range to allow compilation on, e.g. 1:100") \
     v(OptionRange, bytecodeRangeToDFGCompile, nullptr, Normal, "bytecode size range to allow DFG compilation on, e.g. 1:100") \
     v(OptionRange, bytecodeRangeToFTLCompile, nullptr, Normal, "bytecode size range to allow FTL compilation on, e.g. 1:100") \
@@ -239,6 +240,7 @@ bool canUseHandlerIC();
     v(Unsigned, defaultB3OptLevel, 2, Normal, nullptr) \
     v(Bool, b3AlwaysFailsBeforeCompile, false, Normal, nullptr) \
     v(Bool, b3AlwaysFailsBeforeLink, false, Normal, nullptr) \
+    v(Bool, validateSerializedValue, false, Normal, nullptr) /* tests CloneSerializer/Deserializer */ \
     v(Bool, ftlCrashes, false, Normal, nullptr) /* fool-proof way of checking that you ended up in the FTL. ;-) */\
     v(Bool, clobberAllRegsInFTLICSlowPath, ASSERT_ENABLED, Normal, nullptr) \
     v(Bool, enableJITDebugAssertions, ASSERT_ENABLED, Normal, nullptr) \
@@ -249,7 +251,7 @@ bool canUseHandlerIC();
     v(Unsigned, maxPolymorphicAccessInliningListSize, 8, Normal, nullptr) \
     v(Bool, usePolymorphicCallInlining, true, Normal, nullptr) \
     v(Bool, usePolymorphicCallInliningForNonStubStatus, false, Normal, nullptr) \
-    v(Unsigned, maxPolymorphicCallVariantListSize, 15, Normal, nullptr) \
+    v(Unsigned, maxPolymorphicCallVariantListSize, 8, Normal, nullptr) \
     v(Unsigned, maxPolymorphicCallVariantListSizeForTopTier, 5, Normal, nullptr) \
     v(Unsigned, maxPolymorphicCallVariantListSizeForWebAssemblyToJS, 5, Normal, nullptr) \
     v(Unsigned, maxPolymorphicCallVariantsForInlining, 5, Normal, nullptr) \
@@ -529,6 +531,7 @@ bool canUseHandlerIC();
     v(Bool, forcePolyProto, false, Normal, "If true, create_this will always create an object with a poly proto structure.") \
     v(Bool, forceMiniVMMode, false, Normal, "If true, it will force mini VM mode on.") \
     v(Bool, useTracePoints, false, Normal, nullptr) \
+    v(Bool, useCompilerSignpost, false, Normal, nullptr) \
     v(Bool, traceLLIntExecution, false, Configurable, nullptr) \
     v(Bool, traceLLIntSlowPath, false, Configurable, nullptr) \
     v(Bool, traceBaselineJITExecution, false, Normal, nullptr) \
@@ -552,6 +555,7 @@ bool canUseHandlerIC();
     v(Double, allowHoistingLICMProbability, 0.5, Normal, nullptr) \
     v(Bool, exposeCustomSettersOnGlobalObjectForTesting, false, Normal, nullptr) \
     v(Bool, useJITCage, canUseJITCage(), Normal, nullptr) \
+    v(Bool, useAllocationProfiling, false, Normal, "Allows toggling of bmalloc/libPAS allocation profiling features at JSC launch.") \
     v(Bool, dumpBaselineJITSizeStatistics, false, Normal, nullptr) \
     v(Bool, dumpDFGJITSizeStatistics, false, Normal, nullptr) \
     v(Bool, verboseExecutablePoolAllocation, false, Normal, nullptr) \

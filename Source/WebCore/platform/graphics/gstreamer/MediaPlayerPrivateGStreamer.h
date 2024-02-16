@@ -164,18 +164,11 @@ public:
     void setPageIsVisible(bool visible, String&&) final { m_visible = visible; }
     void setVisibleInViewport(bool isVisible) final;
     void setPresentationSize(const IntSize&) final;
-    // Prefer MediaTime based methods over float based.
-    float duration() const final { return durationMediaTime().toFloat(); }
-    double durationDouble() const final { return durationMediaTime().toDouble(); }
-    MediaTime durationMediaTime() const override;
-    float currentTime() const final { return currentMediaTime().toFloat(); }
-    double currentTimeDouble() const final { return currentMediaTime().toDouble(); }
-    MediaTime currentMediaTime() const override;
+    MediaTime duration() const override;
+    MediaTime currentTime() const override;
     const PlatformTimeRanges& buffered() const override;
-    float maxTimeSeekable() const final { return maxMediaTimeSeekable().toFloat(); }
-    MediaTime maxMediaTimeSeekable() const override;
-    double minTimeSeekable() const final { return minMediaTimeSeekable().toFloat(); }
-    MediaTime minMediaTimeSeekable() const final { return MediaTime::zeroTime(); }
+    MediaTime maxTimeSeekable() const override;
+    MediaTime minTimeSeekable() const final { return MediaTime::zeroTime(); }
     bool didLoadingProgress() const final;
     unsigned long long totalBytes() const final;
     std::optional<bool> isCrossOrigin(const SecurityOrigin&) const final;
@@ -192,7 +185,7 @@ public:
     unsigned decodedFrameCount() const final;
     unsigned droppedFrameCount() const final;
     void acceleratedRenderingStateChanged() final;
-    bool performTaskAtMediaTime(Function<void()>&&, const MediaTime&) override;
+    bool performTaskAtTime(Function<void()>&&, const MediaTime&) override;
     void isLoopingChanged() final;
 
 #if USE(TEXTURE_MAPPER)
@@ -273,11 +266,17 @@ protected:
         Playing, // Pipeline is playing and it should be.
     };
 
+    enum class ChangePipelineStateResult {
+        Ok,
+        Rejected,
+        Failed,
+    };
+    ChangePipelineStateResult changePipelineState(GstState);
+
     static bool isAvailable();
 
     virtual void durationChanged();
     virtual void sourceSetup(GstElement*);
-    virtual bool changePipelineState(GstState);
     virtual void updatePlaybackRate();
 
 #if USE(GSTREAMER_HOLEPUNCH)
@@ -347,6 +346,9 @@ protected:
 
     void setCachedPosition(const MediaTime&) const;
 
+    bool isPipelineSeeking(GstState current, GstState pending, GstStateChangeReturn) const;
+    bool isPipelineSeeking() const;
+
     Ref<MainThreadNotifier<MainThreadNotification>> m_notifier;
     ThreadSafeWeakPtr<MediaPlayer> m_player;
     String m_referrer;
@@ -359,6 +361,7 @@ protected:
     bool m_didErrorOccur { false };
     mutable bool m_isEndReached { false };
     mutable std::optional<bool> m_isLiveStream;
+    bool m_isPipelinePlaying = false;
 
     // m_isPaused represents:
     // A) In MSE streams, whether playback or pause has last been requested with pause() and play(),

@@ -78,6 +78,7 @@
 #import "WebPageProxy.h"
 #import "WebProcessPool.h"
 #import "WebProcessProxy.h"
+#import "WebTextReplacementData.h"
 #import "_WKDragActionsInternal.h"
 #import "_WKRemoteObjectRegistryInternal.h"
 #import "_WKThumbnailViewInternal.h"
@@ -103,12 +104,14 @@
 #import <WebCore/LegacyNSPasteboardTypes.h>
 #import <WebCore/LoaderNSURLExtras.h>
 #import <WebCore/LocalizedStrings.h>
+#import <WebCore/NowPlayingInfo.h>
 #import <WebCore/Pasteboard.h>
 #import <WebCore/PlatformEventFactoryMac.h>
 #import <WebCore/PlatformPlaybackSessionInterface.h>
 #import <WebCore/PlatformScreen.h>
 #import <WebCore/PlaybackSessionInterfaceMac.h>
 #import <WebCore/PromisedAttachmentInfo.h>
+#import <WebCore/ShareableBitmap.h>
 #import <WebCore/TextAlternativeWithRange.h>
 #import <WebCore/TextRecognitionResult.h>
 #import <WebCore/TextUndoInsertionMarkupMac.h>
@@ -152,6 +155,10 @@
 
 #if ENABLE(MEDIA_SESSION_COORDINATOR)
 #include "MediaSessionCoordinatorProxyPrivate.h"
+#endif
+
+#if USE(APPLE_INTERNAL_SDK)
+#import <WebKitAdditions/WebViewImplAdditionsBefore.mm>
 #endif
 
 #import <pal/cocoa/RevealSoftLink.h>
@@ -1126,6 +1133,8 @@ static void* imageOverlayObservationContext = &imageOverlayObservationContext;
 
 namespace WebKit {
 
+using namespace WebCore;
+
 static NSTrackingAreaOptions trackingAreaOptions()
 {
     // Legacy style scrollbars have design details that rely on tracking the mouse all the time.
@@ -1148,7 +1157,7 @@ static bool isInRecoveryOS()
 
 WebViewImpl::WebViewImpl(NSView <WebViewImplDelegate> *view, WKWebView *outerWebView, WebProcessPool& processPool, Ref<API::PageConfiguration>&& configuration)
     : m_view(view)
-    , m_pageClient(makeUnique<PageClientImpl>(view, outerWebView))
+    , m_pageClient(makeUniqueWithoutRefCountedCheck<PageClientImpl>(view, outerWebView))
     , m_page(processPool.createWebPage(*m_pageClient, WTFMove(configuration)))
     , m_needsViewFrameInWindowCoordinates(m_page->preferences().pluginsEnabled())
     , m_intrinsicContentSize(CGSizeMake(NSViewNoIntrinsicMetric, NSViewNoIntrinsicMetric))
@@ -3504,8 +3513,8 @@ void WebViewImpl::accessibilityRegisterUIProcessTokens()
     // Initialize remote accessibility when the window connection has been established.
     NSData *remoteElementToken = [NSAccessibilityRemoteUIElement remoteTokenForLocalUIElement:m_view.getAutoreleased()];
     NSData *remoteWindowToken = [NSAccessibilityRemoteUIElement remoteTokenForLocalUIElement:[m_view window]];
-    IPC::DataReference elementToken = IPC::DataReference(reinterpret_cast<const uint8_t*>([remoteElementToken bytes]), [remoteElementToken length]);
-    IPC::DataReference windowToken = IPC::DataReference(reinterpret_cast<const uint8_t*>([remoteWindowToken bytes]), [remoteWindowToken length]);
+    std::span elementToken(reinterpret_cast<const uint8_t*>([remoteElementToken bytes]), [remoteElementToken length]);
+    std::span windowToken(reinterpret_cast<const uint8_t*>([remoteWindowToken bytes]), [remoteWindowToken length]);
     m_page->registerUIProcessAccessibilityTokens(elementToken, windowToken);
 }
 
@@ -4248,7 +4257,7 @@ void WebViewImpl::provideDataForPasteboard(NSPasteboard *pasteboard, NSString *t
 
     // FIXME: Need to support NSRTFDPboardType.
     if ([type isEqual:WebCore::legacyTIFFPasteboardType()])
-        [pasteboard setData:(__bridge NSData *)m_promisedImage->tiffRepresentation() forType:WebCore::legacyTIFFPasteboardType()];
+        [pasteboard setData:(__bridge NSData *)m_promisedImage->adapter().tiffRepresentation() forType:WebCore::legacyTIFFPasteboardType()];
 }
 
 static BOOL fileExists(NSString *path)
@@ -5986,6 +5995,18 @@ void WebViewImpl::updateTextTouchBar()
     }
 }
 
+bool WebViewImpl::isContentRichlyEditable() const
+{
+    return m_page->editorState().isContentRichlyEditable;
+}
+
+#if ENABLE(MULTI_REPRESENTATION_HEIC)
+void WebViewImpl::insertMultiRepresentationHEIC(NSData *data)
+{
+    m_page->insertMultiRepresentationHEIC(data);
+}
+#endif
+
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
 
 bool WebViewImpl::isPictureInPictureActive()
@@ -5996,6 +6017,20 @@ bool WebViewImpl::isPictureInPictureActive()
 void WebViewImpl::togglePictureInPicture()
 {
     [m_playbackControlsManager togglePictureInPicture];
+}
+
+bool WebViewImpl::isInWindowFullscreenActive() const
+{
+    if (auto* interface = m_page->playbackSessionManager()->controlsManagerInterface())
+        return interface->isInWindowFullscreenActive();
+
+    return false;
+}
+
+void WebViewImpl::toggleInWindowFullscreen()
+{
+    if (auto* interface = m_page->playbackSessionManager()->controlsManagerInterface())
+        return interface->toggleInWindowFullscreen();
 }
 
 void WebViewImpl::updateMediaPlaybackControlsManager()
@@ -6016,6 +6051,22 @@ void WebViewImpl::updateMediaPlaybackControlsManager()
 }
 
 #endif // ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
+
+void WebViewImpl::nowPlayingMediaTitleAndArtist(void(^completionHandler)(NSString *, NSString *))
+{
+#if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
+    if (!m_page->hasActiveVideoForControlsManager()) {
+        completionHandler(nil, nil);
+        return;
+    }
+
+    m_page->requestActiveNowPlayingSessionInfo([completionHandler = makeBlockPtr(completionHandler)] (bool registeredAsNowPlayingApplication, WebCore::NowPlayingInfo&& nowPlayingInfo) {
+        completionHandler(nowPlayingInfo.title, nowPlayingInfo.artist);
+    });
+#else
+    completionHandler(nil, nil);
+#endif
+}
 
 void WebViewImpl::updateMediaTouchBar()
 {
@@ -6227,6 +6278,14 @@ void WebViewImpl::handleContextMenuTranslation(const WebCore::TranslationContext
 
 #endif // HAVE(TRANSLATION_UI_SERVICES) && ENABLE(CONTEXT_MENUS)
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT) && ENABLE(CONTEXT_MENUS)
+void WebViewImpl::handleContextMenuSwapCharacters(IntRect selectionBoundsInRootView)
+{
+    auto view = m_view.get();
+    showSwapCharactersViewRelativeToRectOfView(selectionBoundsInRootView, view.get());
+}
+#endif
+
 bool WebViewImpl::acceptsPreviewPanelControl(QLPreviewPanel *)
 {
 #if ENABLE(IMAGE_ANALYSIS)
@@ -6434,6 +6493,53 @@ void WebViewImpl::uninstallImageAnalysisOverlayView()
 }
 
 #endif // ENABLE(IMAGE_ANALYSIS_ENHANCEMENTS)
+
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+void WebViewImpl::willBeginTextReplacementSession(const WTF::UUID& uuid, CompletionHandler<void(const Vector<WebUnifiedTextReplacementContextData>&)>&& completionHandler)
+{
+    protectedPage()->willBeginTextReplacementSession(uuid, WTFMove(completionHandler));
+}
+
+void WebViewImpl::didBeginTextReplacementSession(const WTF::UUID& uuid, const Vector<WebUnifiedTextReplacementContextData>& contexts)
+{
+    protectedPage()->didBeginTextReplacementSession(uuid, contexts);
+}
+
+void WebViewImpl::textReplacementSessionDidReceiveReplacements(const WTF::UUID& uuid, const Vector<WebTextReplacementData>& replacements, const WebUnifiedTextReplacementContextData& context, bool finished)
+{
+    protectedPage()->textReplacementSessionDidReceiveReplacements(uuid, replacements, context, finished);
+}
+
+void WebViewImpl::textReplacementSessionDidUpdateStateForReplacement(const WTF::UUID& uuid, WebTextReplacementData::State state, const WebTextReplacementData& replacement, const WebUnifiedTextReplacementContextData& context)
+{
+    protectedPage()->textReplacementSessionDidUpdateStateForReplacement(uuid, state, replacement, context);
+}
+
+void WebViewImpl::didEndTextReplacementSession(const WTF::UUID& uuid, bool accepted)
+{
+    protectedPage()->didEndTextReplacementSession(uuid, accepted);
+}
+
+void WebViewImpl::textReplacementSessionDidReceiveTextWithReplacementRange(const WTF::UUID& uuid, const WebCore::AttributedString& attributedText, const WebCore::CharacterRange& range, const WebUnifiedTextReplacementContextData& context)
+{
+    protectedPage()->textReplacementSessionDidReceiveTextWithReplacementRange(uuid, attributedText, range, context);
+}
+
+void WebViewImpl::textReplacementSessionDidReceiveEditAction(const WTF::UUID& uuid, WebKit::WebTextReplacementData::EditAction action)
+{
+    protectedPage()->textReplacementSessionDidReceiveEditAction(uuid, action);
+}
+
+#endif
+
+Ref<WebPageProxy> WebViewImpl::protectedPage() const
+{
+    return m_page.get();
+}
+
+#if USE(APPLE_INTERNAL_SDK)
+#import <WebKitAdditions/WebViewImplAdditionsAfter.mm>
+#endif
 
 } // namespace WebKit
 

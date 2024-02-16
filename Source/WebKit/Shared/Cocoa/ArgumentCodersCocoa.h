@@ -26,6 +26,7 @@
 #pragma once
 
 #import "ArgumentCoders.h"
+#import "CoreIPCRetainPtr.h"
 
 #if PLATFORM(COCOA)
 
@@ -50,33 +51,21 @@ OBJC_CLASS AVOutputContext;
 #endif
 
 #if USE(PASSKIT)
+OBJC_CLASS CNContact;
 OBJC_CLASS CNPhoneNumber;
 OBJC_CLASS CNPostalAddress;
 OBJC_CLASS PKContact;
+OBJC_CLASS PKDateComponentsRange;
+OBJC_CLASS PKPayment;
+OBJC_CLASS PKPaymentMerchantSession;
+OBJC_CLASS PKPaymentMethod;
+OBJC_CLASS PKPaymentToken;
+OBJC_CLASS PKShippingMethod;
 #endif
 
 namespace IPC {
 
 #ifdef __OBJC__
-
-template<typename T>
-class CoreIPCRetainPtr : public RetainPtr<T> {
-public:
-    CoreIPCRetainPtr()
-        : RetainPtr<T>()
-    {
-    }
-
-    CoreIPCRetainPtr(T *object)
-        : RetainPtr<T>(object)
-    {
-    }
-
-    CoreIPCRetainPtr(RetainPtr<T>&& object)
-        : RetainPtr<T>(WTFMove(object))
-    {
-    }
-};
 
 enum class NSType : uint8_t {
 #if USE(AVFOUNDATION)
@@ -84,9 +73,18 @@ enum class NSType : uint8_t {
 #endif
     Array,
 #if USE(PASSKIT)
+    CNContact,
     CNPhoneNumber,
     CNPostalAddress,
+    NSDateComponents,
     PKContact,
+    PKPaymentMerchantSession,
+    PKPayment,
+    PKPaymentToken,
+    PKSecureElementPass,
+    PKShippingMethod,
+    PKDateComponentsRange,
+    PKPaymentMethod,
 #endif
     Color,
 #if ENABLE(DATA_DETECTION)
@@ -102,16 +100,45 @@ enum class NSType : uint8_t {
     Font,
     Locale,
     Number,
+    Null,
     PersonNameComponents,
+    PresentationIntent,
     SecureCoding,
     String,
     URL,
+    NSURLProtectionSpace,
     NSValue,
     CF,
     Unknown,
 };
 NSType typeFromObject(id);
 bool isSerializableValue(id);
+
+enum class CFType : uint8_t {
+    CFArray,
+    CFBoolean,
+    CFCharacterSet,
+    CFData,
+    CFDate,
+    CFDictionary,
+    CFNull,
+    CFNumber,
+    CFString,
+    CFURL,
+    SecCertificate,
+#if HAVE(SEC_KEYCHAIN)
+    SecKeychainItem,
+#endif
+#if HAVE(SEC_ACCESS_CONTROL)
+    SecAccessControl,
+#endif
+    SecTrust,
+    CGColorSpace,
+    CGColor,
+    Nullptr,
+    Unknown,
+};
+CFType typeFromCFTypeRef(CFTypeRef);
 
 #if ENABLE(DATA_DETECTION)
 template<> Class getClass<DDScannerResult>();
@@ -123,9 +150,17 @@ template<> Class getClass<WKDDActionContext>();
 template<> Class getClass<AVOutputContext>();
 #endif
 #if USE(PASSKIT)
+template<> Class getClass<CNContact>();
 template<> Class getClass<CNPhoneNumber>();
 template<> Class getClass<CNPostalAddress>();
 template<> Class getClass<PKContact>();
+template<> Class getClass<PKPaymentMerchantSession>();
+template<> Class getClass<PKPayment>();
+template<> Class getClass<PKPaymentToken>();
+template<> Class getClass<PKShippingMethod>();
+template<> Class getClass<PKDateComponentsRange>();
+template<> Class getClass<PKPaymentMethod>();
+template<> Class getClass<PKSecureElementPass>();
 #endif
 
 void encodeObjectWithWrapper(Encoder&, id);
@@ -133,6 +168,8 @@ std::optional<RetainPtr<id>> decodeObjectFromWrapper(Decoder&, const HashSet<Cla
 
 template<typename T> void encodeObjectDirectly(Encoder&, T *);
 template<typename T> void encodeObjectDirectly(Encoder&, T);
+template<typename T> void encodeObjectDirectly(StreamConnectionEncoder&, T *);
+template<typename T> void encodeObjectDirectly(StreamConnectionEncoder&, T);
 template<typename T> std::optional<RetainPtr<id>> decodeObjectDirectlyRequiringAllowedClasses(Decoder&);
 
 template<typename T, typename = IsObjCObject<T>> void encode(Encoder&, T *);
@@ -153,10 +190,13 @@ static inline bool isObjectClassAllowed(id object, const HashSet<Class>& allowed
 template<typename T, typename>
 std::optional<RetainPtr<T>> decodeRequiringAllowedClasses(Decoder& decoder)
 {
+#if ASSERT_ENABLED
+    auto allowedClasses = decoder.allowedClasses();
+#endif
     auto result = decodeObjectFromWrapper(decoder, decoder.allowedClasses());
     if (!result)
         return std::nullopt;
-    ASSERT(!*result || isObjectClassAllowed((*result).get(), decoder.allowedClasses()));
+    ASSERT(!*result || isObjectClassAllowed((*result).get(), allowedClasses));
     return { *result };
 }
 
@@ -181,6 +221,12 @@ template<typename T> struct ArgumentCoder<T *> {
 template<typename T> struct ArgumentCoder<CoreIPCRetainPtr<T>> {
     template<typename U = T>
     static void encode(Encoder& encoder, const CoreIPCRetainPtr<U>& object)
+    {
+        encodeObjectDirectly<U>(encoder, object.get());
+    }
+
+    template<typename U = T>
+    static void encode(StreamConnectionEncoder& encoder, const CoreIPCRetainPtr<U>& object)
     {
         encodeObjectDirectly<U>(encoder, object.get());
     }

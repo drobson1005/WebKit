@@ -152,7 +152,7 @@ public:
     void focusedElementChanged(Element*);
     void focusedFrameChanged(Frame*);
 
-    WEBCORE_EXPORT Page* createWindow(LocalFrame&, const WindowFeatures&, const NavigationAction&);
+    WEBCORE_EXPORT RefPtr<Page> createWindow(LocalFrame&, const WindowFeatures&, const NavigationAction&);
     WEBCORE_EXPORT void show();
 
     bool canRunModal() const;
@@ -236,21 +236,15 @@ public:
     void registerPopupOpeningObserver(PopupOpeningObserver&);
     void unregisterPopupOpeningObserver(PopupOpeningObserver&);
 
-#if PLATFORM(PLAYSTATION)
-    void postAccessibilityNotification(AccessibilityObject&, AXObjectCache::AXNotification);
-    void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&);
-    void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXObjectCache::AXLoadingEvent);
-#endif
-
     WEBCORE_EXPORT void getToolTip(const HitTestResult&, String&, TextDirection&);
 
 private:
     void notifyPopupOpeningObservers() const;
+    Ref<Page> protectedPage() const;
 
-    Page& m_page;
+    SingleThreadWeakRef<Page> m_page;
     UniqueRef<ChromeClient> m_client;
-    // FIXME: This should be WeakPtr<PopupOpeningObserver>.
-    Vector<PopupOpeningObserver*> m_popupOpeningObservers;
+    Vector<WeakPtr<PopupOpeningObserver>> m_popupOpeningObservers;
 #if PLATFORM(IOS_FAMILY)
     bool m_isDispatchViewportDataDidChangeSuppressed { false };
 #endif

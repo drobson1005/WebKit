@@ -199,14 +199,11 @@ static inline bool fullyClipsContents(Node& node)
 {
     CheckedPtr renderer = node.renderer();
     if (!renderer) {
-        if (!is<Element>(node))
-            return false;
-        return !downcast<Element>(node).hasDisplayContents();
+        RefPtr element = dynamicDowncast<Element>(node);
+        return element && !element->hasDisplayContents();
     }
-    if (!is<RenderBox>(*renderer))
-        return false;
-    CheckedRef box = downcast<RenderBox>(*renderer);
-    if (!box->hasNonVisibleOverflow())
+    CheckedPtr box = dynamicDowncast<RenderBox>(*renderer);
+    if (!box || !box->hasNonVisibleOverflow())
         return false;
 
     // Quirk to keep copy/paste in the CodeMirror editor version used in Jenkins working.
@@ -274,9 +271,8 @@ bool isRendererReplacedElement(RenderObject* renderer, TextIteratorBehaviors beh
     if (renderer->isImage() || renderer->isRenderWidget() || renderer->isRenderMedia() || isAttachment)
         return true;
 
-    if (is<Element>(renderer->node())) {
-        Ref element = downcast<Element>(*renderer->node());
-        if (is<HTMLFormControlElement>(element) || is<HTMLLegendElement>(element) || is<HTMLProgressElement>(element) || element->hasTagName(meterTag))
+    if (RefPtr element = dynamicDowncast<Element>(renderer->node())) {
+        if (is<HTMLFormControlElement>(*element) || is<HTMLLegendElement>(*element) || is<HTMLProgressElement>(*element) || element->hasTagName(meterTag))
             return true;
         if (equalLettersIgnoringASCIICase(element->attributeWithoutSynchronization(roleAttr), "img"_s))
             return true;
@@ -425,7 +421,8 @@ static inline Node* parentNodeOrShadowHost(TextIteratorBehaviors options, Node& 
 
 static inline bool hasDisplayContents(Node& node)
 {
-    return is<Element>(node) && downcast<Element>(node).hasDisplayContents();
+    RefPtr element = dynamicDowncast<Element>(node);
+    return element && element->hasDisplayContents();
 }
 
 static bool isRendererVisible(const RenderObject* renderer, TextIteratorBehaviors behaviors)
@@ -550,8 +547,8 @@ static bool hasVisibleTextNode(RenderText& renderer)
 {
     if (renderer.style().visibility() == Visibility::Visible)
         return true;
-    if (is<RenderTextFragment>(renderer)) {
-        if (auto firstLetter = downcast<RenderTextFragment>(renderer).firstLetter()) {
+    if (CheckedPtr renderTextFragment = dynamicDowncast<RenderTextFragment>(renderer)) {
+        if (auto firstLetter = renderTextFragment->firstLetter()) {
             if (firstLetter->style().visibility() == Visibility::Visible)
                 return true;
         }
@@ -577,8 +574,8 @@ bool TextIterator::handleTextNode()
             emitCharacter(' ', WTFMove(textNode), nullptr, runStart, runStart);
             return false;
         }
-        if (!m_handledFirstLetter && is<RenderTextFragment>(renderer.get()) && !m_offset) {
-            handleTextNodeFirstLetter(downcast<RenderTextFragment>(renderer.get()));
+        if (CheckedPtr renderTextFragment = dynamicDowncast<RenderTextFragment>(renderer.get()); renderTextFragment && !m_handledFirstLetter && !m_offset) {
+            handleTextNodeFirstLetter(*renderTextFragment);
             if (m_firstLetterText) {
                 String firstLetter = m_firstLetterText->text();
                 emitText(textNode, *m_firstLetterText, m_offset, m_offset + firstLetter.length());
@@ -602,11 +599,9 @@ bool TextIterator::handleTextNode()
 
     std::tie(m_textRun, m_textRunLogicalOrderCache) = InlineIterator::firstTextBoxInLogicalOrderFor(renderer.get());
 
-    bool shouldHandleFirstLetter = !m_handledFirstLetter && is<RenderTextFragment>(renderer.get()) && !m_offset;
-    if (shouldHandleFirstLetter)
-        handleTextNodeFirstLetter(downcast<RenderTextFragment>(renderer.get()));
-
-    if (!m_textRun && rendererText.length() && !shouldHandleFirstLetter) {
+    if (CheckedPtr renderTextFragment = dynamicDowncast<RenderTextFragment>(renderer.get()); renderTextFragment && !m_handledFirstLetter && !m_offset)
+        handleTextNodeFirstLetter(*renderTextFragment);
+    else if (!m_textRun && rendererText.length()) {
         if (renderer->style().visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility))
             return false;
         m_lastTextNodeEndedWithCollapsedSpace = true; // entire block is collapsed space
@@ -630,26 +625,23 @@ void TextIterator::handleTextRun()
     auto [firstTextRun, orderCache] = InlineIterator::firstTextBoxInLogicalOrderFor(renderer);
 
     String rendererText = renderer->text();
-    unsigned start = m_offset;
-    unsigned end = (textNode.ptr() == m_endContainer) ? static_cast<unsigned>(m_endOffset) : UINT_MAX;
+    unsigned rangeStart = m_offset;
+    auto rangeEnd = std::optional<unsigned> { };
+    if (textNode.ptr() == m_endContainer)
+        rangeEnd = m_endOffset;
+
     while (m_textRun) {
-        unsigned textRunStart = m_textRun->start();
-        unsigned runStart = std::max(textRunStart, start);
+        auto textRunStart = m_textRun->start();
+        auto textRunEnd = textRunStart + m_textRun->length();
 
-        unsigned textRunEnd = textRunStart + m_textRun->length();
-        unsigned runEnd = std::min(textRunEnd, end);
+        auto runStart = std::max(textRunStart, rangeStart);
+        auto runEnd = std::min(textRunEnd, rangeEnd.value_or(textRunEnd));
 
-        // Determine what the next text run will be, but don't advance yet
-        auto nextTextRun = InlineIterator::nextTextBoxInLogicalOrder(m_textRun, m_textRunLogicalOrderCache);
-
-        // Check for collapsed space at the start of this run.
-        bool needSpace = m_lastTextNodeEndedWithCollapsedSpace || (m_textRun == firstTextRun && textRunStart == runStart && runStart);
-        if (needSpace && !renderer->style().isCollapsibleWhiteSpace(m_lastCharacter) && m_lastCharacter) {
-            if (runStart >= runEnd && m_behaviors.contains(TextIteratorBehavior::IgnoresWhiteSpaceAtEndOfRun)) {
-                m_textRun = nextTextRun;
-                continue;
-            }
-
+        // Check if we need to emit (previously) collapsed whitespace at the start of this run.
+        auto isAfterRangeEnd = rangeEnd ? runStart > *rangeEnd : false;
+        auto hasPrecedingCollapsedWhitespace = m_lastTextNodeEndedWithCollapsedSpace || (m_textRun == firstTextRun && textRunStart == runStart && runStart);
+        auto shouldEmitWhitespace = !isAfterRangeEnd && hasPrecedingCollapsedWhitespace && m_lastCharacter && !renderer->style().isCollapsibleWhiteSpace(m_lastCharacter);
+        if (shouldEmitWhitespace) {
             if (m_lastTextNode == textNode.ptr() && runStart && rendererText[runStart - 1] == ' ') {
                 unsigned spaceRunStart = runStart - 1;
                 while (spaceRunStart && rendererText[spaceRunStart - 1] == ' ')
@@ -660,6 +652,8 @@ void TextIterator::handleTextRun()
             return;
         }
 
+        // Determine what the next text run will be, but don't advance yet
+        auto nextTextRun = InlineIterator::nextTextBoxInLogicalOrder(m_textRun, m_textRunLogicalOrderCache);
         if (runStart < runEnd) {
             auto isNewlineOrTab = [&](UChar character) {
                 return character == '\n' || character == '\t';
@@ -756,8 +750,8 @@ bool TextIterator::handleReplacedElement()
         return false;
     }
 
-    if (m_behaviors.contains(TextIteratorBehavior::EntersTextControls) && is<RenderTextControl>(renderer.get())) {
-        if (auto innerTextElement = downcast<RenderTextControl>(renderer.get()).textFormControlElement().innerTextElement()) {
+    if (CheckedPtr renderTextControl = dynamicDowncast<RenderTextControl>(renderer.get()); renderTextControl && m_behaviors.contains(TextIteratorBehavior::EntersTextControls)) {
+        if (auto innerTextElement = renderTextControl->textFormControlElement().innerTextElement()) {
             m_currentNode = innerTextElement->containingShadowRoot();
             pushFullyClippedState(m_fullyClippedStack, *protectedCurrentNode());
             m_offset = 0;
@@ -765,7 +759,8 @@ bool TextIterator::handleReplacedElement()
         }
     }
 
-    if (m_behaviors.contains(TextIteratorBehavior::EntersImageOverlays) && is<HTMLElement>(m_currentNode.get()) && ImageOverlay::hasOverlay(downcast<HTMLElement>(*m_currentNode))) {
+    RefPtr currentElement = dynamicDowncast<HTMLElement>(m_currentNode.get());
+    if (m_behaviors.contains(TextIteratorBehavior::EntersImageOverlays) && currentElement && ImageOverlay::hasOverlay(*currentElement)) {
         if (RefPtr shadowRoot = m_currentNode->shadowRoot()) {
             m_currentNode = WTFMove(shadowRoot);
             pushFullyClippedState(m_fullyClippedStack, *protectedCurrentNode());
@@ -798,8 +793,8 @@ bool TextIterator::handleReplacedElement()
     m_positionStartOffset = 0;
     m_positionEndOffset = 1;
 
-    if (m_behaviors.contains(TextIteratorBehavior::EmitsImageAltText) && is<RenderImage>(renderer.get())) {
-        String altText = downcast<RenderImage>(renderer.get()).altText();
+    if (CheckedPtr renderImage = dynamicDowncast<RenderImage>(renderer.get()); renderImage && m_behaviors.contains(TextIteratorBehavior::EmitsImageAltText)) {
+        auto altText = renderImage->altText();
         if (unsigned length = altText.length()) {
             m_lastCharacter = altText[length - 1];
             m_copyableText.set(WTFMove(altText));
@@ -816,16 +811,15 @@ bool TextIterator::handleReplacedElement()
 
 static bool shouldEmitTabBeforeNode(Node& node)
 {
-    CheckedPtr renderer = node.renderer();
+    CheckedPtr cell = dynamicDowncast<RenderTableCell>(node.renderer());
     
     // Table cells are delimited by tabs.
-    if (!renderer || !isTableCell(node))
+    if (!cell)
         return false;
     
     // Want a tab before every cell other than the first one.
-    CheckedRef cell = downcast<RenderTableCell>(*renderer);
     CheckedPtr table = cell->table();
-    return table && (table->cellBefore(cell.ptr()) || table->cellAbove(cell.ptr()));
+    return table && (table->cellBefore(cell.get()) || table->cellAbove(cell.get()));
 }
 
 static bool shouldEmitNewlineForNode(Node* node, bool emitsOriginalText)
@@ -853,29 +847,27 @@ static bool shouldEmitReplacementInsteadOfNode(const Node& node)
     return is<TextPlaceholderElement>(node);
 }
 
-static bool shouldEmitNewlinesBeforeAndAfterNode(Node& node)
+bool shouldEmitNewlinesBeforeAndAfterNode(Node& node)
 {
     // Block flow (versus inline flow) is represented by having
     // a newline both before and after the element.
     CheckedPtr renderer = node.renderer();
     if (!renderer) {
-        if (!is<HTMLElement>(node))
-            return false;
-        auto& element = downcast<HTMLElement>(node);
-        return hasHeaderTag(element)
-            || element.hasTagName(blockquoteTag)
-            || element.hasTagName(ddTag)
-            || element.hasTagName(divTag)
-            || element.hasTagName(dlTag)
-            || element.hasTagName(dtTag)
-            || element.hasTagName(hrTag)
-            || element.hasTagName(liTag)
-            || element.hasTagName(listingTag)
-            || element.hasTagName(olTag)
-            || element.hasTagName(pTag)
-            || element.hasTagName(preTag)
-            || element.hasTagName(trTag)
-            || element.hasTagName(ulTag);
+        RefPtr element = dynamicDowncast<HTMLElement>(node);
+        return element && (hasHeaderTag(*element)
+            || element->hasTagName(blockquoteTag)
+            || element->hasTagName(ddTag)
+            || element->hasTagName(divTag)
+            || element->hasTagName(dlTag)
+            || element->hasTagName(dtTag)
+            || element->hasTagName(hrTag)
+            || element->hasTagName(liTag)
+            || element->hasTagName(listingTag)
+            || element->hasTagName(olTag)
+            || element->hasTagName(pTag)
+            || element->hasTagName(preTag)
+            || element->hasTagName(trTag)
+            || element->hasTagName(ulTag));
     }
     
     // Need to make an exception for table cells, because they are blocks, but we
@@ -885,8 +877,8 @@ static bool shouldEmitNewlinesBeforeAndAfterNode(Node& node)
     
     // Need to make an exception for table row elements, because they are neither
     // "inline" or "RenderBlock", but we want newlines for them.
-    if (is<RenderTableRow>(*renderer)) {
-        CheckedPtr table = downcast<RenderTableRow>(*renderer).table();
+    if (CheckedPtr tableRow = dynamicDowncast<RenderTableRow>(*renderer)) {
+        CheckedPtr table = tableRow->table();
         if (table && !table->isInline())
             return true;
     }
@@ -930,20 +922,13 @@ static bool shouldEmitExtraNewlineForNode(Node& node)
     // result even without margin collapsing. For example: <div><p>text</p></div>
     // will work right even if both the <div> and the <p> have bottom margins.
 
-    CheckedPtr renderer = node.renderer();
-    if (!is<RenderBox>(renderer.get()))
+    CheckedPtr renderBox = dynamicDowncast<RenderBox>(node.renderer());
+    if (!renderBox || !renderBox->height())
         return false;
 
     // NOTE: We only do this for a select set of nodes, and WinIE appears not to do this at all.
-    if (!is<HTMLElement>(node))
-        return false;
-
-    Ref element = downcast<HTMLElement>(node);
-    if (!hasHeaderTag(element) && !is<HTMLParagraphElement>(element))
-        return false;
-
-    CheckedRef renderBox = downcast<RenderBox>(*renderer);
-    if (!renderBox->height())
+    RefPtr element = dynamicDowncast<HTMLElement>(node);
+    if (!element || (!hasHeaderTag(*element) && !is<HTMLParagraphElement>(*element)))
         return false;
 
     auto bottomMargin = renderBox->collapsedMarginAfter();
@@ -953,7 +938,7 @@ static bool shouldEmitExtraNewlineForNode(Node& node)
 
 static int collapsedSpaceLength(RenderText& renderer, int textEnd)
 {
-    StringImpl& text = renderer.text();
+    auto text = renderer.text();
     unsigned length = text.length();
     for (unsigned i = textEnd; i < length; ++i) {
         if (!renderer.style().isCollapsibleWhiteSpace(text[i]))
@@ -965,10 +950,8 @@ static int collapsedSpaceLength(RenderText& renderer, int textEnd)
 static int maxOffsetIncludingCollapsedSpaces(Node& node)
 {
     int offset = caretMaxOffset(node);
-    if (CheckedPtr renderer = node.renderer()) {
-        if (is<RenderText>(*renderer))
-            offset += collapsedSpaceLength(downcast<RenderText>(*renderer), offset);
-    }
+    if (CheckedPtr renderText = dynamicDowncast<RenderText>(node.renderer()))
+        offset += collapsedSpaceLength(*renderText, offset);
     return offset;
 }
 
@@ -1019,9 +1002,13 @@ bool TextIterator::shouldRepresentNodeOffsetZero()
     // If this node is unrendered or invisible the VisiblePosition checks below won't have much meaning.
     // Additionally, if the range we are iterating over contains huge sections of unrendered content, 
     // we would create VisiblePositions on every call to this function without this check.
-    if (!currentNode->renderer() || currentNode->renderer()->style().visibility() != Visibility::Visible
-        || (is<RenderBlockFlow>(*currentNode->renderer()) && !downcast<RenderBlockFlow>(*currentNode->renderer()).height() && !is<HTMLBodyElement>(currentNode)))
+    if (!currentNode->renderer() || currentNode->renderer()->style().visibility() != Visibility::Visible)
         return false;
+
+    if (CheckedPtr renderBlockFlow = dynamicDowncast<RenderBlockFlow>(*currentNode->renderer())) {
+        if (!renderBlockFlow->height() && !is<HTMLBodyElement>(currentNode))
+            return false;
+    }
 
     // The startPos.isNotNull() check is needed because the start could be before the body,
     // and in that case we'll get null. We don't want to put in newlines at the start in that case.
@@ -1350,12 +1337,12 @@ RenderText* SimplifiedBackwardsTextIterator::handleFirstLetter(int& startOffset,
     CheckedRef renderer = downcast<RenderText>(*m_node->renderer());
     startOffset = (m_node == m_startContainer) ? m_startOffset : 0;
 
-    if (!is<RenderTextFragment>(renderer.get())) {
+    CheckedPtr fragment = dynamicDowncast<RenderTextFragment>(renderer.get());
+    if (!fragment) {
         offsetInNode = 0;
         return renderer.ptr();
     }
 
-    CheckedRef fragment = downcast<RenderTextFragment>(renderer.get());
     int offsetAfterFirstLetter = fragment->start();
     if (startOffset >= offsetAfterFirstLetter) {
         ASSERT(!m_shouldHandleFirstLetter);

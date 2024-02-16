@@ -240,7 +240,7 @@ void RenderListMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffse
         context.translate(-markerRect.x(), -markerRect.maxY());
     }
 
-    FloatPoint textOrigin = FloatPoint(markerRect.x(), markerRect.y() + style().metricsOfPrimaryFont().ascent());
+    FloatPoint textOrigin = FloatPoint(markerRect.x(), markerRect.y() + style().metricsOfPrimaryFont().intAscent());
     textOrigin = roundPointToDevicePixels(LayoutPoint(textOrigin), document().deviceScaleFactor(), style().isLeftToRightDirection());
     context.drawText(style().fontCascade(), textRun(), textOrigin);
 }
@@ -248,13 +248,11 @@ void RenderListMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffse
 RenderBox* RenderListMarker::parentBox(RenderBox& box)
 {
     ASSERT(m_listItem);
-    auto* fragmentedFlow = m_listItem->enclosingFragmentedFlow();
-    if (!is<RenderMultiColumnFlow>(fragmentedFlow))
+    CheckedPtr multiColumnFlow = dynamicDowncast<RenderMultiColumnFlow>(m_listItem->enclosingFragmentedFlow());
+    if (!multiColumnFlow)
         return box.parentBox();
-    auto* placeholder = downcast<RenderMultiColumnFlow>(*fragmentedFlow).findColumnSpannerPlaceholder(&box);
-    if (!placeholder)
-        return box.parentBox();
-    return placeholder->parentBox();
+    auto* placeholder = multiColumnFlow->findColumnSpannerPlaceholder(&box);
+    return placeholder ? placeholder->parentBox() : box.parentBox();
 };
 
 void RenderListMarker::addOverflowFromListMarker()
@@ -338,11 +336,11 @@ void RenderListMarker::addOverflowFromListMarker()
             markerAncestor = parentBox(*markerAncestor);
             if (markerAncestor->hasNonVisibleOverflow())
                 propagateVisualOverflow = false;
-            if (is<RenderBlock>(*markerAncestor)) {
+            if (CheckedPtr markerAncestorBlock = dynamicDowncast<RenderBlock>(*markerAncestor)) {
                 if (propagateVisualOverflow)
-                    downcast<RenderBlock>(*markerAncestor).addVisualOverflow(markerRect);
+                    markerAncestorBlock->addVisualOverflow(markerRect);
                 if (propagateLayoutOverflow)
-                    downcast<RenderBlock>(*markerAncestor).addLayoutOverflow(markerRect);
+                    markerAncestorBlock->addLayoutOverflow(markerRect);
             }
             if (markerAncestor->hasNonVisibleOverflow())
                 propagateLayoutOverflow = false;
@@ -371,7 +369,7 @@ void RenderListMarker::layout()
         setHeight(m_image->imageSize(this, style().effectiveZoom()).height());
     } else {
         setLogicalWidth(minPreferredLogicalWidth());
-        setLogicalHeight(style().metricsOfPrimaryFont().height());
+        setLogicalHeight(style().metricsOfPrimaryFont().intHeight());
     }
 
     setMarginStart(0);
@@ -411,7 +409,7 @@ void RenderListMarker::updateContent()
     if (isImage()) {
         // FIXME: This is a somewhat arbitrary width.  Generated images for markers really won't become particularly useful
         // until we support the CSS3 marker pseudoclass to allow control over the width and height of the marker box.
-        LayoutUnit bulletWidth = style().metricsOfPrimaryFont().ascent() / 2_lu;
+        LayoutUnit bulletWidth = style().metricsOfPrimaryFont().intAscent() / 2_lu;
         LayoutSize defaultBulletSize(bulletWidth, bulletWidth);
         LayoutSize imageSize = calculateImageIntrinsicDimensions(m_image.get(), defaultBulletSize, DoNotScaleByEffectiveZoom);
         m_image->setContainerContextForRenderer(*this, imageSize, style().effectiveZoom());
@@ -463,7 +461,7 @@ void RenderListMarker::computePreferredLogicalWidths()
 
     LayoutUnit logicalWidth;
     if (widthUsesMetricsOfPrimaryFont())
-        logicalWidth = (font.metricsOfPrimaryFont().ascent() * 2 / 3 + 1) / 2 + 2;
+        logicalWidth = (font.metricsOfPrimaryFont().intAscent() * 2 / 3 + 1) / 2 + 2;
     else if (!m_textWithSuffix.isEmpty())
             logicalWidth = font.width(textRun());
 
@@ -487,13 +485,13 @@ void RenderListMarker::updateMargins()
             marginEnd = cMarkerPadding;
         else if (widthUsesMetricsOfPrimaryFont()) {
                 marginStart = -1;
-                marginEnd = fontMetrics.ascent() - minPreferredLogicalWidth() + 1;
+                marginEnd = fontMetrics.intAscent() - minPreferredLogicalWidth() + 1;
         }
     } else if (isImage()) {
         marginStart = -minPreferredLogicalWidth() - cMarkerPadding;
         marginEnd = cMarkerPadding;
     } else {
-        int offset = fontMetrics.ascent() * 2 / 3;
+        int offset = fontMetrics.intAscent() * 2 / 3;
         if (widthUsesMetricsOfPrimaryFont()) {
             marginStart = -offset - cMarkerPadding - 1;
             marginEnd = offset + cMarkerPadding + 1 - minPreferredLogicalWidth();
@@ -545,14 +543,14 @@ FloatRect RenderListMarker::relativeMarkerRect()
     if (widthUsesMetricsOfPrimaryFont()) {
         // FIXME: Are these particular rounding rules necessary?
         const FontMetrics& fontMetrics = style().metricsOfPrimaryFont();
-        int ascent = fontMetrics.ascent();
+        int ascent = fontMetrics.intAscent();
         int bulletWidth = (ascent * 2 / 3 + 1) / 2;
         relativeRect = FloatRect(1, 3 * (ascent - ascent * 2 / 3) / 2, bulletWidth, bulletWidth);
     } else {
         if (m_textWithSuffix.isEmpty())
             return FloatRect();
         auto& font = style().fontCascade();
-        relativeRect = FloatRect(0, 0, font.width(textRun()), font.metricsOfPrimaryFont().height());
+        relativeRect = FloatRect(0, 0, font.width(textRun()), font.metricsOfPrimaryFont().intHeight());
     }
 
     if (!style().isHorizontalWritingMode()) {

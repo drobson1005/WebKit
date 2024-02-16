@@ -57,7 +57,7 @@
 #include "StepRange.h"
 #include "Text.h"
 #include "TypedElementDescendantIteratorInlines.h"
-#include "UserAgentPartIds.h"
+#include "UserAgentParts.h"
 #include "UserGestureIndicator.h"
 #include <limits>
 #include <wtf/DateMath.h>
@@ -330,18 +330,20 @@ void BaseDateAndTimeInputType::createShadowSubtree()
     ASSERT(needsShadowSubtree());
     ASSERT(element());
 
-    auto& element = *this->element();
-    auto& document = element.document();
+    Ref element = *this->element();
+    Ref document = element->document();
 
-    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { *element.userAgentShadowRoot() };
+    Ref shadowRoot = *element->userAgentShadowRoot();
+    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
 
-    if (document.settings().dateTimeInputsEditableComponentsEnabled()) {
-        m_dateTimeEditElement = DateTimeEditElement::create(document, *this);
-        element.userAgentShadowRoot()->appendChild(ContainerNode::ChildChange::Source::Parser, *m_dateTimeEditElement);
+    if (document->settings().dateTimeInputsEditableComponentsEnabled()) {
+        Ref dateTimeEditElement = DateTimeEditElement::create(document, *this);
+        m_dateTimeEditElement = dateTimeEditElement.copyRef();
+        shadowRoot->appendChild(ContainerNode::ChildChange::Source::Parser, dateTimeEditElement);
     } else {
-        auto valueContainer = HTMLDivElement::create(document);
-        element.userAgentShadowRoot()->appendChild(ContainerNode::ChildChange::Source::Parser, valueContainer);
-        valueContainer->setPseudo(UserAgentPartIds::webkitDateAndTimeValue());
+        Ref valueContainer = HTMLDivElement::create(document);
+        shadowRoot->appendChild(ContainerNode::ChildChange::Source::Parser, valueContainer);
+        valueContainer->setUserAgentPart(UserAgentParts::webkitDateAndTimeValue());
     }
     updateInnerTextValue();
 }
@@ -511,8 +513,8 @@ void BaseDateAndTimeInputType::didChangeValueFromControl()
     if (!valueChanged)
         return;
 
-    Ref<HTMLInputElement> input(*element());
-    if (input->userAgentShadowRoot()->containsFocusedElement())
+    Ref input = *element();
+    if (input->protectedUserAgentShadowRoot()->containsFocusedElement())
         input->dispatchFormControlInputEvent();
     else
         input->dispatchFormControlChangeEvent();

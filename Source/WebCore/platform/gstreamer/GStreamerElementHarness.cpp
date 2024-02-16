@@ -72,8 +72,8 @@ static GstStaticPadTemplate s_harnessSinkPadTemplate = GST_STATIC_PAD_TEMPLATE("
  * explicitly call the `start(caps)` method, otherwise the sample-based `pushSample()` API will
  * implicitely take care of starting the harness.
  *
- * Output buffers and events can be manually pulled on the corresponding
- * `GStreamerElementHarness::Stream` using the `pullBuffer()` and `pullEvent()` methods. The list of
+ * Output samples and events can be manually pulled on the corresponding
+ * `GStreamerElementHarness::Stream` using the `pullSample()` and `pullEvent()` methods. The list of
  * output streams can be queried with the `GStreamerElementHarness::outputStreams()` method.
  *
  * The harness can work on elements exposing either a static source pad, or one-to-many "sometimes"
@@ -86,9 +86,9 @@ static GstStaticPadTemplate s_harnessSinkPadTemplate = GST_STATIC_PAD_TEMPLATE("
  * PNG using the mermaid CLI tools or the [live editor](https://mermaid.live).
  */
 
-GStreamerElementHarness::GStreamerElementHarness(GRefPtr<GstElement>&& element, ProcessBufferCallback&& processOutputBufferCallback, std::optional<PadLinkCallback>&& padLinkCallback)
+GStreamerElementHarness::GStreamerElementHarness(GRefPtr<GstElement>&& element, ProcessSampleCallback&& processOutputSampleCallback, std::optional<PadLinkCallback>&& padLinkCallback)
     : m_element(WTFMove(element))
-    , m_processOutputBufferCallback(WTFMove(processOutputBufferCallback))
+    , m_processOutputSampleCallback(WTFMove(processOutputSampleCallback))
     , m_padLinkCallback(WTFMove(padLinkCallback))
 {
     static std::once_flag debugRegisteredFlag;
@@ -162,6 +162,7 @@ GStreamerElementHarness::GStreamerElementHarness(GRefPtr<GstElement>&& element, 
 GStreamerElementHarness::~GStreamerElementHarness()
 {
     GST_DEBUG_OBJECT(m_element.get(), "Stopping harness");
+    pushEvent(adoptGRef(gst_event_new_eos()));
     unregisterPipeline(m_element);
     gst_pad_set_active(m_srcPad.get(), FALSE);
     {
@@ -190,6 +191,20 @@ void GStreamerElementHarness::start(GRefPtr<GstCaps>&& inputCaps, std::optional<
 
     pushStickyEvents(WTFMove(inputCaps), WTFMove(segment));
     m_playing.store(true);
+}
+
+void GStreamerElementHarness::reset()
+{
+    if (!m_playing.load())
+        return;
+
+    GST_DEBUG_OBJECT(m_element.get(), "Resetting harness");
+    pushEvent(adoptGRef(gst_event_new_eos()));
+    gst_element_set_state(m_element.get(), GST_STATE_NULL);
+
+    processOutputSamples();
+
+    m_playing.store(false);
 }
 
 void GStreamerElementHarness::pushStickyEvents(GRefPtr<GstCaps>&& inputCaps, std::optional<const GstSegment*>&& segment)
@@ -276,7 +291,14 @@ GStreamerElementHarness::Stream::Stream(GRefPtr<GstPad>&& pad, RefPtr<GStreamerE
                 downstreamHarness->start(GRefPtr<GstCaps>(stream.outputCaps()));
             return downstreamHarness->pushBufferFull(adoptGRef(buffer));
         }
-        return stream.chainBuffer(buffer);
+
+        const auto& caps = stream.outputCaps();
+        const GstSegment* segment = nullptr;
+        if (auto segmentEvent = adoptGRef(gst_pad_get_sticky_event(stream.pad().get(), GST_EVENT_SEGMENT, 0)))
+            gst_event_parse_segment(segmentEvent.get(), &segment);
+
+        auto outputBuffer = adoptGRef(buffer);
+        return stream.chainSample(adoptGRef(gst_sample_new(outputBuffer.get(), caps.get(), segment, nullptr)));
     }),  this, nullptr);
     gst_pad_set_event_function_full(m_targetPad.get(), reinterpret_cast<GstPadEventFunction>(+[](GstPad* pad, GstObject*, GstEvent* event) -> gboolean {
         auto& stream = *reinterpret_cast<GStreamerElementHarness::Stream*>(pad->eventdata);
@@ -296,13 +318,13 @@ GStreamerElementHarness::Stream::~Stream()
     gst_pad_set_query_function(m_targetPad.get(), nullptr);
 }
 
-GRefPtr<GstBuffer> GStreamerElementHarness::Stream::pullBuffer()
+GRefPtr<GstSample> GStreamerElementHarness::Stream::pullSample()
 {
-    GST_LOG_OBJECT(m_pad.get(), "%zu buffers currently queued", m_bufferQueue.size());
-    Locker locker { m_bufferQueueLock };
-    if (m_bufferQueue.isEmpty())
+    GST_LOG_OBJECT(m_pad.get(), "%zu samples currently queued", m_sampleQueue.size());
+    Locker locker { m_sampleQueueLock };
+    if (m_sampleQueue.isEmpty())
         return nullptr;
-    return m_bufferQueue.takeLast();
+    return m_sampleQueue.takeLast();
 }
 
 GRefPtr<GstEvent> GStreamerElementHarness::Stream::pullEvent()
@@ -327,16 +349,19 @@ const GRefPtr<GstCaps>& GStreamerElementHarness::Stream::outputCaps()
     if (m_outputCaps)
         return m_outputCaps;
 
-    m_outputCaps = adoptGRef(gst_pad_get_current_caps(m_pad.get()));
+    auto stream = adoptGRef(gst_pad_get_stream(m_pad.get()));
+    if (stream)
+        m_outputCaps = adoptGRef(gst_stream_get_caps(stream.get()));
+    else
+        m_outputCaps = adoptGRef(gst_pad_get_current_caps(m_pad.get()));
     GST_DEBUG_OBJECT(m_pad.get(), "Output caps: %" GST_PTR_FORMAT, m_outputCaps.get());
     return m_outputCaps;
 }
 
-GstFlowReturn GStreamerElementHarness::Stream::chainBuffer(GstBuffer* outputBuffer)
+GstFlowReturn GStreamerElementHarness::Stream::chainSample(GRefPtr<GstSample>&& sample)
 {
-    Locker locker { m_bufferQueueLock };
-    auto buffer = adoptGRef(outputBuffer);
-    m_bufferQueue.prepend(WTFMove(buffer));
+    Locker locker { m_sampleQueueLock };
+    m_sampleQueue.prepend(WTFMove(sample));
     return GST_FLOW_OK;
 }
 
@@ -344,8 +369,9 @@ bool GStreamerElementHarness::Stream::sinkEvent(GstEvent* event)
 {
     Locker locker { m_sinkEventQueueLock };
 
-    // Clear cached output caps when the pad receives a new caps event.
-    if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS)
+    // Clear cached output caps when the pad receives a new caps event or stream-start (potentially
+    // storing a GstStream).
+    if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS || GST_EVENT_TYPE(event) == GST_EVENT_STREAM_START)
         m_outputCaps = nullptr;
 
     m_sinkEventQueue.prepend(GRefPtr<GstEvent>(event));
@@ -387,11 +413,11 @@ bool GStreamerElementHarness::srcEvent(GstEvent* event)
     return true;
 }
 
-void GStreamerElementHarness::processOutputBuffers()
+void GStreamerElementHarness::processOutputSamples()
 {
     for (auto& stream : m_outputStreams) {
-        while (auto outputBuffer = stream->pullBuffer())
-            m_processOutputBufferCallback(*stream.get(), outputBuffer);
+        while (auto outputSample = stream->pullSample())
+            m_processOutputSampleCallback(*stream.get(), WTFMove(outputSample));
     }
 }
 
@@ -416,7 +442,7 @@ bool GStreamerElementHarness::flushBuffers()
         return false;
     }
 
-    processOutputBuffers();
+    processOutputSamples();
 
     pushEvent(adoptGRef(gst_event_new_flush_start()));
     pushEvent(adoptGRef(gst_event_new_flush_stop(FALSE)));

@@ -30,7 +30,6 @@
 
 #import "APIData.h"
 #import "ApplicationStateTracker.h"
-#import "DataReference.h"
 #import "DrawingAreaProxy.h"
 #import "EndowmentStateTracker.h"
 #import "FrameInfoData.h"
@@ -51,6 +50,7 @@
 #import "WKGeolocationProviderIOS.h"
 #import "WKPasswordView.h"
 #import "WKProcessPoolInternal.h"
+#import "WKVisibilityPropagationView.h"
 #import "WKWebViewConfigurationInternal.h"
 #import "WKWebViewContentProviderRegistry.h"
 #import "WKWebViewIOS.h"
@@ -229,6 +229,20 @@ void PageClientImpl::didCreateContextInGPUProcessForVisibilityPropagation(LayerH
     [contentView() _gpuProcessDidCreateContextForVisibilityPropagation];
 }
 #endif // ENABLE(GPU_PROCESS)
+
+#if ENABLE(MODEL_PROCESS)
+void PageClientImpl::didCreateContextInModelProcessForVisibilityPropagation(LayerHostingContextID)
+{
+    [m_contentView _modelProcessDidCreateContextForVisibilityPropagation];
+}
+#endif // ENABLE(MODEL_PROCESS)
+
+#if USE(EXTENSIONKIT)
+UIView *PageClientImpl::createVisibilityPropagationView()
+{
+    return [contentView() _createVisibilityPropagationView];
+}
+#endif
 #endif // HAVE(VISIBILITY_PROPAGATION_VIEW)
 
 #if ENABLE(GPU_PROCESS)
@@ -236,6 +250,14 @@ void PageClientImpl::gpuProcessDidExit()
 {
     [contentView() _gpuProcessDidExit];
     PageClientImplCocoa::gpuProcessDidExit();
+}
+#endif
+
+#if ENABLE(MODEL_PROCESS)
+void PageClientImpl::modelProcessDidExit()
+{
+    [m_contentView _modelProcessDidExit];
+    PageClientImplCocoa::modelProcessDidExit();
 }
 #endif
 
@@ -367,7 +389,7 @@ void PageClientImpl::executeUndoRedo(UndoOrRedo undoOrRedo)
     return (undoOrRedo == UndoOrRedo::Undo) ? [[contentView() undoManager] undo] : [[contentView() undoManager] redo];
 }
 
-void PageClientImpl::accessibilityWebProcessTokenReceived(const IPC::DataReference& data)
+void PageClientImpl::accessibilityWebProcessTokenReceived(std::span<const uint8_t> data)
 {
     NSData *remoteToken = [NSData dataWithBytes:data.data() length:data.size()];
     [contentView() _setAccessibilityWebProcessToken:remoteToken];
@@ -806,7 +828,7 @@ void PageClientImpl::beganExitFullScreen(const IntRect& initialFrame, const IntR
 
 #endif // ENABLE(FULLSCREEN_API)
 
-void PageClientImpl::didFinishLoadingDataForCustomContentProvider(const String& suggestedFilename, const IPC::DataReference& dataReference)
+void PageClientImpl::didFinishLoadingDataForCustomContentProvider(const String& suggestedFilename, std::span<const uint8_t> dataReference)
 {
     RetainPtr<NSData> data = adoptNS([[NSData alloc] initWithBytes:dataReference.data() length:dataReference.size()]);
     [webView() _didFinishLoadingDataForCustomContentProviderWithSuggestedFilename:suggestedFilename data:data.get()];
@@ -1097,9 +1119,9 @@ void PageClientImpl::showMediaControlsContextMenu(FloatRect&& targetFrame, Vecto
 #endif // ENABLE(MEDIA_CONTROLS_CONTEXT_MENUS) && USE(UICONTEXTMENU)
 
 #if HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
-void PageClientImpl::handleAsynchronousCancelableScrollEvent(WKBaseScrollView *scrollView, UIScrollEvent *scrollEvent, void (^completion)(BOOL handled))
+void PageClientImpl::handleAsynchronousCancelableScrollEvent(WKBaseScrollView *scrollView, WKBEScrollViewScrollUpdate *update, void (^completion)(BOOL handled))
 {
-    [webView() scrollView:scrollView handleScrollEvent:scrollEvent completion:completion];
+    [webView() scrollView:scrollView handleScrollUpdate:update completion:completion];
 }
 #endif
 

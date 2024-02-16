@@ -26,6 +26,8 @@ import unittest
 from webkitbugspy import Issue, Tracker, User, radar, mocks
 from webkitcorepy import mocks as wkmocks, OutputCapture
 
+RELATED_BLANK = {'related-to': [], 'blocked-by': [], 'blocking': [], 'parent-of': [], 'subtask-of': [], 'cause-of': [], 'caused-by': [], 'duplicate-of': [], 'original-of': []}
+
 
 class TestRadar(unittest.TestCase):
     def test_encoding(self):
@@ -390,7 +392,7 @@ What version of 'WebKit Text' should the bug be associated with?:
             self.assertEqual(tracker.issue(1).redacted, radar.Tracker.Redaction(True, "matches 'component:Text'"))
             self.assertEqual(tracker.issue(2).redacted, False)
             tracker.issue(1).close(original=tracker.issue(2))
-            self.assertEqual(tracker.issue(2).redacted, radar.Tracker.Redaction(True, "matches 'component:Text'"))
+            self.assertEqual(tracker.issue(2).redacted, radar.Tracker.Redaction(True, "is related to rdar://1 which matches 'component:Text'"))
 
     def test_redacted_original(self):
         with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
@@ -398,7 +400,7 @@ What version of 'WebKit Text' should the bug be associated with?:
             self.assertEqual(tracker.issue(1).redacted, radar.Tracker.Redaction(True, "matches 'component:Text'"))
             self.assertEqual(tracker.issue(2).redacted, False)
             tracker.issue(2).close(original=tracker.issue(1))
-            self.assertEqual(tracker.issue(2).redacted, radar.Tracker.Redaction(True, "matches 'component:Text'"))
+            self.assertEqual(tracker.issue(2).redacted, radar.Tracker.Redaction(True, "is related to rdar://1 which matches 'component:Text'"))
 
     def test_redaction_exception(self):
         with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
@@ -458,3 +460,55 @@ What version of 'WebKit Text' should the bug be associated with?:
             issue.set_keywords(['Keyword B'])
             self.assertEqual(issue.keywords, ['Keyword B'])
             self.assertEqual(tracker.issue(1).keywords, ['Keyword B'])
+
+    def test_relate_simple(self):
+        with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
+            tracker = radar.Tracker()
+            issue = tracker.issue(1)
+            issue2 = tracker.issue(2)
+
+            self.assertEqual(issue.related, RELATED_BLANK)
+            issue.relate(related_to=issue2)
+            self.assertEqual(issue.related, {'related-to': [issue2], 'blocked-by': [], 'blocking': [], 'parent-of': [], 'subtask-of': [], 'cause-of': [], 'caused-by': [], 'duplicate-of': [], 'original-of': []})
+
+    def test_relate(self):
+        with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
+            tracker = radar.Tracker()
+            issue = tracker.issue(1)
+            issue2 = tracker.issue(2)
+            issue3 = tracker.issue(3)
+
+            self.assertEqual(issue.related, RELATED_BLANK)
+            issue.relate(related_to=issue2, parent_of=issue3)
+            self.assertEqual(issue.related['related-to'], [issue2])
+            self.assertEqual(issue.related['parent-of'], [issue3])
+
+    def test_relate_server(self):
+        with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
+            tracker = radar.Tracker()
+            tracker.issue(1).relate(related_to=tracker.issue(2))
+            self.assertEqual(tracker.issue(1).related['related-to'], [tracker.issue(2)])
+            self.assertEqual(tracker.issue(2).related['related-to'], [tracker.issue(1)])
+
+    def test_relate_inverse(self):
+        with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
+            tracker = radar.Tracker()
+            tracker.issue(1).relate(blocking=tracker.issue(2))
+            self.assertEqual(tracker.issue(1).related['blocking'], [tracker.issue(2)])
+            self.assertEqual(tracker.issue(2).related['blocked-by'], [tracker.issue(1)])
+
+            tracker.issue(2).relate(parent_of=tracker.issue(3))
+            self.assertEqual(tracker.issue(2).related['parent-of'], [tracker.issue(3)])
+            self.assertEqual(tracker.issue(3).related['subtask-of'], [tracker.issue(2)])
+
+    def test_relate_fail_type(self):
+        with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
+            tracker = radar.Tracker()
+            issue = tracker.issue(1)
+            issue2 = tracker.issue(2)
+
+            self.assertEqual(issue.related, RELATED_BLANK)
+            with self.assertRaises(TypeError) as c:
+                issue.relate(fake_relation=issue2)
+            self.assertEqual('\'fake_relation\' is an invalid relation', str(c.exception))
+            self.assertEqual(issue.related, RELATED_BLANK)

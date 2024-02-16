@@ -98,7 +98,7 @@ bool ScrollingCoordinator::coordinatesScrollingForOverflowLayer(const RenderLaye
 
 ScrollingNodeID ScrollingCoordinator::scrollableContainerNodeID(const RenderObject&) const
 {
-    return 0;
+    return { };
 }
 
 EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(const LocalFrame& frame) const
@@ -247,6 +247,16 @@ GraphicsLayer* ScrollingCoordinator::footerLayerForFrameView(LocalFrameView& fra
 #endif
 }
 
+Page* ScrollingCoordinator::page() const
+{
+    return m_page.get();
+}
+
+RefPtr<Page> ScrollingCoordinator::protectedPage() const
+{
+    return m_page.get();
+}
+
 GraphicsLayer* ScrollingCoordinator::counterScrollingLayerForFrameView(LocalFrameView& frameView)
 {
     if (auto* renderView = frameView.frame().contentRenderer())
@@ -367,8 +377,7 @@ bool ScrollingCoordinator::shouldUpdateScrollLayerPositionSynchronously(const Lo
 
 ScrollingNodeID ScrollingCoordinator::uniqueScrollingNodeID()
 {
-    static ScrollingNodeID uniqueScrollingNodeID = 1;
-    return uniqueScrollingNodeID++;
+    return ScrollingNodeID::generate();
 }
 
 void ScrollingCoordinator::receivedWheelEventWithPhases(PlatformWheelEventPhase phase, PlatformWheelEventPhase momentumPhase)
@@ -388,7 +397,7 @@ void ScrollingCoordinator::deferWheelEventTestCompletionForReason(ScrollingNodeI
         return;
 
     if (auto monitor = m_page->wheelEventTestMonitor())
-        monitor->deferForReason(reinterpret_cast<WheelEventTestMonitor::ScrollableAreaIdentifier>(nodeID), reason);
+        monitor->deferForReason(reinterpret_cast<WheelEventTestMonitor::ScrollableAreaIdentifier>(nodeID.object().toUInt64()), reason);
 }
 
 void ScrollingCoordinator::removeWheelEventTestCompletionDeferralForReason(ScrollingNodeID nodeID, WheelEventTestMonitor::DeferReason reason)
@@ -398,7 +407,7 @@ void ScrollingCoordinator::removeWheelEventTestCompletionDeferralForReason(Scrol
         return;
 
     if (auto monitor = m_page->wheelEventTestMonitor())
-        monitor->removeDeferralForReason(reinterpret_cast<WheelEventTestMonitor::ScrollableAreaIdentifier>(nodeID), reason);
+        monitor->removeDeferralForReason(reinterpret_cast<WheelEventTestMonitor::ScrollableAreaIdentifier>(nodeID.object().toUInt64()), reason);
 }
 
 String ScrollingCoordinator::scrollingStateTreeAsText(OptionSet<ScrollingStateTreeAsTextBehavior>) const

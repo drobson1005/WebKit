@@ -29,6 +29,7 @@
 
 #include "AXCoreObject.h"
 #include "AXTextMarker.h"
+#include "AXTextRun.h"
 #include "AXTreeStore.h"
 #include "PageIdentifier.h"
 #include "RenderStyleConstants.h"
@@ -47,6 +48,7 @@ class TextStream;
 namespace WebCore {
 
 class AXIsolatedObject;
+class AXGeometryManager;
 class AXObjectCache;
 class AccessibilityObject;
 class Page;
@@ -89,7 +91,6 @@ enum class AXPropertyName : uint16_t {
     DatetimeAttributeValue,
     DecrementButton,
     Description,
-    DescriptionAttributeValue,
     DisclosedByRow,
     DisclosedRows,
     DocumentEncoding,
@@ -106,12 +107,13 @@ enum class AXPropertyName : uint16_t {
     HasUnderline,
     HeaderContainer,
     HeadingLevel,
-    HelpText,
     HierarchicalLevel,
     HorizontalScrollBar,
     IdentifierAttribute,
     IncrementButton,
+    InitialFrameRect,
     InnerHTML,
+    InternalLinkElement,
     InsideLink,
     InvalidStatus,
     IsGrabbed,
@@ -129,6 +131,7 @@ enum class AXPropertyName : uint16_t {
     IsFileUploadButton,
     IsIndeterminate,
     IsInlineText,
+    IsRadioInput,
     IsInputImage,
     IsKeyboardFocusable,
     IsLink,
@@ -149,6 +152,7 @@ enum class AXPropertyName : uint16_t {
     IsMathToken,
     IsMeter,
     IsMultiSelectable,
+    IsNonLayerSVGObject,
     IsNonNativeTextControl,
     IsPlugin,
     IsPressed,
@@ -167,7 +171,6 @@ enum class AXPropertyName : uint16_t {
     IsWidget,
     KeyShortcuts,
     Language,
-    LinkedObjects,
     LiveRegionAtomic,
     LiveRegionRelevant,
     LiveRegionStatus,
@@ -196,6 +199,7 @@ enum class AXPropertyName : uint16_t {
     PopupValue,
     PosInSet,
     PreventKeyboardDOMEventDispatch,
+    RadioButtonGroup,
     RelativeFrame,
     RoleValue,
     RolePlatformString,
@@ -210,6 +214,7 @@ enum class AXPropertyName : uint16_t {
     SelectedChildren,
     SelectedTextRange,
     SetSize,
+    ShouldEmitNewlinesBeforeAndAfterNode,
     SortDirection,
     SpeechHint,
     StringValue,
@@ -237,7 +242,6 @@ enum class AXPropertyName : uint16_t {
 #endif
     Title,
     TitleAttributeValue,
-    TitleUIElement,
     URL,
     ValueAutofillButtonType,
     ValueDescription,
@@ -255,7 +259,7 @@ using AXPropertyValueVariant = std::variant<std::nullptr_t, AXID, String, bool, 
     , RetainPtr<NSAttributedString>
 #endif
 #if ENABLE(AX_THREAD_TEXT_APIS)
-    , Vector<AXTextRun>
+    , AXTextRuns
 #endif
 >;
 using AXPropertyMap = HashMap<AXPropertyName, AXPropertyValueVariant, IntHash<AXPropertyName>, WTF::StrongEnumHashTraits<AXPropertyName>>;
@@ -322,19 +326,19 @@ public:
     WEBCORE_EXPORT RefPtr<AXIsolatedObject> focusedNode();
 
     RefPtr<AXIsolatedObject> objectForID(const AXID) const;
-    template<typename U> Vector<RefPtr<AXCoreObject>> objectsForIDs(const U&) const;
+    template<typename U> Vector<RefPtr<AXCoreObject>> objectsForIDs(const U&);
 
     void generateSubtree(AccessibilityObject&);
-    void labelCreated(AccessibilityObject&);
     void updateNode(AccessibilityObject&);
     enum class ResolveNodeChanges : bool { No, Yes };
     void updateChildren(AccessibilityObject&, ResolveNodeChanges = ResolveNodeChanges::Yes);
     void updateChildrenForObjects(const ListHashSet<RefPtr<AccessibilityObject>>&);
     void updateNodeProperty(AXCoreObject& object, AXPropertyName property) { updateNodeProperties(object, { property }); };
     void updateNodeProperties(AXCoreObject&, const AXPropertyNameSet&);
-    void updateNodeAndDependentProperties(AccessibilityObject&);
+    void updateDependentProperties(AccessibilityObject&);
     void updatePropertiesForSelfAndDescendants(AccessibilityObject&, const AXPropertyNameSet&);
     void updateFrame(AXID, IntRect&&);
+    void updateRootScreenRelativePosition();
     void overrideNodeProperties(AXID, AXPropertyMap&&);
 
     double loadingProgress() { return m_loadingProgress; }
@@ -370,8 +374,13 @@ public:
     AXTextMarkerRange selectedTextMarkerRange();
     void setSelectedTextMarkerRange(AXTextMarkerRange&&);
 
-    void queueNodeUpdate(AXCoreObject&, const NodeUpdateOptions&);
+    void queueNodeUpdate(AXID, const NodeUpdateOptions&);
     void processQueuedNodeUpdates();
+
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    AXTextMarker firstMarker();
+    AXTextMarker lastMarker();
+#endif
 
 private:
     AXIsolatedTree(AXObjectCache&);
@@ -430,10 +439,6 @@ private:
     // IsolatedObject must have one and only one entry in this map, that maps
     // its ObjectID to its ParentChildrenIDs struct.
     HashMap<AXID, ParentChildrenIDs> m_nodeMap;
-
-    // Only accessed on the main thread.
-    // Stores all nodes that are added via addUnconnectedNode, which do not get stored in m_nodeMap.
-    HashSet<AXID> m_unconnectedNodes;
 
     // Only accessed on the main thread.
     // The key is the ID of the object that will be resolved into an m_pendingAppends NodeChange.

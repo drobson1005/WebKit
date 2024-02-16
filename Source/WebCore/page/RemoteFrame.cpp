@@ -105,6 +105,11 @@ FrameView* RemoteFrame::virtualView() const
     return m_view.get();
 }
 
+FrameLoaderClient& RemoteFrame::loaderClient()
+{
+    return m_client.get();
+}
+
 void RemoteFrame::setView(RefPtr<RemoteFrameView>&& view)
 {
     m_view = WTFMove(view);
@@ -113,11 +118,22 @@ void RemoteFrame::setView(RefPtr<RemoteFrameView>&& view)
 void RemoteFrame::frameDetached()
 {
     m_client->frameDetached();
+    m_window->frameDetached();
 }
 
 String RemoteFrame::renderTreeAsText(size_t baseIndent, OptionSet<RenderAsTextFlag> behavior)
 {
     return m_client->renderTreeAsText(baseIndent, behavior);
+}
+
+String RemoteFrame::customUserAgent() const
+{
+    return m_customUserAgent;
+}
+
+String RemoteFrame::customUserAgentAsSiteSpecificQuirks() const
+{
+    return m_customUserAgentAsSiteSpecificQuirks;
 }
 
 } // namespace WebCore

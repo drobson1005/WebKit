@@ -41,6 +41,7 @@
 #include "SecurityOriginData.h"
 #include "Timer.h"
 #include "VideoPlaybackQualityMetrics.h"
+#include "VideoReceiverEndpoint.h"
 #include <JavaScriptCore/Forward.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Function.h>
@@ -420,13 +421,14 @@ public:
     void queueTaskOnEventLoop(Function<void()>&&);
 
     bool paused() const;
+    void willSeekToTarget(const MediaTime&);
     void seekToTime(const MediaTime&);
     void seekWhenPossible(const MediaTime&);
     void seekToTarget(const SeekTarget&);
     bool seeking() const;
     void seeked(const MediaTime&);
 
-    static double invalidTime() { return -1.0;}
+    static double invalidTime() { return -1.0; }
     MediaTime duration() const;
     MediaTime currentTime() const;
 
@@ -642,6 +644,8 @@ public:
     unsigned long long fileSize() const;
 
     std::optional<VideoPlaybackQualityMetrics> videoPlaybackQualityMetrics();
+    using VideoPlaybackQualityMetricsPromise = NativePromise<VideoPlaybackQualityMetrics, PlatformMediaError>;
+    Ref<VideoPlaybackQualityMetricsPromise> asyncVideoPlaybackQualityMetrics();
 
     String sourceApplicationIdentifier() const;
     Vector<String> preferredAudioCharacteristics() const;
@@ -656,7 +660,7 @@ public:
     bool contentMIMETypeWasInferredFromExtension() const { return m_contentMIMETypeWasInferredFromExtension; }
 
     const Vector<ContentType>& mediaContentTypesRequiringHardwareSupport() const;
-    bool shouldCheckHardwareSupport() const;
+    void setShouldCheckHardwareSupport(bool);
 
     const std::optional<Vector<String>>& allowedMediaContainerTypes() const;
     const std::optional<Vector<String>>& allowedMediaCodecTypes() const;
@@ -676,7 +680,7 @@ public:
     AVPlayer *objCAVFoundationAVPlayer() const;
 #endif
 
-    bool performTaskAtMediaTime(Function<void()>&&, const MediaTime&);
+    bool performTaskAtTime(Function<void()>&&, const MediaTime&);
 
     bool shouldIgnoreIntrinsicSize();
 
@@ -728,6 +732,8 @@ public:
     bool requiresRemotePlayback() const { return m_requiresRemotePlayback; }
 
     void setResourceOwner(const ProcessIdentity&);
+
+    void setVideoReceiverEndpoint(const VideoReceiverEndpoint&);
 
 private:
     MediaPlayer(MediaPlayerClient&);

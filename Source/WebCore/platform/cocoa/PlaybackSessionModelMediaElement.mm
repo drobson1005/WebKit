@@ -210,9 +210,12 @@ void PlaybackSessionModelMediaElement::updateForEventName(const WTF::AtomString&
     if (all
         || eventName == eventNames().webkitpresentationmodechangedEvent) {
         bool isPictureInPictureActive = this->isPictureInPictureActive();
+        bool isInWindowFullscreenActive = this->isInWindowFullscreenActive();
 
-        for (auto& client : m_clients)
+        for (auto& client : m_clients) {
             client->pictureInPictureActiveChanged(isPictureInPictureActive);
+            client->isInWindowFullscreenActiveChanged(isInWindowFullscreenActive);
+        }
     }
 
 
@@ -336,6 +339,21 @@ void PlaybackSessionModelMediaElement::selectLegibleMediaOption(uint64_t index)
     m_mediaElement->setSelectedTextTrack(textTrack);
 }
 
+void PlaybackSessionModelMediaElement::toggleFullscreen()
+{
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    ASSERT(is<HTMLVideoElement>(*m_mediaElement));
+    if (!is<HTMLVideoElement>(*m_mediaElement))
+        return;
+
+    auto& element = downcast<HTMLVideoElement>(*m_mediaElement);
+    if (element.fullscreenMode() == MediaPlayerEnums::VideoFullscreenModeStandard)
+        element.setPresentationMode(HTMLVideoElement::VideoPresentationMode::Inline);
+    else
+        element.setPresentationMode(HTMLVideoElement::VideoPresentationMode::Fullscreen);
+#endif
+}
+
 void PlaybackSessionModelMediaElement::togglePictureInPicture()
 {
 #if ENABLE(VIDEO_PRESENTATION_MODE)
@@ -348,6 +366,23 @@ void PlaybackSessionModelMediaElement::togglePictureInPicture()
         element.setPresentationMode(HTMLVideoElement::VideoPresentationMode::Inline);
     else
         element.setPresentationMode(HTMLVideoElement::VideoPresentationMode::PictureInPicture);
+#endif
+}
+
+void PlaybackSessionModelMediaElement::toggleInWindowFullscreen()
+{
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    ASSERT(is<HTMLVideoElement>(*m_mediaElement));
+    if (!is<HTMLVideoElement>(*m_mediaElement))
+        return;
+
+    auto& element = downcast<HTMLVideoElement>(*m_mediaElement);
+    UserGestureIndicator indicator(IsProcessingUserGesture::Yes, &element.document());
+
+    if (element.fullscreenMode() == MediaPlayerEnums::VideoFullscreenModeInWindow)
+        element.setPresentationMode(HTMLVideoElement::VideoPresentationMode::Inline);
+    else
+        element.setPresentationMode(HTMLVideoElement::VideoPresentationMode::InWindow);
 #endif
 }
 
@@ -445,6 +480,7 @@ const Vector<AtomString>& PlaybackSessionModelMediaElement::observedEventNames()
         eventNames().volumechangeEvent,
         eventNames().waitingEvent,
         eventNames().webkitcurrentplaybacktargetiswirelesschangedEvent,
+        eventNames().webkitpresentationmodechangedEvent,
     });
     return names.get();
 }
@@ -633,6 +669,14 @@ bool PlaybackSessionModelMediaElement::isPictureInPictureActive() const
         return false;
 
     return (m_mediaElement->fullscreenMode() & HTMLMediaElementEnums::VideoFullscreenModePictureInPicture) == HTMLMediaElementEnums::VideoFullscreenModePictureInPicture;
+}
+
+bool PlaybackSessionModelMediaElement::isInWindowFullscreenActive() const
+{
+    if (!m_mediaElement)
+        return false;
+
+    return (m_mediaElement->fullscreenMode() & HTMLMediaElementEnums::VideoFullscreenModeInWindow) == HTMLMediaElementEnums::VideoFullscreenModeInWindow;
 }
 
 #if !RELEASE_LOG_DISABLED

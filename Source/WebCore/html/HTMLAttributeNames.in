@@ -326,6 +326,7 @@ ontransitioncancel
 ontransitionend
 ontransitionrun
 ontransitionstart
+onuncapturederror
 onunhandledrejection
 onunload
 onvolumechange
@@ -364,7 +365,6 @@ popovertargetaction
 poster
 preload
 progress
-pseudo
 readonly
 referrerpolicy
 rel
@@ -385,8 +385,9 @@ scrolldelay
 scrolling
 select
 selected
-shadowrootmode
+shadowrootclonable
 shadowrootdelegatesfocus
+shadowrootmode
 shape
 size
 sizes
@@ -414,6 +415,7 @@ truespeed
 type
 uiactions
 usemap
+useragentpart
 valign
 value
 valuetype

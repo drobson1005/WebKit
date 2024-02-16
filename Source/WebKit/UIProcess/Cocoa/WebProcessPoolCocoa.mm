@@ -248,6 +248,9 @@ static AccessibilityPreferences accessibilityPreferences()
     if (auto* functionPointer = _AXSReduceMotionAutoplayAnimatedImagesEnabledPtr())
         preferences.imageAnimationEnabled = functionPointer();
 #endif
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    preferences.prefersNonBlinkingCursor = _AXSPrefersNonBlinkingCursorIndicator();
+#endif
     return preferences;
 }
 
@@ -265,11 +268,26 @@ void WebProcessPool::setMediaAccessibilityPreferences(WebProcessProxy& process)
 }
 #endif
 
+static const char* description(ProcessThrottleState state)
+{
+    switch (state) {
+    case ProcessThrottleState::Foreground: return "foreground";
+    case ProcessThrottleState::Background: return "background";
+    case ProcessThrottleState::Suspended: return "suspended";
+    }
+    return nullptr;
+}
+
 static void logProcessPoolState(const WebProcessPool& pool)
 {
     for (Ref process : pool.processes()) {
         WTF::TextStream stream;
         stream << process;
+
+        if (auto taskInfo = process->taskInfo()) {
+            stream << ", state: " << description(taskInfo->state);
+            stream << ", phys_footprint_mb: " << (taskInfo->physicalFootprint / 1048576.0) << " MB";
+        }
 
         String domain = process->optionalRegistrableDomain() ? process->optionalRegistrableDomain()->string() : "unknown"_s;
         RELEASE_LOG(Process, "WebProcessProxy %p - %" PUBLIC_LOG_STRING ", domain: %" PRIVATE_LOG_STRING, process.ptr(), stream.release().utf8().data(), domain.utf8().data());
@@ -307,6 +325,11 @@ void WebProcessPool::platformInitialize(NeedsGlobalStaticInitialization needsGlo
         for (const auto& pool : WebProcessPool::allProcessPools())
             logProcessPoolState(pool.get());
     });
+
+    PAL::registerNotifyCallback("com.apple.WebKit.restrictedDomains"_s, ^{
+        RestrictedOpenerDomainsController::shared();
+    });
+
 }
 
 void WebProcessPool::platformResolvePathsForSandboxExtensions()
@@ -845,6 +868,9 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 #if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
     if (canLoadkAXSReduceMotionAutoplayAnimatedImagesChangedNotification())
         addCFNotificationObserver(accessibilityPreferencesChangedCallback, getkAXSReduceMotionAutoplayAnimatedImagesChangedNotification());
+#endif
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    addCFNotificationObserver(accessibilityPreferencesChangedCallback, kAXSPrefersNonBlinkingCursorIndicatorDidChangeNotification);
 #endif
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK)
     addCFNotificationObserver(mediaAccessibilityPreferencesChangedCallback, kMAXCaptionAppearanceSettingsChangedNotification);

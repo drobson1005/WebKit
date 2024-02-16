@@ -32,6 +32,7 @@
 #include "CSSFontSelector.h"
 #include "CSSStyleSheet.h"
 #include "CustomPropertyRegistry.h"
+#include "DocumentInlines.h"
 #include "Element.h"
 #include "ElementAncestorIteratorInlines.h"
 #include "ElementChildIteratorInlines.h"
@@ -47,6 +48,7 @@
 #include "ProcessingInstruction.h"
 #include "RenderBoxInlines.h"
 #include "RenderView.h"
+#include "RuleSet.h"
 #include "SVGElementTypeHelpers.h"
 #include "SVGStyleElement.h"
 #include "Settings.h"
@@ -113,6 +115,11 @@ void Scope::createDocumentResolver()
 
     m_resolver = Resolver::create(m_document, Resolver::ScopeType::Document);
 
+    if (!m_dynamicViewTransitionsStyle)
+        m_dynamicViewTransitionsStyle = RuleSet::create();
+
+    m_resolver->ruleSets().setDynamicViewTransitionsStyle(m_dynamicViewTransitionsStyle.get());
+
     m_document->fontSelector().buildStarted();
 
     m_resolver->ruleSets().initializeUserStyle();
@@ -173,6 +180,12 @@ void Scope::clearResolver()
     m_resolver = nullptr;
     customPropertyRegistry().clearRegisteredFromStylesheets();
     counterStyleRegistry().clearAuthorCounterStyles();
+}
+
+void Scope::clearViewTransitionStyles()
+{
+    clearResolver();
+    m_dynamicViewTransitionsStyle = nullptr;
 }
 
 void Scope::releaseMemory()
@@ -628,12 +641,14 @@ const Vector<RefPtr<CSSStyleSheet>> Scope::activeStyleSheetsForInspector()
 {
     Vector<RefPtr<CSSStyleSheet>> result;
 
-    if (auto* pageUserSheet = m_document->extensionStyleSheets().pageUserSheet())
-        result.append(pageUserSheet);
-    result.appendVector(m_document->extensionStyleSheets().documentUserStyleSheets());
-    result.appendVector(m_document->extensionStyleSheets().injectedUserStyleSheets());
-    result.appendVector(m_document->extensionStyleSheets().injectedAuthorStyleSheets());
-    result.appendVector(m_document->extensionStyleSheets().authorStyleSheetsForTesting());
+    if (CheckedPtr extensionStyleSheets = m_document->extensionStyleSheetsIfExists()) {
+        if (auto* pageUserSheet = extensionStyleSheets->pageUserSheet())
+            result.append(pageUserSheet);
+        result.appendVector(extensionStyleSheets->documentUserStyleSheets());
+        result.appendVector(extensionStyleSheets->injectedUserStyleSheets());
+        result.appendVector(extensionStyleSheets->injectedAuthorStyleSheets());
+        result.appendVector(extensionStyleSheets->authorStyleSheetsForTesting());
+    }
 
     for (auto& styleSheet : m_styleSheetsForStyleSheetList) {
         auto* sheet = dynamicDowncast<CSSStyleSheet>(*styleSheet);
@@ -825,6 +840,7 @@ void Scope::didChangeStyleSheetEnvironment()
             if (descendantShadowRoot.mode() != ShadowRootMode::UserAgent)
                 const_cast<ShadowRoot&>(descendantShadowRoot).styleScope().scheduleUpdate(UpdateType::ContentsOrInterpretation);
         }
+        m_document->invalidateCachedCSSParserContext();
     }
     scheduleUpdate(UpdateType::ContentsOrInterpretation);
 }

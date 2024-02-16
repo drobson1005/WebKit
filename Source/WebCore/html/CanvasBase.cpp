@@ -99,12 +99,12 @@ AffineTransform CanvasBase::baseTransform() const
     return m_imageBuffer->baseTransform();
 }
 
-void CanvasBase::makeRenderingResultsAvailable()
+void CanvasBase::makeRenderingResultsAvailable(ShouldApplyPostProcessingToDirtyRect shouldApplyPostProcessingToDirtyRect)
 {
     if (auto* context = renderingContext()) {
         context->drawBufferToCanvas(CanvasRenderingContext::SurfaceBuffer::DrawingBuffer);
-        if (m_canvasNoiseHashSalt)
-            m_canvasNoiseInjection.postProcessDirtyCanvasBuffer(buffer(), *m_canvasNoiseHashSalt);
+        if (m_canvasNoiseHashSalt && shouldApplyPostProcessingToDirtyRect == ShouldApplyPostProcessingToDirtyRect::Yes)
+            m_canvasNoiseInjection.postProcessDirtyCanvasBuffer(buffer(), *m_canvasNoiseHashSalt, context->is2d() ? CanvasNoiseInjectionPostProcessArea::DirtyRect : CanvasNoiseInjectionPostProcessArea::FullBuffer);
     }
 }
 
@@ -171,7 +171,7 @@ bool CanvasBase::hasObserver(CanvasObserver& observer) const
     return m_observers.contains(observer);
 }
 
-void CanvasBase::notifyObserversCanvasChanged(const std::optional<FloatRect>& rect)
+void CanvasBase::notifyObserversCanvasChanged(const FloatRect& rect)
 {
     for (auto& observer : m_observers)
         observer.canvasChanged(*this, rect);
@@ -179,13 +179,16 @@ void CanvasBase::notifyObserversCanvasChanged(const std::optional<FloatRect>& re
 
 void CanvasBase::didDraw(const std::optional<FloatRect>& rect, ShouldApplyPostProcessingToDirtyRect shouldApplyPostProcessingToDirtyRect)
 {
+    addCanvasNeedingPreparationForDisplayOrFlush();
+    IntRect dirtyRect { { }, size() };
+    if (rect)
+        dirtyRect.intersect(enclosingIntRect(*rect));
+    notifyObserversCanvasChanged(dirtyRect);
+
     // FIXME: We should exclude rects with ShouldApplyPostProcessingToDirtyRect::No
     if (shouldInjectNoiseBeforeReadback()) {
         if (shouldApplyPostProcessingToDirtyRect == ShouldApplyPostProcessingToDirtyRect::Yes) {
-            if (rect)
-                m_canvasNoiseInjection.updateDirtyRect(intersection(enclosingIntRect(*rect), { { }, size() }));
-            else
-                m_canvasNoiseInjection.updateDirtyRect({ { }, size() });
+            m_canvasNoiseInjection.updateDirtyRect(dirtyRect);
         } else if (!rect)
             m_canvasNoiseInjection.clearDirtyRect();
     }
@@ -310,6 +313,9 @@ bool CanvasBase::shouldAccelerate(uint64_t area) const
     if (area < scriptExecutionContext()->settingsValues().minimumAccelerated2DContextArea)
         return false;
     return true;
+#elif USE(SKIA)
+    UNUSED_PARAM(area);
+    return true;
 #else
     UNUSED_PARAM(area);
     return false;
@@ -354,6 +360,20 @@ void CanvasBase::recordLastFillText(const String& text)
     if (!shouldInjectNoiseBeforeReadback())
         return;
     m_lastFillText = text;
+}
+
+void CanvasBase::addCanvasNeedingPreparationForDisplayOrFlush()
+{
+    if (auto* document = dynamicDowncast<Document>(scriptExecutionContext()))
+        document->addCanvasNeedingPreparationForDisplayOrFlush(*this);
+    // FIXME: WorkerGlobalContext does not have prepare phase yet.
+}
+
+void CanvasBase::removeCanvasNeedingPreparationForDisplayOrFlush()
+{
+    if (auto* document = dynamicDowncast<Document>(scriptExecutionContext()))
+        document->removeCanvasNeedingPreparationForDisplayOrFlush(*this);
+    // FIXME: WorkerGlobalContext does not have prepare phase yet.
 }
 
 bool CanvasBase::postProcessPixelBufferResults(Ref<PixelBuffer>&& pixelBuffer) const

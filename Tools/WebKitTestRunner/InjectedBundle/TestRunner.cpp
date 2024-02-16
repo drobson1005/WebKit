@@ -40,7 +40,6 @@
 #include <WebKit/WKBundleBackForwardList.h>
 #include <WebKit/WKBundleFrame.h>
 #include <WebKit/WKBundleFramePrivate.h>
-#include <WebKit/WKBundleInspector.h>
 #include <WebKit/WKBundleNodeHandlePrivate.h>
 #include <WebKit/WKBundlePage.h>
 #include <WebKit/WKBundlePagePrivate.h>
@@ -257,8 +256,13 @@ void TestRunner::notifyDone()
     if (!injectedBundle.isTestRunning())
         return;
 
+    bool mainFrameIsRemote = WKBundleFrameIsRemote(WKBundlePageGetMainFrame(injectedBundle.pageRef()));
+    if (mainFrameIsRemote) {
+        setWaitUntilDone(false);
+        return postPageMessage("NotifyDone");
+    }
     if (shouldWaitUntilDone() && !injectedBundle.topLoadingFrame())
-        injectedBundle.page()->dump();
+        injectedBundle.page()->dump(m_forceRepaint);
 
     // We don't call invalidateWaitToDumpWatchdogTimer() here, even if we continue to wait for a load to finish.
     // The test is still subject to timeout checking - it is better to detect an async timeout inside WebKitTestRunner
@@ -274,7 +278,7 @@ void TestRunner::forceImmediateCompletion()
         return;
 
     if (shouldWaitUntilDone() && injectedBundle.page())
-        injectedBundle.page()->dump();
+        injectedBundle.page()->dump(m_forceRepaint);
 
     setWaitUntilDone(false);
 }
@@ -352,8 +356,12 @@ bool TestRunner::findString(JSStringRef target, JSValueRef optionsArrayAsValue)
 
 void TestRunner::findStringMatchesInPage(JSStringRef target, JSValueRef optionsArrayAsValue)
 {
-    if (auto options = findOptionsFromArray(optionsArrayAsValue))
-        WKBundlePageFindStringMatches(page(), toWK(target).get(), *options);
+    if (auto options = findOptionsFromArray(optionsArrayAsValue)) {
+        postPageMessage("FindStringMatches", createWKDictionary({
+            { "String", toWK(target) },
+            { "FindOptions", toWK(*options) },
+        }));
+    }
 }
 
 void TestRunner::replaceFindMatchesAtIndices(JSValueRef matchIndicesAsValue, JSStringRef replacementText, bool selectionOnly)
@@ -541,17 +549,17 @@ void TestRunner::makeWindowObject(JSContextRef context)
 
 void TestRunner::showWebInspector()
 {
-    WKBundleInspectorShow(WKBundlePageGetInspector(page()));
+    WKBundlePageShowInspectorForTest(page());
 }
 
 void TestRunner::closeWebInspector()
 {
-    WKBundleInspectorClose(WKBundlePageGetInspector(page()));
+    WKBundlePageCloseInspectorForTest(page());
 }
 
 void TestRunner::evaluateInWebInspector(JSStringRef script)
 {
-    WKBundleInspectorEvaluateScriptForTest(WKBundlePageGetInspector(page()), toWK(script).get());
+    WKBundlePageEvaluateScriptInInspectorForTest(page(), toWK(script).get());
 }
 
 using WorldMap = WTF::HashMap<unsigned, WKRetainPtr<WKBundleScriptWorldRef>>;
@@ -1565,11 +1573,12 @@ void TestRunner::setStatisticsTopFrameUniqueRedirectFrom(JSStringRef hostName, J
     }));
 }
 
-void TestRunner::setStatisticsCrossSiteLoadWithLinkDecoration(JSStringRef fromHost, JSStringRef toHost)
+void TestRunner::setStatisticsCrossSiteLoadWithLinkDecoration(JSStringRef fromHost, JSStringRef toHost, bool wasFiltered)
 {
     postSynchronousMessage("SetStatisticsCrossSiteLoadWithLinkDecoration", createWKDictionary({
         { "FromHost", toWK(fromHost) },
         { "ToHost", toWK(toHost) },
+        { "WasFiltered", adoptWK(WKBooleanCreate(wasFiltered)) },
     }));
 }
 
@@ -1867,10 +1876,16 @@ static JSValueRef makeDomainsValue(const Vector<String>& domains)
     builder.append(']');
     return JSValueMakeFromJSONString(mainFrameJSContext(), createJSString(builder.toString().utf8().data()).get());
 }
+
 void TestRunner::callDidReceiveAllStorageAccessEntriesCallback(Vector<String>& domains)
 {
     auto result = makeDomainsValue(domains);
     callTestRunnerCallback(AllStorageAccessEntriesCallbackID, 1, &result);
+}
+
+void TestRunner::setRequestStorageAccessThrowsExceptionUntilReload(bool enabled)
+{
+    postSynchronousPageMessage("SetRequestStorageAccessThrowsExceptionUntilReload", enabled);
 }
 
 void TestRunner::loadedSubresourceDomains(JSValueRef callback)

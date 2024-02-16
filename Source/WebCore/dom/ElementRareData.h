@@ -34,6 +34,7 @@
 #include "NodeRareData.h"
 #include "PopoverData.h"
 #include "PseudoElement.h"
+#include "PseudoElementIdentifier.h"
 #include "RenderElement.h"
 #include "ResizeObserver.h"
 #include "ShadowRoot.h"
@@ -95,8 +96,8 @@ public:
     RenderStyle* computedStyle() const { return m_computedStyle.get(); }
     void setComputedStyle(std::unique_ptr<RenderStyle>&& computedStyle) { m_computedStyle = WTFMove(computedStyle); }
 
-    RenderStyle* displayContentsStyle() const { return m_displayContentsStyle.get(); }
-    void setDisplayContentsStyle(std::unique_ptr<RenderStyle> style) { m_displayContentsStyle = WTFMove(style); }
+    RenderStyle* displayContentsOrNoneStyle() const { return m_displayContentsOrNoneStyle.get(); }
+    void setDisplayContentsOrNoneStyle(std::unique_ptr<RenderStyle> style) { m_displayContentsOrNoneStyle = WTFMove(style); }
 
     const AtomString& effectiveLang() const { return m_effectiveLang; }
     void setEffectiveLang(const AtomString& lang) { m_effectiveLang = lang; }
@@ -110,8 +111,8 @@ public:
     ScrollPosition savedLayerScrollPosition() const { return m_savedLayerScrollPosition; }
     void setSavedLayerScrollPosition(ScrollPosition position) { m_savedLayerScrollPosition = position; }
 
-    ElementAnimationRareData* animationRareData(PseudoId) const;
-    ElementAnimationRareData& ensureAnimationRareData(PseudoId);
+    ElementAnimationRareData* animationRareData(const std::optional<Style::PseudoElementIdentifier>&) const;
+    ElementAnimationRareData& ensureAnimationRareData(const std::optional<Style::PseudoElementIdentifier>&);
 
     DOMTokenList* partList() const { return m_partList.get(); }
     void setPartList(std::unique_ptr<DOMTokenList>&& partList) { m_partList = WTFMove(partList); }
@@ -162,8 +163,8 @@ public:
             result.add(UseType::ScrollingPosition);
         if (m_computedStyle)
             result.add(UseType::ComputedStyle);
-        if (m_displayContentsStyle)
-            result.add(UseType::DisplayContentsStyle);
+        if (m_displayContentsOrNoneStyle)
+            result.add(UseType::DisplayContentsOrNoneStyle);
         if (!m_effectiveLang.isEmpty())
             result.add(UseType::EffectiveLang);
         if (m_dataset)
@@ -218,7 +219,7 @@ private:
     ScrollPosition m_savedLayerScrollPosition;
 
     std::unique_ptr<RenderStyle> m_computedStyle;
-    std::unique_ptr<RenderStyle> m_displayContentsStyle;
+    std::unique_ptr<RenderStyle> m_displayContentsOrNoneStyle;
 
     AtomString m_effectiveLang;
     std::unique_ptr<DatasetDOMStringMap> m_dataset;
@@ -297,21 +298,21 @@ inline void ElementRareData::setUnusualTabIndex(int tabIndex)
     m_unusualTabIndex = tabIndex;
 }
 
-inline ElementAnimationRareData* ElementRareData::animationRareData(PseudoId pseudoId) const
+inline ElementAnimationRareData* ElementRareData::animationRareData(const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier) const
 {
     for (auto& animationRareData : m_animationRareData) {
-        if (animationRareData->pseudoId() == pseudoId)
+        if (animationRareData->pseudoElementIdentifier() == pseudoElementIdentifier)
             return animationRareData.get();
     }
     return nullptr;
 }
 
-inline ElementAnimationRareData& ElementRareData::ensureAnimationRareData(PseudoId pseudoId)
+inline ElementAnimationRareData& ElementRareData::ensureAnimationRareData(const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier)
 {
-    if (auto* animationRareData = this->animationRareData(pseudoId))
+    if (auto* animationRareData = this->animationRareData(pseudoElementIdentifier))
         return *animationRareData;
 
-    m_animationRareData.append(makeUnique<ElementAnimationRareData>(pseudoId));
+    m_animationRareData.append(makeUnique<ElementAnimationRareData>(pseudoElementIdentifier));
     return *m_animationRareData.last().get();
 }
 

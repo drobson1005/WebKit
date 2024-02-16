@@ -27,9 +27,10 @@
 
 #if ENABLE(PDF_PLUGIN)
 
-#include "DataReference.h"
 #include "FrameInfoData.h"
 #include "PDFPluginIdentifier.h"
+#include "PDFScriptEvaluator.h"
+#include "WebMouseEvent.h"
 #include <WebCore/AffineTransform.h>
 #include <WebCore/FindOptions.h>
 #include <WebCore/FloatRect.h>
@@ -43,6 +44,7 @@
 #include <wtf/WeakPtr.h>
 
 OBJC_CLASS NSDictionary;
+OBJC_CLASS PDFAnnotation;
 OBJC_CLASS PDFDocument;
 OBJC_CLASS PDFSelection;
 
@@ -51,30 +53,40 @@ class FragmentedSharedBuffer;
 class GraphicsContext;
 class Element;
 class HTMLPlugInElement;
+class NetscapePlugInStreamLoaderClient;
 class ResourceResponse;
 class Scrollbar;
+class ShareableBitmap;
 class SharedBuffer;
 enum class PlatformCursorType : uint8_t;
 }
 
 namespace WebKit {
 
+class PDFIncrementalLoader;
+class PDFPluginAnnotation;
 class PluginView;
-class ShareableBitmap;
 class WebFrame;
 class WebKeyboardEvent;
 class WebMouseEvent;
 class WebWheelEvent;
+struct LookupTextResult;
 struct WebHitTestResultData;
 
-class PDFPluginBase : public ThreadSafeRefCounted<PDFPluginBase>, public WebCore::ScrollableArea {
+class PDFPluginBase : public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<PDFPluginBase>, public WebCore::ScrollableArea, public PDFScriptEvaluator::Client {
     WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(PDFPluginBase);
+    friend class PDFIncrementalLoader;
 public:
     static WebCore::PluginInfo pluginInfo();
 
     virtual ~PDFPluginBase();
 
+    using WebKit::PDFScriptEvaluator::Client::weakPtrFactory;
+    using WebKit::PDFScriptEvaluator::Client::WeakValueType;
+    using WebKit::PDFScriptEvaluator::Client::WeakPtrImplType;
+
+    void startLoading();
     void destroy();
 
     virtual bool isUnifiedPDFPlugin() const { return false; }
@@ -93,17 +105,21 @@ public:
     virtual bool isComposited() const { return false; }
 
     virtual bool shouldCreateTransientPaintingSnapshot() const { return false; }
-    virtual RefPtr<ShareableBitmap> snapshot() { return nullptr; }
+    virtual RefPtr<WebCore::ShareableBitmap> snapshot() { return nullptr; }
     virtual void paint(WebCore::GraphicsContext&, const WebCore::IntRect&) { }
 
     virtual CGFloat scaleFactor() const = 0;
 
+    virtual CGFloat minScaleFactor() const { return 0.25; }
+    virtual CGFloat maxScaleFactor() const { return 5; }
+
     bool isLocked() const;
 
-    virtual RetainPtr<PDFDocument> pdfDocumentForPrinting() const = 0;
-    virtual WebCore::FloatSize pdfDocumentSizeForPrinting() const = 0;
+    RetainPtr<PDFDocument> pdfDocument() const { return m_pdfDocument; }
+    RetainPtr<PDFDocument> pdfDocumentForPrinting() const { return m_pdfDocument; }
+    WebCore::FloatSize pdfDocumentSizeForPrinting() const;
 
-    virtual void geometryDidChange(const WebCore::IntSize& pluginSize, const WebCore::AffineTransform& pluginToRootViewTransform);
+    virtual bool geometryDidChange(const WebCore::IntSize& pluginSize, const WebCore::AffineTransform& pluginToRootViewTransform);
     virtual void visibilityDidChange(bool);
     virtual void deviceScaleFactorChanged(float) { }
 
@@ -123,18 +139,23 @@ public:
     virtual bool handleMouseLeaveEvent(const WebMouseEvent&) = 0;
     virtual bool handleContextMenuEvent(const WebMouseEvent&) = 0;
     virtual bool handleKeyboardEvent(const WebKeyboardEvent&) = 0;
-    virtual bool handleEditingCommand(StringView commandName) = 0;
-    virtual bool isEditingCommandEnabled(StringView commandName) = 0;
+    virtual bool handleEditingCommand(const String& commandName, const String& argument) = 0;
+    virtual bool isEditingCommandEnabled(const String& commandName) = 0;
 
-    virtual String getSelectionString() const = 0;
+    virtual String selectionString() const = 0;
     virtual bool existingSelectionContainsPoint(const WebCore::FloatPoint&) const = 0;
     virtual WebCore::FloatRect rectForSelectionInRootView(PDFSelection *) const = 0;
 
     virtual unsigned countFindMatches(const String& target, WebCore::FindOptions, unsigned maxMatchCount) = 0;
     virtual bool findString(const String& target, WebCore::FindOptions, unsigned maxMatchCount) = 0;
+    virtual Vector<WebCore::FloatRect> rectsForTextMatchesInRect(const WebCore::IntRect&) const { return { }; }
+    virtual bool drawsFindOverlay() const = 0;
 
     virtual bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&) = 0;
-    virtual std::tuple<String, PDFSelection *, NSDictionary *> lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) const = 0;
+    void performSpotlightSearch(const String& query);
+    void performWebSearch(const String& query);
+
+    virtual LookupTextResult lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) = 0;
 
     virtual id accessibilityHitTest(const WebCore::IntPoint&) const = 0;
     virtual id accessibilityObject() const = 0;
@@ -160,17 +181,66 @@ public:
     WebCore::Scrollbar* horizontalScrollbar() const override { return m_horizontalScrollbar.get(); }
     WebCore::Scrollbar* verticalScrollbar() const override { return m_verticalScrollbar.get(); }
 
+    virtual void didAttachScrollingNode() { }
+
     virtual void didChangeSettings() { }
 
     // HUD Actions.
 #if ENABLE(PDF_HUD)
     virtual void zoomIn() = 0;
     virtual void zoomOut() = 0;
-    virtual void save(CompletionHandler<void(const String&, const URL&, const IPC::DataReference&)>&&) = 0;
-    virtual void openWithPreview(CompletionHandler<void(const String&, FrameInfoData&&, const IPC::DataReference&, const String&)>&&) = 0;
+    void save(CompletionHandler<void(const String&, const URL&, std::span<const uint8_t>)>&&);
+    void openWithPreview(CompletionHandler<void(const String&, FrameInfoData&&, std::span<const uint8_t>, const String&)>&&);
 #endif
 
     void notifyCursorChanged(WebCore::PlatformCursorType);
+
+    WebCore::ScrollPosition scrollPosition() const final;
+
+    virtual void setActiveAnnotation(RetainPtr<PDFAnnotation>&&) = 0;
+    void didMutatePDFDocument() { m_pdfDocumentWasMutated = true; }
+
+    virtual CGRect pluginBoundsForAnnotation(RetainPtr<PDFAnnotation>&) const = 0;
+    virtual void focusNextAnnotation() = 0;
+    virtual void focusPreviousAnnotation() = 0;
+
+    void navigateToURL(const URL&);
+
+    virtual void attemptToUnlockPDF(const String& password) = 0;
+
+#if HAVE(INCREMENTAL_PDF_APIS)
+    bool incrementalPDFLoadingEnabled() const { return m_incrementalPDFLoadingEnabled; }
+    void receivedNonLinearizedPDFSentinel();
+    void startByteRangeRequest(WebCore::NetscapePlugInStreamLoaderClient&, uint64_t requestIdentifier, uint64_t position, size_t count);
+    void adoptBackgroundThreadDocument(RetainPtr<PDFDocument>&&);
+    void maybeClearHighLatencyDataProviderFlag();
+#endif
+
+    void notifySelectionChanged();
+
+    virtual void windowActivityDidChange() { }
+
+    virtual void didSameDocumentNavigationForFrame(WebFrame&) { }
+
+#if PLATFORM(MAC)
+    void writeItemsToPasteboard(NSString *pasteboardName, NSArray *items, NSArray *types) const;
+#endif
+
+private:
+    bool documentFinishedLoading() const { return m_documentFinishedLoading; }
+    uint64_t streamedBytes() const { return m_streamedBytes; }
+    void ensureDataBufferLength(uint64_t);
+
+    bool haveStreamedDataForRange(uint64_t offset, size_t count) const;
+    // This just checks whether the CFData is large enough; it doesn't know if we filled this range with data.
+    bool haveDataForRange(uint64_t offset, size_t count) const;
+
+    void insertRangeRequestData(uint64_t offset, const Vector<uint8_t>&);
+
+    // Returns the number of bytes copied.
+    size_t copyDataAtPosition(void* buffer, uint64_t sourcePosition, size_t count) const;
+    // FIXME: It would be nice to avoid having both the "copy into a buffer" and "return a pointer" ways of getting data.
+    const uint8_t* dataPtrForRange(uint64_t sourcePosition, size_t count) const;
 
 protected:
     explicit PDFPluginBase(WebCore::HTMLPlugInElement&);
@@ -179,22 +249,22 @@ protected:
 
     virtual void teardown();
 
+    bool supportsForms();
+
     void createPDFDocument();
     virtual void installPDFDocument() = 0;
-    virtual void tryRunScriptsInPDFDocument() { }
-
-    virtual void incrementalPDFStreamDidReceiveData(const WebCore::SharedBuffer&) { }
-    virtual bool incrementalPDFStreamDidFinishLoading() { return false; }
-    virtual void incrementalPDFStreamDidFail() { }
+    void tryRunScriptsInPDFDocument();
 
     virtual unsigned firstPageHeight() const = 0;
 
-    NSData *rawData() const;
+    NSData *originalData() const;
+    virtual NSData *liveData() const = 0;
 
-    void ensureDataBufferLength(uint64_t);
     void addArchiveResource();
 
     void invalidateRect(const WebCore::IntRect&);
+
+    void print() override;
 
     // ScrollableArea functions.
     WebCore::IntRect scrollCornerRect() const final;
@@ -205,11 +275,10 @@ protected:
     void setScrollOffset(const WebCore::ScrollOffset&) final;
     bool isActive() const final;
     bool isScrollCornerVisible() const final { return false; }
-    WebCore::ScrollPosition scrollPosition() const final;
     WebCore::ScrollPosition minimumScrollPosition() const final;
     WebCore::ScrollPosition maximumScrollPosition() const final;
     WebCore::IntSize visibleSize() const final { return m_size; }
-    WebCore::IntPoint lastKnownMousePositionInView() const override { return m_lastMousePositionInPluginCoordinates; }
+    WebCore::IntPoint lastKnownMousePositionInView() const override;
 
     float deviceScaleFactor() const override;
     bool shouldSuspendScrollAnimations() const final { return false; } // If we return true, ScrollAnimatorMac will keep cycling a timer forever, waiting for a good time to animate.
@@ -235,11 +304,16 @@ protected:
     virtual Ref<WebCore::Scrollbar> createScrollbar(WebCore::ScrollbarOrientation);
     virtual void destroyScrollbar(WebCore::ScrollbarOrientation);
 
-    // HUD.
 #if ENABLE(PDF_HUD)
-    void updatePDFHUDLocation();
+    void updateHUDLocation();
     WebCore::IntRect frameForHUDInRootViewCoordinates() const;
     bool hudEnabled() const;
+    bool shouldShowHUD() const;
+    void updateHUDVisibility();
+#endif
+
+#if !LOG_DISABLED
+    void incrementalLoaderLog(const String&);
 #endif
 
     SingleThreadWeakPtr<PluginView> m_view;
@@ -248,24 +322,102 @@ protected:
 
     PDFPluginIdentifier m_identifier;
 
+    // m_data grows as we receive data in the primary request (PDFPluginBase::streamDidReceiveData())
+    // but also as byte range requests are received via m_incrementalLoader, so it may have "holes"
+    // before the main resource is fully loaded.
     RetainPtr<CFMutableDataRef> m_data;
+    uint64_t m_streamedBytes { 0 };
+
     RetainPtr<PDFDocument> m_pdfDocument;
 
     String m_suggestedFilename;
-    uint64_t m_streamedBytes { 0 };
+
+    String m_lastFindString;
 
     WebCore::IntSize m_size;
     WebCore::AffineTransform m_rootViewToPluginTransform;
 
     WebCore::IntSize m_scrollOffset;
-    WebCore::IntPoint m_lastMousePositionInPluginCoordinates;
+    std::optional<WebMouseEvent> m_lastMouseEvent;
 
     RefPtr<WebCore::Scrollbar> m_horizontalScrollbar;
     RefPtr<WebCore::Scrollbar> m_verticalScrollbar;
 
     bool m_documentFinishedLoading { false };
     bool m_isBeingDestroyed { false };
-    bool m_hasBeenDestroyed { false };
+    std::atomic<bool> m_hasBeenDestroyed { false };
+    bool m_didRunScripts { false };
+
+#if PLATFORM(MAC)
+    RefPtr<PDFPluginAnnotation> m_activeAnnotation;
+#endif
+    RefPtr<WebCore::Element> m_annotationContainer;
+    bool m_pdfDocumentWasMutated { false };
+
+#if HAVE(INCREMENTAL_PDF_APIS)
+    RefPtr<PDFIncrementalLoader> m_incrementalLoader;
+    std::atomic<bool> m_incrementalPDFLoadingEnabled { false };
+#endif
+
+    // Set overflow: hidden on the annotation container so <input> elements scrolled out of view don't show
+    // scrollbars on the body. We can't add annotations directly to the body, because overflow: hidden on the body
+    // will break rubber-banding.
+    static constexpr auto annotationStyle =
+    "#annotationContainer {"
+    "    overflow: hidden;"
+    "    position: absolute;"
+    "    pointer-events: none;"
+    "    top: 0;"
+    "    left: 0;"
+    "    right: 0;"
+    "    bottom: 0;"
+    "    display: flex;"
+    "    flex-direction: column;"
+    "    justify-content: center;"
+    "    align-items: center;"
+    "}"
+    ""
+    ".annotation {"
+    "    position: absolute;"
+    "    pointer-events: auto;"
+    "}"
+    ""
+    "textarea.annotation { "
+    "    resize: none;"
+    "}"
+    ""
+    "input.annotation[type='password'] {"
+    "    position: static;"
+    "    width: 238px;"
+    "    margin-top: 110px;"
+    "    font-size: 15px;"
+    "}"
+    ""
+    ".lock-icon {"
+    "    width: 64px;"
+    "    height: 64px;"
+    "    margin-bottom: 12px;"
+    "}"
+    ""
+    ".password-form {"
+    "    position: static;"
+    "    display: block;"
+    "    text-align: center;"
+    "    font-family: system-ui;"
+    "    font-size: 15px;"
+    "}"
+    ""
+    ".password-form p {"
+    "    margin: 4pt;"
+    "}"
+    ""
+    ".password-form .subtitle {"
+    "    font-size: 12px;"
+    "}"
+    ""
+    ".password-form + input.annotation[type='password'] {"
+    "    margin-top: 16px;"
+    "}"_s;
 };
 
 } // namespace WebKit

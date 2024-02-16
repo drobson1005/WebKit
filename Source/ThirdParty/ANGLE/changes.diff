@@ -15,6 +15,52 @@ index 34826b47554d0d89e8b9619d46828177b2c1b873..2e03a110de26a7cb888d8e9a5997deaf
  #include "common/utilities.h"
  #include "GLES3/gl3.h"
  #include "common/mathutil.h"
+diff --git a/src/compiler/fuzz/translator_fuzzer.cpp b/src/compiler/fuzz/translator_fuzzer.cpp
+index bfca63f6b9a7562e8ceea36a9a31793d0720e030..06b9ef5d3101e1a0ab86b4b36ae407e71b43ddea 100644
+--- a/src/compiler/fuzz/translator_fuzzer.cpp
++++ b/src/compiler/fuzz/translator_fuzzer.cpp
+@@ -139,6 +139,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+         static_cast<uint32_t>(ShFragmentSynchronizationType::InvalidEnum));
+ 
+     std::vector<uint32_t> validOutputs;
++#ifndef ANGLE_TRANSLATOR_FUZZER_METAL_ONLY
+     validOutputs.push_back(SH_ESSL_OUTPUT);
+     validOutputs.push_back(SH_GLSL_COMPATIBILITY_OUTPUT);
+     validOutputs.push_back(SH_GLSL_130_OUTPUT);
+@@ -155,6 +156,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+     validOutputs.push_back(SH_HLSL_3_0_OUTPUT);
+     validOutputs.push_back(SH_HLSL_4_1_OUTPUT);
+     validOutputs.push_back(SH_HLSL_4_0_FL9_3_OUTPUT);
++#endif
++#ifdef ANGLE_ENABLE_METAL
++    validOutputs.push_back(SH_MSL_METAL_OUTPUT);
++#endif
+     bool found = false;
+     for (auto valid : validOutputs)
+     {
+@@ -186,6 +191,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+         if (translator == nullptr)
+         {
++            sh::Finalize();
+             return 0;
+         }
+ 
+@@ -219,6 +225,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+         if (!translator->Init(resources))
+         {
++            sh::Finalize();
+             return 0;
+         }
+ 
+@@ -230,5 +237,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+     const char *shaderStrings[] = {reinterpret_cast<const char *>(data)};
+     translator->compile(shaderStrings, 1, options);
+ 
++    sh::Finalize();
+     return 0;
+ }
 diff --git a/src/compiler/preprocessor/preprocessor_tab_autogen.cpp b/src/compiler/preprocessor/preprocessor_tab_autogen.cpp
 index a7607c9e529ce7a57bdc6c3c82134b144eb67130..c9ec1adec020589bd4fcfe226721042a8f2c6cf5 100644
 --- a/src/compiler/preprocessor/preprocessor_tab_autogen.cpp
@@ -29,10 +75,10 @@ index a7607c9e529ce7a57bdc6c3c82134b144eb67130..c9ec1adec020589bd4fcfe226721042a
  
     Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2021 Free Software Foundation,
 diff --git a/src/compiler/translator/Compiler.cpp b/src/compiler/translator/Compiler.cpp
-index f62b2e93f85ecd0a7b1262cd5dd06063e59e7fb2..472a4255ae2a58f0231704c960191c1a8781d2ec 100644
+index 88f21c495cbf08907a2b5a17292ba21255a72728..bc24fe90a2584615625ddca0cf6f95a734def319 100644
 --- a/src/compiler/translator/Compiler.cpp
 +++ b/src/compiler/translator/Compiler.cpp
-@@ -1229,7 +1229,7 @@ bool TCompiler::checkAndSimplifyAST(TIntermBlock *root,
+@@ -1252,7 +1252,7 @@ bool TCompiler::checkAndSimplifyAST(TIntermBlock *root,
  
  bool TCompiler::resizeClipAndCullDistanceBuiltins(TIntermBlock *root)
  {
@@ -68,7 +114,7 @@ index d5a48edd40f382359db76acf1a1ce75b6a6dc6d5..907c62e0bb659292b391270790498186
  
     Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2021 Free Software Foundation,
 diff --git a/src/libANGLE/State.cpp b/src/libANGLE/State.cpp
-index 1aefc07ee593aac7eecf409c340c13f00bdb66b7..0a526dab50e28bd98793839f6abc68304d62d835 100644
+index 6b0adeba62891567ab4ea4258749c32e632b9f9b..a7a7bf03015fd2fad754255ef6b0ff660807e58a 100644
 --- a/src/libANGLE/State.cpp
 +++ b/src/libANGLE/State.cpp
 @@ -6,6 +6,9 @@
@@ -125,7 +171,7 @@ index 08b431099786e24e6b27a6539812e520c92436bb..3902781af7459dc8a880bd44f957df36
      }
  
 diff --git a/src/libANGLE/renderer/metal/ContextMtl.mm b/src/libANGLE/renderer/metal/ContextMtl.mm
-index 3ef4364a885736ae921d8e148160a4abfb9822e4..9073131849b74cbdce871fcad5e53e2f84dddd40 100644
+index 92f6dd08372b0a606455ea6cc6113a53e6091dc8..8cc18a48bd0519922db0d17915be44b5384b852b 100644
 --- a/src/libANGLE/renderer/metal/ContextMtl.mm
 +++ b/src/libANGLE/renderer/metal/ContextMtl.mm
 @@ -1067,6 +1067,13 @@ angle::Result ContextMtl::multiDrawElementsInstancedBaseVertexBaseInstance(
@@ -142,7 +188,7 @@ index 3ef4364a885736ae921d8e148160a4abfb9822e4..9073131849b74cbdce871fcad5e53e2f
      return gl::GraphicsResetStatus::NoError;
  }
  
-@@ -2474,8 +2481,22 @@ angle::Result ContextMtl::setupDraw(const gl::Context *context,
+@@ -2477,8 +2484,22 @@ angle::Result ContextMtl::setupDraw(const gl::Context *context,
              return angle::Result::Continue;
          }
          // Setup with flushed state should either produce a working encoder or fail with an error
@@ -168,7 +214,7 @@ index 3ef4364a885736ae921d8e148160a4abfb9822e4..9073131849b74cbdce871fcad5e53e2f
      return angle::Result::Continue;
  }
 diff --git a/src/libANGLE/renderer/metal/DisplayMtl.mm b/src/libANGLE/renderer/metal/DisplayMtl.mm
-index f1737c960489e0d76f969c1472e223753922226a..2bcc0fe5c94031244fa60e3bea9452a7fa341a3c 100644
+index b0dc421820a6c56fb2de35654e9a2a9c600ba886..cf9d89c5f93fb1455fcb1b3f7ab7770c0dfedd02 100644
 --- a/src/libANGLE/renderer/metal/DisplayMtl.mm
 +++ b/src/libANGLE/renderer/metal/DisplayMtl.mm
 @@ -184,12 +184,22 @@ void DisplayMtl::terminate()
@@ -224,7 +270,7 @@ index 5f3f10a86f707290bcad9f823dec0a9126425fde..860f798cf68bb4fad87bee1ea9cd507d
  
      BufferMtl *packBufferMtl = mtl::GetImpl(packPixelsParams.packBuffer);
 diff --git a/src/libANGLE/renderer/metal/ProgramExecutableMtl.mm b/src/libANGLE/renderer/metal/ProgramExecutableMtl.mm
-index 1fdfeca55096fdc2bf64c2abd5e3427e626589fa..db97dd3032d6b2877b56dcff199f33e3757fedcf 100644
+index 6720310023e4ced1ee11024795b8520ff0630988..f39af499839e84efe1906b1725901b0dfd835f22 100644
 --- a/src/libANGLE/renderer/metal/ProgramExecutableMtl.mm
 +++ b/src/libANGLE/renderer/metal/ProgramExecutableMtl.mm
 @@ -897,7 +897,7 @@ angle::Result ProgramExecutableMtl::setupDraw(const gl::Context *glContext,
@@ -268,10 +314,10 @@ index b0726b984f41119e930897b043a7da70a446a12a..d1877ade8fb10211d437c2d0dba8ea27
      params.srcDefaultAlphaData  = convertedFormat.defaultAlpha;
  
 diff --git a/src/libANGLE/renderer/metal/mtl_command_buffer.h b/src/libANGLE/renderer/metal/mtl_command_buffer.h
-index cf8d6013a25c5e2ae757768ce7c32fdc9cd1161e..ea3fa7f419c6fe61f9bce6796f6b4e988bac6683 100644
+index 8d7bc2667e4a20f1de7a513badb68e4da7fe3537..753f1b9a178c2d9c9b20307b2a837a00263f78e7 100644
 --- a/src/libANGLE/renderer/metal/mtl_command_buffer.h
 +++ b/src/libANGLE/renderer/metal/mtl_command_buffer.h
-@@ -98,6 +98,8 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
+@@ -101,6 +101,8 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
      bool isTimeElapsedEntryComplete(uint64_t id);
      double getTimeElapsedEntryInSeconds(uint64_t id);
  
@@ -280,7 +326,7 @@ index cf8d6013a25c5e2ae757768ce7c32fdc9cd1161e..ea3fa7f419c6fe61f9bce6796f6b4e98
    private:
      void onCommandBufferCompleted(id<MTLCommandBuffer> buf,
                                    uint64_t serial,
-@@ -139,6 +141,8 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
+@@ -143,6 +145,8 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
      void recordCommandBufferTimeElapsed(std::lock_guard<std::mutex> &lg,
                                          uint64_t id,
                                          double seconds);
@@ -289,7 +335,7 @@ index cf8d6013a25c5e2ae757768ce7c32fdc9cd1161e..ea3fa7f419c6fe61f9bce6796f6b4e98
  };
  
  class CommandBuffer final : public WrappedObject<id<MTLCommandBuffer>>, angle::NonCopyable
-@@ -549,6 +553,7 @@ class RenderCommandEncoder final : public CommandEncoder
+@@ -569,6 +573,7 @@ class RenderCommandEncoder final : public CommandEncoder
  
      const RenderPassDesc &renderPassDesc() const { return mRenderPassDesc; }
      bool hasDrawCalls() const { return mHasDrawCalls; }
@@ -298,7 +344,7 @@ index cf8d6013a25c5e2ae757768ce7c32fdc9cd1161e..ea3fa7f419c6fe61f9bce6796f6b4e98
      uint64_t getSerial() const { return mSerial; }
  
 diff --git a/src/libANGLE/renderer/metal/mtl_command_buffer.mm b/src/libANGLE/renderer/metal/mtl_command_buffer.mm
-index c5b9b6a46772a1050b4fdc9f9edfcf6abaa232f8..a0dba45a9a8393957a73bfee52559556fd74378a 100644
+index 6207372fc309e2da60e269792aa1aa7a8d73d6b3..d182803b8ff855f4674d635209bd67b59f74e14d 100644
 --- a/src/libANGLE/renderer/metal/mtl_command_buffer.mm
 +++ b/src/libANGLE/renderer/metal/mtl_command_buffer.mm
 @@ -373,12 +373,20 @@ inline void SetVisibilityResultModeCmd(id<MTLRenderCommandEncoder> encoder,
@@ -330,7 +376,7 @@ index c5b9b6a46772a1050b4fdc9f9edfcf6abaa232f8..a0dba45a9a8393957a73bfee52559556
      [resource ANGLE_MTL_RELEASE];
  }
  
-@@ -611,6 +620,20 @@ void CommandQueue::onCommandBufferCompleted(id<MTLCommandBuffer> buf,
+@@ -634,6 +643,20 @@ void CommandQueue::onCommandBufferCompleted(id<MTLCommandBuffer> buf,
  
      ANGLE_MTL_LOG("Completed MTLCommandBuffer %llu:%p", serial, buf);
  
@@ -352,10 +398,10 @@ index c5b9b6a46772a1050b4fdc9f9edfcf6abaa232f8..a0dba45a9a8393957a73bfee52559556
      {
          // Record this command buffer's elapsed time.
 diff --git a/src/libANGLE/renderer/metal/mtl_render_utils.mm b/src/libANGLE/renderer/metal/mtl_render_utils.mm
-index 9c60b84d60ddba3c7096b46e77a224b69fd4b75d..12467e7c09301b21f17c3a52d6c322eceba6cfa6 100644
+index 9e5487d393a0a2bd64106fc70e7b3f73626e2490..fec9fc3f884dfe7c87527ea19cca37c527d51e5a 100644
 --- a/src/libANGLE/renderer/metal/mtl_render_utils.mm
 +++ b/src/libANGLE/renderer/metal/mtl_render_utils.mm
-@@ -601,7 +601,8 @@ void DispatchCompute(ContextMtl *contextMtl,
+@@ -607,7 +607,8 @@ void DispatchCompute(ContextMtl *contextMtl,
                       id<MTLComputePipelineState> pipelineState,
                       size_t numThreads)
  {
@@ -440,7 +486,7 @@ index 3eaa9a64e79af26faa786102ece3f0bdea84d090..7ecb6db9d993df8985fcb6f701dfe7ca
 +
 +#endif /* LIBANGLE_RENDERER_METAL_RESOURCE_SPI_H_ */
 diff --git a/src/libANGLE/renderer/metal/mtl_resources.mm b/src/libANGLE/renderer/metal/mtl_resources.mm
-index 829539a2e821e01d6aa80729e9eb72cb5ea0e083..4e856a7f4039986fefb06b426eced442c4b711a9 100644
+index 1a16ccf79c85d0c88e6251ec52207ae06a7084f0..a52ca7218803a9265f69977a782dea26b03a9cbd 100644
 --- a/src/libANGLE/renderer/metal/mtl_resources.mm
 +++ b/src/libANGLE/renderer/metal/mtl_resources.mm
 @@ -78,12 +78,10 @@ MTLResourceOptions resourceOptionsForStorageMode(MTLStorageMode storageMode)

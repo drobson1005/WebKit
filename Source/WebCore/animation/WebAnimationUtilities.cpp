@@ -38,15 +38,15 @@
 #include "CSSSelectorParserContext.h"
 #include "CSSTransition.h"
 #include "CSSTransitionEvent.h"
-#include "DeclarativeAnimation.h"
 #include "Element.h"
 #include "KeyframeEffectStack.h"
 #include "ScriptExecutionContext.h"
+#include "StyleOriginatedAnimation.h"
 #include "WebAnimation.h"
 
 namespace WebCore {
 
-static bool compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder(const Styleable& a, const Styleable& b)
+static bool compareStyleOriginatedAnimationOwningElementPositionsInDocumentTreeOrder(const Styleable& a, const Styleable& b)
 {
     // We should not ever be calling this function with two Elements that are the same. If that were the case,
     // then comparing objects of this kind would yield inconsistent results when comparing A == B and B == A.
@@ -61,11 +61,13 @@ static bool compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder
     //     - any other pseudo-elements not mentioned specifically in this list, sorted in ascending order by the Unicode codepoints that make up each selector
     //     - ::after
     //     - element children
-    enum SortingIndex : uint8_t { NotPseudo, Marker, Before, FirstLetter, FirstLine, GrammarError, Highlight, WebKitScrollbar, Selection, SpellingError, After, Other };
-    auto sortingIndex = [](PseudoId pseudoId) -> SortingIndex {
-        switch (pseudoId) {
-        case PseudoId::None:
+    // FIXME: Tree order should account for the name argument of view transitions.
+    enum SortingIndex : uint8_t { NotPseudo, Marker, Before, FirstLetter, FirstLine, GrammarError, Highlight, WebKitScrollbar, Selection, SpellingError, After, ViewTransition, ViewTransitionGroup, ViewTransitionImagePair, ViewTransitionOld, ViewTransitionNew, Other };
+    auto sortingIndex = [](const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier) -> SortingIndex {
+        if (!pseudoElementIdentifier)
             return NotPseudo;
+
+        switch (pseudoElementIdentifier->pseudoId) {
         case PseudoId::Marker:
             return Marker;
         case PseudoId::Before:
@@ -86,6 +88,16 @@ static bool compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder
             return SpellingError;
         case PseudoId::After:
             return After;
+        case PseudoId::ViewTransition:
+            return ViewTransition;
+        case PseudoId::ViewTransitionGroup:
+            return ViewTransitionGroup;
+        case PseudoId::ViewTransitionImagePair:
+            return ViewTransitionImagePair;
+        case PseudoId::ViewTransitionOld:
+            return ViewTransitionOld;
+        case PseudoId::ViewTransitionNew:
+            return ViewTransitionNew;
         default:
             ASSERT_NOT_REACHED();
             return Other;
@@ -96,8 +108,8 @@ static bool compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder
     auto& bReferenceElement = b.element;
 
     if (&aReferenceElement == &bReferenceElement) {
-        auto aSortingIndex = sortingIndex(a.pseudoId);
-        auto bSortingIndex = sortingIndex(b.pseudoId);
+        auto aSortingIndex = sortingIndex(a.pseudoElementIdentifier);
+        auto bSortingIndex = sortingIndex(b.pseudoElementIdentifier);
         ASSERT(aSortingIndex != bSortingIndex);
         return aSortingIndex < bSortingIndex;
     }
@@ -114,7 +126,7 @@ static bool compareCSSTransitions(const CSSTransition& a, const CSSTransition& b
 
     // If the owning element of A and B differs, sort A and B by tree order of their corresponding owning elements.
     if (*aOwningElement != *bOwningElement)
-        return compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder(*aOwningElement, *bOwningElement);
+        return compareStyleOriginatedAnimationOwningElementPositionsInDocumentTreeOrder(*aOwningElement, *bOwningElement);
 
     // Otherwise, if A and B have different transition generation values, sort by their corresponding transition generation in ascending order.
     if (a.generationTime() != b.generationTime())
@@ -135,7 +147,7 @@ static bool compareCSSAnimations(const CSSAnimation& a, const CSSAnimation& b)
 
     // If the owning element of A and B differs, sort A and B by tree order of their corresponding owning elements.
     if (*aOwningElement != *bOwningElement)
-        return compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder(*aOwningElement, *bOwningElement);
+        return compareStyleOriginatedAnimationOwningElementPositionsInDocumentTreeOrder(*aOwningElement, *bOwningElement);
 
     // Sort A and B based on their position in the computed value of the animation-name property of the (common) owning element.
     auto* cssAnimationList = aOwningElement->ensureKeyframeEffectStack().cssAnimationList();
@@ -162,10 +174,10 @@ bool compareAnimationsByCompositeOrder(const WebAnimation& a, const WebAnimation
     // this function should be called with std::stable_sort().
     RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(&a != &b);
 
-    auto* aAsDeclarativeAnimation = dynamicDowncast<DeclarativeAnimation>(a);
-    bool aHasOwningElement = aAsDeclarativeAnimation && aAsDeclarativeAnimation->owningElement();
-    auto* bAsDeclarativeAnimation = dynamicDowncast<DeclarativeAnimation>(b);
-    bool bHasOwningElement = bAsDeclarativeAnimation && bAsDeclarativeAnimation->owningElement();
+    auto* aAsStyleOriginatedAnimation = dynamicDowncast<StyleOriginatedAnimation>(a);
+    bool aHasOwningElement = aAsStyleOriginatedAnimation && aAsStyleOriginatedAnimation->owningElement();
+    auto* bAsStyleOriginatedAnimation = dynamicDowncast<StyleOriginatedAnimation>(b);
+    bool bHasOwningElement = bAsStyleOriginatedAnimation && bAsStyleOriginatedAnimation->owningElement();
 
     // CSS Transitions sort first.
     auto* aAsCSSTransition = aHasOwningElement ? dynamicDowncast<CSSTransition>(a) : nullptr;
@@ -192,15 +204,15 @@ bool compareAnimationsByCompositeOrder(const WebAnimation& a, const WebAnimation
 }
 
 template <typename T>
-static std::optional<bool> compareDeclarativeAnimationEvents(const AnimationEventBase& a, const AnimationEventBase& b)
+static std::optional<bool> compareStyleOriginatedAnimationEvents(const AnimationEventBase& a, const AnimationEventBase& b)
 {
-    auto* aAsDeclarativeEvent = dynamicDowncast<T>(a);
-    auto* bAsDeclarativeEvent = dynamicDowncast<T>(b);
-    if (!aAsDeclarativeEvent && !bAsDeclarativeEvent)
+    auto* aAsDStyleOriginatedAnimationEventAnimationEvent = dynamicDowncast<T>(a);
+    auto* bAsDStyleOriginatedAnimationEventAnimationEvent = dynamicDowncast<T>(b);
+    if (!aAsDStyleOriginatedAnimationEventAnimationEvent && !bAsDStyleOriginatedAnimationEventAnimationEvent)
         return std::nullopt;
 
-    if (!!aAsDeclarativeEvent != !!bAsDeclarativeEvent)
-        return !bAsDeclarativeEvent;
+    if (!!aAsDStyleOriginatedAnimationEventAnimationEvent != !!bAsDStyleOriginatedAnimationEventAnimationEvent)
+        return !bAsDStyleOriginatedAnimationEventAnimationEvent;
 
     auto aScheduledTime = a.scheduledTime();
     auto bScheduledTime = b.scheduledTime();
@@ -212,9 +224,9 @@ static std::optional<bool> compareDeclarativeAnimationEvents(const AnimationEven
     if (aTarget == bTarget)
         return false;
 
-    auto aStyleable = Styleable(*checkedDowncast<Element>(aTarget), aAsDeclarativeEvent->pseudoId());
-    auto bStyleable = Styleable(*checkedDowncast<Element>(bTarget), bAsDeclarativeEvent->pseudoId());
-    return compareDeclarativeAnimationOwningElementPositionsInDocumentTreeOrder(aStyleable, bStyleable);
+    auto aStyleable = Styleable(*checkedDowncast<Element>(aTarget), aAsDStyleOriginatedAnimationEventAnimationEvent->pseudoElementIdentifier());
+    auto bStyleable = Styleable(*checkedDowncast<Element>(bTarget), bAsDStyleOriginatedAnimationEventAnimationEvent->pseudoElementIdentifier());
+    return compareStyleOriginatedAnimationOwningElementPositionsInDocumentTreeOrder(aStyleable, bStyleable);
 }
 
 bool compareAnimationEventsByCompositeOrder(const AnimationEventBase& a, const AnimationEventBase& b)
@@ -274,11 +286,11 @@ bool compareAnimationEventsByCompositeOrder(const AnimationEventBase& a, const A
     }
 
     // CSSTransitionEvent instances sort next.
-    if (auto sorted = compareDeclarativeAnimationEvents<CSSTransitionEvent>(a, b))
+    if (auto sorted = compareStyleOriginatedAnimationEvents<CSSTransitionEvent>(a, b))
         return *sorted;
 
     // CSSAnimationEvent instances sort last.
-    if (auto sorted = compareDeclarativeAnimationEvents<CSSAnimationEvent>(a, b))
+    if (auto sorted = compareStyleOriginatedAnimationEvents<CSSAnimationEvent>(a, b))
         return *sorted;
 
     return false;
@@ -346,7 +358,12 @@ std::optional<PseudoId> pseudoIdFromString(const String& pseudoElement)
 
     // FIXME: This parserContext should include a document to get the proper settings.
     CSSSelectorParserContext parserContext { CSSParserContext { HTMLStandardMode } };
-    return CSSSelector::parseStandalonePseudoElement(pseudoElement, parserContext);
+    auto [pseudoElementIsParsable, pseudoElementIdentifier] = CSSSelector::parsePseudoElement(pseudoElement, parserContext);
+    if (!pseudoElementIsParsable || (pseudoElementIdentifier && !pseudoElementIdentifier->nameArgument.isNull()))
+        return { };
+    if (!pseudoElementIdentifier)
+        return PseudoId::None;
+    return pseudoElementIdentifier->pseudoId;
 }
 
 AtomString animatablePropertyAsString(AnimatableCSSProperty property)

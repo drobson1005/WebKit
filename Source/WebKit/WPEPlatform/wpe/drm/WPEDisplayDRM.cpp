@@ -29,6 +29,7 @@
 #include "DRMUniquePtr.h"
 #include "WPEDisplayDRMPrivate.h"
 #include "WPEExtensions.h"
+#include "WPEMonitorDRMPrivate.h"
 #include "WPEViewDRM.h"
 #include <fcntl.h>
 #include <gio/gio.h>
@@ -47,7 +48,7 @@ struct _WPEDisplayDRMPrivate {
     uint32_t cursorWidth;
     uint32_t cursorHeight;
     std::unique_ptr<WPE::DRM::Connector> connector;
-    std::unique_ptr<WPE::DRM::Crtc> crtc;
+    GRefPtr<WPEMonitor> monitor;
     std::unique_ptr<WPE::DRM::Plane> primaryPlane;
     std::unique_ptr<WPE::DRM::Cursor> cursor;
     std::unique_ptr<WPE::DRM::Seat> seat;
@@ -88,8 +89,14 @@ static UnixFileDescriptor findDevice(GError** error)
             continue;
 
         fd = UnixFileDescriptor { open(device->nodes[DRM_NODE_PRIMARY], O_RDWR | O_CLOEXEC), UnixFileDescriptor::Adopt };
-        if (fd)
+        if (!fd)
+            continue;
+
+        WPE::DRM::UniquePtr<drmModeRes> resources(drmModeGetResources(fd.value()));
+        if (resources && resources->count_crtcs && resources->count_connectors && resources->count_encoders)
             break;
+
+        fd = { };
     }
 
     drmFreeDevices(devices, numDevices);
@@ -132,7 +139,7 @@ static std::unique_ptr<WPE::DRM::Connector> chooseConnector(int fd, drmModeRes* 
 {
     for (int i = 0; i < resources->count_connectors; ++i) {
         WPE::DRM::UniquePtr<drmModeConnector> connector(drmModeGetConnector(fd, resources->connectors[i]));
-        if (!connector || connector->connection != DRM_MODE_CONNECTED || connector->connector_type == DRM_MODE_CONNECTOR_WRITEBACK || !connector->encoder_id)
+        if (!connector || connector->connection != DRM_MODE_CONNECTED || connector->connector_type == DRM_MODE_CONNECTOR_WRITEBACK)
             continue;
 
         if (auto conn = WPE::DRM::Connector::create(fd, connector.get()))
@@ -145,16 +152,29 @@ static std::unique_ptr<WPE::DRM::Connector> chooseConnector(int fd, drmModeRes* 
 
 static std::unique_ptr<WPE::DRM::Crtc> chooseCrtcForConnector(int fd, drmModeRes* resources, const WPE::DRM::Connector& connector, GError** error)
 {
+    // Try the currently connected encoder+crtc.
     WPE::DRM::UniquePtr<drmModeEncoder> encoder(drmModeGetEncoder(fd, connector.encoderID()));
-    if (!encoder) {
-        g_set_error_literal(error, WPE_DISPLAY_ERROR, WPE_DISPLAY_ERROR_CONNECTION_FAILED, "Failed to get the connector encoder");
-        return nullptr;
+    if (encoder) {
+        for (int i = 0; i < resources->count_crtcs; ++i) {
+            if (resources->crtcs[i] == encoder->crtc_id) {
+                WPE::DRM::UniquePtr<drmModeCrtc> drmCrtc(drmModeGetCrtc(fd, resources->crtcs[i]));
+                return WPE::DRM::Crtc::create(fd, drmCrtc.get(), i);
+            }
+        }
     }
 
-    for (int i = 0; i < resources->count_crtcs; ++i) {
-        if (resources->crtcs[i] == encoder->crtc_id) {
-            WPE::DRM::UniquePtr<drmModeCrtc> drmCrtc(drmModeGetCrtc(fd, resources->crtcs[i]));
-            return WPE::DRM::Crtc::create(fd, drmCrtc.get(), i);
+    // If no active crtc was found, pick the first possible crtc, then try the first possible for crtc.
+    for (int i = 0; i < resources->count_encoders; ++i) {
+        WPE::DRM::UniquePtr<drmModeEncoder> encoder(drmModeGetEncoder(fd, resources->encoders[i]));
+        if (!encoder)
+            continue;
+
+        for (int j = 0; j < resources->count_crtcs; ++j) {
+            const uint32_t crtcMask = 1 << j;
+            if (encoder->possible_crtcs & crtcMask) {
+                WPE::DRM::UniquePtr<drmModeCrtc> drmCrtc(drmModeGetCrtc(fd, resources->crtcs[j]));
+                return WPE::DRM::Crtc::create(fd, drmCrtc.get(), j);
+            }
         }
     }
 
@@ -229,7 +249,7 @@ static gboolean wpeDisplayDRMConnect(WPEDisplay* display, GError** error)
     displayDRM->priv->fd = WTFMove(fd);
     displayDRM->priv->device = device;
     displayDRM->priv->connector = WTFMove(connector);
-    displayDRM->priv->crtc = WTFMove(crtc);
+    displayDRM->priv->monitor = wpeMonitorDRMCreate(WTFMove(crtc), *displayDRM->priv->connector);
     displayDRM->priv->primaryPlane = WTFMove(primaryPlane);
     displayDRM->priv->seat = WPE::DRM::Seat::create();
     if (cursorPlane)
@@ -259,6 +279,18 @@ static GList* wpeDisplayDRMGetPreferredDMABufFormats(WPEDisplay* display)
     return g_list_reverse(preferredFormats);
 }
 
+static guint wpeDisplayDRMGetNMonitors(WPEDisplay*)
+{
+    return 1;
+}
+
+static WPEMonitor* wpeDisplayDRMGetMonitor(WPEDisplay* display, guint index)
+{
+    if (index)
+        return nullptr;
+    return WPE_DISPLAY_DRM(display)->priv->monitor.get();
+}
+
 static void wpe_display_drm_class_init(WPEDisplayDRMClass* displayDRMClass)
 {
     GObjectClass* objectClass = G_OBJECT_CLASS(displayDRMClass);
@@ -268,6 +300,8 @@ static void wpe_display_drm_class_init(WPEDisplayDRMClass* displayDRMClass)
     displayClass->connect = wpeDisplayDRMConnect;
     displayClass->create_view = wpeDisplayDRMCreateView;
     displayClass->get_preferred_dma_buf_formats = wpeDisplayDRMGetPreferredDMABufFormats;
+    displayClass->get_n_monitors = wpeDisplayDRMGetNMonitors;
+    displayClass->get_monitor = wpeDisplayDRMGetMonitor;
 }
 
 const WPE::DRM::Connector& wpeDisplayDRMGetConnector(WPEDisplayDRM* display)
@@ -275,9 +309,9 @@ const WPE::DRM::Connector& wpeDisplayDRMGetConnector(WPEDisplayDRM* display)
     return *display->priv->connector;
 }
 
-const WPE::DRM::Crtc& wpeDisplayDRMGetCrtc(WPEDisplayDRM* display)
+WPEMonitor* wpeDisplayDRMGetMonitor(WPEDisplayDRM* display)
 {
-    return *display->priv->crtc;
+    return display->priv->monitor.get();
 }
 
 const WPE::DRM::Plane& wpeDisplayDRMGetPrimaryPlane(WPEDisplayDRM* display)

@@ -29,6 +29,7 @@
 #import "APIArray.h"
 #import "Logging.h"
 #import "WKNSArray.h"
+#import "WKTextExtractionUtilities.h"
 #import "WebPreferences.h"
 #import "_WKFeatureInternal.h"
 #import <WebCore/SecurityOrigin.h>
@@ -280,16 +281,6 @@ static _WKStorageBlockingPolicy toAPI(WebCore::StorageBlockingPolicy policy)
 - (void)_setStorageBlockingPolicy:(_WKStorageBlockingPolicy)policy
 {
     _preferences->setStorageBlockingPolicy(static_cast<uint32_t>(toStorageBlockingPolicy(policy)));
-}
-
-- (BOOL)_offlineApplicationCacheIsEnabled
-{
-    return _preferences->offlineWebApplicationCacheEnabled();
-}
-
-- (void)_setOfflineApplicationCacheIsEnabled:(BOOL)offlineApplicationCacheIsEnabled
-{
-    _preferences->setOfflineWebApplicationCacheEnabled(offlineApplicationCacheIsEnabled);
 }
 
 - (BOOL)_fullScreenEnabled
@@ -828,6 +819,22 @@ static WebCore::EditableLinkBehavior toEditableLinkBehavior(_WKEditableLinkBehav
 - (BOOL)_avFoundationEnabled
 {
     return _preferences->isAVFoundationEnabled();
+}
+
+- (void)_setTextExtractionEnabled:(BOOL)enabled
+{
+    if (enabled) {
+        static std::once_flag onceFlag;
+        std::call_once(onceFlag, [] {
+            WebKit::prepareTextExtractionSupport();
+        });
+    }
+    _preferences->setTextExtractionEnabled(enabled);
+}
+
+- (BOOL)_textExtractionEnabled
+{
+    return _preferences->textExtractionEnabled();
 }
 
 - (void)_setColorFilterEnabled:(BOOL)enabled
@@ -1687,6 +1694,16 @@ static WebCore::EditableLinkBehavior toEditableLinkBehavior(_WKEditableLinkBehav
     return _preferences->verifyWindowOpenUserGestureFromUIProcess();
 }
 
+- (BOOL)_mediaCapabilityGrantsEnabled
+{
+    return _preferences->mediaCapabilityGrantsEnabled();
+}
+
+- (void)_setMediaCapabilityGrantsEnabled:(BOOL)mediaCapabilityGrantsEnabled
+{
+    _preferences->setMediaCapabilityGrantsEnabled(mediaCapabilityGrantsEnabled);
+}
+
 @end
 
 @implementation WKPreferences (WKDeprecated)
@@ -1777,6 +1794,15 @@ static WebCore::EditableLinkBehavior toEditableLinkBehavior(_WKEditableLinkBehav
 }
 
 - (void)_setDisplayListDrawingEnabled:(BOOL)displayListDrawingEnabled
+{
+}
+
+- (BOOL)_offlineApplicationCacheIsEnabled
+{
+    return NO;
+}
+
+- (void)_setOfflineApplicationCacheIsEnabled:(BOOL)offlineApplicationCacheIsEnabled
 {
 }
 

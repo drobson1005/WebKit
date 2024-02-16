@@ -75,6 +75,7 @@ public:
         MatchBidirectionally = 1 << 2, // Match two patterns in either direction (A matches B, or B matches A). Invalid for matching URLs.
     };
 
+    static URLSchemeSet& extensionSchemes();
     static URLSchemeSet& validSchemes();
     static URLSchemeSet& supportedSchemes();
 
@@ -88,6 +89,8 @@ public:
     String scheme() const;
     String host() const;
     String path() const;
+
+    bool hostIsPublicSuffix() const;
 
     bool matchesAllURLs() const { return m_matchesAllURLs; }
     bool matchesAllHosts() const;

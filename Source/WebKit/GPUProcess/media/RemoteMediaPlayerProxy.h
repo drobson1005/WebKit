@@ -41,6 +41,7 @@
 #include <WebCore/InbandTextTrackPrivate.h>
 #include <WebCore/MediaPlayer.h>
 #include <WebCore/MediaPlayerIdentifier.h>
+#include <WebCore/MediaPromiseTypes.h>
 #include <WebCore/PlatformMediaResourceLoader.h>
 #include <wtf/LoggerHelper.h>
 #include <wtf/RefPtr.h>
@@ -117,6 +118,9 @@ public:
 
     WebCore::MediaPlayerIdentifier identifier() const { return m_id; }
     void invalidate();
+
+    // Ensure that all previously queued messages to the content process have completed.
+    Ref<WebCore::MediaPromise> commitAllTransactions();
 
 #if ENABLE(VIDEO_PRESENTATION_MODE)
     void updateVideoFullscreenInlineImage();
@@ -213,8 +217,8 @@ public:
     void videoTrackSetSelected(WebCore::TrackID, bool);
     void textTrackSetMode(WebCore::TrackID, WebCore::InbandTextTrackPrivate::Mode);
 
-    using PerformTaskAtMediaTimeCompletionHandler = CompletionHandler<void(std::optional<MediaTime>, std::optional<MonotonicTime>)>;
-    void performTaskAtMediaTime(const MediaTime&, MonotonicTime, PerformTaskAtMediaTimeCompletionHandler&&);
+    using PerformTaskAtTimeCompletionHandler = CompletionHandler<void(std::optional<MediaTime>, std::optional<MonotonicTime>)>;
+    void performTaskAtTime(const MediaTime&, MonotonicTime, PerformTaskAtTimeCompletionHandler&&);
     void isCrossOrigin(WebCore::SecurityOriginData, CompletionHandler<void(std::optional<bool>)>&&);
 
     void setVideoPlaybackMetricsUpdateInterval(double);
@@ -361,6 +365,7 @@ private:
     void setShouldDisableHDR(bool);
     using LayerHostingContextIDCallback = WebCore::MediaPlayer::LayerHostingContextIDCallback;
     void requestHostingContextID(LayerHostingContextIDCallback&&);
+    void setShouldCheckHardwareSupport(bool);
 
 #if !RELEASE_LOG_DISABLED
     const Logger& mediaPlayerLogger() final { return m_logger; }
@@ -390,13 +395,14 @@ private:
     RunLoop::Timer m_updateCachedStateMessageTimer;
     RemoteMediaPlayerState m_cachedState;
     RemoteMediaPlayerProxyConfiguration m_configuration;
-    PerformTaskAtMediaTimeCompletionHandler m_performTaskAtMediaTimeCompletionHandler;
+    PerformTaskAtTimeCompletionHandler m_performTaskAtTimeCompletionHandler;
 #if ENABLE(MEDIA_SOURCE)
     RefPtr<RemoteMediaSourceProxy> m_mediaSourceProxy;
 #endif
 
     Seconds m_videoPlaybackMetricsUpdateInterval;
     MonotonicTime m_nextPlaybackQualityMetricsUpdateTime;
+    bool m_hasPlaybackMetricsUpdatePending { false };
 
     float m_videoContentScale { 1.0 };
     WebCore::LayoutRect m_playerContentBoxRect;
@@ -419,6 +425,7 @@ private:
     bool m_observingTimeChanges { false };
     Ref<RemoteVideoFrameObjectHeap> m_videoFrameObjectHeap;
     RefPtr<WebCore::VideoFrame> m_videoFrameForCurrentTime;
+    bool m_shouldCheckHardwareSupport { false };
 #if !RELEASE_LOG_DISABLED
     const Logger& m_logger;
 #endif

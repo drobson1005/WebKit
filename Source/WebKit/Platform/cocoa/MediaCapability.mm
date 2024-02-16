@@ -28,42 +28,53 @@
 
 #if ENABLE(EXTENSION_CAPABILITIES)
 
+#import <BrowserEngineKit/BECapability.h>
+#import <WebCore/RegistrableDomain.h>
 #import <wtf/text/WTFString.h>
 
 #import "ExtensionKitSoftLink.h"
 
 namespace WebKit {
 
-static RetainPtr<_SECapability> createPlatformCapability(const RegistrableDomain& registrableDomain)
-{
-#if USE(EXTENSIONKIT)
-    if ([get_SECapabilityClass() respondsToSelector:@selector(mediaWithWebsite:)])
-        return [get_SECapabilityClass() mediaWithWebsite:registrableDomain.string()];
-#else
-    UNUSED_PARAM(url);
-#endif
+using WebCore::RegistrableDomain;
 
-    return nil;
+MediaCapability::MediaCapability(URL url)
+    : m_url { WTFMove(url) }
+    , m_mediaEnvironment(adoptNS([[BEMediaEnvironment alloc] initWithWebPageURL:m_url]))
+{
+    setPlatformCapability([BEProcessCapability mediaPlaybackAndCaptureWithEnvironment:m_mediaEnvironment.get()]);
 }
 
-MediaCapability::MediaCapability(RegistrableDomain registrableDomain)
-    : m_registrableDomain { WTFMove(registrableDomain) }
-    , m_platformCapability { createPlatformCapability(m_registrableDomain) }
+bool MediaCapability::isActivatingOrActive() const
 {
+    switch (m_state) {
+    case State::Inactive:
+    case State::Deactivating:
+        return false;
+    case State::Activating:
+    case State::Active:
+        return true;
+    }
+
+    RELEASE_ASSERT_NOT_REACHED();
+    return false;
 }
 
-MediaCapability::MediaCapability(const URL& url)
-    : MediaCapability { RegistrableDomain(url) }
+RegistrableDomain MediaCapability::registrableDomain() const
 {
+    return RegistrableDomain { m_url };
 }
 
 String MediaCapability::environmentIdentifier() const
 {
 #if USE(EXTENSIONKIT)
-    return [m_platformCapability mediaEnvironment];
-#else
-    return { };
+    xpc_object_t xpcObject = [m_mediaEnvironment createXPCRepresentation];
+    if (!xpcObject)
+        return emptyString();
+    return String::fromUTF8(xpc_dictionary_get_string(xpcObject, "identifier"));
 #endif
+
+    return { };
 }
 
 } // namespace WebKit

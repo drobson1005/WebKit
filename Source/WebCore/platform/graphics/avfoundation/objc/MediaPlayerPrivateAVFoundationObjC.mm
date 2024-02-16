@@ -103,6 +103,7 @@
 #import <wtf/BlockObjCExceptions.h>
 #import <wtf/FileSystem.h>
 #import <wtf/ListHashSet.h>
+#import <wtf/NativePromise.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/OSObjectPtr.h>
 #import <wtf/URL.h>
@@ -452,8 +453,11 @@ MediaPlayerPrivateAVFoundationObjC::~MediaPlayerPrivateAVFoundationObjC()
 {
     [[m_avAsset resourceLoader] setDelegate:nil queue:0];
 
-    for (auto& pair : m_resourceLoaderMap)
-        pair.value->invalidate();
+    for (auto& pair : m_resourceLoaderMap) {
+        m_targetQueue->dispatch([loader = pair.value] () mutable {
+            loader->stopLoading();
+        });
+    }
 
     if (m_videoOutput)
         m_videoOutput->invalidate();
@@ -612,6 +616,8 @@ void MediaPlayerPrivateAVFoundationObjC::createVideoLayer()
         return;
 
     ensureOnMainThread([this, weakThis = ThreadSafeWeakPtr { *this }] {
+        assertIsMainThread();
+
         RefPtr protectedThis = weakThis.get();
         if (!protectedThis)
             return;
@@ -630,6 +636,8 @@ void MediaPlayerPrivateAVFoundationObjC::createVideoLayer()
 
 void MediaPlayerPrivateAVFoundationObjC::createAVPlayerLayer()
 {
+    assertIsMainThread();
+
     if (!m_avPlayer)
         return;
 
@@ -658,6 +666,8 @@ void MediaPlayerPrivateAVFoundationObjC::createAVPlayerLayer()
 
 void MediaPlayerPrivateAVFoundationObjC::destroyVideoLayer()
 {
+    assertIsMainThread();
+
     if (!m_videoLayer)
         return;
 
@@ -693,7 +703,7 @@ bool MediaPlayerPrivateAVFoundationObjC::hasAvailableVideoFrame() const
     if (currentRenderingMode() == MediaRenderingMode::MediaRenderingToLayer)
         return m_cachedIsReadyForDisplay;
 
-    if (m_videoOutput && (m_lastPixelBuffer || m_videoOutput->hasImageForTime(currentMediaTime())))
+    if (m_videoOutput && (m_lastPixelBuffer || m_videoOutput->hasImageForTime(currentTime())))
         return true;
 
     return m_videoFrameHasDrawn;
@@ -1028,11 +1038,13 @@ void MediaPlayerPrivateAVFoundationObjC::createAVAssetForURL(const URL& url, Ret
         }
     }
 
-    AVAssetResourceLoader *resourceLoader = m_avAsset.get().resourceLoader;
+    AVAssetResourceLoader *resourceLoader = [m_avAsset resourceLoader];
     [resourceLoader setDelegate:m_loaderDelegate.get() queue:globalLoaderDelegateQueue()];
 
-    if (auto mediaResourceLoader = player->createResourceLoader())
+    if (auto mediaResourceLoader = player->createResourceLoader()) {
+        m_targetQueue = mediaResourceLoader->targetQueue();
         resourceLoader.URLSession = (NSURLSession *)adoptNS([[WebCoreNSURLSession alloc] initWithResourceLoader:*mediaResourceLoader delegate:resourceLoader.URLSessionDataDelegate delegateQueue:resourceLoader.URLSessionDataDelegateQueue]).get();
+    }
 
     [[NSNotificationCenter defaultCenter] addObserver:m_objcObserver.get() selector:@selector(chapterMetadataDidChange:) name:AVAssetChapterMetadataGroupsDidChangeNotification object:m_avAsset.get()];
 
@@ -1081,6 +1093,8 @@ static NSString* convertDynamicRangeModeEnumToAVVideoRange(DynamicRangeMode mode
 
 void MediaPlayerPrivateAVFoundationObjC::createAVPlayer()
 {
+    assertIsMainThread();
+
     if (m_avPlayer)
         return;
 
@@ -1166,7 +1180,7 @@ void MediaPlayerPrivateAVFoundationObjC::createAVPlayer()
                 ALWAYS_LOG(identifier, "PeriodicTimeObserver called with called with infinite time");
             m_lastPeriodicObserverMediaTime = time;
 
-            currentMediaTimeDidChange(WTFMove(time));
+            currentTimeDidChange(WTFMove(time));
         });
     }];
 
@@ -1352,6 +1366,8 @@ void MediaPlayerPrivateAVFoundationObjC::setVideoFullscreenGravity(MediaPlayer::
 void MediaPlayerPrivateAVFoundationObjC::setVideoFullscreenMode(MediaPlayer::VideoFullscreenMode mode)
 {
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(WATCHOS)
+    assertIsMainThread();
+
     if ([m_videoLayer respondsToSelector:@selector(setPIPModeEnabled:)])
         [m_videoLayer setPIPModeEnabled:(mode & MediaPlayer::VideoFullscreenModePictureInPicture)];
     updateDisableExternalPlayback();
@@ -1410,6 +1426,8 @@ void MediaPlayerPrivateAVFoundationObjC::didEnd()
 
 void MediaPlayerPrivateAVFoundationObjC::platformSetVisible(bool isVisible)
 {
+    assertIsMainThread();
+
     if (!m_videoLayer)
         return;
 
@@ -1537,21 +1555,16 @@ MediaTime MediaPlayerPrivateAVFoundationObjC::platformDuration() const
     return MediaTime::invalidTime();
 }
 
-float MediaPlayerPrivateAVFoundationObjC::currentTime() const
-{
-    return currentMediaTime().toFloat();
-}
-
-MediaTime MediaPlayerPrivateAVFoundationObjC::currentMediaTime() const
+MediaTime MediaPlayerPrivateAVFoundationObjC::currentTime() const
 {
     if (!metaDataAvailable() || !m_avPlayerItem)
         return MediaTime::zeroTime();
 
     if (!m_wallClockAtCachedCurrentTime)
-        currentMediaTimeDidChange(PAL::toMediaTime([m_avPlayerItem currentTime]));
+        currentTimeDidChange(PAL::toMediaTime([m_avPlayerItem currentTime]));
     ASSERT(m_wallClockAtCachedCurrentTime);
 
-    auto itemTime = m_cachedCurrentMediaTime;
+    auto itemTime = m_cachedCurrentTime;
     if (!itemTime.isFinite())
         return MediaTime::zeroTime();
 
@@ -1569,15 +1582,15 @@ bool MediaPlayerPrivateAVFoundationObjC::setCurrentTimeDidChangeCallback(MediaPl
     return true;
 }
 
-void MediaPlayerPrivateAVFoundationObjC::currentMediaTimeDidChange(MediaTime&& time) const
+void MediaPlayerPrivateAVFoundationObjC::currentTimeDidChange(MediaTime&& time) const
 {
-    m_cachedCurrentMediaTime = WTFMove(time);
+    m_cachedCurrentTime = WTFMove(time);
     m_wallClockAtCachedCurrentTime = WallTime::now();
     m_timeControlStatusAtCachedCurrentTime = m_cachedTimeControlStatus;
     m_requestedRateAtCachedCurrentTime = m_requestedRate;
 
     if (m_currentTimeDidChangeCallback)
-        m_currentTimeDidChangeCallback(m_cachedCurrentMediaTime.isFinite() ? m_cachedCurrentMediaTime : MediaTime::zeroTime());
+        m_currentTimeDidChangeCallback(m_cachedCurrentTime.isFinite() ? m_cachedCurrentTime : MediaTime::zeroTime());
 }
 
 void MediaPlayerPrivateAVFoundationObjC::seekToTargetInternal(const SeekTarget& target)
@@ -1775,7 +1788,7 @@ MediaTime MediaPlayerPrivateAVFoundationObjC::platformMaxTimeSeekable() const
         m_cachedSeekableRanges = [m_avPlayerItem seekableTimeRanges];
 
     if (![m_cachedSeekableRanges count])
-        return durationMediaTime();
+        return duration();
 
     MediaTime maxTimeSeekable;
     for (NSValue *thisRangeValue in m_cachedSeekableRanges.get()) {
@@ -1862,7 +1875,7 @@ bool MediaPlayerPrivateAVFoundationObjC::trackIsPlayable(AVAssetTrack* track) co
     if (!player)
         return false;
 
-    if (player->shouldCheckHardwareSupport() && !assetTrackMeetsHardwareDecodeRequirements(track, player->mediaContentTypesRequiringHardwareSupport()))
+    if (shouldCheckHardwareSupport() && !assetTrackMeetsHardwareDecodeRequirements(track, player->mediaContentTypesRequiringHardwareSupport()))
         return false;
 
     auto description = retainPtr((__bridge CMFormatDescriptionRef)track.formatDescriptions.firstObject);
@@ -2177,25 +2190,27 @@ bool MediaPlayerPrivateAVFoundationObjC::shouldWaitForLoadingOfResource(AVAssetR
 #endif
 #endif
 
-    auto resourceLoader = WebCoreAVFResourceLoader::create(this, avRequest);
+    auto resourceLoader = WebCoreAVFResourceLoader::create(this, avRequest, m_targetQueue);
     m_resourceLoaderMap.add((__bridge CFTypeRef)avRequest, resourceLoader.copyRef());
     resourceLoader->startLoading();
+
     return true;
 }
 
 void MediaPlayerPrivateAVFoundationObjC::didCancelLoadingRequest(AVAssetResourceLoadingRequest* avRequest)
 {
-    String scheme = [[[avRequest request] URL] scheme];
-
-    WebCoreAVFResourceLoader* resourceLoader = m_resourceLoaderMap.get((__bridge CFTypeRef)avRequest);
-
-    if (resourceLoader)
-        resourceLoader->stopLoading();
+    ASSERT(isMainThread());
+    if (RefPtr resourceLoader = m_resourceLoaderMap.get((__bridge CFTypeRef)avRequest)) {
+        m_targetQueue->dispatch([resourceLoader = WTFMove(resourceLoader)] { resourceLoader->stopLoading();
+        });
+    }
 }
 
 void MediaPlayerPrivateAVFoundationObjC::didStopLoadingRequest(AVAssetResourceLoadingRequest *avRequest)
 {
-    m_resourceLoaderMap.remove((__bridge CFTypeRef)avRequest);
+    ASSERT(isMainThread());
+    if (RefPtr resourceLoader = m_resourceLoaderMap.take((__bridge CFTypeRef)avRequest))
+        m_targetQueue->dispatch([resourceLoader = WTFMove(resourceLoader)] { });
 }
 
 bool MediaPlayerPrivateAVFoundationObjC::isAvailable()
@@ -2214,6 +2229,8 @@ MediaTime MediaPlayerPrivateAVFoundationObjC::mediaTimeForTimeValue(const MediaT
 
 void MediaPlayerPrivateAVFoundationObjC::updateVideoLayerGravity(ShouldAnimate shouldAnimate)
 {
+    assertIsMainThread();
+
     if (!m_videoLayer)
         return;
 
@@ -2607,7 +2624,7 @@ void MediaPlayerPrivateAVFoundationObjC::resolvedURLChanged()
 
 bool MediaPlayerPrivateAVFoundationObjC::didPassCORSAccessCheck() const
 {
-    AVAssetResourceLoader *resourceLoader = m_avAsset.get().resourceLoader;
+    AVAssetResourceLoader *resourceLoader = [m_avAsset resourceLoader];
     WebCoreNSURLSession *session = (WebCoreNSURLSession *)resourceLoader.URLSession;
     if ([session isKindOfClass:[WebCoreNSURLSession class]])
         return session.didPassCORSAccessChecks;
@@ -2617,7 +2634,9 @@ bool MediaPlayerPrivateAVFoundationObjC::didPassCORSAccessCheck() const
 
 std::optional<bool> MediaPlayerPrivateAVFoundationObjC::isCrossOrigin(const SecurityOrigin& origin) const
 {
-    AVAssetResourceLoader *resourceLoader = m_avAsset.get().resourceLoader;
+    assertIsMainThread();
+
+    AVAssetResourceLoader *resourceLoader = [m_avAsset resourceLoader];
     WebCoreNSURLSession *session = (WebCoreNSURLSession *)resourceLoader.URLSession;
     if ([session isKindOfClass:[WebCoreNSURLSession class]])
         return [session isCrossOrigin:origin];
@@ -2673,7 +2692,7 @@ bool MediaPlayerPrivateAVFoundationObjC::updateLastPixelBuffer()
         createVideoOutput();
     ASSERT(m_videoOutput);
 
-    auto currentTime = currentMediaTime();
+    auto currentTime = this->currentTime();
 
     if (!m_videoOutput->hasImageForTime(currentTime))
         return false;
@@ -2684,12 +2703,12 @@ bool MediaPlayerPrivateAVFoundationObjC::updateLastPixelBuffer()
     if (m_isGatheringVideoFrameMetadata) {
         auto presentationTime = MonotonicTime::now().secondsSinceEpoch().seconds() - (currentTime - entry.displayTime).toDouble();
         m_videoFrameMetadata = {
-            .width = static_cast<unsigned>(CVPixelBufferGetWidth(m_lastPixelBuffer.get())),
-            .height = static_cast<unsigned>(CVPixelBufferGetHeight(m_lastPixelBuffer.get())),
-            .presentedFrames = static_cast<unsigned>(++m_sampleCount),
-            .mediaTime = entry.displayTime.toDouble(),
             .presentationTime = presentationTime,
             .expectedDisplayTime = presentationTime,
+            .width = static_cast<unsigned>(CVPixelBufferGetWidth(m_lastPixelBuffer.get())),
+            .height = static_cast<unsigned>(CVPixelBufferGetHeight(m_lastPixelBuffer.get())),
+            .mediaTime = entry.displayTime.toDouble(),
+            .presentedFrames = static_cast<unsigned>(++m_sampleCount),
         };
     }
 
@@ -2793,7 +2812,7 @@ RefPtr<VideoFrame> MediaPlayerPrivateAVFoundationObjC::videoFrameForCurrentTime(
     updateLastPixelBuffer();
     if (!m_lastPixelBuffer)
         return nullptr;
-    return VideoFrameCV::create(currentMediaTime(), false, VideoFrame::Rotation::None, RetainPtr { m_lastPixelBuffer });
+    return VideoFrameCV::create(currentTime(), false, VideoFrame::Rotation::None, RetainPtr { m_lastPixelBuffer });
 }
 
 RefPtr<NativeImage> MediaPlayerPrivateAVFoundationObjC::nativeImageForCurrentTime()
@@ -3683,7 +3702,7 @@ void MediaPlayerPrivateAVFoundationObjC::metadataDidArrive(const RetainPtr<NSArr
         if (item.keySpace)
             type = metadataType(item.keySpace);
 
-        m_metadataTrack->addDataCue(start, end, SerializedPlatformDataCue::create({ WebCore::SerializedPlatformDataCueValue::PlatformType::ObjC, item }), type);
+        m_metadataTrack->addDataCue(start, end, SerializedPlatformDataCue::create(SerializedPlatformDataCueValue { item }), type);
     }
 #endif
 }
@@ -3841,7 +3860,14 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 std::optional<VideoPlaybackQualityMetrics> MediaPlayerPrivateAVFoundationObjC::videoPlaybackQualityMetrics()
 {
-    if (![m_videoLayer respondsToSelector:@selector(videoPerformanceMetrics)])
+    assertIsMainThread();
+
+    return videoPlaybackQualityMetrics(m_videoLayer.get());
+}
+
+std::optional<VideoPlaybackQualityMetrics> MediaPlayerPrivateAVFoundationObjC::videoPlaybackQualityMetrics(AVPlayerLayer* videoLayer) const
+{
+    if (!videoLayer || ![videoLayer respondsToSelector:@selector(videoPerformanceMetrics)])
         return std::nullopt;
 
 #if PLATFORM(WATCHOS)
@@ -3849,7 +3875,7 @@ std::optional<VideoPlaybackQualityMetrics> MediaPlayerPrivateAVFoundationObjC::v
 #else
 ALLOW_NEW_API_WITHOUT_GUARDS_BEGIN
 
-    auto metrics = [m_videoLayer videoPerformanceMetrics];
+    auto metrics = [videoLayer videoPerformanceMetrics];
     if (!metrics)
         return std::nullopt;
 
@@ -3869,7 +3895,26 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
 #endif
 }
 
-bool MediaPlayerPrivateAVFoundationObjC::performTaskAtMediaTime(WTF::Function<void()>&& task, const MediaTime& time)
+auto MediaPlayerPrivateAVFoundationObjC::asyncVideoPlaybackQualityMetrics() -> Ref<VideoPlaybackQualityMetricsPromise>
+{
+    assertIsMainThread();
+
+    static std::once_flag onceKey;
+    static LazyNeverDestroyed<Ref<WorkQueue>> metricsWorkQueue;
+    std::call_once(onceKey, [] {
+        metricsWorkQueue.construct(WorkQueue::create("VideoPlaybackQualityMetrics", WorkQueue::QOS::Background));
+    });
+
+    if (!m_videoLayer)
+        return VideoPlaybackQualityMetricsPromise::createAndReject(PlatformMediaError::NotSupportedError);
+    return invokeAsync(metricsWorkQueue.get(), [protectedThis = Ref { *this }, protectedVideoLayer = m_videoLayer, this] {
+        if (auto metrics = videoPlaybackQualityMetrics(protectedVideoLayer.get()))
+            return VideoPlaybackQualityMetricsPromise::createAndResolve(WTFMove(*metrics));
+        return VideoPlaybackQualityMetricsPromise::createAndReject(PlatformMediaError::NotSupportedError);
+    });
+}
+
+bool MediaPlayerPrivateAVFoundationObjC::performTaskAtTime(WTF::Function<void()>&& task, const MediaTime& time)
 {
     if (!m_avPlayer)
         return false;
@@ -3913,6 +3958,8 @@ void MediaPlayerPrivateAVFoundationObjC::setPreferredDynamicRangeMode(DynamicRan
 
 void MediaPlayerPrivateAVFoundationObjC::setShouldDisableHDR(bool shouldDisable)
 {
+    assertIsMainThread();
+
     if (![m_videoLayer respondsToSelector:@selector(setToneMapToStandardDynamicRange:)])
         return;
 
@@ -4202,7 +4249,7 @@ NSArray* playerKVOProperties()
         return;
 
     if (RefPtr player = m_player.get()) {
-        player->queueTaskOnEventLoop([player, metadataGroups = retainPtr(metadataGroups), currentTime = player->currentMediaTime()] {
+        player->queueTaskOnEventLoop([player, metadataGroups = retainPtr(metadataGroups), currentTime = player->currentTime()] {
             ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
             for (AVTimedMetadataGroup *group in metadataGroups.get())
@@ -4222,7 +4269,7 @@ NSArray* playerKVOProperties()
         return;
 
     if (RefPtr player = m_player.get()) {
-        player->queueTaskOnEventLoop([player, metadataGroups = retainPtr(metadataGroups), currentTime = player->currentMediaTime()] {
+        player->queueTaskOnEventLoop([player, metadataGroups = retainPtr(metadataGroups), currentTime = player->currentTime()] {
             player->metadataGroupDidArrive(metadataGroups, currentTime);
         });
     }

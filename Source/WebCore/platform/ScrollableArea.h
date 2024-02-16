@@ -103,14 +103,14 @@ public:
 
     virtual void updateSnapOffsets() { };
     WEBCORE_EXPORT const LayoutScrollSnapOffsetsInfo* snapOffsetsInfo() const;
-    void setScrollSnapOffsetInfo(const LayoutScrollSnapOffsetsInfo&);
-    void clearSnapOffsets();
+    WEBCORE_EXPORT void setScrollSnapOffsetInfo(const LayoutScrollSnapOffsetsInfo&);
+    WEBCORE_EXPORT void clearSnapOffsets();
     WEBCORE_EXPORT std::optional<unsigned> currentHorizontalSnapPointIndex() const;
     WEBCORE_EXPORT std::optional<unsigned> currentVerticalSnapPointIndex() const;
     WEBCORE_EXPORT void setCurrentHorizontalSnapPointIndex(std::optional<unsigned>);
     WEBCORE_EXPORT void setCurrentVerticalSnapPointIndex(std::optional<unsigned>);
 
-    void resnapAfterLayout();
+    WEBCORE_EXPORT void resnapAfterLayout();
     void doPostThumbMoveSnapping(ScrollbarOrientation);
 
     void stopKeyboardScrollAnimation();
@@ -152,8 +152,8 @@ public:
     WEBCORE_EXPORT virtual ScrollbarGutter scrollbarGutterStyle() const;
     virtual ScrollbarWidth scrollbarWidthStyle() const { return ScrollbarWidth::Auto; }
 
-    bool allowsHorizontalScrolling() const;
-    bool allowsVerticalScrolling() const;
+    WEBCORE_EXPORT bool allowsHorizontalScrolling() const;
+    WEBCORE_EXPORT bool allowsVerticalScrolling() const;
 
     WEBCORE_EXPORT String horizontalScrollbarStateForTesting() const;
     WEBCORE_EXPORT String verticalScrollbarStateForTesting() const;
@@ -200,7 +200,7 @@ public:
     void invalidateScrollbars();
     bool useDarkAppearanceForScrollbars() const;
 
-    virtual ScrollingNodeID scrollingNodeID() const { return 0; }
+    virtual ScrollingNodeID scrollingNodeID() const { return { }; }
 
     WEBCORE_EXPORT ScrollAnimator& scrollAnimator() const;
     ScrollAnimator* existingScrollAnimator() const { return m_scrollAnimator.get(); }

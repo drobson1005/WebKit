@@ -38,6 +38,7 @@
 #include "WebProcessProxy.h"
 #include "WebsiteDataStore.h"
 #include <WebCore/CaptureDeviceWithCapabilities.h>
+#include <WebCore/MediaConstraintType.h>
 #include <WebCore/MediaConstraints.h>
 #include <WebCore/MockRealtimeMediaSourceCenter.h>
 #include <WebCore/PermissionName.h>
@@ -206,7 +207,17 @@ static uint64_t toWebCore(UserMediaPermissionRequestProxy::UserMediaAccessDenial
 }
 #endif
 
-void UserMediaPermissionRequestManagerProxy::denyRequest(UserMediaPermissionRequestProxy& request, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason reason, const String& invalidConstraint)
+void UserMediaPermissionRequestManagerProxy::denyRequest(UserMediaPermissionRequestProxy& request, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason reason, const String& message)
+{
+    denyRequest(request, reason, message, WebCore::MediaConstraintType::Unknown);
+}
+
+void UserMediaPermissionRequestManagerProxy::denyRequest(UserMediaPermissionRequestProxy& request, WebCore::MediaConstraintType invalidConstraint)
+{
+    denyRequest(request, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::InvalidConstraint, { }, invalidConstraint);
+}
+
+void UserMediaPermissionRequestManagerProxy::denyRequest(UserMediaPermissionRequestProxy& request, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason reason, const String& message, WebCore::MediaConstraintType invalidConstraint)
 {
     if (!m_page.hasRunningProcess())
         return;
@@ -222,7 +233,7 @@ void UserMediaPermissionRequestManagerProxy::denyRequest(UserMediaPermissionRequ
     }
 
 #if ENABLE(MEDIA_STREAM)
-    m_page.send(Messages::WebPage::UserMediaAccessWasDenied(request.userMediaID(), toWebCore(reason), invalidConstraint));
+    m_page.send(Messages::WebPage::UserMediaAccessWasDenied(request.userMediaID(), toWebCore(reason), message, invalidConstraint));
 #else
     UNUSED_PARAM(reason);
     UNUSED_PARAM(invalidConstraint);
@@ -319,6 +330,11 @@ void UserMediaPermissionRequestManagerProxy::didCommitLoadForFrame(FrameIdentifi
 void UserMediaPermissionRequestManagerProxy::resetAccess(std::optional<FrameIdentifier> frameID)
 {
     ALWAYS_LOG(LOGIDENTIFIER, frameID ? frameID->object().toUInt64() : 0);
+
+    if (m_currentUserMediaRequest && (!frameID || m_currentUserMediaRequest->frameID() == *frameID)) {
+        m_currentUserMediaRequest->invalidate();
+        m_currentUserMediaRequest = nullptr;
+    }
 
     if (frameID) {
         m_grantedRequests.removeAllMatching([frameID](const auto& grantedRequest) {
@@ -423,7 +439,7 @@ void UserMediaPermissionRequestManagerProxy::updateStoredRequests(UserMediaPermi
 
 void UserMediaPermissionRequestManagerProxy::rejectionTimerFired()
 {
-    denyRequest(m_pendingRejections.takeFirst(), UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::PermissionDenied, emptyString());
+    denyRequest(m_pendingRejections.takeFirst(), UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::PermissionDenied);
     if (!m_pendingRejections.isEmpty())
         scheduleNextRejection();
 }
@@ -553,7 +569,7 @@ void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionRequest()
         if (!request->isPending())
             return;
 
-        RealtimeMediaSourceCenter::InvalidConstraintsHandler invalidHandler = [this, request](const String& invalidConstraint) {
+        RealtimeMediaSourceCenter::InvalidConstraintsHandler invalidHandler = [this, request](auto invalidConstraint) {
             if (!request->isPending())
                 return;
 
@@ -592,19 +608,19 @@ void UserMediaPermissionRequestManagerProxy::platformValidateUserMediaRequestCon
 }
 #endif
 
-void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionInvalidRequest(const String& invalidConstraint)
+void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionInvalidRequest(MediaConstraintType invalidConstraint)
 {
     ALWAYS_LOG(LOGIDENTIFIER, m_currentUserMediaRequest->userMediaID().toUInt64());
     bool filterConstraint = !m_currentUserMediaRequest->hasPersistentAccess() && !wasGrantedVideoOrAudioAccess(m_currentUserMediaRequest->frameID());
 
-    denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::InvalidConstraint, filterConstraint ? String { } : invalidConstraint);
+    denyRequest(*m_currentUserMediaRequest, filterConstraint ? MediaConstraintType::Unknown : invalidConstraint);
 }
 
 void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionValidRequest(Vector<CaptureDevice>&& audioDevices, Vector<CaptureDevice>&& videoDevices, WebCore::MediaDeviceHashSalts&& deviceIdentifierHashSalts)
 {
     ALWAYS_LOG(LOGIDENTIFIER, m_currentUserMediaRequest->userMediaID().toUInt64(), ", video: ", videoDevices.size(), " audio: ", audioDevices.size());
     if (!m_currentUserMediaRequest->requiresDisplayCapture() && videoDevices.isEmpty() && audioDevices.isEmpty()) {
-        denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::NoConstraints, emptyString());
+        denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::NoConstraints);
         return;
     }
 
@@ -616,7 +632,7 @@ void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionValidRequ
     ALWAYS_LOG(LOGIDENTIFIER, m_currentUserMediaRequest->userMediaID().toUInt64(), ", action: ", action);
 
     if (action == RequestAction::Deny) {
-        denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::PermissionDenied, emptyString());
+        denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::PermissionDenied);
         return;
     }
 
@@ -674,7 +690,7 @@ void UserMediaPermissionRequestManagerProxy::decidePolicyForUserMediaPermissionR
     auto* webFrame = WebFrameProxy::webFrame(m_currentUserMediaRequest->frameID());
 
     if (!webFrame || !protocolHostAndPortAreEqual(URL(m_page.pageLoadState().activeURL()), m_currentUserMediaRequest->topLevelDocumentSecurityOrigin().data().toURL())) {
-        denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::NoConstraints, emptyString());
+        denyRequest(*m_currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::NoConstraints);
         return;
     }
 

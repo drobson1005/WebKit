@@ -31,6 +31,7 @@
 #import "LayerProperties.h"
 #import "Logging.h"
 #import "MessageSenderInlines.h"
+#import "ProcessThrottler.h"
 #import "RemoteLayerTreeDrawingAreaProxyMessages.h"
 #import "RemotePageDrawingAreaProxy.h"
 #import "RemotePageProxy.h"
@@ -102,6 +103,12 @@ void RemoteLayerTreeDrawingAreaProxy::sizeDidChange()
     if (m_isWaitingForDidUpdateGeometry)
         return;
     sendUpdateGeometry();
+}
+
+void RemoteLayerTreeDrawingAreaProxy::remotePageProcessCrashed(WebCore::ProcessIdentifier processIdentifier)
+{
+    if (m_remoteLayerTreeHost)
+        m_remoteLayerTreeHost->remotePageProcessCrashed(processIdentifier);
 }
 
 void RemoteLayerTreeDrawingAreaProxy::viewWillStartLiveResize()
@@ -188,15 +195,20 @@ void RemoteLayerTreeDrawingAreaProxy::willCommitLayerTree(IPC::Connection& conne
     state.pendingLayerTreeTransactionID = transactionID;
 }
 
-void RemoteLayerTreeDrawingAreaProxy::commitLayerTree(IPC::Connection& connection, const Vector<std::pair<RemoteLayerTreeTransaction, RemoteScrollingCoordinatorTransaction>>& transactions)
+void RemoteLayerTreeDrawingAreaProxy::commitLayerTree(IPC::Connection& connection, const Vector<std::pair<RemoteLayerTreeTransaction, RemoteScrollingCoordinatorTransaction>>& transactions, HashMap<RemoteImageBufferSetIdentifier, std::unique_ptr<BufferSetBackendHandle>>&& handlesMap)
 {
     Vector<MachSendRight> sendRights;
     for (auto& transaction : transactions) {
         // commitLayerTreeTransaction consumes the incoming buffers, so we need to grab them first.
         for (auto& [layerID, properties] : transaction.first.changedLayerProperties()) {
-            const auto* backingStoreProperties = properties->backingStoreOrProperties.properties.get();
+            auto* backingStoreProperties = properties->backingStoreOrProperties.properties.get();
             if (!backingStoreProperties)
                 continue;
+            if (backingStoreProperties->bufferSetIdentifier()) {
+                auto iter = handlesMap.find(*backingStoreProperties->bufferSetIdentifier());
+                if (iter != handlesMap.end())
+                    backingStoreProperties->setBackendHandle(*iter->value);
+            }
             if (const auto& backendHandle = backingStoreProperties->bufferHandle()) {
                 if (const auto* sendRight = std::get_if<MachSendRight>(&backendHandle.value()))
                     sendRights.append(*sendRight);
@@ -279,6 +291,7 @@ void RemoteLayerTreeDrawingAreaProxy::commitLayerTreeTransaction(IPC::Connection
 
 #if ENABLE(THREADED_ANIMATION_RESOLUTION)
     m_acceleratedTimelineTimeOrigin = layerTreeTransaction.acceleratedTimelineTimeOrigin();
+    m_animationCurrentTime = MonotonicTime::now();
 #endif
 
     webPageProxy->scrollingCoordinatorProxy()->willCommitLayerAndScrollingTrees();
@@ -567,7 +580,9 @@ void RemoteLayerTreeDrawingAreaProxy::waitForDidUpdateActivityState(ActivityStat
 
 void RemoteLayerTreeDrawingAreaProxy::hideContentUntilPendingUpdate()
 {
-    m_replyForUnhidingContent = sendWithAsyncReply(Messages::DrawingArea::DispatchAfterEnsuringDrawing(), [] { });
+    // FIXME(rdar://122365213): Rethink whether this needs to use an async reply handler or start a background activity.
+    auto activity = m_webProcessProxy->throttler().backgroundActivity("hideContentUntilPendingUpdate"_s);
+    m_replyForUnhidingContent = m_webProcessProxy->sendWithAsyncReply(Messages::DrawingArea::DispatchAfterEnsuringDrawing(), [timedActivity = makeUnique<ProcessThrottlerTimedActivity>(1_s, WTFMove(activity))] () mutable { }, messageSenderDestinationID(), { }, WebProcessProxy::ShouldStartProcessThrottlerActivity::No);
     m_remoteLayerTreeHost->detachRootLayer();
 }
 

@@ -203,12 +203,12 @@ bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestR
     // just pass currentEvent down to the widget, we don't want to call it for events that
     // don't correspond to Cocoa events. The mousedown/ups will have already been passed on as
     // part of the pressed/released handling.
-    return passMouseDownEventToWidget(downcast<RenderWidget>(*target).widget());
+    return passMouseDownEventToWidget(downcast<RenderWidget>(*target).protectedWidget().get());
 }
 
 bool EventHandler::passWidgetMouseDownEventToWidget(RenderWidget* renderWidget)
 {
-    return passMouseDownEventToWidget(renderWidget->widget());
+    return passMouseDownEventToWidget(renderWidget->protectedWidget().get());
 }
 
 static bool lastEventIsMouseUp()
@@ -414,16 +414,16 @@ bool EventHandler::passSubframeEventToSubframe(MouseEventWithHitTestResults& eve
         return true;
         
     case NSEventTypeLeftMouseDown: {
-        Node* node = event.targetNode();
+        RefPtr node = event.targetNode();
         if (!node)
             return false;
-        auto* renderer = node->renderer();
-        if (!is<RenderWidget>(renderer))
+        WeakPtr renderer = node->renderer();
+        if (!is<RenderWidget>(renderer.get()))
             return false;
-        Widget* widget = downcast<RenderWidget>(*renderer).widget();
+        RefPtr widget = downcast<RenderWidget>(*renderer).widget();
         if (!widget || !widget->isLocalFrameView())
             return false;
-        if (!passWidgetMouseDownEventToWidget(downcast<RenderWidget>(renderer)))
+        if (!passWidgetMouseDownEventToWidget(RefPtr { downcast<RenderWidget>(renderer.get()) }.get())) // May destroy the renderer.
             return false;
         m_mouseDownWasInSubframe = true;
         return true;
@@ -800,7 +800,7 @@ static ContainerNode* findEnclosingScrollableContainer(ContainerNode* node, cons
 {
     // Find the first node with a valid scrollable area starting with the current
     // node and traversing its parents (or shadow hosts).
-    for (ContainerNode* candidate = node; candidate; candidate = candidate->parentOrShadowHostNode()) {
+    for (auto* candidate = node; candidate; candidate = candidate->parentInComposedTree()) {
         if (is<HTMLIFrameElement>(*candidate))
             continue;
 

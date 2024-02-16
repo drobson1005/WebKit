@@ -139,6 +139,7 @@ enum class CursorVisibility : bool;
 enum class DisplayType : uint8_t;
 enum class EmptyCell : bool;
 enum class EventListenerRegionType : uint8_t;
+enum class FieldSizing : bool;
 enum class FillAttachment : uint8_t;
 enum class FillBox : uint8_t;
 enum class FillSizeType : uint8_t;
@@ -274,13 +275,14 @@ using LayoutBoxExtent = RectEdges<LayoutUnit>;
 
 namespace Style {
 class CustomPropertyRegistry;
+struct PseudoElementIdentifier;
 struct ScopedName;
 }
 
 constexpr auto PublicPseudoIDBits = 16;
 constexpr auto TextDecorationLineBits = 4;
 constexpr auto TextTransformBits = 5;
-constexpr auto StyleTypeBits = 5;
+constexpr auto PseudoElementTypeBits = 5;
 
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(PseudoStyleCache);
 struct PseudoStyleCache {
@@ -342,10 +344,12 @@ public:
     StyleSelfAlignmentData resolvedJustifySelf(const RenderStyle* parentStyle, ItemPosition normalValueBehaviour) const;
     StyleContentAlignmentData resolvedJustifyContent(const StyleContentAlignmentData& normalValueBehaviour) const;
 
-    PseudoId styleType() const { return static_cast<PseudoId>(m_nonInheritedFlags.styleType); }
-    void setStyleType(PseudoId styleType) { m_nonInheritedFlags.styleType = static_cast<unsigned>(styleType); }
+    PseudoId pseudoElementType() const { return static_cast<PseudoId>(m_nonInheritedFlags.pseudoElementType); }
+    void setPseudoElementType(PseudoId pseudoElementType) { m_nonInheritedFlags.pseudoElementType = static_cast<unsigned>(pseudoElementType); }
+    const AtomString& pseudoElementNameArgument() const;
+    void setPseudoElementNameArgument(const AtomString&);
 
-    RenderStyle* getCachedPseudoStyle(PseudoId) const;
+    RenderStyle* getCachedPseudoStyle(const Style::PseudoElementIdentifier&) const;
     RenderStyle* addCachedPseudoStyle(std::unique_ptr<RenderStyle>);
 
     const PseudoStyleCache* cachedPseudoStyles() const { return m_cachedPseudoStyles.get(); }
@@ -422,7 +426,7 @@ public:
     inline bool hasStaticInlinePosition(bool horizontal) const;
     inline bool hasStaticBlockPosition(bool horizontal) const;
 
-    PositionType position() const { return static_cast<PositionType>(m_nonInheritedFlags.position); }
+    PositionType position() const;
     inline bool hasOutOfFlowPosition() const;
     inline bool hasInFlowPosition() const;
     inline bool hasViewportConstrainedPosition() const;
@@ -525,6 +529,8 @@ public:
     Clear clear() const { return static_cast<Clear>(m_nonInheritedFlags.clear); }
     static UsedClear usedClear(const RenderObject&);
     TableLayoutType tableLayout() const { return static_cast<TableLayoutType>(m_nonInheritedFlags.tableLayout); }
+
+    FieldSizing fieldSizing() const;
 
     WEBCORE_EXPORT const FontCascade& fontCascade() const;
     WEBCORE_EXPORT const FontMetrics& metricsOfPrimaryFont() const;
@@ -715,7 +721,12 @@ public:
 
     inline ContentVisibility contentVisibility() const;
 
-    inline std::optional<ContentVisibility> skippedContentReason() const;
+    // effectiveContentVisibility will return ContentVisibility::Hidden in a content-visibility: hidden subtree (overriding
+    // content-visibility: auto at all times), ContentVisibility::Auto in a content-visibility: auto subtree (when the
+    // content is not user relevant and thus skipped), and ContentVisibility::Visible otherwise.
+    inline ContentVisibility effectiveContentVisibility() const;
+    // Returns true for skipped content roots and skipped content itself.
+    inline bool hasSkippedContent() const;
 
     inline ContainIntrinsicSizeType containIntrinsicWidthType() const;
     inline ContainIntrinsicSizeType containIntrinsicHeightType() const;
@@ -1062,12 +1073,10 @@ public:
     inline const FilterOperations& backdropFilter() const;
     inline bool hasBackdropFilter() const;
 
-#if ENABLE(CSS_COMPOSITING)
     inline void setBlendMode(BlendMode);
     inline bool isInSubtreeWithBlendMode() const;
 
     inline void setIsolation(Isolation);
-#endif
 
     inline BlendMode blendMode() const;
     inline bool hasBlendMode() const;
@@ -1095,7 +1104,7 @@ public:
         m_nonInheritedFlags.effectiveDisplay = m_nonInheritedFlags.originalDisplay;
     }
     void setEffectiveDisplay(DisplayType v) { m_nonInheritedFlags.effectiveDisplay = static_cast<unsigned>(v); }
-    void setPosition(PositionType v) { m_nonInheritedFlags.position = static_cast<unsigned>(v); }
+    inline void setPosition(PositionType);
     void setFloating(Float v) { m_nonInheritedFlags.floating = static_cast<unsigned>(v); }
 
     inline void setLeft(Length&&);
@@ -1211,6 +1220,8 @@ public:
     void setClear(Clear v) { m_nonInheritedFlags.clear = static_cast<unsigned>(v); }
     void setTableLayout(TableLayoutType v) { m_nonInheritedFlags.tableLayout = static_cast<unsigned>(v); }
 
+    void setFieldSizing(FieldSizing);
+
     WEBCORE_EXPORT bool setFontDescription(FontCascadeDescription&&);
 
     // Only used for blending font sizes when animating, for MathML anonymous blocks, and for text autosizing.
@@ -1310,7 +1321,7 @@ public:
 
     inline void setContentVisibility(ContentVisibility);
 
-    inline void setSkippedContentReason(ContentVisibility);
+    inline void setEffectiveContentVisibility(ContentVisibility);
 
     inline void setListStyleType(ListStyleType);
     void setListStyleImage(RefPtr<StyleImage>&&);
@@ -1726,7 +1737,6 @@ public:
     const AtomString& hyphenString() const;
 
     bool inheritedEqual(const RenderStyle&) const;
-    bool inheritedCustomPropertiesEqual(const RenderStyle&) const;
     bool fastPathInheritedEqual(const RenderStyle&) const;
     bool nonFastPathInheritedEqual(const RenderStyle&) const;
 
@@ -1987,6 +1997,8 @@ public:
 
     static constexpr TouchAction initialTouchActions();
 
+    static FieldSizing initialFieldSizing();
+
     static inline Length initialScrollMargin();
     static inline Length initialScrollPadding();
 
@@ -2067,10 +2079,8 @@ public:
 
     static inline FilterOperations initialBackdropFilter();
 
-#if ENABLE(CSS_COMPOSITING)
     static constexpr BlendMode initialBlendMode();
     static constexpr Isolation initialIsolation();
-#endif
 
     static constexpr MathStyle initialMathStyle();
 
@@ -2183,7 +2193,6 @@ private:
         unsigned overflowX : 3; // Overflow
         unsigned overflowY : 3; // Overflow
         unsigned clear : 3; // Clear
-        unsigned position : 3; // PositionType
         unsigned unicodeBidi : 3; // UnicodeBidi
         unsigned floating : 3; // Float
         unsigned tableLayout : 1; // TableLayoutType
@@ -2201,7 +2210,7 @@ private:
         unsigned firstChildState : 1;
         unsigned lastChildState : 1;
         unsigned isLink : 1;
-        unsigned styleType : StyleTypeBits; // PseudoId
+        unsigned pseudoElementType : PseudoElementTypeBits; // PseudoId
         unsigned pseudoBits : PublicPseudoIDBits;
 
         // If you add more style bits here, you will also need to update RenderStyle::NonInheritedFlags::copyNonInheritedFrom().

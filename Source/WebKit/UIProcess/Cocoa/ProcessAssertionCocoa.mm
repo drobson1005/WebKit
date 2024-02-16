@@ -43,6 +43,12 @@
 #import <wtf/WeakObjCPtr.h>
 #import <wtf/WorkQueue.h>
 
+#if USE(EXTENSIONKIT)
+#import <BrowserEngineKit/BENetworkingProcess.h>
+#import <BrowserEngineKit/BERenderingProcess.h>
+#import <BrowserEngineKit/BEWebContentProcess.h>
+#endif
+
 #if PLATFORM(IOS_FAMILY)
 #import <UIKit/UIApplication.h>
 
@@ -358,6 +364,10 @@ static ASCIILiteral runningBoardDomainForAssertionType(ProcessAssertionType asse
     }
 }
 
+#if USE(EXTENSIONKIT)
+Lock ProcessAssertion::s_capabilityLock;
+#endif
+
 ProcessAssertion::ProcessAssertion(pid_t pid, const String& reason, ProcessAssertionType assertionType, const String& environmentIdentifier)
     : m_assertionType(assertionType)
     , m_pid(pid)
@@ -376,21 +386,24 @@ ProcessAssertion::ProcessAssertion(AuxiliaryProcessProxy& process, const String&
         ASCIILiteral runningBoardAssertionName = runningBoardNameForAssertionType(m_assertionType);
         ASCIILiteral runningBoardDomain = runningBoardDomainForAssertionType(m_assertionType);
         auto didInvalidateBlock = [weakThis = ThreadSafeWeakPtr { *this }, runningBoardAssertionName] () {
-            auto strongThis = weakThis.get();
-            RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion: RBS %{public}s assertion for process with PID=%d was invalidated", strongThis.get(), runningBoardAssertionName.characters(), strongThis ? strongThis->m_pid : 0);
-            if (strongThis)
-                strongThis->processAssertionWasInvalidated();
+            RunLoop::main().dispatch([weakThis = WTFMove(weakThis), runningBoardAssertionName = WTFMove(runningBoardAssertionName)] {
+                auto strongThis = weakThis.get();
+                RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion: RBS %{public}s assertion for process with PID=%d was invalidated", strongThis.get(), runningBoardAssertionName.characters(), strongThis ? strongThis->m_pid : 0);
+                if (strongThis)
+                    strongThis->processAssertionWasInvalidated();
+            });
         };
         auto willInvalidateBlock = [weakThis = ThreadSafeWeakPtr { *this }, runningBoardAssertionName] () {
-            auto strongThis = weakThis.get();
-            RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion() RBS %{public}s assertion for process with PID=%d will be invalidated", strongThis.get(), runningBoardAssertionName.characters(), strongThis ? strongThis->m_pid : 0);
-            if (strongThis)
-                strongThis->processAssertionWillBeInvalidated();
+            RunLoop::main().dispatch([weakThis = WTFMove(weakThis), runningBoardAssertionName = WTFMove(runningBoardAssertionName)] {
+                auto strongThis = weakThis.get();
+                RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion() RBS %{public}s assertion for process with PID=%d will be invalidated", strongThis.get(), runningBoardAssertionName.characters(), strongThis ? strongThis->m_pid : 0);
+                if (strongThis)
+                    strongThis->processAssertionWillBeInvalidated();
+            });
         };
-        AssertionCapability capability { process.environmentIdentifier(), runningBoardDomain, runningBoardAssertionName, WTFMove(willInvalidateBlock), WTFMove(didInvalidateBlock) };
-        m_capability = capability.platformCapability();
+        m_capability = AssertionCapability { process.environmentIdentifier(), runningBoardDomain, runningBoardAssertionName, WTFMove(willInvalidateBlock), WTFMove(didInvalidateBlock) };
         m_process = process.extensionProcess();
-        if (m_capability)
+        if (m_capability && m_capability->platformCapability())
             return;
         RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion() Failed to create capability %s", this, runningBoardAssertionName.characters());
     }
@@ -462,15 +475,16 @@ void ProcessAssertion::acquireSync()
 {
     RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion::acquireSync Trying to take RBS assertion '%{public}s' for process with PID=%d", this, m_reason.utf8().data(), m_pid);
 #if USE(EXTENSIONKIT)
-    if (m_process) {
-        NSError *error = nil;
-        m_grant = [m_process grantCapability:m_capability.get() error:&error];
+    if (m_process && m_capability && m_capability->platformCapability()) {
+        auto* capability = m_capability->platformCapability();
+        Locker locker { s_capabilityLock };
+        m_grant = m_process->grantCapability(capability);
         if (m_grant) {
             RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion() Successfully granted capability", this);
             return;
         }
         ASCIILiteral runningBoardAssertionName = runningBoardNameForAssertionType(m_assertionType);
-        RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion() Failed to grant capability %s with error %@", this, runningBoardAssertionName.characters(), error);
+        RELEASE_LOG(ProcessSuspension, "%p - ProcessAssertion() Failed to grant capability %s", this, runningBoardAssertionName.characters());
     }
 #endif
     NSError *acquisitionError = nil;
@@ -497,7 +511,8 @@ ProcessAssertion::~ProcessAssertion()
     }
 
 #if USE(EXTENSIONKIT)
-    [m_grant invalidateWithError:nil];
+    Locker locker { s_capabilityLock };
+    [m_grant invalidate];
 #endif
 }
 

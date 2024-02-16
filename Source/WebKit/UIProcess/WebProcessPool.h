@@ -54,6 +54,7 @@
 #include <wtf/RefCounter.h>
 #include <wtf/RefPtr.h>
 #include <wtf/WeakPtr.h>
+#include <wtf/text/ASCIILiteral.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
@@ -377,6 +378,18 @@ public:
     Ref<GPUProcessProxy> ensureProtectedGPUProcess();
     GPUProcessProxy* gpuProcess() const { return m_gpuProcess.get(); }
 #endif
+
+#if ENABLE(MODEL_PROCESS)
+    void modelProcessDidFinishLaunching(ProcessID);
+    void modelProcessExited(ProcessID, ProcessTerminationReason);
+
+    void createModelProcessConnection(WebProcessProxy&, IPC::Connection::Handle&&, WebKit::ModelProcessConnectionParameters&&);
+
+    ModelProcessProxy& ensureModelProcess();
+    Ref<ModelProcessProxy> ensureProtectedModelProcess();
+    ModelProcessProxy* modelProcess() const { return m_modelProcess.get(); }
+#endif
+
     // Network Process Management
     void networkProcessDidTerminate(NetworkProcessProxy&, ProcessTerminationReason);
 
@@ -519,6 +532,12 @@ public:
     int32_t userId() const { return m_userId; }
 #endif
 
+#if PLATFORM(WIN) // FIXME: remove this line when this feature is enabled for playstation port.
+#if ENABLE(REMOTE_INSPECTOR)
+    void setPagesControlledByAutomation(bool);
+#endif
+#endif
+
     static void platformInitializeNetworkProcess(NetworkProcessCreationParameters&);
     static Vector<String> urlSchemesWithCustomProtocolHandlers();
 
@@ -568,6 +587,7 @@ private:
 #endif
 
     void updateProcessAssertions();
+    static constexpr Seconds audibleActivityClearDelay = 5_s;
     void updateAudibleMediaAssertions();
     void updateMediaStreamingActivity();
 
@@ -662,6 +682,9 @@ private:
 #if ENABLE(GPU_PROCESS)
     RefPtr<GPUProcessProxy> m_gpuProcess;
 #endif
+#if ENABLE(MODEL_PROCESS)
+    RefPtr<ModelProcessProxy> m_modelProcess;
+#endif
 
     Ref<WebPageGroup> m_defaultPageGroup;
 
@@ -699,7 +722,7 @@ private:
     bool m_memorySamplerEnabled { false };
     double m_memorySamplerInterval { 1400.0 };
 
-    typedef HashMap<const char*, RefPtr<WebContextSupplement>, PtrHash<const char*>> WebContextSupplementMap;
+    using WebContextSupplementMap = HashMap<ASCIILiteral, RefPtr<WebContextSupplement>, ASCIILiteralPtrHash>;
     WebContextSupplementMap m_supplements;
 
 #if USE(SOUP)
@@ -747,6 +770,11 @@ private:
 #if ENABLE(GPU_PROCESS)
     RunLoop::Timer m_resetGPUProcessCrashCountTimer;
     unsigned m_recentGPUProcessCrashCount { 0 };
+#endif
+
+#if ENABLE(MODEL_PROCESS)
+    RunLoop::Timer m_resetModelProcessCrashCountTimer;
+    unsigned m_recentModelProcessCrashCount { 0 };
 #endif
 
 #if PLATFORM(COCOA)

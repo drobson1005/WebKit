@@ -31,6 +31,7 @@
 #import "PDFAnnotationTextWidgetDetails.h"
 #import "PDFLayerControllerSPI.h"
 #import "PDFPlugin.h"
+#import "UnifiedPDFPlugin.h"
 #import <Quartz/Quartz.h>
 #import <WebCore/AddEventListenerOptions.h>
 #import <WebCore/CSSPrimitiveValue.h>
@@ -68,9 +69,9 @@ static const String cssAlignmentValueForNSTextAlignment(NSTextAlignment alignmen
     return String();
 }
 
-Ref<PDFPluginTextAnnotation> PDFPluginTextAnnotation::create(PDFAnnotation *annotation, PDFLayerController *pdfLayerController, PDFPlugin* plugin)
+Ref<PDFPluginTextAnnotation> PDFPluginTextAnnotation::create(PDFAnnotation *annotation, PDFPluginBase* plugin)
 {
-    return adoptRef(*new PDFPluginTextAnnotation(annotation, pdfLayerController, plugin));
+    return adoptRef(*new PDFPluginTextAnnotation(annotation, plugin));
 }
 
 PDFPluginTextAnnotation::~PDFPluginTextAnnotation()
@@ -99,10 +100,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     styledElement.setInlineStyleProperty(CSSPropertyFontFamily, textAnnotation.font.familyName);
     styledElement.setInlineStyleProperty(CSSPropertyTextAlign, cssAlignmentValueForNSTextAlignment(textAnnotation.alignment));
 
-    if (isMultiline)
-        downcast<HTMLTextAreaElement>(styledElement).setValue(textAnnotation.stringValue);
-    else
-        downcast<HTMLInputElement>(styledElement).setValue(textAnnotation.stringValue);
+    downcast<HTMLTextFormControlElement>(styledElement).setValue(textAnnotation.stringValue);
 
     return element;
 }
@@ -112,7 +110,12 @@ void PDFPluginTextAnnotation::updateGeometry()
     PDFPluginAnnotation::updateGeometry();
 
     StyledElement* styledElement = static_cast<StyledElement*>(element());
-    styledElement->setInlineStyleProperty(CSSPropertyFontSize, textAnnotation().font.pointSize * pdfLayerController().contentScaleFactor, CSSUnitType::CSS_PX);
+    auto scaleFactor = plugin()->scaleFactor();
+#if ENABLE(UNIFIED_PDF)
+    if (plugin()->isUnifiedPDFPlugin())
+        scaleFactor *= downcast<UnifiedPDFPlugin>(plugin())->documentFittingScale();
+#endif
+    styledElement->setInlineStyleProperty(CSSPropertyFontSize, textAnnotation().font.pointSize * scaleFactor, CSSUnitType::CSS_PX);
 }
 
 void PDFPluginTextAnnotation::commit()
@@ -126,6 +129,11 @@ String PDFPluginTextAnnotation::value() const
     return downcast<HTMLTextFormControlElement>(element())->value();
 }
 
+void PDFPluginTextAnnotation::setValue(const String& value)
+{
+    downcast<HTMLTextFormControlElement>(element())->setValue(value);
+}
+
 bool PDFPluginTextAnnotation::handleEvent(Event& event)
 {
     if (PDFPluginAnnotation::handleEvent(event))
@@ -135,7 +143,7 @@ bool PDFPluginTextAnnotation::handleEvent(Event& event)
         auto& keyboardEvent = downcast<KeyboardEvent>(event);
 
         if (keyboardEvent.keyIdentifier() == "U+0009"_s) {
-            if (keyboardEvent.ctrlKey() || keyboardEvent.metaKey() || keyboardEvent.altGraphKey())
+            if (keyboardEvent.ctrlKey() || keyboardEvent.metaKey())
                 return false;
 
             if (keyboardEvent.shiftKey())

@@ -103,9 +103,6 @@ typedef NS_ENUM(NSInteger, _WKPitchCorrectionAlgorithm) {
 @property (nonatomic, setter=_setDefaultFixedPitchFontSize:) NSUInteger _defaultFixedPitchFontSize WK_API_AVAILABLE(macos(10.12), ios(10.0));
 @property (nonatomic, copy, setter=_setFixedPitchFontFamily:) NSString *_fixedPitchFontFamily WK_API_AVAILABLE(macos(10.12), ios(10.0));
 
-// FIXME: This should be configured on the WKWebsiteDataStore.
-// FIXME: This property should not have the verb "is" in it.
-@property (nonatomic, setter=_setOfflineApplicationCacheIsEnabled:) BOOL _offlineApplicationCacheIsEnabled;
 @property (nonatomic, setter=_setFullScreenEnabled:) BOOL _fullScreenEnabled WK_API_AVAILABLE(macos(10.11), ios(9.0), tvos(17.0));
 @property (nonatomic, setter=_setShouldSuppressKeyboardInputDuringProvisionalNavigation:) BOOL _shouldSuppressKeyboardInputDuringProvisionalNavigation WK_API_AVAILABLE(macos(10.12.4), ios(10.3));
 @property (nonatomic, setter=_setAllowsPictureInPictureMediaPlayback:) BOOL _allowsPictureInPictureMediaPlayback WK_API_AVAILABLE(macos(10.13), ios(11.0));
@@ -135,6 +132,8 @@ typedef NS_ENUM(NSInteger, _WKPitchCorrectionAlgorithm) {
 @property (nonatomic, setter=_setEditableLinkBehavior:) _WKEditableLinkBehavior _editableLinkBehavior WK_API_AVAILABLE(macos(10.13.4), ios(11.3));
 
 @property (nonatomic, setter=_setAVFoundationEnabled:) BOOL _avFoundationEnabled WK_API_AVAILABLE(macos(10.10), ios(12.0));
+
+@property (nonatomic, setter=_setTextExtractionEnabled:) BOOL _textExtractionEnabled WK_API_AVAILABLE(macos(WK_MAC_TBA), ios(WK_IOS_TBA));
 
 + (NSArray<_WKFeature *> *)_features WK_API_AVAILABLE(macos(13.3), ios(16.4));
 - (BOOL)_isEnabledForFeature:(_WKFeature *)feature WK_API_AVAILABLE(macos(10.12), ios(10.0));
@@ -191,6 +190,7 @@ typedef NS_ENUM(NSInteger, _WKPitchCorrectionAlgorithm) {
 @property (nonatomic, setter=_setManagedMediaSourceEnabled:) BOOL _managedMediaSourceEnabled  WK_API_AVAILABLE(macos(14.0), ios(17.0));
 @property (nonatomic, setter=_setManagedMediaSourceLowThreshold:) double _managedMediaSourceLowThreshold WK_API_AVAILABLE(macos(14.0), ios(17.0));
 @property (nonatomic, setter=_setManagedMediaSourceHighThreshold:) double _managedMediaSourceHighThreshold WK_API_AVAILABLE(macos(14.0), ios(17.0));
+@property (nonatomic, setter=_setMediaCapabilityGrantsEnabled:) BOOL _mediaCapabilityGrantsEnabled WK_API_AVAILABLE(ios(WK_IOS_TBA)) WK_API_UNAVAILABLE(macos);
 
 #if !TARGET_OS_IPHONE
 @property (nonatomic, setter=_setWebGLEnabled:) BOOL _webGLEnabled WK_API_AVAILABLE(macos(10.13.4));
@@ -246,6 +246,8 @@ typedef NS_ENUM(NSInteger, _WKPitchCorrectionAlgorithm) {
 @property (nonatomic, setter=_setSubpixelCSSOMElementMetricsEnabled:) BOOL _subpixelCSSOMElementMetricsEnabled WK_API_DEPRECATED("Subpixel CSSOM element metrics are no longer supported", macos(10.13.4, 10.15));
 #endif
 @property (nonatomic, setter=_setDisplayListDrawingEnabled:) BOOL _displayListDrawingEnabled WK_API_DEPRECATED("Display list drawing is no longer supported", macos(10.12, WK_MAC_TBA), ios(10.0, WK_IOS_TBA));
+// FIXME: We should remove this property.
+@property (nonatomic, setter=_setOfflineApplicationCacheIsEnabled:) BOOL _offlineApplicationCacheIsEnabled;
 
 
 @end

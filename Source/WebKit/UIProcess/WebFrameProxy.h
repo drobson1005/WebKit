@@ -49,7 +49,6 @@ class URL;
 namespace IPC {
 class Connection;
 class Decoder;
-using DataReference = std::span<const uint8_t>;
 }
 
 namespace WebKit {
@@ -63,6 +62,8 @@ class WebPageProxy;
 class WebProcessProxy;
 class WebsiteDataStore;
 
+enum class CanWrap : bool { No, Yes };
+enum class DidWrap : bool { No, Yes };
 enum class ShouldExpectSafeBrowsingResult : bool;
 enum class ProcessSwapRequestedByClient : bool;
 
@@ -98,7 +99,7 @@ public:
 
     void loadURL(const URL&, const String& referrer = String());
     // Sub frames only. For main frames, use WebPageProxy::loadData.
-    void loadData(const IPC::DataReference&, const String& MIMEType, const String& encodingName, const URL& baseURL);
+    void loadData(std::span<const uint8_t>, const String& MIMEType, const String& encodingName, const URL& baseURL);
 
     const URL& url() const { return m_frameLoadState.url(); }
     const URL& provisionalURL() const { return m_frameLoadState.provisionalURL(); }
@@ -158,24 +159,41 @@ public:
     void getFrameInfo(CompletionHandler<void(FrameTreeNodeData&&)>&&);
     FrameTreeCreationParameters frameTreeCreationParameters() const;
 
-    WebFrameProxy* parentFrame() { return m_parentFrame.get(); }
+    WebFrameProxy* parentFrame() const { return m_parentFrame.get(); }
+    Ref<WebFrameProxy> rootFrame();
     WebProcessProxy& process() const { return m_process.get(); }
     Ref<WebProcessProxy> protectedProcess() const { return process(); }
     void setProcess(WebProcessProxy& process) { m_process = process; }
     ProvisionalFrameProxy* provisionalFrame() { return m_provisionalFrame.get(); }
     std::unique_ptr<ProvisionalFrameProxy> takeProvisionalFrame();
     RefPtr<RemotePageProxy> remotePageProxy();
+    void remoteProcessDidTerminate();
+    std::optional<WebCore::PageIdentifier> webPageIDInCurrentProcess();
+    void notifyParentOfLoadCompletion(WebProcessProxy&);
 
     bool isFocused() const;
+
+    struct TraversalResult {
+        RefPtr<WebFrameProxy> frame;
+        DidWrap didWrap { DidWrap::No };
+    };
+    TraversalResult traverseNext() const;
+    TraversalResult traverseNext(CanWrap) const;
+    TraversalResult traversePrevious(CanWrap);
 
 private:
     WebFrameProxy(WebPageProxy&, WebProcessProxy&, WebCore::FrameIdentifier);
 
     std::optional<WebCore::PageIdentifier> pageIdentifier() const;
 
+    RefPtr<WebFrameProxy> deepLastChild();
+    RefPtr<WebFrameProxy> firstChild() const;
+    RefPtr<WebFrameProxy> lastChild() const;
+    RefPtr<WebFrameProxy> nextSibling() const;
+    RefPtr<WebFrameProxy> previousSibling() const;
+
     WeakPtr<WebPageProxy> m_page;
     Ref<WebProcessProxy> m_process;
-    WebCore::PageIdentifier m_webPageID;
 
     FrameLoadState m_frameLoadState;
 
@@ -183,7 +201,6 @@ private:
     String m_title;
     String m_frameName;
     bool m_containsPluginDocument { false };
-    bool m_isDoingServiceWorkerClientNavigation { false };
     WebCore::CertificateInfo m_certificateInfo;
     RefPtr<WebFramePolicyListenerProxy> m_activeListener;
     WebCore::FrameIdentifier m_frameID;

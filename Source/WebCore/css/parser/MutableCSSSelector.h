@@ -27,6 +27,9 @@ namespace WebCore {
 
 struct CSSSelectorParserContext;
 
+class MutableCSSSelector;
+using MutableCSSSelectorList = Vector<std::unique_ptr<MutableCSSSelector>>;
+
 class MutableCSSSelector {
     WTF_MAKE_FAST_ALLOCATED;
 public:
@@ -71,9 +74,11 @@ public:
     void setPseudoElement(CSSSelector::PseudoElement type) { m_selector->setPseudoElement(type); }
     void setPseudoClass(CSSSelector::PseudoClass type) { m_selector->setPseudoClass(type); }
 
-    void adoptSelectorVector(Vector<std::unique_ptr<MutableCSSSelector>>&&);
+    void adoptSelectorVector(MutableCSSSelectorList&&);
     void setArgumentList(FixedVector<PossiblyQuotedIdentifier>);
     void setSelectorList(std::unique_ptr<CSSSelectorList>);
+
+    void setImplicit() { m_selector->setImplicit(); }
 
     CSSSelector::PseudoClass pseudoClass() const { return m_selector->pseudoClass(); }
 
@@ -108,6 +113,8 @@ private:
     std::unique_ptr<MutableCSSSelector> m_tagHistory;
 };
 
+// FIXME: WebKitUnknown is listed below as otherwise @supports does the wrong thing, but there ought
+// to be a better solution.
 inline bool MutableCSSSelector::needsImplicitShadowCombinatorForMatching() const
 {
     return match() == CSSSelector::Match::PseudoElement
@@ -117,7 +124,8 @@ inline bool MutableCSSSelector::needsImplicitShadowCombinatorForMatching() const
 #endif
             || pseudoElement() == CSSSelector::PseudoElement::Part
             || pseudoElement() == CSSSelector::PseudoElement::Slotted
-            || pseudoElement() == CSSSelector::PseudoElement::UserAgentPartLegacyAlias);
+            || pseudoElement() == CSSSelector::PseudoElement::UserAgentPartLegacyAlias
+            || pseudoElement() == CSSSelector::PseudoElement::WebKitUnknown);
 }
 
-}
+} // namespace WebCore

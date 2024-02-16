@@ -32,7 +32,7 @@
 #include "AuthenticationManager.h"
 #include "AuxiliaryProcessMessages.h"
 #include "BackgroundFetchState.h"
-#include "DataReference.h"
+#include "DidFilterKnownLinkDecoration.h"
 #include "Download.h"
 #include "DownloadProxyMessages.h"
 #include "ITPThirdPartyData.h"
@@ -59,6 +59,7 @@
 #include "ProcessAssertion.h"
 #include "RTCDataChannelRemoteManagerProxy.h"
 #include "RemoteWorkerType.h"
+#include "ResourceLoadStatisticsStore.h"
 #include "ShouldGrandfatherStatistics.h"
 #include "StorageAccessStatus.h"
 #include "WebCookieManager.h"
@@ -1265,7 +1266,7 @@ void NetworkProcess::resetCacheMaxAgeCapForPrevalentResources(PAL::SessionID ses
     completionHandler();
 }
 
-void NetworkProcess::didCommitCrossSiteLoadWithDataTransfer(PAL::SessionID sessionID, RegistrableDomain&& fromDomain, RegistrableDomain&& toDomain, OptionSet<WebCore::CrossSiteNavigationDataTransfer::Flag> navigationDataTransfer, WebPageProxyIdentifier webPageProxyID, WebCore::PageIdentifier webPageID)
+void NetworkProcess::didCommitCrossSiteLoadWithDataTransfer(PAL::SessionID sessionID, RegistrableDomain&& fromDomain, RegistrableDomain&& toDomain, OptionSet<WebCore::CrossSiteNavigationDataTransfer::Flag> navigationDataTransfer, WebPageProxyIdentifier webPageProxyID, WebCore::PageIdentifier webPageID, DidFilterKnownLinkDecoration didFilterKnownLinkDecoration)
 {
     ASSERT(!navigationDataTransfer.isEmpty());
 
@@ -1284,23 +1285,22 @@ void NetworkProcess::didCommitCrossSiteLoadWithDataTransfer(PAL::SessionID sessi
     if (navigationDataTransfer.contains(CrossSiteNavigationDataTransfer::Flag::DestinationLinkDecoration)) {
         if (auto* session = networkSession(sessionID)) {
             if (auto* resourceLoadStatistics = session->resourceLoadStatistics())
-                resourceLoadStatistics->logCrossSiteLoadWithLinkDecoration(WTFMove(fromDomain), WTFMove(toDomain), [] { });
+                resourceLoadStatistics->logCrossSiteLoadWithLinkDecoration(WTFMove(fromDomain), WTFMove(toDomain), didFilterKnownLinkDecoration, [] { });
         } else
             ASSERT_NOT_REACHED();
     }
 }
 
-void NetworkProcess::setCrossSiteLoadWithLinkDecorationForTesting(PAL::SessionID sessionID, RegistrableDomain&& fromDomain, RegistrableDomain&& toDomain, CompletionHandler<void()>&& completionHandler)
+void NetworkProcess::setCrossSiteLoadWithLinkDecorationForTesting(PAL::SessionID sessionID, RegistrableDomain&& fromDomain, RegistrableDomain&& toDomain, DidFilterKnownLinkDecoration didFilterKnownLinkDecoration, CompletionHandler<void()>&& completionHandler)
 {
     if (auto* session = networkSession(sessionID)) {
-        if (auto* resourceLoadStatistics = session->resourceLoadStatistics())
-            resourceLoadStatistics->logCrossSiteLoadWithLinkDecoration(WTFMove(fromDomain), WTFMove(toDomain), WTFMove(completionHandler));
-        else
-            completionHandler();
-    } else {
+        if (auto* resourceLoadStatistics = session->resourceLoadStatistics()) {
+            resourceLoadStatistics->logCrossSiteLoadWithLinkDecoration(WTFMove(fromDomain), WTFMove(toDomain), didFilterKnownLinkDecoration, WTFMove(completionHandler));
+            return;
+        }
+    } else
         ASSERT_NOT_REACHED();
-        completionHandler();
-    }
+    completionHandler();
 }
 
 void NetworkProcess::resetCrossSiteLoadsWithLinkDecorationForTesting(PAL::SessionID sessionID, CompletionHandler<void()>&& completionHandler)
@@ -1477,6 +1477,12 @@ void NetworkProcess::setBlobRegistryTopOriginPartitioningEnabled(PAL::SessionID 
 {
     if (auto* session = networkSession(sessionID))
         session->setBlobRegistryTopOriginPartitioningEnabled(enabled);
+}
+
+void NetworkProcess::setShouldSendPrivateTokenIPCForTesting(PAL::SessionID sessionID, bool enabled) const
+{
+    if (auto* session = networkSession(sessionID))
+        session->setShouldSendPrivateTokenIPCForTesting(enabled);
 }
 
 void NetworkProcess::preconnectTo(PAL::SessionID sessionID, WebPageProxyIdentifier webPageProxyID, WebCore::PageIdentifier webPageID, WebCore::ResourceRequest&& request, WebCore::StoredCredentialsPolicy storedCredentialsPolicy, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
@@ -2103,12 +2109,12 @@ void NetworkProcess::downloadRequest(PAL::SessionID sessionID, DownloadID downlo
     downloadManager().startDownload(sessionID, downloadID, request, topOrigin, isNavigatingToAppBoundDomain, suggestedFilename);
 }
 
-void NetworkProcess::resumeDownload(PAL::SessionID sessionID, DownloadID downloadID, const IPC::DataReference& resumeData, const String& path, WebKit::SandboxExtension::Handle&& sandboxExtensionHandle, CallDownloadDidStart callDownloadDidStart)
+void NetworkProcess::resumeDownload(PAL::SessionID sessionID, DownloadID downloadID, std::span<const uint8_t> resumeData, const String& path, WebKit::SandboxExtension::Handle&& sandboxExtensionHandle, CallDownloadDidStart callDownloadDidStart)
 {
     downloadManager().resumeDownload(sessionID, downloadID, resumeData, path, WTFMove(sandboxExtensionHandle), callDownloadDidStart);
 }
 
-void NetworkProcess::cancelDownload(DownloadID downloadID, CompletionHandler<void(const IPC::DataReference&)>&& completionHandler)
+void NetworkProcess::cancelDownload(DownloadID downloadID, CompletionHandler<void(std::span<const uint8_t>)>&& completionHandler)
 {
     downloadManager().cancelDownload(downloadID, WTFMove(completionHandler));
 }
@@ -2937,10 +2943,15 @@ void NetworkProcess::addWebPageNetworkParameters(PAL::SessionID sessionID, WebPa
 
 void NetworkProcess::removeWebPageNetworkParameters(PAL::SessionID sessionID, WebPageProxyIdentifier pageID)
 {
-    if (auto* session = networkSession(sessionID)) {
-        session->removeWebPageNetworkParameters(pageID);
-        session->storageManager().clearStorageForWebPage(pageID);
-    }
+    auto* session = networkSession(sessionID);
+    if (!session)
+        return;
+
+    session->removeWebPageNetworkParameters(pageID);
+    session->storageManager().clearStorageForWebPage(pageID);
+
+    if (auto* resourceLoadStatistics = session->resourceLoadStatistics())
+        resourceLoadStatistics->clearFrameLoadRecordsForStorageAccess(pageID);
 }
 
 void NetworkProcess::countNonDefaultSessionSets(PAL::SessionID sessionID, CompletionHandler<void(size_t)>&& completionHandler)
@@ -2964,7 +2975,7 @@ void NetworkProcess::setIsHoldingLockedFiles(bool isHoldingLockedFiles)
     if (!isHoldingLockedFiles) {
         m_holdingLockedFileAssertion = nullptr;
 #if USE(EXTENSIONKIT)
-        invalidateGrant();
+        invalidateFileActivity();
 #endif
         return;
     }
@@ -2973,9 +2984,9 @@ void NetworkProcess::setIsHoldingLockedFiles(bool isHoldingLockedFiles)
         return;
 
 #if USE(EXTENSIONKIT)
-    if (hasAcquiredGrant())
+    if (hasAcquiredFileActivity())
         return;
-    if (aqcuireLockedFileGrant())
+    if (acquireLockedFileActivity())
         return;
 #endif
 

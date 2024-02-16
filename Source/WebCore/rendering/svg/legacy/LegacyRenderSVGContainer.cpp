@@ -34,6 +34,7 @@
 #include "SVGRenderingContext.h"
 #include "SVGResources.h"
 #include "SVGResourcesCache.h"
+#include "SVGVisitedRendererTracking.h"
 #include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 
@@ -196,17 +197,22 @@ bool LegacyRenderSVGContainer::nodeAtFloatPoint(const HitTestRequest& request, H
     if (!pointIsInsideViewportClip(pointInParent))
         return false;
 
-    FloatPoint localPoint = valueOrDefault(localToParentTransform().inverse()).mapPoint(pointInParent);
+    static NeverDestroyed<SVGVisitedRendererTracking::VisitedSet> s_visitedSet;
 
-    if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
+    SVGVisitedRendererTracking recursionTracking(s_visitedSet);
+    if (recursionTracking.isVisiting(*this))
         return false;
 
-    SVGHitTestCycleDetectionScope hitTestScope(*this);
+    SVGVisitedRendererTracking::Scope recursionScope(recursionTracking, *this);
+
+    FloatPoint localPoint = valueOrDefault(localToParentTransform().inverse()).mapPoint(pointInParent);
+    if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
+        return false;
 
     for (RenderObject* child = lastChild(); child; child = child->previousSibling()) {
         if (child->nodeAtFloatPoint(request, result, localPoint, hitTestAction)) {
             updateHitTestResult(result, LayoutPoint(localPoint));
-            if (result.addNodeToListBasedTestResult(child->node(), request, flooredLayoutPoint(localPoint)) == HitTestProgress::Stop)
+            if (result.addNodeToListBasedTestResult(child->protectedNode().get(), request, flooredLayoutPoint(localPoint)) == HitTestProgress::Stop)
                 return true;
         }
     }
@@ -214,7 +220,7 @@ bool LegacyRenderSVGContainer::nodeAtFloatPoint(const HitTestRequest& request, H
     // Accessibility wants to return SVG containers, if appropriate.
     if (request.type() & HitTestRequest::Type::AccessibilityHitTest && m_objectBoundingBox.contains(localPoint)) {
         updateHitTestResult(result, LayoutPoint(localPoint));
-        if (result.addNodeToListBasedTestResult(nodeForHitTest(), request, flooredLayoutPoint(localPoint)) == HitTestProgress::Stop)
+        if (result.addNodeToListBasedTestResult(protectedNodeForHitTest().get(), request, flooredLayoutPoint(localPoint)) == HitTestProgress::Stop)
             return true;
     }
     

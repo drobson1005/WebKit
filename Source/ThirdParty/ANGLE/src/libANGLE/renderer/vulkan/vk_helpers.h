@@ -42,7 +42,9 @@ constexpr size_t kStagingBufferSize = 1024 * 16;
 
 constexpr VkImageCreateFlags kVkImageCreateFlagsNone = 0;
 
-constexpr VkFilter kDefaultYCbCrChromaFilter = VK_FILTER_NEAREST;
+// Most likely initial chroma filter mode given GL_TEXTURE_EXTERNAL_OES default
+// min & mag filters are linear.
+constexpr VkFilter kDefaultYCbCrChromaFilter = VK_FILTER_LINEAR;
 
 constexpr VkPipelineStageFlags kSwapchainAcquireImageWaitStageFlags =
     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |          // First use is a blit command.
@@ -132,6 +134,7 @@ class DynamicBuffer : angle::NonCopyable
     std::unique_ptr<BufferHelper> mBuffer;
     uint32_t mNextAllocationOffset;
     size_t mSize;
+    size_t mSizeInRecentHistory;
     size_t mAlignment;
     VkMemoryPropertyFlags mMemoryPropertyFlags;
 
@@ -728,7 +731,7 @@ using PipelineBarrierArray = angle::PackedEnumMap<PipelineStage, PipelineBarrier
 enum class MemoryCoherency : uint8_t
 {
     CachedNonCoherent,
-    CachedCoherent,
+    CachedPreferCoherent,
     UnCachedCoherent,
 
     InvalidEnum = 3,
@@ -737,12 +740,7 @@ enum class MemoryCoherency : uint8_t
 ANGLE_INLINE bool IsCached(MemoryCoherency coherency)
 {
     return coherency == MemoryCoherency::CachedNonCoherent ||
-           coherency == MemoryCoherency::CachedCoherent;
-}
-ANGLE_INLINE bool IsCoherent(MemoryCoherency coherency)
-{
-    return coherency == MemoryCoherency::UnCachedCoherent ||
-           coherency == MemoryCoherency::CachedCoherent;
+           coherency == MemoryCoherency::CachedPreferCoherent;
 }
 
 enum class MemoryHostVisibility
@@ -901,6 +899,9 @@ class BufferHelper : public ReadWriteResource
     DescriptorSetCacheManager mDescriptorSetCacheManager;
     // For external buffer
     GLeglClientBufferEXT mClientBuffer;
+
+    // Whether ANGLE currently has ownership of this resource or it's released to external.
+    bool mIsReleasedToExternal;
 };
 
 class BufferPool : angle::NonCopyable
@@ -1906,7 +1907,8 @@ class ImageHelper final : public Resource, public angle::Subject
                                uint32_t mipLevels,
                                uint32_t layerCount,
                                bool isRobustResourceInitEnabled,
-                               bool hasProtectedContent);
+                               bool hasProtectedContent,
+                               YcbcrConversionDesc conversionDesc);
     VkResult initMemory(Context *context,
                         const MemoryProperties &memoryProperties,
                         VkMemoryPropertyFlags flags,
@@ -2113,6 +2115,7 @@ class ImageHelper final : public Resource, public angle::Subject
     bool hasEmulatedDepthChannel() const;
     bool hasEmulatedStencilChannel() const;
     bool hasEmulatedImageFormat() const { return mActualFormatID != mIntendedFormatID; }
+    bool hasInefficientlyEmulatedImageFormat() const;
     GLint getSamples() const { return mSamples; }
 
     ImageSerial getImageSerial() const
@@ -2480,20 +2483,10 @@ class ImageHelper final : public Resource, public angle::Subject
         y2yDesc.updateConversionModel(VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY);
         return y2yDesc;
     }
-    void updateYcbcrConversionDesc(RendererVk *rendererVk,
-                                   uint64_t externalFormat,
-                                   VkSamplerYcbcrModelConversion conversionModel,
-                                   VkSamplerYcbcrRange colorRange,
-                                   VkChromaLocation xChromaOffset,
-                                   VkChromaLocation yChromaOffset,
-                                   VkFilter chromaFilter,
-                                   VkComponentMapping components,
-                                   angle::FormatID intendedFormatID)
-    {
-        mYcbcrConversionDesc.update(rendererVk, externalFormat, conversionModel, colorRange,
-                                    xChromaOffset, yChromaOffset, chromaFilter, components,
-                                    intendedFormatID);
-    }
+
+    static YcbcrConversionDesc deriveConversionDesc(Context *context,
+                                                    angle::FormatID actualFormatID,
+                                                    angle::FormatID intendedFormatID);
 
     // Used by framebuffer and render pass functions to decide loadOps and invalidate/un-invalidate
     // render target contents.
@@ -2855,6 +2848,9 @@ class ImageHelper final : public Resource, public angle::Subject
     RenderPassUsageFlags mRenderPassUsageFlags;
     // The QueueSerial that associated with the last barrier.
     QueueSerial mBarrierQueueSerial;
+
+    // Whether ANGLE currently has ownership of this resource or it's released to external.
+    bool mIsReleasedToExternal;
 
     // For imported images
     YcbcrConversionDesc mYcbcrConversionDesc;

@@ -88,7 +88,7 @@ static String createUniqueFontName()
     return fontName;
 }
 
-RefPtr<FontCustomPlatformData> createFontCustomPlatformData(SharedBuffer& buffer, const String& itemInCollection)
+RefPtr<FontCustomPlatformData> FontCustomPlatformData::create(SharedBuffer& buffer, const String& itemInCollection)
 {
     String fontName = createUniqueFontName();
     auto fontResource = renameAndActivateFont(buffer, fontName);
@@ -98,6 +98,11 @@ RefPtr<FontCustomPlatformData> createFontCustomPlatformData(SharedBuffer& buffer
 
     FontPlatformData::CreationData creationData = { buffer, itemInCollection, fontResource.releaseNonNull() };
     return adoptRef(new FontCustomPlatformData(fontName, WTFMove(creationData)));
+}
+
+RefPtr<FontCustomPlatformData> FontCustomPlatformData::createMemorySafe(SharedBuffer&, const String&)
+{
+    return nullptr;
 }
 
 bool FontCustomPlatformData::supportsFormat(const String& format)
@@ -111,10 +116,18 @@ bool FontCustomPlatformData::supportsFormat(const String& format)
         || equalLettersIgnoringASCIICase(format, "svg"_s);
 }
 
-bool FontCustomPlatformData::supportsTechnology(const FontTechnology&)
+bool FontCustomPlatformData::supportsTechnology(const FontTechnology& tech)
 {
-    // FIXME: define supported technologies for this platform (webkit.org/b/256310).
-    return true;
+    switch (tech) {
+    case FontTechnology::ColorCbdt:
+    case FontTechnology::ColorColrv0:
+    case FontTechnology::ColorSbix:
+    case FontTechnology::ColorSvg:
+    case FontTechnology::FeaturesOpentype:
+        return true;
+    default:
+        return false;
+    }
 }
 
 }

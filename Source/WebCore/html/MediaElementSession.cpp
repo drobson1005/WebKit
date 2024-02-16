@@ -625,10 +625,12 @@ bool MediaElementSession::canShowControlsManager(PlaybackControlsPurpose purpose
 
 #if ENABLE(FULLSCREEN_API)
     // Elements which are not descendants of the current fullscreen element cannot be main content.
-    auto* fullscreenElement = m_element.document().fullscreenManager().currentFullscreenElement();
-    if (fullscreenElement && !m_element.isDescendantOf(*fullscreenElement)) {
-        INFO_LOG(LOGIDENTIFIER, "returning FALSE: outside of full screen");
-        return false;
+    if (CheckedPtr fullsreenManager = m_element.document().fullscreenManagerIfExists()) {
+        auto* fullscreenElement = fullsreenManager->currentFullscreenElement();
+        if (fullscreenElement && !m_element.isDescendantOf(*fullscreenElement)) {
+            INFO_LOG(LOGIDENTIFIER, "returning FALSE: outside of full screen");
+            return false;
+        }
     }
 #endif
 
@@ -752,7 +754,7 @@ bool MediaElementSession::wirelessVideoPlaybackDisabled() const
         return true;
     }
 
-    auto player = m_element.player();
+    RefPtr player = m_element.player();
     if (!player)
         return true;
 
@@ -769,7 +771,7 @@ void MediaElementSession::setWirelessVideoPlaybackDisabled(bool disabled)
     else
         removeBehaviorRestriction(WirelessVideoPlaybackDisabled);
 
-    auto player = m_element.player();
+    RefPtr player = m_element.player();
     if (!player)
         return;
 
@@ -954,30 +956,6 @@ bool MediaElementSession::requiresPlaybackTargetRouteMonitoring() const
 }
 #endif
 
-#if ENABLE(MEDIA_SOURCE)
-size_t MediaElementSession::maximumMediaSourceBufferSize(const SourceBuffer& buffer) const
-{
-    // A good quality 1080p video uses 8,000 kbps and stereo audio uses 384 kbps, so assume 95% for video and 5% for audio.
-    const float bufferBudgetPercentageForVideo = .95;
-    const float bufferBudgetPercentageForAudio = .05;
-
-    size_t maximum = buffer.document().settings().maximumSourceBufferSize();
-
-    // Allow a SourceBuffer to buffer as though it is audio-only even if it doesn't have any active tracks (yet).
-    size_t bufferSize = static_cast<size_t>(maximum * bufferBudgetPercentageForAudio);
-    if (buffer.hasVideo())
-        bufferSize += static_cast<size_t>(maximum * bufferBudgetPercentageForVideo);
-
-    // FIXME: we might want to modify this algorithm to:
-    // - decrease the maximum size for background tabs
-    // - decrease the maximum size allowed for inactive elements when a process has more than one
-    //   element, eg. so a page with many elements which are played one at a time doesn't keep
-    //   everything buffered after an element has finished playing.
-
-    return bufferSize;
-}
-#endif
-
 static bool isElementMainContentForPurposesOfAutoplay(const HTMLMediaElement& element, bool shouldHitTestMainFrame)
 {
     Document& document = element.document();
@@ -1070,18 +1048,14 @@ static bool isElementLargeRelativeToMainFrame(const HTMLMediaElement& element)
     if (!documentFrame)
         return false;
 
-    auto* localFrame = dynamicDowncast<LocalFrame>(documentFrame->mainFrame());
-    if (!localFrame)
+    RefPtr mainFrameView = documentFrame->mainFrame().virtualView();
+    if (!mainFrameView)
         return false;
 
-    if (!localFrame->view())
-        return false;
+    auto maxVisibleClientWidth = std::min(renderer->clientWidth().toInt(), mainFrameView->visibleWidth());
+    auto maxVisibleClientHeight = std::min(renderer->clientHeight().toInt(), mainFrameView->visibleHeight());
 
-    auto& mainFrameView = *localFrame->view();
-    auto maxVisibleClientWidth = std::min(renderer->clientWidth().toInt(), mainFrameView.visibleWidth());
-    auto maxVisibleClientHeight = std::min(renderer->clientHeight().toInt(), mainFrameView.visibleHeight());
-
-    return maxVisibleClientWidth * maxVisibleClientHeight > minimumPercentageOfMainFrameAreaForMainContent * mainFrameView.visibleWidth() * mainFrameView.visibleHeight();
+    return maxVisibleClientWidth * maxVisibleClientHeight > minimumPercentageOfMainFrameAreaForMainContent * mainFrameView->visibleWidth() * mainFrameView->visibleHeight();
 }
 
 static bool isElementLargeEnoughForMainContent(const HTMLMediaElement& element, MediaSessionMainContentPurpose purpose)
@@ -1331,8 +1305,10 @@ void MediaElementSession::updateMediaUsageIfChanged()
 
     bool isOutsideOfFullscreen = false;
 #if ENABLE(FULLSCREEN_API)
-    if (auto* fullscreenElement = document.fullscreenManager().currentFullscreenElement())
-        isOutsideOfFullscreen = !m_element.isDescendantOf(*fullscreenElement);
+    if (CheckedPtr fullscreenManager = document.fullscreenManagerIfExists()) {
+        if (auto* fullscreenElement = document.fullscreenManager().currentFullscreenElement())
+            isOutsideOfFullscreen = m_element.isDescendantOf(*fullscreenElement);
+    }
 #endif
     bool isAudio = client().presentationType() == MediaType::Audio;
     bool isVideo = client().presentationType() == MediaType::Video;

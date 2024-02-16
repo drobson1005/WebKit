@@ -29,8 +29,11 @@
 #include <type_traits>
 #include <wtf/ASCIICType.h>
 #include <wtf/Forward.h>
+#include <wtf/HashFunctions.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/SuperFastHash.h>
+
+OBJC_CLASS NSString;
 
 namespace WTF {
 
@@ -48,6 +51,9 @@ public:
     WTF_EXPORT_PRIVATE void dump(PrintStream& out) const;
 
     ASCIILiteral() = default;
+    constexpr ASCIILiteral(std::nullptr_t)
+        : ASCIILiteral()
+    { }
 
     unsigned hash() const;
     constexpr bool isNull() const { return !m_characters; }
@@ -120,6 +126,12 @@ struct ASCIILiteralHash {
 template<typename T> struct DefaultHash;
 template<> struct DefaultHash<ASCIILiteral> : ASCIILiteralHash { };
 
+struct ASCIILiteralPtrHash {
+    static unsigned hash(const ASCIILiteral& key) { return IntHash<uintptr_t>::hash(reinterpret_cast<uintptr_t>(key.characters())); }
+    static bool equal(const ASCIILiteral& a, const ASCIILiteral& b) { return a.characters() == b.characters(); }
+    static constexpr bool safeToCompareToEmptyOrDeleted = false;
+};
+
 inline namespace StringLiterals {
 
 constexpr ASCIILiteral operator"" _s(const char* characters, size_t n)
@@ -137,4 +149,5 @@ constexpr ASCIILiteral operator"" _s(const char* characters, size_t n)
 
 } // namespace WTF
 
+using WTF::ASCIILiteralPtrHash;
 using namespace WTF::StringLiterals;

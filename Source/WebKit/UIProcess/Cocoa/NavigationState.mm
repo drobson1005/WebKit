@@ -70,6 +70,7 @@
 #import "_WKFrameHandleInternal.h"
 #import "_WKRenderingProgressEventsInternal.h"
 #import "_WKSameDocumentNavigationTypeInternal.h"
+#import <JavaScriptCore/ConsoleTypes.h>
 #import <WebCore/AuthenticationMac.h>
 #import <WebCore/ContentRuleListResults.h>
 #import <WebCore/Credential.h>
@@ -77,6 +78,7 @@
 #import <WebCore/SerializedCryptoKeyWrap.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/NeverDestroyed.h>
+#import <wtf/Scope.h>
 #import <wtf/URL.h>
 #import <wtf/WeakHashMap.h>
 #import <wtf/cocoa/VectorCocoa.h>
@@ -95,10 +97,15 @@
 #import <pal/spi/cocoa/LaunchServicesSPI.h>
 #endif
 
-#if USE(APPLE_INTERNAL_SDK) && __has_include(<WebKitAdditions/NavigationStateAdditions.mm>)
-#import <WebKitAdditions/NavigationStateAdditions.mm>
-#else
-#define NAVIGATION_STATE_DECIDE_POLICY_FOR_NAVIGATION_ACTION_ADDITIONS
+#if HAVE(MARKETPLACE_KIT)
+#import "WebKitSwiftSoftLink.h"
+
+SOFT_LINK_CLASS_FOR_HEADER(WebKit, WKMarketplaceKit)
+SOFT_LINK_CLASS_FOR_SOURCE_OPTIONAL(WebKit, WebKitSwift, WKMarketplaceKit)
+
+@interface WKMarketplaceKit : NSObject
++ (void)requestAppInstallationWithTopOrigin:(NSURL *)topOrigin url:(NSURL *)url completionHandler:(void (^)(NSError *))completionHandler;
+@end
 #endif
 
 namespace WebKit {
@@ -405,8 +412,65 @@ static void trySOAuthorization(Ref<API::NavigationAction>&& navigationAction, We
 #endif
 }
 
+#if HAVE(MARKETPLACE_KIT)
+
+static bool isMarketplaceKitURL(const URL& url)
+{
+    return url.protocolIs("app-distribution"_s) || url.protocolIs("marketplace-kit"_s);
+}
+
+static void interceptMarketplaceKitNavigation(Ref<API::NavigationAction>&& action, WebPageProxy& page)
+{
+    std::optional<FrameIdentifier> sourceFrameID;
+    if (auto sourceFrame = action->sourceFrame())
+        sourceFrameID = sourceFrame->handle()->frameID();
+
+    auto addConsoleError = [sourceFrameID, url = action->request().url(), weakPage = WeakPtr { page }](const String& error) {
+        if (!sourceFrameID || !weakPage)
+            return;
+
+        weakPage->addConsoleMessage(*sourceFrameID, MessageSource::Network, MessageLevel::Error, makeString("Can't handle MarketplaceKit link ", url.string().utf8().data(), " due to error: "_s, error));
+    };
+
+    if (!action->shouldOpenExternalSchemes() || !action->isProcessingUserGesture() || action->isRedirect() || action->data().requesterTopOrigin.isNull()) {
+        RELEASE_LOG_ERROR(Loading, "NavigationState: can't handle MarketplaceKit navigation with shouldOpenExternalSchemes: %d, isProcessingUserGesture: %d, isRedirect: %d, requesterTopOriginIsNull: %d", action->shouldOpenExternalSchemes(), action->isProcessingUserGesture(), action->isRedirect(), action->data().requesterTopOrigin.isNull());
+
+        if (!action->isProcessingUserGesture())
+            addConsoleError("must be activated via a user gesture"_s);
+        else if (action->isRedirect())
+            addConsoleError("must be a direct link without a redirect"_s);
+
+        return;
+    }
+
+    RetainPtr<NSURL> requesterTopOriginURL = static_cast<NSURL *>(action->data().requesterTopOrigin.toURL());
+    RetainPtr<NSURL> url = static_cast<NSURL *>(action->request().url());
+
+    if (!requesterTopOriginURL || !url) {
+        RELEASE_LOG_ERROR(Loading, "NavigationState: can't handle MarketplaceKit navigation with requesterTopOriginURL: %d url: %d", static_cast<bool>(requesterTopOriginURL), static_cast<bool>(url));
+        return;
+    }
+
+    if (![getWKMarketplaceKitClass() respondsToSelector:@selector(requestAppInstallationWithTopOrigin:url:completionHandler:)])
+        return;
+
+    [getWKMarketplaceKitClass() requestAppInstallationWithTopOrigin:requesterTopOriginURL.get() url:url.get() completionHandler:makeBlockPtr([addConsoleError = WTFMove(addConsoleError)](NSError *error) mutable {
+        if (error)
+            addConsoleError(error.description);
+    }).get()];
+}
+
+#endif // HAVE(MARKETPLACE_KIT)
+
 static void tryInterceptNavigation(Ref<API::NavigationAction>&& navigationAction, WebPageProxy& page, WTF::Function<void(bool)>&& completionHandler)
 {
+#if HAVE(MARKETPLACE_KIT)
+    if (isMarketplaceKitURL(navigationAction->request().url())) {
+        interceptMarketplaceKitNavigation(WTFMove(navigationAction), page);
+        return completionHandler(true /* interceptedNavigation */);
+    }
+#endif
+
 #if HAVE(APP_LINKS)
     if (navigationAction->shouldOpenAppLinks()) {
         auto url = navigationAction->request().url();
@@ -466,8 +530,6 @@ static bool isUnsupportedWebExtensionNavigation(API::NavigationAction& navigatio
 
 void NavigationState::NavigationClient::decidePolicyForNavigationAction(WebPageProxy& webPageProxy, Ref<API::NavigationAction>&& navigationAction, Ref<WebFramePolicyListenerProxy>&& listener)
 {
-    NAVIGATION_STATE_DECIDE_POLICY_FOR_NAVIGATION_ACTION_ADDITIONS
-
     bool subframeNavigation = navigationAction->targetFrame() && !navigationAction->targetFrame()->isMainFrame();
 
     RefPtr<API::WebsitePolicies> defaultWebsitePolicies;
@@ -581,6 +643,14 @@ void NavigationState::NavigationClient::decidePolicyForNavigationAction(WebPageP
                 break;
 
             case _WKNavigationActionPolicyAllowWithoutTryingAppLink:
+#if HAVE(MARKETPLACE_KIT)
+                if (isMarketplaceKitURL(navigationAction->request().url())) {
+                    interceptMarketplaceKitNavigation(WTFMove(navigationAction), webPageProxy);
+                    localListener->ignore();
+                    return;
+                }
+#endif
+
                 trySOAuthorization(WTFMove(navigationAction), webPageProxy, [localListener = WTFMove(localListener), websitePolicies = WTFMove(apiWebsitePolicies)] (bool optimizedLoad) {
                     if (optimizedLoad) {
                         localListener->ignore(WasNavigationIntercepted::Yes);

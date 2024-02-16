@@ -26,7 +26,6 @@
 #include "APIData.h"
 #include "APINavigation.h"
 #include "APISerializedScriptValue.h"
-#include "DataReference.h"
 #include "ImageOptions.h"
 #include "NotificationService.h"
 #include "PageLoadState.h"
@@ -73,7 +72,6 @@
 #include <JavaScriptCore/JSRetainPtr.h>
 #include <WebCore/CertificateInfo.h>
 #include <WebCore/JSDOMExceptionHandling.h>
-#include <WebCore/RefPtrCairo.h>
 #include <WebCore/RunJavaScriptParameters.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/URLSoup.h>
@@ -5041,7 +5039,12 @@ cairo_surface_t* webkit_web_view_get_snapshot_finish(WebKitWebView* webView, GAs
 
 #if USE(GTK4)
     auto image = adoptRef(static_cast<cairo_surface_t*>(g_task_propagate_pointer(G_TASK(result), error)));
-    return image ? cairoSurfaceToGdkTexture(image.get()).leakRef() : nullptr;
+    auto texture = image ? cairoSurfaceToGdkTexture(image.get()) : nullptr;
+    if (texture)
+        return texture.leakRef();
+    if (error && !*error)
+        g_set_error_literal(error, WEBKIT_SNAPSHOT_ERROR, WEBKIT_SNAPSHOT_ERROR_FAILED_TO_CREATE, _("There was an error creating the snapshot"));
+    return nullptr;
 #else
     return static_cast<cairo_surface_t*>(g_task_propagate_pointer(G_TASK(result), error));
 #endif

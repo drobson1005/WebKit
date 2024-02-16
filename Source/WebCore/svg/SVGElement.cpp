@@ -89,7 +89,9 @@ SVGElement::~SVGElement()
         RELEASE_ASSERT(!m_svgRareData->correspondingElement());
         m_svgRareData = nullptr;
     }
-    document().accessSVGExtensions().removeElementToRebuild(*this);
+
+    RefAllowingPartiallyDestroyed<Document> document = this->document();
+    document->checkedSVGExtensions()->removeElementToRebuild(*this);
 
     if (hasPendingResources()) {
         treeScopeForSVGReferences().removeElementFromPendingSVGResources(*this);
@@ -153,15 +155,16 @@ void SVGElement::reportAttributeParsingError(SVGParsingError error, const Qualif
         return;
 
     String errorString = "<" + tagName() + "> attribute " + name.toString() + "=\"" + value + "\"";
-    SVGDocumentExtensions& extensions = document().accessSVGExtensions();
+    Ref document = this->document();
+    CheckedRef extensions = document->svgExtensions();
 
     if (error == NegativeValueForbiddenError) {
-        extensions.reportError("Invalid negative value for " + errorString);
+        extensions->reportError("Invalid negative value for " + errorString);
         return;
     }
 
     if (error == ParsingAttributeFailedError) {
-        extensions.reportError("Invalid value for " + errorString);
+        extensions->reportError("Invalid value for " + errorString);
         return;
     }
 
@@ -170,26 +173,28 @@ void SVGElement::reportAttributeParsingError(SVGParsingError error, const Qualif
 
 void SVGElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    if (removalType.disconnectedFromDocument) {
-        ASSERT(!parentNode() || !parentNode()->isConnected());
-        m_elementsWithRelativeLengths.clear();
-    }
-
     StyledElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
+
+    if (!parentNode()) {
+        m_hasRegisteredWithParentForRelativeLengths = false;
+        if (RefPtr oldParent = dynamicDowncast<SVGElement>(oldParentOfRemovedTree))
+            oldParent->updateRelativeLengthsInformationForChild(false, *this);
+    }
 
     if (hasPendingResources())
         treeScopeForSVGReferences().removeElementFromPendingSVGResources(*this);
 
     if (removalType.disconnectedFromDocument) {
-        auto& extensions = document().accessSVGExtensions();
+        RefAllowingPartiallyDestroyed<Document> document = this->document();
+        CheckedRef extensions = document->svgExtensions();
         if (m_svgRareData) {
-            for (auto& element : m_svgRareData->takeReferencingElements()) {
-                extensions.addElementToRebuild(element);
-                Ref { element }->clearTarget();
+            for (Ref element : m_svgRareData->takeReferencingElements()) {
+                extensions->addElementToRebuild(element);
+                element->clearTarget();
             }
             RELEASE_ASSERT(m_svgRareData->referencingElements().isEmptyIgnoringNullReferences());
         }
-        extensions.removeElementToRebuild(*this);
+        extensions->removeElementToRebuild(*this);
     }
     invalidateInstances();
 
@@ -199,6 +204,7 @@ void SVGElement::removedFromAncestor(RemovalType removalType, ContainerNode& old
 
 SVGSVGElement* SVGElement::ownerSVGElement() const
 {
+IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_LOCAL_VARS_BEGIN
     auto* node = parentNode();
     while (node) {
         if (auto* svg = dynamicDowncast<SVGSVGElement>(*node))
@@ -208,6 +214,7 @@ SVGSVGElement* SVGElement::ownerSVGElement() const
     }
 
     return nullptr;
+IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_LOCAL_VARS_END
 }
 
 SVGElement* SVGElement::viewportElement() const
@@ -298,12 +305,14 @@ SVGElement* SVGElement::correspondingElement() const
 
 RefPtr<SVGUseElement> SVGElement::correspondingUseElement() const
 {
+IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_LOCAL_VARS_BEGIN
     auto* root = containingShadowRoot();
     if (!root)
         return nullptr;
     if (root->mode() != ShadowRootMode::UserAgent)
         return nullptr;
     return dynamicDowncast<SVGUseElement>(root->host());
+IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_LOCAL_VARS_END
 }
 
 void SVGElement::setCorrespondingElement(SVGElement* correspondingElement)
@@ -358,7 +367,7 @@ bool SVGElement::removeEventListener(const AtomString& eventType, EventListener&
     // event listener in a cache. If we want to be able to call removeEventListener() multiple
     // times on different nodes, we have to delay its immediate destruction, which would happen
     // after the first call below.
-    Ref<EventListener> protector(listener);
+    Ref protectedListener { listener };
 
     // Remove event listener from regular DOM element
     if (!Node::removeEventListener(eventType, listener, options))
@@ -452,16 +461,21 @@ static inline bool isSVGLayerAwareElement(const SVGElement& element)
     case SVG::g:
     case SVG::image:
     case SVG::line:
+    case SVG::linearGradient:
+    case SVG::marker:
     case SVG::mask:
     case SVG::path:
+    case SVG::pattern:
     case SVG::polygon:
     case SVG::polyline:
+    case SVG::radialGradient:
     case SVG::rect:
+    case SVG::stop:
     case SVG::svg:
     case SVG::switch_:
     case SVG::symbol:
-    case SVG::textPath:
     case SVG::text:
+    case SVG::textPath:
     case SVG::tref:
     case SVG::tspan:
     case SVG::use:
@@ -505,7 +519,7 @@ void SVGElement::attributeChanged(const QualifiedName& name, const AtomString& o
 
     switch (name.nodeName()) {
     case AttributeNames::idAttr:
-        document().accessSVGExtensions().rebuildAllElementReferencesForTarget(*this);
+        protectedDocument()->checkedSVGExtensions()->rebuildAllElementReferencesForTarget(*this);
         break;
     case AttributeNames::classAttr:
         m_className->setBaseValInternal(newValue);
@@ -595,7 +609,7 @@ RefPtr<SVGAttributeAnimator> SVGElement::createAnimator(const QualifiedName& att
         return animator;
 
     // Animated property animator.
-    auto animator = propertyRegistry().createAnimator(attributeName, animationMode, calcMode, isAccumulated, isAdditive);
+    RefPtr animator = propertyRegistry().createAnimator(attributeName, animationMode, calcMode, isAccumulated, isAdditive);
     if (!animator)
         return animator;
     for (auto& instance : copyToVectorOf<Ref<SVGElement>>(instances()))
@@ -628,7 +642,7 @@ MutableStyleProperties* SVGElement::animatedSMILStyleProperties() const
 {
     if (m_svgRareData)
         return m_svgRareData->animatedSMILStyleProperties();
-    return 0;
+    return nullptr;
 }
 
 MutableStyleProperties& SVGElement::ensureAnimatedSMILStyleProperties()
@@ -655,10 +669,10 @@ inline const RenderStyle* SVGElementRareData::overrideComputedStyle(Element& ele
     return m_overrideComputedStyle.get();
 }
 
-const RenderStyle* SVGElement::computedStyle(PseudoId pseudoElementSpecifier)
+const RenderStyle* SVGElement::computedStyle(const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier)
 {
     if (!m_svgRareData || !m_svgRareData->useOverrideComputedStyle())
-        return Element::computedStyle(pseudoElementSpecifier);
+        return Element::computedStyle(pseudoElementIdentifier);
 
     const RenderStyle* parentStyle = nullptr;
     if (RefPtr parent = parentOrShadowHostElement()) {
@@ -811,8 +825,8 @@ String SVGElement::title() const
     // the document, not a tooltip) so we instantly return.
     if (isOutermostSVGSVGElement() && document().topDocument().isSVGDocument())
         return String();
-    auto firstTitle = childrenOfType<SVGTitleElement>(*this).first();
-    return firstTitle ? const_cast<SVGTitleElement*>(firstTitle)->innerText() : String();
+    RefPtr firstTitle = childrenOfType<SVGTitleElement>(*this).first();
+    return firstTitle ? const_cast<SVGTitleElement&>(*firstTitle).innerText() : String();
 }
 
 bool SVGElement::rendererIsNeeded(const RenderStyle& style)
@@ -997,7 +1011,8 @@ void SVGElement::collectPresentationalHintsForAttribute(const QualifiedName& nam
 
 void SVGElement::updateSVGRendererForElementChange()
 {
-    document().updateSVGRenderer(*this);
+    RefAllowingPartiallyDestroyed<Document> document = this->document();
+    document->updateSVGRenderer(*this);
 }
 
 void SVGElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -1015,9 +1030,8 @@ void SVGElement::svgAttributeChanged(const QualifiedName& attrName)
     }
 
     if (attrName == HTMLNames::idAttr) {
-        auto renderer = this->renderer();
         // Notify resources about id changes, this is important as we cache resources by id in SVGDocumentExtensions
-        if (CheckedPtr container = dynamicDowncast<LegacyRenderSVGResourceContainer>(renderer))
+        if (CheckedPtr container = dynamicDowncast<LegacyRenderSVGResourceContainer>(renderer()))
             container->idChanged();
         if (isConnected())
             buildPendingResourcesIfNeeded();
@@ -1029,7 +1043,11 @@ void SVGElement::svgAttributeChanged(const QualifiedName& attrName)
 Node::InsertedIntoAncestorResult SVGElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
     StyledElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
-    updateRelativeLengthsInformation();
+
+    if (!m_hasInitializedRelativeLengthsState)
+        updateRelativeLengthsInformation();
+    else if (RefPtr parentElement = dynamicDowncast<SVGElement>(parentNode()); parentElement && &parentOfInsertedTree == parentNode())
+        parentElement->updateRelativeLengthsInformationForChild(hasRelativeLengths(), *this);
 
     if (needsPendingResourceHandling() && insertionType.connectedToDocument && !isInShadowTree()) {
         if (treeScopeForSVGReferences().isIdOfPendingSVGResource(getIdAttribute()))
@@ -1051,23 +1069,23 @@ void SVGElement::buildPendingResourcesIfNeeded()
     if (!needsPendingResourceHandling() || !isConnected() || isInShadowTree())
         return;
 
-    auto& treeScope = treeScopeForSVGReferences();
+    CheckedRef treeScope = treeScopeForSVGReferences();
     auto resourceId = getIdAttribute();
-    if (!treeScope.isIdOfPendingSVGResource(resourceId))
+    if (!treeScope->isIdOfPendingSVGResource(resourceId))
         return;
 
-    treeScope.markPendingSVGResourcesForRemoval(resourceId);
+    treeScope->markPendingSVGResourcesForRemoval(resourceId);
 
     // Rebuild pending resources for each client of a pending resource that is being removed.
-    while (auto clientElement = treeScope.takeElementFromPendingSVGResourcesForRemovalMap(resourceId)) {
+    while (RefPtr clientElement = treeScope->takeElementFromPendingSVGResourcesForRemovalMap(resourceId)) {
         ASSERT(clientElement->hasPendingResources());
         if (clientElement->hasPendingResources()) {
             clientElement->buildPendingResource();
-            if (auto renderer = clientElement->renderer()) {
-                for (auto& ancestor : ancestorsOfType<LegacyRenderSVGResourceContainer>(*renderer))
-                    ancestor.markAllClientsForRepaint();
+            if (CheckedPtr renderer = clientElement->renderer()) {
+                for (CheckedRef ancestor : ancestorsOfType<LegacyRenderSVGResourceContainer>(*renderer))
+                    ancestor->markAllClientsForRepaint();
             }
-            treeScope.clearHasPendingSVGResourcesIfPossible(*clientElement);
+            treeScope->clearHasPendingSVGResourcesIfPossible(*clientElement);
         }
     }
 }
@@ -1102,26 +1120,32 @@ AffineTransform SVGElement::localCoordinateSpaceTransform(SVGLocatable::CTMScope
     return AffineTransform();
 }
 
-void SVGElement::updateRelativeLengthsInformation(bool hasRelativeLengths, SVGElement& element)
+void SVGElement::updateRelativeLengthsInformation()
 {
-    // If we're not yet in a document, this function will be called again from insertedIntoAncestor(). Do nothing now.
-    if (!isConnected())
-        return;
+    m_hasInitializedRelativeLengthsState = true;
+    m_selfHasRelativeLengths = selfHasRelativeLengths();
+    if (RefPtr parent = dynamicDowncast<SVGElement>(parentNode()))
+        parent->updateRelativeLengthsInformationForChild(hasRelativeLengths(), *this);
+}
 
-    // An element wants to notify us that its own relative lengths state changed.
-    // Register it in the relative length map, and register us in the parent relative length map.
-    // Register the parent in the grandparents map, etc. Repeat procedure until the root of the SVG tree.
-
-    if (hasRelativeLengths)
-        m_elementsWithRelativeLengths.add(element);
-    else {
-        if (!m_elementsWithRelativeLengths.remove(element))
-            return;
+void SVGElement::updateRelativeLengthsInformationForChild(bool hasRelativeLengths, SVGElement& element)
+{
+    ASSERT(element.parentNode() == this || (!hasRelativeLengths && !element.parentNode()));
+    bool notifyParent = false;
+    if (hasRelativeLengths) {
+        m_childElementsWithRelativeLengths.add(element);
+        notifyParent = !m_hasRegisteredWithParentForRelativeLengths;
+    } else {
+        m_childElementsWithRelativeLengths.remove(element);
+        notifyParent = m_childElementsWithRelativeLengths.isEmptyIgnoringNullReferences() && m_hasRegisteredWithParentForRelativeLengths;
     }
 
-    if (is<SVGGraphicsElement>(element)) {
-        if (RefPtr parent = dynamicDowncast<SVGElement>(parentNode()))
-            parent->updateRelativeLengthsInformation(hasRelativeLengths, *this);
+    if (!notifyParent)
+        return;
+
+    if (RefPtr parent = dynamicDowncast<SVGElement>(parentNode())) {
+        m_hasRegisteredWithParentForRelativeLengths = hasRelativeLengths;
+        parent->updateRelativeLengthsInformationForChild(hasRelativeLengths, *this);
     }
 }
 
@@ -1136,7 +1160,7 @@ void SVGElement::invalidateInstances()
         return;
 
     for (auto& instance : copyToVectorOf<Ref<SVGElement>>(instances())) {
-        if (auto useElement = instance->correspondingUseElement())
+        if (RefPtr useElement = instance->correspondingUseElement())
             useElement->invalidateShadowTree();
         instance->setCorrespondingElement(nullptr);
     }

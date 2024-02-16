@@ -32,7 +32,10 @@
 
 #if ENABLE(WK_WEB_EXTENSIONS)
 
+#import "WebProcessMessages.h"
+#import "WebProcessPool.h"
 #import "_WKWebExtensionMatchPatternInternal.h"
+#import <WebCore/PublicSuffix.h>
 #import <wtf/HashMap.h>
 #import <wtf/HashSet.h>
 #import <wtf/NeverDestroyed.h>
@@ -46,6 +49,12 @@ using namespace WebCore;
 
 static constexpr ASCIILiteral allURLsPattern = "<all_urls>"_s;
 static constexpr ASCIILiteral allHostsAndSchemesPattern = "*://*/*"_s;
+
+WebExtensionMatchPattern::URLSchemeSet& WebExtensionMatchPattern::extensionSchemes()
+{
+    static MainThreadNeverDestroyed<URLSchemeSet> schemes = std::initializer_list<String> { "webkit-extension"_s };
+    return schemes;
+}
 
 WebExtensionMatchPattern::URLSchemeSet& WebExtensionMatchPattern::validSchemes()
 {
@@ -70,8 +79,12 @@ void WebExtensionMatchPattern::registerCustomURLScheme(String urlScheme)
     auto canonicalScheme = URLParser::maybeCanonicalizeScheme(String(urlScheme));
     ASSERT(canonicalScheme);
 
+    extensionSchemes().addVoid(canonicalScheme.value());
     validSchemes().addVoid(canonicalScheme.value());
     supportedSchemes().addVoid(canonicalScheme.value());
+
+    for (auto& pool : WebProcessPool::allProcessPools())
+        pool->sendToAllProcesses(Messages::WebProcess::RegisterURLSchemeAsWebExtension(urlScheme));
 }
 
 RefPtr<WebExtensionMatchPattern> WebExtensionMatchPattern::getOrCreate(const String& pattern)
@@ -264,6 +277,15 @@ String WebExtensionMatchPattern::path() const
     if (!isValid() || matchesAllURLs())
         return nullString();
     return pattern().path();
+}
+
+bool WebExtensionMatchPattern::hostIsPublicSuffix() const
+{
+    auto host = pattern().host();
+    if (host.startsWith("*."_s))
+        host = host.substring(2);
+
+    return isPublicSuffix(host);
 }
 
 String WebExtensionMatchPattern::stringWithScheme(const String& differentScheme) const

@@ -58,7 +58,6 @@ public:
     bool isSyncMessage() const { return messageIsSync(messageName()); }
 
     void setShouldDispatchMessageWhenWaitingForSyncReply(ShouldDispatchWhenWaitingForSyncReply);
-    ShouldDispatchWhenWaitingForSyncReply shouldDispatchMessageWhenWaitingForSyncReply() const;
 
     bool isFullySynchronousModeForTesting() const;
     void setFullySynchronousModeForTesting();
@@ -71,15 +70,19 @@ public:
 
     void wrapForTesting(UniqueRef<Encoder>&&);
 
-    template<typename T, size_t Extent>
-    void encodeSpan(const std::span<T, Extent>&);
-    template<typename T>
-    void encodeObject(const T&);
+    template<typename T, size_t Extent> void encodeSpan(std::span<T, Extent>);
+    template<typename T> void encodeObject(const T&);
 
     template<typename T>
     Encoder& operator<<(T&& t)
     {
         ArgumentCoder<std::remove_cvref_t<T>, void>::encode(*this, std::forward<T>(t));
+        return *this;
+    }
+
+    Encoder& operator<<(Attachment&& attachment)
+    {
+        addAttachment(WTFMove(attachment));
         return *this;
     }
 
@@ -116,7 +119,7 @@ private:
 };
 
 template<typename T, size_t Extent>
-inline void Encoder::encodeSpan(const std::span<T, Extent>& span)
+inline void Encoder::encodeSpan(std::span<T, Extent> span)
 {
     auto* data = reinterpret_cast<const uint8_t*>(span.data());
     size_t size = span.size_bytes();

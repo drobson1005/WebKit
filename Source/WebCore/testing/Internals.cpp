@@ -186,7 +186,6 @@
 #include "RenderMenuList.h"
 #include "RenderSearchField.h"
 #include "RenderTheme.h"
-#include "RenderThemeIOS.h"
 #include "RenderTreeAsText.h"
 #include "RenderView.h"
 #include "RenderedDocumentMarker.h"
@@ -360,6 +359,7 @@
 
 #if PLATFORM(IOS_FAMILY)
 #include "MediaSessionHelperIOS.h"
+#include "RenderThemeIOS.h"
 #endif
 
 #if PLATFORM(COCOA)
@@ -499,6 +499,10 @@ static bool markerTypeFrom(const String& markerType, DocumentMarker::Type& resul
     else if (equalLettersIgnoringASCIICase(markerType, "telephonenumber"_s))
         result = DocumentMarker::Type::TelephoneNumber;
 #endif
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    else if (equalLettersIgnoringASCIICase(markerType, "unifiedtextreplacement"_s))
+        result = DocumentMarker::Type::UnifiedTextReplacement;
+#endif
     else
         return false;
 
@@ -592,10 +596,8 @@ void Internals::resetToConsistentState(Page& page)
 #if ENABLE(VIDEO) || ENABLE(WEB_AUDIO)
     PlatformMediaSessionManager::sharedManager().setIsPlayingToAutomotiveHeadUnit(false);
 #endif
-#if ENABLE(ACCESSIBILITY)
     AXObjectCache::setEnhancedUserInterfaceAccessibility(false);
     AXObjectCache::disableAccessibility();
-#endif
 
     MockPageOverlayClient::singleton().uninstallAllOverlays();
 
@@ -629,6 +631,7 @@ void Internals::resetToConsistentState(Page& page)
     auto& webRTCProvider = reinterpret_cast<LibWebRTCProvider&>(rtcProvider);
     WebCore::useRealRTCPeerConnectionFactory(webRTCProvider);
     webRTCProvider.disableNonLocalhostConnections();
+    webRTCProvider.setVP9HardwareSupportForTesting({ });
 #endif
     WebRTCProvider::setH264HardwareEncoderAllowed(true);
     page.settings().setWebRTCEncryptionEnabled(true);
@@ -642,7 +645,6 @@ void Internals::resetToConsistentState(Page& page)
 
     page.setFullscreenAutoHideDuration(0_s);
     page.setFullscreenInsets({ });
-    page.setFullscreenControlsHidden(false);
 
     MediaEngineConfigurationFactory::disableMock();
 
@@ -775,26 +777,27 @@ unsigned Internals::workerThreadCount() const
 
 ExceptionOr<bool> Internals::areSVGAnimationsPaused() const
 {
-    auto* document = contextDocument();
+    RefPtr document = contextDocument();
     if (!document)
         return Exception { ExceptionCode::InvalidAccessError, "No context document"_s };
 
-    if (!document->svgExtensions())
+    if (!document->svgExtensionsIfExists())
         return Exception { ExceptionCode::NotFoundError, "No SVG animations"_s };
 
-    return document->accessSVGExtensions().areAnimationsPaused();
+    return document->checkedSVGExtensions()->areAnimationsPaused();
 }
 
 ExceptionOr<double> Internals::svgAnimationsInterval(SVGSVGElement& element) const
 {
-    auto* document = contextDocument();
+    RefPtr document = contextDocument();
     if (!document)
         return 0;
 
-    if (!document->svgExtensions())
+    CheckedPtr svgExtensions = document->svgExtensionsIfExists();
+    if (!svgExtensions)
         return 0;
 
-    if (document->accessSVGExtensions().areAnimationsPaused())
+    if (svgExtensions->areAnimationsPaused())
         return 0;
 
     return element.timeContainer().animationFrameDelay().value();
@@ -803,10 +806,10 @@ ExceptionOr<double> Internals::svgAnimationsInterval(SVGSVGElement& element) con
 Vector<Ref<SVGSVGElement>> Internals::allSVGSVGElements() const
 {
     Vector<Ref<SVGSVGElement>> elements;
-    for (auto& document : Document::allDocuments()) {
-        if (!document->svgExtensions())
-            continue;
-        elements.appendVector(document->accessSVGExtensions().allSVGSVGElements());
+    for (auto& checkedDocument : Document::allDocuments()) {
+        Ref document = checkedDocument.get();
+        if (CheckedPtr svgExtensions = document->svgExtensionsIfExists())
+            elements.appendVector(svgExtensions->allSVGSVGElements());
     }
     return elements;
 }
@@ -1080,7 +1083,7 @@ static PDFDocumentImage* pdfDocumentImageFromImageElement(HTMLImageElement& elem
 unsigned Internals::imageFrameIndex(HTMLImageElement& element)
 {
     auto* bitmapImage = bitmapImageFromImageElement(element);
-    return bitmapImage ? bitmapImage->currentFrame() : 0;
+    return bitmapImage ? bitmapImage->currentFrameIndex() : 0;
 }
 
 unsigned Internals::imageFrameCount(HTMLImageElement& element)
@@ -1098,7 +1101,7 @@ float Internals::imageFrameDurationAtIndex(HTMLImageElement& element, unsigned i
 void Internals::setImageFrameDecodingDuration(HTMLImageElement& element, float duration)
 {
     if (auto* bitmapImage = bitmapImageFromImageElement(element))
-        bitmapImage->setFrameDecodingDurationForTesting(Seconds { duration });
+        bitmapImage->setMinimumDecodingDurationForTesting(Seconds { duration });
 }
 
 void Internals::resetImageAnimation(HTMLImageElement& element)
@@ -1130,6 +1133,19 @@ void Internals::pauseImageAnimation(HTMLImageElement& element)
     element.setAllowsAnimation(false);
 }
 #endif // ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
+
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+void Internals::setPrefersNonBlinkingCursor(bool enabled)
+{
+    auto* document = contextDocument();
+    if (RefPtr page = document ? document->page() : nullptr) {
+        page->setPrefersNonBlinkingCursor(enabled);
+        page->forEachDocument([&](auto& document) {
+            document.selection().setPrefersNonBlinkingCursor(enabled);
+        });
+    }
+}
+#endif
 
 unsigned Internals::imagePendingDecodePromisesCountForTesting(HTMLImageElement& element)
 {
@@ -1385,10 +1401,33 @@ void Internals::incrementFrequentPaintCounter(Element& element)
         element.renderer()->enclosingLayer()->simulateFrequentPaint();
 }
 
+void Internals::purgeFrontBuffer(Element& element)
+{
+    if (element.renderer()) {
+        if (CheckedPtr layer = element.renderer()->enclosingLayer())
+            layer->purgeFrontBufferForTesting();
+    }
+}
+
+void Internals::purgeBackBuffer(Element& element)
+{
+    if (element.renderer()) {
+        if (CheckedPtr layer = element.renderer()->enclosingLayer())
+            layer->purgeBackBufferForTesting();
+    }
+}
+
+void Internals::markFrontBufferVolatile(Element& element)
+{
+    if (element.renderer()) {
+        if (CheckedPtr layer = element.renderer()->enclosingLayer())
+            layer->markFrontBufferVolatileForTesting();
+    }
+}
+
 Ref<CSSComputedStyleDeclaration> Internals::computedStyleIncludingVisitedInfo(Element& element) const
 {
-    bool allowVisitedStyle = true;
-    return CSSComputedStyleDeclaration::create(element, allowVisitedStyle);
+    return CSSComputedStyleDeclaration::create(element, CSSComputedStyleDeclaration::AllowVisited::Yes);
 }
 
 Node* Internals::ensureUserAgentShadowRoot(Element& host)
@@ -1423,14 +1462,14 @@ ExceptionOr<String> Internals::shadowRootType(const Node& root) const
     }
 }
 
-const AtomString& Internals::userAgentPartId(Element& element)
+const AtomString& Internals::userAgentPart(Element& element)
 {
-    return element.pseudo();
+    return element.userAgentPart();
 }
 
-void Internals::setUserAgentPartId(Element& element, const AtomString& id)
+void Internals::setUserAgentPart(Element& element, const AtomString& part)
 {
-    return element.setPseudo(id);
+    return element.setUserAgentPart(part);
 }
 
 ExceptionOr<bool> Internals::isTimerThrottled(int timeoutId)
@@ -1521,6 +1560,8 @@ std::optional<Internals::EventThrottlingBehavior> Internals::eventThrottlingBeha
 
 String Internals::visiblePlaceholder(Element& element)
 {
+    element.document().updateLayout(LayoutOptions::IgnorePendingStylesheets);
+
     if (is<HTMLTextFormControlElement>(element)) {
         const HTMLTextFormControlElement& textFormControlElement = downcast<HTMLTextFormControlElement>(element);
         if (!textFormControlElement.isPlaceholderVisible())
@@ -1729,34 +1770,32 @@ void Internals::setWebRTCVP9Support(bool supportVP9Profile0, bool supportVP9Prof
     }
 }
 
-void Internals::setWebRTCVP9VTBSupport(bool value)
+void Internals::disableWebRTCHardwareVP9()
 {
 #if USE(LIBWEBRTC)
     if (auto* page = contextDocument()->page()) {
         auto& rtcProvider = static_cast<LibWebRTCProvider&>(page->webRTCProvider());
-        rtcProvider.setVP9VTBSupport(value);
+        rtcProvider.setVP9HardwareSupportForTesting(false);
         rtcProvider.clearFactory();
     }
-#else
-    UNUSED_PARAM(value);
 #endif
 }
 
-bool Internals::isSupportingVP9VTB() const
+bool Internals::isSupportingVP9HardwareDecoder() const
 {
 #if USE(LIBWEBRTC)
     if (auto* page = contextDocument()->page()) {
         auto& rtcProvider = static_cast<LibWebRTCProvider&>(page->webRTCProvider());
-        return rtcProvider.isSupportingVP9VTB();
+        return rtcProvider.isSupportingVP9HardwareDecoder();
     }
 #endif
     return false;
 }
 
-void Internals::isVP9VTBDeccoderUsed(RTCPeerConnection& connection, DOMPromiseDeferred<IDLBoolean>&& promise)
+void Internals::isVP9HardwareDecoderUsed(RTCPeerConnection& connection, DOMPromiseDeferred<IDLBoolean>&& promise)
 {
     connection.gatherDecoderImplementationName([promise = WTFMove(promise)](auto&& name) mutable {
-        promise.resolve(name.contains("VideoToolBox"_s));
+        promise.resolve(!name.contains("fallback from:"_s) && !name.contains("libvpx"_s));
     });
 }
 
@@ -1850,11 +1889,19 @@ ExceptionOr<Ref<DOMRect>> Internals::absoluteCaretBounds()
     
 ExceptionOr<bool> Internals::isCaretBlinkingSuspended()
 {
-    Document* document = contextDocument();
-    if (!document || !document->frame())
+    auto* document = contextDocument();
+    if (!document)
         return Exception { ExceptionCode::InvalidAccessError };
     
-    return document->frame()->selection().isCaretBlinkingSuspended();
+    return isCaretBlinkingSuspended(*document);
+}
+
+ExceptionOr<bool> Internals::isCaretBlinkingSuspended(Document& document)
+{
+    if (!document.frame())
+        return Exception { ExceptionCode::InvalidAccessError };
+
+    return document.frame()->selection().isCaretBlinkingSuspended();
 }
 
 Ref<DOMRect> Internals::boundingBox(Element& element)
@@ -2359,29 +2406,19 @@ ExceptionOr<void> Internals::invalidateControlTints()
     return { };
 }
 
-static TextIteratorBehaviors toTextIteratorBehaviors(const Vector<String>& stringBehaviors)
-{
-    TextIteratorBehaviors behaviors;
-    for (const auto& stringBehavior : stringBehaviors) {
-        if (stringBehavior == "IgnoresWhiteSpaceAtEndOfRun"_s)
-            behaviors.add(TextIteratorBehavior::IgnoresWhiteSpaceAtEndOfRun);
-    }
-    return behaviors;
-}
-
 RefPtr<Range> Internals::rangeFromLocationAndLength(Element& scope, unsigned rangeLocation, unsigned rangeLength)
 {
     return createLiveRange(resolveCharacterRange(makeRangeSelectingNodeContents(scope), { rangeLocation, rangeLength }));
 }
 
-unsigned Internals::locationFromRange(Element& scope, const Range& range, const Vector<String>& stringBehaviors)
+unsigned Internals::locationFromRange(Element& scope, const Range& range)
 {
-    return clampTo<unsigned>(characterRange(makeBoundaryPointBeforeNodeContents(scope), makeSimpleRange(range), toTextIteratorBehaviors(stringBehaviors)).location);
+    return clampTo<unsigned>(characterRange(makeBoundaryPointBeforeNodeContents(scope), makeSimpleRange(range)).location);
 }
 
-unsigned Internals::lengthFromRange(Element& scope, const Range& range, const Vector<String>& stringBehaviors)
+unsigned Internals::lengthFromRange(Element& scope, const Range& range)
 {
-    return clampTo<unsigned>(characterRange(makeBoundaryPointBeforeNodeContents(scope), makeSimpleRange(range), toTextIteratorBehaviors(stringBehaviors)).length);
+    return clampTo<unsigned>(characterRange(makeBoundaryPointBeforeNodeContents(scope), makeSimpleRange(range)).length);
 }
 
 String Internals::rangeAsText(const Range& liveRange)
@@ -2425,13 +2462,13 @@ RefPtr<Range> Internals::rangeOfStringNearLocation(const Range& liveRange, const
     return createLiveRange(findClosestPlainText(range, text, { }, targetOffset));
 }
 
-Vector<Internals::TextIteratorState> Internals::statesOfTextIterator(const Range& liveRange, const Vector<String>& stringBehaviors)
+Vector<Internals::TextIteratorState> Internals::statesOfTextIterator(const Range& liveRange)
 {
     auto simpleRange = makeSimpleRange(liveRange);
     simpleRange.start.document().updateLayout();
 
     Vector<TextIteratorState> states;
-    for (TextIterator it(simpleRange, toTextIteratorBehaviors(stringBehaviors)); !it.atEnd(); it.advance())
+    for (TextIterator it(simpleRange); !it.atEnd(); it.advance())
         states.append({ it.text().toString(), createLiveRange(it.range()) });
     return states;
 }
@@ -2720,6 +2757,13 @@ bool Internals::hasCorrectionIndicatorMarker(int from, int length)
 {
     return hasMarkerFor(DocumentMarker::Type::CorrectionIndicator, from, length);
 }
+
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+bool Internals::hasUnifiedTextReplacementMarker(int from, int length)
+{
+    return hasMarkerFor(DocumentMarker::Type::UnifiedTextReplacement, from, length);
+}
+#endif
 
 void Internals::setContinuousSpellCheckingEnabled(bool enabled)
 {
@@ -3159,13 +3203,14 @@ ExceptionOr<uint64_t> Internals::layerIDForElement(Element& element)
     return backing->graphicsLayer()->primaryLayerID().object().toUInt64();
 }
 
-ExceptionOr<uint64_t> Internals::scrollingNodeIDForNode(Node* node)
+ExceptionOr<Vector<uint64_t>> Internals::scrollingNodeIDForNode(Node* node)
 {
     auto areaOrException = scrollableAreaForNode(node);
     if (areaOrException.hasException())
         return areaOrException.releaseException();
     auto* scrollableArea = areaOrException.releaseReturnValue();
-    return scrollableArea->scrollingNodeID();
+    Vector<uint64_t> returnNodeID = { scrollableArea->scrollingNodeID().object().toUInt64(), scrollableArea->scrollingNodeID().processIdentifier().toUInt64() };
+    return returnNodeID;
 }
 
 static OptionSet<PlatformLayerTreeAsTextFlags> toPlatformLayerTreeFlags(unsigned short flags)
@@ -3780,14 +3825,6 @@ void Internals::setFullscreenAutoHideDuration(double duration)
     page->setFullscreenAutoHideDuration(Seconds(duration));
 }
 
-void Internals::setFullscreenControlsHidden(bool hidden)
-{
-    Page* page = contextDocument()->frame()->page();
-    ASSERT(page);
-
-    page->setFullscreenControlsHidden(hidden);
-}
-
 #if ENABLE(VIDEO)
 bool Internals::isChangingPresentationMode(HTMLVideoElement& element) const
 {
@@ -4237,7 +4274,7 @@ unsigned Internals::mediaElementCount()
         return 0;
 
     unsigned number = 0;
-    for (auto* mediaElement : HTMLMediaElement::allMediaElements()) {
+    for (auto& mediaElement : HTMLMediaElement::allMediaElements()) {
         if (&mediaElement->document() == document)
             ++number;
     }
@@ -4272,7 +4309,7 @@ Vector<String> Internals::mediaResponseContentRanges(HTMLMediaElement& media)
 void Internals::simulateAudioInterruption(HTMLMediaElement& element)
 {
 #if USE(GSTREAMER)
-    element.player()->simulateAudioInterruption();
+    element.protectedPlayer()->simulateAudioInterruption();
 #else
     UNUSED_PARAM(element);
 #endif
@@ -4292,13 +4329,13 @@ ExceptionOr<bool> Internals::mediaElementHasCharacteristic(HTMLMediaElement& ele
 
 void Internals::beginSimulatedHDCPError(HTMLMediaElement& element)
 {
-    if (auto player = element.player())
+    if (RefPtr player = element.player())
         player->beginSimulatedHDCPError();
 }
 
 void Internals::endSimulatedHDCPError(HTMLMediaElement& element)
 {
-    if (auto player = element.player())
+    if (RefPtr player = element.player())
         player->endSimulatedHDCPError();
 }
 
@@ -4785,14 +4822,20 @@ bool Internals::elementIsBlockingDisplaySleep(const HTMLMediaElement& element) c
 
 bool Internals::isPlayerVisibleInViewport(const HTMLMediaElement& element) const
 {
-    auto player = element.player();
+    RefPtr player = element.player();
     return player && player->isVisibleInViewport();
 }
 
 bool Internals::isPlayerMuted(const HTMLMediaElement& element) const
 {
-    auto player = element.player();
+    RefPtr player = element.player();
     return player && player->muted();
+}
+
+bool Internals::isPlayerPaused(const HTMLMediaElement& element) const
+{
+    RefPtr player = element.player();
+    return player && player->paused();
 }
 
 void Internals::beginAudioSessionInterruption()
@@ -5445,13 +5488,13 @@ bool Internals::isProcessingUserGesture()
     return UserGestureIndicator::processingUserGesture();
 }
 
-void Internals::withUserGesture(RefPtr<VoidCallback>&& callback)
+void Internals::withUserGesture(Ref<VoidCallback>&& callback)
 {
     UserGestureIndicator gestureIndicator(IsProcessingUserGesture::Yes, contextDocument());
     callback->handleEvent();
 }
 
-void Internals::withoutUserGesture(RefPtr<VoidCallback>&& callback)
+void Internals::withoutUserGesture(Ref<VoidCallback>&& callback)
 {
     UserGestureIndicator gestureIndicator(IsProcessingUserGesture::No, contextDocument());
     callback->handleEvent();
@@ -5647,7 +5690,7 @@ void Internals::markContextAsInsecure()
     document->securityOrigin().setIsPotentiallyTrustworthy(false);
 }
 
-void Internals::postTask(RefPtr<VoidCallback>&& callback)
+void Internals::postTask(Ref<VoidCallback>&& callback)
 {
     auto* document = contextDocument();
     if (!document) {
@@ -5667,7 +5710,7 @@ static std::optional<TaskSource> taskSourceFromString(const String& taskSourceNa
     return std::nullopt;
 }
 
-ExceptionOr<void> Internals::queueTask(ScriptExecutionContext& context, const String& taskSourceName, RefPtr<VoidCallback>&& callback)
+ExceptionOr<void> Internals::queueTask(ScriptExecutionContext& context, const String& taskSourceName, Ref<VoidCallback>&& callback)
 {
     auto source = taskSourceFromString(taskSourceName);
     if (!source)
@@ -5680,7 +5723,7 @@ ExceptionOr<void> Internals::queueTask(ScriptExecutionContext& context, const St
     return { };
 }
 
-ExceptionOr<void> Internals::queueTaskToQueueMicrotask(Document& document, const String& taskSourceName, RefPtr<VoidCallback>&& callback)
+ExceptionOr<void> Internals::queueTaskToQueueMicrotask(Document& document, const String& taskSourceName, Ref<VoidCallback>&& callback)
 {
     auto source = taskSourceFromString(taskSourceName);
     if (!source)
@@ -5967,6 +6010,19 @@ bool Internals::shouldAudioTrackPlay(const AudioTrack& track)
 }
 #endif
 
+bool Internals::isHardwareVP9DecoderExpected()
+{
+#if PLATFORM(IOS_FAMILY_SIMULATOR)
+    return false;
+#elif PLATFORM(IOS_FAMILY)
+    return true;
+#elif PLATFORM(MAC) && CPU(ARM64)
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool Internals::supportsAudioSession() const
 {
 #if USE(AUDIO_SESSION)
@@ -6184,6 +6240,11 @@ void Internals::whenServiceWorkerIsTerminated(ServiceWorker& worker, DOMPromiseD
     });
 }
 
+void Internals::terminateWebContentProcess()
+{
+    exit(0);
+}
+
 #if ENABLE(APPLE_PAY)
 MockPaymentCoordinator& Internals::mockPaymentCoordinator(Document& document)
 {
@@ -6221,17 +6282,14 @@ static TextRecognitionLineData makeDataForLine(const Internals::ImageOverlayLine
     };
 }
 
-void Internals::requestTextRecognition(Element& element, RefPtr<VoidCallback>&& callback)
+void Internals::requestTextRecognition(Element& element, Ref<VoidCallback>&& callback)
 {
     auto page = contextDocument()->page();
-    if (!page) {
-        if (callback)
-            callback->handleEvent();
-    }
+    if (!page)
+        callback->handleEvent();
 
     page->chrome().client().requestTextRecognition(element, { }, [callback = WTFMove(callback)] (auto&&) {
-        if (callback)
-            callback->handleEvent();
+        callback->handleEvent();
     });
 }
 
@@ -6264,7 +6322,7 @@ void Internals::installImageOverlay(Element& element, Vector<ImageOverlayLine>&&
             return TextRecognitionBlockData { block.text, getQuad(block) };
         })
 #if ENABLE(IMAGE_ANALYSIS_ENHANCEMENTS)
-        , fakeImageAnalysisResultForTesting(lines)
+        , TextRecognitionResult::encodeVKCImageAnalysis(fakeImageAnalysisResultForTesting(lines))
 #endif
     });
 #else
@@ -6984,7 +7042,7 @@ ExceptionOr<Vector<String>> Internals::platformSupportedCommands() const
 #endif
 
 #if ENABLE(MEDIA_SESSION_COORDINATOR)
-ExceptionOr<void> Internals::registerMockMediaSessionCoordinator(ScriptExecutionContext& context, RefPtr<StringCallback>&& listener)
+ExceptionOr<void> Internals::registerMockMediaSessionCoordinator(ScriptExecutionContext& context, Ref<StringCallback>&& listener)
 {
     if (m_mockMediaSessionCoordinator)
         return { };
@@ -7256,6 +7314,12 @@ bool Internals::readyToRetrieveComputedRoleOrLabel(Element& element) const
 
     // If the element needs a renderer but doesn't have one yet, we aren't ready to query the computed accessibility role or label. Doing so before the renderer has been attached will yield incorrect results.
     return !element.rendererIsNeeded(*computedStyle);
+}
+
+bool Internals::hasScopeBreakingHasSelectors() const
+{
+    contextDocument()->styleScope().flushPendingUpdate();
+    return !!contextDocument()->styleScope().resolver().ruleSets().scopeBreakingHasPseudoClassInvalidationRuleSet();
 }
 
 } // namespace WebCore

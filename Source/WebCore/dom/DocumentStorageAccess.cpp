@@ -29,6 +29,7 @@
 #include "Chrome.h"
 #include "ChromeClient.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "EventLoop.h"
 #include "FrameLoader.h"
 #include "JSDOMPromiseDeferred.h"
@@ -62,9 +63,9 @@ DocumentStorageAccess* DocumentStorageAccess::from(Document& document)
     return supplement;
 }
 
-const char* DocumentStorageAccess::supplementName()
+ASCIILiteral DocumentStorageAccess::supplementName()
 {
-    return "DocumentStorageAccess";
+    return "DocumentStorageAccess"_s;
 }
 
 void DocumentStorageAccess::hasStorageAccess(Document& document, Ref<DeferredPromise>&& promise)
@@ -201,7 +202,15 @@ void DocumentStorageAccess::requestStorageAccess(Ref<DeferredPromise>&& promise)
             return;
 
         // Consume the user gesture only if the user explicitly denied access.
-        bool shouldPreserveUserGesture = result.wasGranted == StorageAccessWasGranted::Yes || result.promptWasShown == StorageAccessPromptWasShown::No;
+        bool shouldPreserveUserGesture;
+        switch (result.wasGranted) {
+        case StorageAccessWasGranted::Yes:
+        case StorageAccessWasGranted::YesWithException:
+            shouldPreserveUserGesture = true;
+            break;
+        case StorageAccessWasGranted::No:
+            shouldPreserveUserGesture = result.promptWasShown == StorageAccessPromptWasShown::No;
+        }
 
         if (shouldPreserveUserGesture) {
             protectedDocument()->eventLoop().queueMicrotask([this, weakThis] {
@@ -210,9 +219,14 @@ void DocumentStorageAccess::requestStorageAccess(Ref<DeferredPromise>&& promise)
             });
         }
 
-        if (result.wasGranted == StorageAccessWasGranted::Yes)
+        switch (result.wasGranted) {
+        case StorageAccessWasGranted::Yes:
             promise->resolve();
-        else {
+            break;
+        case StorageAccessWasGranted::YesWithException:
+            promise->reject(ExceptionCode::NoModificationAllowedError);
+            break;
+        case StorageAccessWasGranted::No:
             if (result.promptWasShown == StorageAccessPromptWasShown::Yes)
                 setWasExplicitlyDeniedFrameSpecificStorageAccess();
             promise->reject();
@@ -265,11 +279,12 @@ void DocumentStorageAccess::requestStorageAccessQuirk(RegistrableDomain&& reques
 {
     Ref document = m_document.get();
     RELEASE_ASSERT(document->frame() && document->frame()->page());
+    RefPtr page = document->frame()->page();
 
-    auto topFrameDomain = RegistrableDomain(document->topDocument().url());
+    auto topFrameDomain = RegistrableDomain(page->mainFrameURL());
 
     RefPtr frame = document->frame();
-    frame->protectedPage()->chrome().client().requestStorageAccess(WTFMove(requestingDomain), WTFMove(topFrameDomain), *frame, m_storageAccessScope, [this, weakThis = WeakPtr { *this }, completionHandler = WTFMove(completionHandler)] (RequestStorageAccessResult result) mutable {
+    page->chrome().client().requestStorageAccess(WTFMove(requestingDomain), WTFMove(topFrameDomain), *frame, m_storageAccessScope, [this, weakThis = WeakPtr { *this }, completionHandler = WTFMove(completionHandler)] (RequestStorageAccessResult result) mutable {
         if (!weakThis)
             return;
 
@@ -283,9 +298,12 @@ void DocumentStorageAccess::requestStorageAccessQuirk(RegistrableDomain&& reques
             });
         }
 
-        if (result.wasGranted == StorageAccessWasGranted::Yes)
+        switch (result.wasGranted) {
+        case StorageAccessWasGranted::Yes:
+        case StorageAccessWasGranted::YesWithException:
             completionHandler(StorageAccessWasGranted::Yes);
-        else {
+            break;
+        case StorageAccessWasGranted::No:
             if (result.promptWasShown == StorageAccessPromptWasShown::Yes)
                 setWasExplicitlyDeniedFrameSpecificStorageAccess();
             completionHandler(StorageAccessWasGranted::No);

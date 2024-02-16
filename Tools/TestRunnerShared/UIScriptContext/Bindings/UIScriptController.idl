@@ -291,6 +291,10 @@ interface UIScriptController {
 
     undefined setScrollViewKeyboardAvoidanceEnabled(boolean enabled);
 
+    undefined beginInteractiveObscuredInsetsChange();
+    undefined endInteractiveObscuredInsetsChange();
+    undefined setObscuredInsets(double top, double right, double bottom, double left);
+
     undefined becomeFirstResponder();
     undefined resignFirstResponder();
     readonly attribute boolean isPresentingModally;
@@ -349,7 +353,7 @@ interface UIScriptController {
 
     object propertiesOfLayerWithID(unsigned long long layerID);
     
-    DOMString scrollbarStateForScrollingNodeID(unsigned long long scrollingNodeID, boolean isVertical);
+    DOMString scrollbarStateForScrollingNodeID(unsigned long long scrollingNodeID, unsigned long long processID, boolean isVertical);
 
     undefined retrieveSpeakSelectionContent(object callback);
     readonly attribute DOMString accessibilitySpeakSelectionContent;

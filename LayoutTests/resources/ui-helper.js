@@ -909,10 +909,11 @@ window.UIHelper = class UIHelper {
             return Promise.resolve();
 
         if (internals.isUsingUISideCompositing() && (!scroller || scroller.nodeName != "SELECT")) {
+            var scrollingNodeID = internalFunctions.scrollingNodeIDForNode(scroller);
             return new Promise(resolve => {
                 testRunner.runUIScript(`(function() {
                     uiController.doAfterNextStablePresentationUpdate(function() {
-                        uiController.uiScriptComplete(uiController.scrollbarStateForScrollingNodeID(${internalFunctions.scrollingNodeIDForNode(scroller)}, ${isVertical}));
+                        uiController.uiScriptComplete(uiController.scrollbarStateForScrollingNodeID(${scrollingNodeID[0]}, ${scrollingNodeID[1]}, ${isVertical}));
                     });
                 })()`, state => {
                     resolve(state);
@@ -1705,6 +1706,36 @@ window.UIHelper = class UIHelper {
             }
 
             requestAnimationFrame(animationFrame);
+        });
+    }
+
+    static beginInteractiveObscuredInsetsChange()
+    {
+        if (!this.isWebKit2() || !this.isIOSFamily())
+            return Promise.resolve();
+
+        return new Promise(resolve => {
+            testRunner.runUIScript("uiController.beginInteractiveObscuredInsetsChange()", resolve);
+        });
+    }
+
+    static endInteractiveObscuredInsetsChange()
+    {
+        if (!this.isWebKit2() || !this.isIOSFamily())
+            return Promise.resolve();
+
+        return new Promise(resolve => {
+            testRunner.runUIScript("uiController.endInteractiveObscuredInsetsChange()", resolve);
+        });
+    }
+
+    static setObscuredInsets(top, right, bottom, left)
+    {
+        if (!this.isWebKit2() || !this.isIOSFamily())
+            return Promise.resolve();
+
+        return new Promise(resolve => {
+            testRunner.runUIScript(`uiController.setObscuredInsets(${top}, ${right}, ${bottom}, ${left})`, resolve);
         });
     }
 

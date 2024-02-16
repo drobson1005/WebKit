@@ -20,6 +20,7 @@ set(WPEPlatform_SOURCES
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEKeyUnicode.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEKeymap.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEKeymapXKB.cpp
+    ${WEBKIT_DIR}/WPEPlatform/wpe/WPEMonitor.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEVersion.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEView.cpp
     ${WPEPlatform_DERIVED_SOURCES_DIR}/wpe/WPEEnumTypes.cpp
@@ -38,6 +39,7 @@ set(WPEPlatform_INSTALLED_HEADERS
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEKeymap.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEKeymapXKB.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEKeysyms.h
+    ${WEBKIT_DIR}/WPEPlatform/wpe/WPEMonitor.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEView.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/wpe-platform.h
     ${WPEPlatform_DERIVED_SOURCES_DIR}/wpe/WPEConfig.h
@@ -74,15 +76,14 @@ set(WPEPlatform_PRIVATE_INCLUDE_DIRECTORIES
 
 set(WPEPlatform_SYSTEM_INCLUDE_DIRECTORIES
     ${GLIB_INCLUDE_DIRS}
-    ${LIBEPOXY_INCLUDE_DIRS}
 )
 
 set(WPEPlatform_LIBRARIES
+    Epoxy::Epoxy
     WTF
     ${GLIB_GIO_LIBRARIES}
     ${GLIB_GOBJECT_LIBRARIES}
     ${GLIB_LIBRARIES}
-    ${LIBEPOXY_LIBRARIES}
     ${LIBXKBCOMMON_LIBRARIES}
 )
 

@@ -71,7 +71,7 @@ void ThreadedScrollingCoordinator::commitTreeStateIfNeeded()
 WheelEventHandlingResult ThreadedScrollingCoordinator::handleWheelEventForScrolling(const PlatformWheelEvent& wheelEvent, ScrollingNodeID targetNodeID, std::optional<WheelScrollGestureState> gestureState)
 {
     ASSERT(isMainThread());
-    ASSERT(m_page);
+    ASSERT(page());
     ASSERT(scrollingTree());
 
     if (scrollingTree()->willWheelEventStartSwipeGesture(wheelEvent))
@@ -79,7 +79,7 @@ WheelEventHandlingResult ThreadedScrollingCoordinator::handleWheelEventForScroll
 
     LOG_WITH_STREAM(Scrolling, stream << "ThreadedScrollingCoordinator::handleWheelEventForScrolling " << wheelEvent << " - sending event to scrolling thread, node " << targetNodeID << " gestureState " << gestureState);
 
-    auto deferrer = WheelEventTestMonitorCompletionDeferrer { m_page->wheelEventTestMonitor().get(), reinterpret_cast<WheelEventTestMonitor::ScrollableAreaIdentifier>(targetNodeID), WheelEventTestMonitor::DeferReason::PostMainThreadWheelEventHandling };
+    auto deferrer = WheelEventTestMonitorCompletionDeferrer { page()->wheelEventTestMonitor().get(), reinterpret_cast<WheelEventTestMonitor::ScrollableAreaIdentifier>(targetNodeID.object().toUInt64()), WheelEventTestMonitor::DeferReason::PostMainThreadWheelEventHandling };
 
     RefPtr<ThreadedScrollingTree> threadedScrollingTree = downcast<ThreadedScrollingTree>(scrollingTree());
     ScrollingThread::dispatch([threadedScrollingTree, wheelEvent, targetNodeID, gestureState, deferrer = WTFMove(deferrer)] {
@@ -109,7 +109,10 @@ void ThreadedScrollingCoordinator::didScheduleRenderingUpdate()
 
 void ThreadedScrollingCoordinator::willStartRenderingUpdate()
 {
-    RefPtr<ThreadedScrollingTree> threadedScrollingTree = downcast<ThreadedScrollingTree>(scrollingTree());
+    ASSERT(isMainThread());
+    if (RefPtr page = this->page())
+        page->layoutIfNeeded(LayoutOptions::UpdateCompositingLayers);
+    RefPtr threadedScrollingTree = downcast<ThreadedScrollingTree>(scrollingTree());
     threadedScrollingTree->willStartRenderingUpdate();
     commitTreeStateIfNeeded();
     synchronizeStateFromScrollingTree();

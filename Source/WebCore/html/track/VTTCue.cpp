@@ -54,7 +54,7 @@
 #include "TextTrack.h"
 #include "TextTrackCueGeneric.h"
 #include "TextTrackCueList.h"
-#include "UserAgentPartIds.h"
+#include "UserAgentParts.h"
 #include "VTTRegionList.h"
 #include "VTTScanner.h"
 #include "WebVTTElement.h"
@@ -257,7 +257,7 @@ void VTTCueBox::applyCSSProperties()
     // The font shorthand property on the (root) list of WebVTT Node Objects
     // must be set to 5vh sans-serif. [CSS-VALUES]
     // NOTE: We use 'cqh' rather than 'vh' as the video element is not a proper viewport.
-    setInlineStyleProperty(CSSPropertyFontSize, cue->fontSize(), CSSUnitType::CSS_CQH, cue->fontSizeIsImportant());
+    setInlineStyleProperty(CSSPropertyFontSize, cue->fontSize(), CSSUnitType::CSS_CQMIN, cue->fontSizeIsImportant());
 
     if (!cue->snapToLines()) {
         setInlineStyleProperty(CSSPropertyWhiteSpaceCollapse, CSSValuePreserve);
@@ -956,9 +956,9 @@ void VTTCue::obtainCSSBoxes()
     // background box.
 
     // Note: This is contained by default in m_cueHighlightBox.
-    m_cueHighlightBox->setPseudo(UserAgentPartIds::cue());
+    m_cueHighlightBox->setUserAgentPart(UserAgentParts::cue());
 
-    m_cueBackdropBox->setPseudo(UserAgentPartIds::webkitMediaTextTrackDisplayBackdrop());
+    m_cueBackdropBox->setUserAgentPart(UserAgentParts::webkitMediaTextTrackDisplayBackdrop());
     m_cueBackdropBox->appendChild(m_cueHighlightBox);
     displayTree->appendChild(m_cueBackdropBox);
 
@@ -1446,7 +1446,7 @@ void VTTCue::prepareToSpeak(SpeechSynthesis& speechSynthesis, double rate, doubl
 
     auto& track = *this->track();
     m_speechSynthesis = &speechSynthesis;
-    m_speechUtterance = SpeechSynthesisUtterance::create(track.document(), m_content, [protectedThis = Ref { *this }, completion = WTFMove(completion)](const SpeechSynthesisUtterance&) {
+    m_speechUtterance = SpeechSynthesisUtterance::create(*track.scriptExecutionContext(), m_content, [protectedThis = Ref { *this }, completion = WTFMove(completion)](const SpeechSynthesisUtterance&) {
         protectedThis->m_speechUtterance = nullptr;
         protectedThis->m_speechSynthesis = nullptr;
         completion(protectedThis.get());

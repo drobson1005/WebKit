@@ -251,7 +251,7 @@ static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestTypedefsConstructor);
 using JSTestGlobalObjectDOMConstructor = JSDOMConstructorNotConstructable<JSTestGlobalObject>;
 
 /* Hash table */
-#if PLATFORM(MAC)
+#if ENABLE(WYHASH_STRING_HASHER)
 
 static const struct CompactHashIndex JSTestGlobalObjectTableIndex[268] = {
     { -1, -1 },
@@ -1104,12 +1104,12 @@ void JSTestGlobalObject::destroy(JSC::JSCell* cell)
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObjectConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName))
 {
-    VM& vm = JSC::getVM(lexicalGlobalObject);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
     auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto* prototype = jsDynamicCast<JSTestGlobalObjectPrototype*>(JSValue::decode(thisValue));
     if (UNLIKELY(!prototype))
         return throwVMTypeError(lexicalGlobalObject, throwScope);
-    return JSValue::encode(JSTestGlobalObject::getConstructor(JSC::getVM(lexicalGlobalObject), prototype->globalObject()));
+    return JSValue::encode(JSTestGlobalObject::getConstructor(vm, prototype->globalObject()));
 }
 
 static inline JSValue jsTestGlobalObject_regularAttributeGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
@@ -2270,7 +2270,7 @@ void JSTestGlobalObjectOwner::finalize(JSC::Handle<JSC::Unknown> handle, void* c
 {
     auto* jsTestGlobalObject = static_cast<JSTestGlobalObject*>(handle.slot()->asCell());
     auto& world = *static_cast<DOMWrapperWorld*>(context);
-    uncacheWrapper(world, &jsTestGlobalObject->wrapped(), jsTestGlobalObject);
+    uncacheWrapper(world, jsTestGlobalObject->protectedWrapped().ptr(), jsTestGlobalObject);
 }
 
 TestGlobalObject* JSTestGlobalObject::toWrapped(JSC::VM&, JSC::JSValue value)

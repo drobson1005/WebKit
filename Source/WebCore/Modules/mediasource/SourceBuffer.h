@@ -51,6 +51,7 @@ class AudioTrackList;
 class BufferSource;
 class MediaSource;
 class PlatformTimeRanges;
+class Settings;
 class SourceBufferPrivate;
 class TextTrackList;
 class TimeRanges;
@@ -120,7 +121,6 @@ public:
     using SourceBufferPrivateClient::ref;
     using SourceBufferPrivateClient::deref;
 
-    Document& document() const;
     enum class AppendMode { Segments, Sequence };
     AppendMode mode() const { return m_mode; }
     ExceptionOr<void> setMode(AppendMode);
@@ -151,6 +151,7 @@ public:
 
 protected:
     SourceBuffer(Ref<SourceBufferPrivate>&&, MediaSource&);
+    const Settings& settings() const;
 
 private:
     void refEventTarget() final { ref(); }
@@ -165,7 +166,6 @@ private:
     Ref<MediaPromise> sourceBufferPrivateBufferedChanged(const Vector<PlatformTimeRanges>&, uint64_t) final;
     void sourceBufferPrivateHighestPresentationTimestampChanged(const MediaTime&) final;
     Ref<MediaPromise> sourceBufferPrivateDurationChanged(const MediaTime& duration) final;
-    void sourceBufferPrivateDidParseSample(double sampleDuration) final;
     void sourceBufferPrivateDidDropSample() final;
     void sourceBufferPrivateDidReceiveRenderingError(int64_t errorCode) final;
 
@@ -202,8 +202,6 @@ private:
 
     uint64_t maximumBufferSize() const;
 
-    void monitorBufferingRate();
-
     void reportExtraMemoryAllocated(uint64_t extraMemory);
 
     void appendError(bool);
@@ -218,6 +216,9 @@ private:
     WEBCORE_EXPORT Ref<SamplesPromise> enqueuedSamplesForTrackID(TrackID);
     WEBCORE_EXPORT MediaTime minimumUpcomingPresentationTimeForTrackID(TrackID);
     WEBCORE_EXPORT void setMaximumQueueDepthForTrackID(TrackID, uint64_t);
+
+    void ensureWeakOnDispatcher(Function<void()>&&) const;
+    Ref<MediaPromise> promisedWeakOnDispatcher(Function<Ref<MediaPromise>()>&&, bool forceAsync = false) const;
 
     void updateBuffered();
 
@@ -244,9 +245,6 @@ private:
     enum AppendStateType { WaitingForSegment, ParsingInitSegment, ParsingMediaSegment };
     AppendStateType m_appendState;
 
-    MonotonicTime m_timeOfBufferingMonitor;
-    double m_bufferedSinceLastMonitor { 0 };
-    double m_averageBufferRate { 0 };
     bool m_bufferedDirty { true };
 
     // Can only grow.
@@ -262,8 +260,9 @@ private:
     bool m_mediaSourceEnded { false };
     Ref<TimeRanges> m_buffered;
     Vector<PlatformTimeRanges> m_trackBuffers;
-    NativePromiseRequest<MediaPromise> m_appendBufferPromise;
-    NativePromiseRequest<MediaPromise> m_removeCodedFramesPromise;
+    NativePromiseRequest m_appendBufferPromise;
+    NativePromiseRequest m_removeCodedFramesPromise;
+    const Ref<RefCountedSerialFunctionDispatcher> m_dispatcher;
 
 #if !RELEASE_LOG_DISABLED
     Ref<const Logger> m_logger;

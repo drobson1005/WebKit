@@ -713,7 +713,6 @@ static void registerWithAccessibility()
     if (![[NSBundle bundleWithPath:bundlePath] loadAndReturnError:&error])
         LOG_ERROR("Failed to load accessibility bundle at %@: %@", bundlePath, error);
 
-#if !PLATFORM(MACCATALYST)
     // This code will eagerly start the in-process AX server.
     // This enables us to revoke the Mach bootstrap sandbox extension.
     NSString *webProcessAXBundlePath = webProcessAccessibilityBundlePath();
@@ -723,7 +722,6 @@ static void registerWithAccessibility()
         [[bundle principalClass] safeValueForKey:@"accessibilityInitializeBundle"];
     else
         LOG_ERROR("Failed to load accessibility bundle at %@: %@", webProcessAXBundlePath, error);
-#endif // !PLATFORM(MACCATALYST)
 #endif
 }
 
@@ -840,7 +838,7 @@ static void registerLogHook()
             char* messageString = os_log_copy_message_string(&msg);
             if (!messageString)
                 return;
-            IPC::DataReference logString(reinterpret_cast<uint8_t*>(messageString), strlen(messageString) + 1);
+            std::span logString(reinterpret_cast<uint8_t*>(messageString), strlen(messageString) + 1);
 
             auto connectionID = WebProcess::singleton().networkProcessConnectionID();
             if (connectionID)
@@ -945,26 +943,13 @@ void WebProcess::initializeSandbox(const AuxiliaryProcessInitializationParameter
 
 static NSURL *origin(WebPage& page)
 {
-    Ref mainFrame = page.mainWebFrame();
-
-    URL mainFrameURL = mainFrame->url();
-    Ref<SecurityOrigin> mainFrameOrigin = SecurityOrigin::create(mainFrameURL);
-    String mainFrameOriginString;
-    if (!mainFrameOrigin->isOpaque())
-        mainFrameOriginString = mainFrameOrigin->toRawString();
-    else
-        mainFrameOriginString = makeString(mainFrameURL.protocol(), ':'); // toRawString() is not supposed to work with opaque origins, and would just return "://".
-
+    auto rootFrameOriginString = page.rootFrameOriginString();
     // +[NSURL URLWithString:] returns nil when its argument is malformed. It's unclear when we would have a malformed URL here,
     // but it happens in practice according to <rdar://problem/14173389>. Leaving an assertion in to catch a reproducible case.
-    ASSERT([NSURL URLWithString:mainFrameOriginString]);
-
-    return [NSURL URLWithString:mainFrameOriginString];
+    ASSERT([NSURL URLWithString:rootFrameOriginString]);
+    return [NSURL URLWithString:rootFrameOriginString];
 }
 
-#endif
-
-#if PLATFORM(MAC)
 static Vector<String> activePagesOrigins(const HashMap<PageIdentifier, RefPtr<WebPage>>& pageMap)
 {
     Vector<String> origins;
@@ -1259,9 +1244,11 @@ void WebProcess::accessibilityPreferencesDidChange(const AccessibilityPreference
     FontCache::invalidateAllFontCaches();
 #if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
     m_imageAnimationEnabled = preferences.imageAnimationEnabled;
-    for (auto& page : m_pageMap.values())
-        page->updateImageAnimationEnabled();
 #endif
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    m_prefersNonBlinkingCursor = preferences.prefersNonBlinkingCursor;
+#endif
+    updatePageAccessibilitySettings();
 }
 
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK)
@@ -1276,6 +1263,21 @@ void WebProcess::setMediaAccessibilityPreferences(WebCore::CaptionUserPreference
     }
 }
 #endif
+
+void WebProcess::updatePageAccessibilitySettings()
+{
+#if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL) || ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    for (auto& page : m_pageMap.values()) {
+#if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
+        page->updateImageAnimationEnabled();
+#endif
+
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+        page->updatePrefersNonBlinkingCursor();
+#endif
+    }
+#endif // ENABLE(ACCESSIBILITY_ANIMATION_CONTROL) || ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+}
 
 #if PLATFORM(MAC) || PLATFORM(MACCATALYST)
 void WebProcess::colorPreferencesDidChange()
@@ -1438,9 +1440,10 @@ void WebProcess::updatePageScreenProperties()
 
 void WebProcess::unblockServicesRequiredByAccessibility(Vector<SandboxExtension::Handle>&& handles)
 {
-    Vector<RefPtr<SandboxExtension>> extensions = WTF::map(WTFMove(handles), [](SandboxExtension::Handle&& handle) {
+    auto extensions = WTF::compactMap(WTFMove(handles), [](SandboxExtension::Handle&& handle) -> RefPtr<SandboxExtension> {
         auto extension = SandboxExtension::create(WTFMove(handle));
-        extension->consume();
+        if (extension)
+            extension->consume();
         return extension;
     });
 

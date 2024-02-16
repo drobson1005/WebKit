@@ -68,6 +68,7 @@
 #include "LocalFrame.h"
 #include "LocalFrameLoaderClient.h"
 #include "Logging.h"
+#include "MIMETypeRegistry.h"
 #include "MemoryCache.h"
 #include "MixedContentChecker.h"
 #include "NavigationRequester.h"
@@ -191,6 +192,11 @@ FrameLoader* DocumentLoader::frameLoader() const
     if (!m_frame)
         return nullptr;
     return &m_frame->loader();
+}
+
+CheckedPtr<FrameLoader> DocumentLoader::checkedFrameLoader() const
+{
+    return frameLoader();
 }
 
 SubresourceLoader* DocumentLoader::mainResourceLoader() const
@@ -734,7 +740,7 @@ void DocumentLoader::willSendRequest(ResourceRequest&& newRequest, const Resourc
         if (!parentFrame)
             return completionHandler(WTFMove(newRequest));
 
-        if (!MixedContentChecker::frameAndAncestorsCanDisplayInsecureContent(*parentFrame, MixedContentChecker::ContentType::Active, newRequest.url())) {
+        if (MixedContentChecker::shouldBlockRequestForDisplayableContent(*parentFrame, newRequest.url(), MixedContentChecker::ContentType::Active)) {
             cancelMainResourceLoad(frameLoader()->cancelledError(newRequest));
             return completionHandler(WTFMove(newRequest));
         }
@@ -1031,10 +1037,8 @@ void DocumentLoader::responseReceived(const ResourceResponse& response, Completi
     RefPtr<SubresourceLoader> mainResourceLoader = this->mainResourceLoader();
     if (mainResourceLoader)
         mainResourceLoader->markInAsyncResponsePolicyCheck();
-    auto requestIdentifier = PolicyCheckIdentifier::generate();
-    frameLoader()->checkContentPolicy(m_response, requestIdentifier, [this, protectedThis = Ref { *this }, mainResourceLoader = WTFMove(mainResourceLoader),
-        completionHandler = completionHandlerCaller.release(), requestIdentifier] (PolicyAction policy, PolicyCheckIdentifier responseIdentifier) mutable {
-        RELEASE_ASSERT(responseIdentifier == requestIdentifier);
+    frameLoader()->checkContentPolicy(m_response, [this, protectedThis = Ref { *this }, mainResourceLoader = WTFMove(mainResourceLoader),
+        completionHandler = completionHandlerCaller.release()] (PolicyAction policy) mutable {
         continueAfterContentPolicy(policy);
         if (mainResourceLoader)
             mainResourceLoader->didReceiveResponsePolicy();
@@ -1050,20 +1054,8 @@ void DocumentLoader::responseReceived(const ResourceResponse& response, Completi
 // because they can claim to be from any domain and thus avoid cross-domain security checks (4120255, 45524528, 47610130).
 bool DocumentLoader::disallowWebArchive() const
 {
-    using MIMETypeHashSet = HashSet<String, ASCIICaseInsensitiveHash>;
-    static NeverDestroyed<MIMETypeHashSet> webArchiveMIMETypes {
-        MIMETypeHashSet {
-            "application/x-webarchive"_s,
-            "application/x-mimearchive"_s,
-            "multipart/related"_s,
-#if PLATFORM(GTK)
-            "message/rfc822"_s,
-#endif
-        }
-    };
-
     String mimeType = m_response.mimeType();
-    if (mimeType.isNull() || !webArchiveMIMETypes.get().contains(mimeType))
+    if (mimeType.isNull() || !MIMETypeRegistry::isWebArchiveMIMEType(mimeType))
         return false;
 
 #if USE(QUICK_LOOK)
@@ -1077,16 +1069,16 @@ bool DocumentLoader::disallowWebArchive() const
     if (!LegacySchemeRegistry::shouldTreatURLSchemeAsLocal(m_request.url().protocol()))
         return true;
 
-    if (!frame() || (frame()->isMainFrame() && allowsWebArchiveForMainFrame()))
-        return false;
-
+#if ENABLE(WEB_ARCHIVE)
     // On purpose of maintaining existing tests.
     auto* localFrame = dynamicDowncast<LocalFrame>(frame()->mainFrame());
-    if (!localFrame)
+    bool alwaysAllowLocalWebArchive = localFrame && localFrame->settings().alwaysAllowLocalWebarchive();
+#else
+    bool alwaysAllowLocalWebArchive { false };
+#endif
+    if (!frame() || (frame()->isMainFrame() && allowsWebArchiveForMainFrame()) || alwaysAllowLocalWebArchive)
         return false;
 
-    if (localFrame->loader().alwaysAllowLocalWebarchive())
-        return false;
     return true;
 }
 
@@ -1183,9 +1175,8 @@ void DocumentLoader::continueAfterContentPolicy(PolicyAction policy)
     if (m_response.isInHTTPFamily()) {
         int status = m_response.httpStatusCode(); // Status may be zero when loading substitute data, in particular from a WebArchive.
         if (status && (status < 200 || status >= 300)) {
-            auto* owner = m_frame->ownerElement();
-            if (is<HTMLObjectElement>(owner)) {
-                downcast<HTMLObjectElement>(*owner).renderFallbackContent();
+            if (RefPtr owner = dynamicDowncast<HTMLObjectElement>(m_frame->ownerElement())) {
+                owner->renderFallbackContent();
                 // object elements are no longer rendered after we fallback, so don't
                 // keep trying to process data from their load
                 cancelMainResourceLoad(frameLoader()->cancelledError(m_request));
@@ -1346,17 +1337,17 @@ void DocumentLoader::commitData(const SharedBuffer& data)
     }
 
 #if ENABLE(CONTENT_EXTENSIONS)
-    auto& extensionStyleSheets = m_frame->document()->extensionStyleSheets();
-
-    for (auto& pendingStyleSheet : m_pendingNamedContentExtensionStyleSheets)
-        extensionStyleSheets.maybeAddContentExtensionSheet(pendingStyleSheet.key, *pendingStyleSheet.value);
-    for (auto& pendingSelectorEntry : m_pendingContentExtensionDisplayNoneSelectors) {
-        for (const auto& pendingSelector : pendingSelectorEntry.value)
-            extensionStyleSheets.addDisplayNoneSelector(pendingSelectorEntry.key, pendingSelector.first, pendingSelector.second);
+    if (!m_pendingNamedContentExtensionStyleSheets.isEmpty() || !m_pendingContentExtensionDisplayNoneSelectors.isEmpty()) {
+        auto& extensionStyleSheets = m_frame->document()->extensionStyleSheets();
+        for (auto& pendingStyleSheet : m_pendingNamedContentExtensionStyleSheets)
+            extensionStyleSheets.maybeAddContentExtensionSheet(pendingStyleSheet.key, *pendingStyleSheet.value);
+        for (auto& pendingSelectorEntry : m_pendingContentExtensionDisplayNoneSelectors) {
+            for (const auto& pendingSelector : pendingSelectorEntry.value)
+                extensionStyleSheets.addDisplayNoneSelector(pendingSelectorEntry.key, pendingSelector.first, pendingSelector.second);
+        }
+        m_pendingNamedContentExtensionStyleSheets.clear();
+        m_pendingContentExtensionDisplayNoneSelectors.clear();
     }
-
-    m_pendingNamedContentExtensionStyleSheets.clear();
-    m_pendingContentExtensionDisplayNoneSelectors.clear();
 #endif
 
     ASSERT(m_frame->document()->parsing());
@@ -1496,7 +1487,7 @@ void DocumentLoader::attachToFrame()
     DOCUMENTLOADER_RELEASE_LOG("DocumentLoader::attachToFrame: m_frame=%p", m_frame.get());
 }
 
-void DocumentLoader::detachFromFrame(LoadWillContinueInAnotherProcess)
+void DocumentLoader::detachFromFrame(LoadWillContinueInAnotherProcess loadWillContinueInAnotherProcess)
 {
     DOCUMENTLOADER_RELEASE_LOG("DocumentLoader::detachFromFrame: m_frame=%p", m_frame.get());
 
@@ -1530,9 +1521,18 @@ void DocumentLoader::detachFromFrame(LoadWillContinueInAnotherProcess)
     if (!m_frame)
         return;
 
+    if (auto navigationID = std::exchange(m_navigationID, 0))
+        m_frame->loader().client().documentLoaderDetached(navigationID, loadWillContinueInAnotherProcess);
+
     InspectorInstrumentation::loaderDetachedFromFrame(*m_frame, *this);
 
     observeFrame(nullptr);
+}
+
+void DocumentLoader::setNavigationID(uint64_t navigationID)
+{
+    ASSERT(navigationID);
+    m_navigationID = navigationID;
 }
 
 void DocumentLoader::clearMainResourceLoader()
@@ -1923,9 +1923,9 @@ URL DocumentLoader::documentURL() const
 #if PLATFORM(IOS_FAMILY)
 
 // FIXME: This method seems to violate the encapsulation of this class.
-void DocumentLoader::setResponseMIMEType(const AtomString& responseMIMEType)
+void DocumentLoader::setResponseMIMEType(const String& responseMIMEType)
 {
-    m_response.setMimeType(responseMIMEType);
+    m_response.setMimeType(String { responseMIMEType });
 }
 
 #endif
@@ -2045,7 +2045,7 @@ bool DocumentLoader::maybeLoadEmpty()
             frameLoader()->client().dispatchDidChangeProvisionalURL();
     }
 
-    String mimeType = shouldLoadEmpty ? "text/html"_s : frameLoader()->client().generatedMIMETypeForURLScheme(m_request.url().protocol());
+    String mimeType = shouldLoadEmpty ? textHTMLContentTypeAtom() : frameLoader()->client().generatedMIMETypeForURLScheme(m_request.url().protocol());
     m_response = ResourceResponse(m_request.url(), mimeType, 0, "UTF-8"_s);
 
     if (!frameLoader()->stateMachine().isDisplayingInitialEmptyDocument()) {
@@ -2063,7 +2063,7 @@ bool DocumentLoader::maybeLoadEmpty()
 
 void DocumentLoader::loadErrorDocument()
 {
-    m_response = ResourceResponse(m_request.url(), "text/html"_s, 0, "UTF-8"_s);
+    m_response = ResourceResponse(m_request.url(), textHTMLContentTypeAtom(), 0, "UTF-8"_s);
     SetForScope isInFinishedLoadingOfEmptyDocument { m_isInFinishedLoadingOfEmptyDocument, true };
 
     commitIfReady();
@@ -2615,6 +2615,11 @@ bool DocumentLoader::allowsActiveContentRuleListActionsForURL(const String& cont
 bool DocumentLoader::fingerprintingProtectionsEnabled() const
 {
     return m_advancedPrivacyProtections.contains(AdvancedPrivacyProtections::FingerprintingProtections);
+}
+
+Ref<CachedResourceLoader> DocumentLoader::protectedCachedResourceLoader() const
+{
+    return m_cachedResourceLoader;
 }
 
 } // namespace WebCore

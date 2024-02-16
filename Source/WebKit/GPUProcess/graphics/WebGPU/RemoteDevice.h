@@ -58,13 +58,13 @@ class StreamServerConnection;
 
 namespace WebCore {
 class MediaPlayer;
+class SharedMemoryHandle;
 class VideoFrame;
 }
 
 namespace WebKit {
 
 class RemoteGPU;
-class SharedMemoryHandle;
 struct SharedVideoFrame;
 
 namespace WebGPU {
@@ -138,12 +138,13 @@ private:
     void createQuerySet(const WebGPU::QuerySetDescriptor&, WebGPUIdentifier);
 
     void pushErrorScope(WebCore::WebGPU::ErrorFilter);
-    void popErrorScope(CompletionHandler<void(std::optional<WebGPU::Error>&&)>&&);
+    void popErrorScope(CompletionHandler<void(bool, std::optional<WebGPU::Error>&&)>&&);
+    void resolveUncapturedErrorEvent(CompletionHandler<void(bool, std::optional<WebGPU::Error>&&)>&&);
     void resolveDeviceLostPromise(CompletionHandler<void(WebCore::WebGPU::DeviceLostReason)>&&);
 
     void setLabel(String&&);
     void setSharedVideoFrameSemaphore(IPC::Semaphore&&);
-    void setSharedVideoFrameMemory(SharedMemoryHandle&&);
+    void setSharedVideoFrameMemory(WebCore::SharedMemoryHandle&&);
 
     Ref<WebCore::WebGPU::Device> m_backing;
     WebGPU::ObjectHeap& m_objectHeap;

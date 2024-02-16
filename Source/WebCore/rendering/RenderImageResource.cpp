@@ -57,7 +57,7 @@ void RenderImageResource::shutdown()
     setCachedImage(nullptr);
 }
 
-void RenderImageResource::setCachedImage(CachedImage* newImage)
+void RenderImageResource::setCachedImage(CachedResourceHandle<CachedImage>&& newImage)
 {
     if (m_cachedImage == newImage)
         return;
@@ -68,7 +68,7 @@ void RenderImageResource::setCachedImage(CachedImage* newImage)
         // removeClient may have destroyed the renderer.
         return;
     }
-    m_cachedImage = newImage;
+    m_cachedImage = WTFMove(newImage);
     m_cachedImageRemoveClientIsNeeded = true;
     if (!m_cachedImage)
         return;
@@ -110,8 +110,8 @@ LayoutSize RenderImageResource::imageSize(float multiplier, CachedImage::SizeTyp
     if (!m_cachedImage)
         return LayoutSize();
     LayoutSize size = m_cachedImage->imageSizeForRenderer(m_renderer.get(), multiplier, type);
-    if (is<RenderImage>(m_renderer))
-        size.scale(downcast<RenderImage>(*m_renderer).imageDevicePixelRatio());
+    if (auto* renderImage = dynamicDowncast<RenderImage>(m_renderer.get()))
+        size.scale(renderImage->imageDevicePixelRatio());
     return size;
 }
 

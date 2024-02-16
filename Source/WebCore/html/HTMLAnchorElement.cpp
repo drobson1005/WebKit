@@ -47,6 +47,7 @@
 #include "PlatformMouseEvent.h"
 #include "PlatformStrategies.h"
 #include "PrivateClickMeasurement.h"
+#include "Quirks.h"
 #include "RegistrableDomain.h"
 #include "RenderImage.h"
 #include "ResourceRequest.h"
@@ -102,7 +103,7 @@ bool HTMLAnchorElement::isMouseFocusable() const
 {
 #if !(PLATFORM(GTK) || PLATFORM(WPE))
     // Only allow links with tabIndex or contentEditable to be mouse focusable.
-    if (isLink())
+    if (isLink() && !document().quirks().needsAnchorElementsToBeMouseFocusable())
         return HTMLElement::supportsFocus();
 #endif
 
@@ -590,7 +591,7 @@ void HTMLAnchorElement::handleClick(Event& event)
     URL completedURL = document().completeURL(url.toString());
 
 #if ENABLE(DATA_DETECTION) && PLATFORM(IOS_FAMILY)
-    if (DataDetection::isDataDetectorLink(*this) && DataDetection::canPresentDataDetectorsUIForElement(*this)) {
+    if (DataDetection::canPresentDataDetectorsUIForElement(*this)) {
         if (auto* page = document().page()) {
             if (page->chrome().client().showDataDetectorsUIForElement(*this, event))
                 return;

@@ -103,7 +103,8 @@ void LegacyRootInlineBox::clearTruncation()
 bool LegacyRootInlineBox::isHyphenated() const
 {
     for (auto* box = firstLeafDescendant(); box; box = box->nextLeafOnLine()) {
-        if (is<LegacyInlineTextBox>(*box) && downcast<LegacyInlineTextBox>(*box).hasHyphen())
+        auto* textBox = dynamicDowncast<LegacyInlineTextBox>(*box);
+        if (textBox && textBox->hasHyphen())
             return true;
     }
     return false;
@@ -363,8 +364,8 @@ LayoutUnit LegacyRootInlineBox::lineSnapAdjustment(LayoutUnit delta) const
         return 0;
 
     auto& gridFontMetrics = lineGrid->style().metricsOfPrimaryFont();
-    LayoutUnit lineGridFontAscent = gridFontMetrics.ascent(baselineType());
-    LayoutUnit lineGridFontHeight = gridFontMetrics.height();
+    LayoutUnit lineGridFontAscent = gridFontMetrics.intAscent(baselineType());
+    LayoutUnit lineGridFontHeight = gridFontMetrics.intHeight();
     LayoutUnit lineGridHalfLeading = (gridLineHeight - lineGridFontHeight) / 2;
 
     LayoutUnit firstLineTop = lineGridBlockOffset + lineGrid->borderAndPaddingBefore();
@@ -372,7 +373,7 @@ LayoutUnit LegacyRootInlineBox::lineSnapAdjustment(LayoutUnit delta) const
     LayoutUnit firstBaselinePosition = firstTextTop + lineGridFontAscent;
 
     LayoutUnit currentTextTop { blockOffset + logicalTop() + delta };
-    LayoutUnit currentFontAscent = blockFlow().style().metricsOfPrimaryFont().ascent(baselineType());
+    LayoutUnit currentFontAscent = blockFlow().style().metricsOfPrimaryFont().intAscent(baselineType());
     LayoutUnit currentBaselinePosition = currentTextTop + currentFontAscent;
 
     LayoutUnit lineGridPaginationOrigin = isHorizontal() ? layoutState->lineGridPaginationOrigin().height() : layoutState->lineGridPaginationOrigin().width();
@@ -483,9 +484,8 @@ LayoutUnit LegacyRootInlineBox::selectionTop() const
 
 #if !PLATFORM(IOS_FAMILY)
     // See rdar://problem/19692206 ... don't want to do this adjustment for iOS where overlap is ok and handled.
-    if (renderer().isRenderRubyBase()) {
+    if (auto* base = dynamicDowncast<RenderRubyBase>(renderer())) {
         // The ruby base selection should avoid intruding into the ruby text. This is only the case if there is an actual ruby text above us.
-        RenderRubyBase* base = &downcast<RenderRubyBase>(renderer());
         RenderRubyRun* run = base->rubyRun();
         if (run) {
             RenderRubyText* text = run->rubyText();
@@ -494,9 +494,8 @@ LayoutUnit LegacyRootInlineBox::selectionTop() const
                 return selectionTop;
             }
         }
-    } else if (renderer().isRenderRubyText()) {
+    } else if (auto* text = dynamicDowncast<RenderRubyText>(renderer())) {
         // The ruby text selection should go all the way to the selection top of the containing line.
-        RenderRubyText* text = &downcast<RenderRubyText>(renderer());
         RenderRubyRun* run = text->rubyRun();
         if (run && run->inlineBoxWrapper()) {
             RenderRubyBase* base = run->rubyBase();
@@ -550,9 +549,8 @@ LayoutUnit LegacyRootInlineBox::selectionBottom() const
     
 #if !PLATFORM(IOS_FAMILY)
     // See rdar://problem/19692206 ... don't want to do this adjustment for iOS where overlap is ok and handled.
-    if (renderer().isRenderRubyBase()) {
+    if (auto* base = dynamicDowncast<RenderRubyBase>(renderer())) {
         // The ruby base selection should avoid intruding into the ruby text. This is only the case if there is an actual ruby text below us.
-        RenderRubyBase* base = &downcast<RenderRubyBase>(renderer());
         RenderRubyRun* run = base->rubyRun();
         if (run) {
             RenderRubyText* text = run->rubyText();
@@ -561,9 +559,8 @@ LayoutUnit LegacyRootInlineBox::selectionBottom() const
                 return selectionBottom;
             }
         }
-    } else if (renderer().isRenderRubyText()) {
+    } else if (auto* text = dynamicDowncast<RenderRubyText>(renderer())) {
         // The ruby text selection should go all the way to the selection bottom of the containing line.
-        RenderRubyText* text = &downcast<RenderRubyText>(renderer());
         RenderRubyRun* run = text->rubyRun();
         if (run && run->inlineBoxWrapper()) {
             RenderRubyBase* base = run->rubyBase();
@@ -693,8 +690,8 @@ void LegacyRootInlineBox::ascentAndDescentForBox(LegacyInlineBox& box, GlyphOver
 
     Vector<SingleThreadWeakPtr<const Font>>* usedFonts = nullptr;
     GlyphOverflow* glyphOverflow = nullptr;
-    if (is<LegacyInlineTextBox>(box)) {
-        GlyphOverflowAndFallbackFontsMap::iterator it = textBoxDataMap.find(&downcast<LegacyInlineTextBox>(box));
+    if (auto* textBox = dynamicDowncast<LegacyInlineTextBox>(box)) {
+        auto it = textBoxDataMap.find(textBox);
         usedFonts = it == textBoxDataMap.end() ? nullptr : &it->value.first;
         glyphOverflow = it == textBoxDataMap.end() ? nullptr : &it->value.second;
     }
@@ -710,11 +707,11 @@ void LegacyRootInlineBox::ascentAndDescentForBox(LegacyInlineBox& box, GlyphOver
         usedFonts->append(&boxLineStyle.fontCascade().primaryFont());
         for (auto& font : *usedFonts) {
             auto& fontMetrics = font->fontMetrics();
-            LayoutUnit usedFontAscent { fontMetrics.ascent(baselineType()) };
-            LayoutUnit usedFontDescent { fontMetrics.descent(baselineType()) };
-            LayoutUnit halfLeading { (fontMetrics.lineSpacing() - fontMetrics.height()) / 2 };
+            LayoutUnit usedFontAscent { fontMetrics.intAscent(baselineType()) };
+            LayoutUnit usedFontDescent { fontMetrics.intDescent(baselineType()) };
+            LayoutUnit halfLeading { (fontMetrics.intLineSpacing() - fontMetrics.intHeight()) / 2 };
             LayoutUnit usedFontAscentAndLeading { usedFontAscent + halfLeading };
-            LayoutUnit usedFontDescentAndLeading { fontMetrics.lineSpacing() - usedFontAscentAndLeading };
+            LayoutUnit usedFontDescentAndLeading { fontMetrics.intLineSpacing() - usedFontAscentAndLeading };
             if (includeFont) {
                 setAscentAndDescent(ascent, descent, usedFontAscent, usedFontDescent, ascentDescentSet);
                 setUsedFont = true;
@@ -745,8 +742,8 @@ void LegacyRootInlineBox::ascentAndDescentForBox(LegacyInlineBox& box, GlyphOver
     }
     
     if (includeFontForBox(box) && !setUsedFont) {
-        LayoutUnit fontAscent { boxLineStyle.metricsOfPrimaryFont().ascent(baselineType()) };
-        LayoutUnit fontDescent { boxLineStyle.metricsOfPrimaryFont().descent(baselineType()) };
+        LayoutUnit fontAscent { boxLineStyle.metricsOfPrimaryFont().intAscent(baselineType()) };
+        LayoutUnit fontDescent { boxLineStyle.metricsOfPrimaryFont().intDescent(baselineType()) };
         setAscentAndDescent(ascent, descent, fontAscent, fontDescent, ascentDescentSet);
         affectsAscent = fontAscent - box.logicalTop() > 0;
         affectsDescent = fontDescent + box.logicalTop() > 0;
@@ -756,26 +753,26 @@ void LegacyRootInlineBox::ascentAndDescentForBox(LegacyInlineBox& box, GlyphOver
         setAscentAndDescent(ascent, descent, glyphOverflow->top, glyphOverflow->bottom, ascentDescentSet);
         affectsAscent = glyphOverflow->top - box.logicalTop() > 0;
         affectsDescent = glyphOverflow->bottom + box.logicalTop() > 0;
-        glyphOverflow->top = std::min(glyphOverflow->top, std::max(0_lu, glyphOverflow->top - boxLineStyle.metricsOfPrimaryFont().ascent(baselineType())));
-        glyphOverflow->bottom = std::min(glyphOverflow->bottom, std::max(0_lu, glyphOverflow->bottom - boxLineStyle.metricsOfPrimaryFont().descent(baselineType())));
+        glyphOverflow->top = std::min(glyphOverflow->top, std::max(0_lu, glyphOverflow->top - boxLineStyle.metricsOfPrimaryFont().intAscent(baselineType())));
+        glyphOverflow->bottom = std::min(glyphOverflow->bottom, std::max(0_lu, glyphOverflow->bottom - boxLineStyle.metricsOfPrimaryFont().intDescent(baselineType())));
     }
     
     if (includeInitialLetterForBox(box)) {
         bool canUseGlyphs = glyphOverflow && glyphOverflow->computeBounds;
-        auto letterAscent { baselineType() == AlphabeticBaseline ? LayoutUnit(boxLineStyle.metricsOfPrimaryFont().capHeight()) : (canUseGlyphs ? glyphOverflow->top : LayoutUnit(boxLineStyle.metricsOfPrimaryFont().ascent(baselineType()))) };
-        auto letterDescent { canUseGlyphs ? glyphOverflow->bottom : (box.isRootInlineBox() ? 0_lu : LayoutUnit(boxLineStyle.metricsOfPrimaryFont().descent(baselineType()))) };
+        auto letterAscent { baselineType() == AlphabeticBaseline ? LayoutUnit(boxLineStyle.metricsOfPrimaryFont().intCapHeight()) : (canUseGlyphs ? glyphOverflow->top : LayoutUnit(boxLineStyle.metricsOfPrimaryFont().intAscent(baselineType()))) };
+        auto letterDescent { canUseGlyphs ? glyphOverflow->bottom : (box.isRootInlineBox() ? 0_lu : LayoutUnit(boxLineStyle.metricsOfPrimaryFont().intDescent(baselineType()))) };
         setAscentAndDescent(ascent, descent, letterAscent, letterDescent, ascentDescentSet);
         affectsAscent = letterAscent - box.logicalTop() > 0;
         affectsDescent = letterDescent + box.logicalTop() > 0;
         if (canUseGlyphs) {
-            glyphOverflow->top = std::min(glyphOverflow->top, std::max(0_lu, glyphOverflow->top - boxLineStyle.metricsOfPrimaryFont().ascent(baselineType())));
-            glyphOverflow->bottom = std::min(glyphOverflow->bottom, std::max(0_lu, glyphOverflow->bottom - boxLineStyle.metricsOfPrimaryFont().descent(baselineType())));
+            glyphOverflow->top = std::min(glyphOverflow->top, std::max(0_lu, glyphOverflow->top - boxLineStyle.metricsOfPrimaryFont().intAscent(baselineType())));
+            glyphOverflow->bottom = std::min(glyphOverflow->bottom, std::max(0_lu, glyphOverflow->bottom - boxLineStyle.metricsOfPrimaryFont().intDescent(baselineType())));
         }
     }
 
     if (includeMarginForBox(box)) {
-        LayoutUnit ascentWithMargin = boxLineStyle.metricsOfPrimaryFont().ascent(baselineType());
-        LayoutUnit descentWithMargin = boxLineStyle.metricsOfPrimaryFont().descent(baselineType());
+        LayoutUnit ascentWithMargin = boxLineStyle.metricsOfPrimaryFont().intAscent(baselineType());
+        LayoutUnit descentWithMargin = boxLineStyle.metricsOfPrimaryFont().intDescent(baselineType());
         if (box.parent() && !box.renderer().isRenderTextOrLineBreak()) {
             ascentWithMargin += box.boxModelObject()->borderAndPaddingBefore() + box.boxModelObject()->marginBefore();
             descentWithMargin += box.boxModelObject()->borderAndPaddingAfter() + box.boxModelObject()->marginAfter();
@@ -805,7 +802,7 @@ LayoutUnit LegacyRootInlineBox::verticalPositionForBox(LegacyInlineBox* box, Ver
     bool isRenderInline = renderer->isRenderInline();
     if (isRenderInline && !firstLine) {
         LayoutUnit cachedPosition;
-        if (verticalPositionCache.get(renderer, baselineType(), cachedPosition))
+        if (verticalPositionCache.get(*renderer, baselineType(), cachedPosition))
             return cachedPosition;
     }
 
@@ -831,11 +828,11 @@ LayoutUnit LegacyRootInlineBox::verticalPositionForBox(LegacyInlineBox* box, Ver
         else if (verticalAlign == VerticalAlign::Super)
             verticalPosition -= fontSize / 3 + 1;
         else if (verticalAlign == VerticalAlign::TextTop)
-            verticalPosition += renderer->baselinePosition(baselineType(), firstLine, lineDirection) - fontMetrics.ascent(baselineType());
+            verticalPosition += renderer->baselinePosition(baselineType(), firstLine, lineDirection) - fontMetrics.intAscent(baselineType());
         else if (verticalAlign == VerticalAlign::Middle)
-            verticalPosition = (verticalPosition - LayoutUnit(fontMetrics.xHeight() / 2) - renderer->lineHeight(firstLine, lineDirection) / 2 + renderer->baselinePosition(baselineType(), firstLine, lineDirection));
+            verticalPosition = (verticalPosition - LayoutUnit(fontMetrics.xHeight().value_or(0) / 2) - renderer->lineHeight(firstLine, lineDirection) / 2 + renderer->baselinePosition(baselineType(), firstLine, lineDirection));
         else if (verticalAlign == VerticalAlign::TextBottom) {
-            verticalPosition += fontMetrics.descent(baselineType());
+            verticalPosition += fontMetrics.intDescent(baselineType());
             // lineHeight - baselinePosition is always 0 for replaced elements (except inline blocks), so don't bother wasting time in that case.
             if (!renderer->isReplacedOrInlineBlock() || renderer->isInlineBlockOrInlineTable())
                 verticalPosition -= (renderer->lineHeight(firstLine, lineDirection) - renderer->baselinePosition(baselineType(), firstLine, lineDirection));
@@ -854,7 +851,7 @@ LayoutUnit LegacyRootInlineBox::verticalPositionForBox(LegacyInlineBox* box, Ver
 
     // Store the cached value.
     if (isRenderInline && !firstLine)
-        verticalPositionCache.set(renderer, baselineType(), verticalPosition);
+        verticalPositionCache.set(*renderer, baselineType(), verticalPosition);
 
     return verticalPosition;
 }
@@ -873,8 +870,11 @@ bool LegacyRootInlineBox::includeFontForBox(LegacyInlineBox& box) const
     if (box.renderer().isReplacedOrInlineBlock() || (box.renderer().isRenderTextOrLineBreak() && !box.behavesLikeText()))
         return false;
     
-    if (!box.behavesLikeText() && is<LegacyInlineFlowBox>(box) && !downcast<LegacyInlineFlowBox>(box).hasTextChildren())
-        return false;
+    if (!box.behavesLikeText()) {
+        auto* flowBox = dynamicDowncast<LegacyInlineFlowBox>(box);
+        if (flowBox && !flowBox->hasTextChildren())
+            return false;
+    }
 
     return renderer().style().lineBoxContain().contains(LineBoxContain::Font);
 }
@@ -884,8 +884,11 @@ bool LegacyRootInlineBox::includeGlyphsForBox(LegacyInlineBox& box) const
     if (box.renderer().isReplacedOrInlineBlock() || (box.renderer().isRenderTextOrLineBreak() && !box.behavesLikeText()))
         return false;
     
-    if (!box.behavesLikeText() && is<LegacyInlineFlowBox>(box) && !downcast<LegacyInlineFlowBox>(box).hasTextChildren())
-        return false;
+    if (!box.behavesLikeText()) {
+        auto* flowBox = dynamicDowncast<LegacyInlineFlowBox>(box);
+        if (flowBox && !flowBox->hasTextChildren())
+            return false;
+    }
 
     return renderer().style().lineBoxContain().contains(LineBoxContain::Glyphs);
 }
@@ -895,8 +898,11 @@ bool LegacyRootInlineBox::includeInitialLetterForBox(LegacyInlineBox& box) const
     if (box.renderer().isReplacedOrInlineBlock() || (box.renderer().isRenderTextOrLineBreak() && !box.behavesLikeText()))
         return false;
     
-    if (!box.behavesLikeText() && is<LegacyInlineFlowBox>(box) && !downcast<LegacyInlineFlowBox>(box).hasTextChildren())
-        return false;
+    if (!box.behavesLikeText()) {
+        auto* flowBox = dynamicDowncast<LegacyInlineFlowBox>(box);
+        if (flowBox && !flowBox->hasTextChildren())
+            return false;
+    }
 
     return renderer().style().lineBoxContain().contains(LineBoxContain::InitialLetter);
 }

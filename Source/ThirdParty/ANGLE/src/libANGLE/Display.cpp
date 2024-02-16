@@ -63,7 +63,7 @@
 #    elif defined(ANGLE_PLATFORM_LINUX)
 #        include "libANGLE/renderer/gl/egl/DisplayEGL.h"
 #        if defined(ANGLE_USE_X11)
-#            include "libANGLE/renderer/gl/glx/DisplayGLX.h"
+#            include "libANGLE/renderer/gl/glx/DisplayGLX_api.h"
 #        endif
 #    elif defined(ANGLE_PLATFORM_ANDROID)
 #        include "libANGLE/renderer/gl/egl/android/DisplayAndroid.h"
@@ -75,6 +75,10 @@
 #if defined(ANGLE_ENABLE_NULL)
 #    include "libANGLE/renderer/null/DisplayNULL.h"
 #endif  // defined(ANGLE_ENABLE_NULL)
+
+#if defined(ANGLE_ENABLE_WGPU)
+#    include "libANGLE/renderer/wgpu/DisplayWgpu_api.h"
+#endif
 
 #if defined(ANGLE_ENABLE_VULKAN)
 #    include "libANGLE/renderer/vulkan/DisplayVk_api.h"
@@ -284,6 +288,13 @@ EGLAttrib GetDisplayTypeFromEnvironment()
     }
 #endif
 
+#if defined(ANGLE_ENABLE_WGPU)
+    if (angleDefaultEnv == "webgpu")
+    {
+        return EGL_PLATFORM_ANGLE_TYPE_WEBGPU_ANGLE;
+    }
+#endif
+
 #if defined(ANGLE_ENABLE_OPENGL)
     if (angleDefaultEnv == "gl")
     {
@@ -424,7 +435,7 @@ rx::DisplayImpl *CreateDisplayFromAttribs(EGLAttrib displayType,
 #        if defined(ANGLE_USE_X11)
             if (platformType == EGL_PLATFORM_X11_EXT)
             {
-                impl = new rx::DisplayGLX(state);
+                impl = rx::CreateGLXDisplay(state);
                 break;
             }
 #        endif
@@ -472,7 +483,7 @@ rx::DisplayImpl *CreateDisplayFromAttribs(EGLAttrib displayType,
 #        if defined(ANGLE_USE_X11)
                 if (platformType == EGL_PLATFORM_X11_EXT)
                 {
-                    impl = new rx::DisplayGLX(state);
+                    impl = rx::CreateGLXDisplay(state);
                     break;
                 }
 #        endif
@@ -596,6 +607,13 @@ rx::DisplayImpl *CreateDisplayFromAttribs(EGLAttrib displayType,
             }
 #endif
             // Metal isn't available.
+            break;
+
+        case EGL_PLATFORM_ANGLE_TYPE_WEBGPU_ANGLE:
+#if defined(ANGLE_ENABLE_WGPU)
+            impl = rx::CreateWgpuDisplay(state);
+#endif  // defined(ANGLE_ENABLE_WGPU)
+        // WebGPU isn't available.
             break;
 
         case EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE:
@@ -2104,6 +2122,10 @@ static ClientExtensions GenerateClientExtensions()
 
 #if defined(ANGLE_ENABLE_NULL)
     extensions.platformANGLENULL = true;
+#endif
+
+#if defined(ANGLE_ENABLE_WGPU)
+    extensions.platformANGLEWebgpu = true;
 #endif
 
 #if defined(ANGLE_ENABLE_D3D11)

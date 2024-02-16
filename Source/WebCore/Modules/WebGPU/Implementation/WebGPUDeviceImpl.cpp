@@ -42,6 +42,7 @@
 #include "WebGPUExtent3D.h"
 #include "WebGPUExternalTextureDescriptor.h"
 #include "WebGPUExternalTextureImpl.h"
+#include "WebGPUInternalError.h"
 #include "WebGPUOutOfMemoryError.h"
 #include "WebGPUPipelineLayoutDescriptor.h"
 #include "WebGPUPipelineLayoutImpl.h"
@@ -67,6 +68,11 @@
 
 namespace WebCore::WebGPU {
 
+static auto invalidEntryPointName()
+{
+    return CString("");
+}
+
 DeviceImpl::DeviceImpl(WebGPUPtr<WGPUDevice>&& device, Ref<SupportedFeatures>&& features, Ref<SupportedLimits>&& limits, ConvertToBackingContext& convertToBackingContext)
     : Device(WTFMove(features), WTFMove(limits))
     , m_backing(device.copyRef())
@@ -75,7 +81,10 @@ DeviceImpl::DeviceImpl(WebGPUPtr<WGPUDevice>&& device, Ref<SupportedFeatures>&& 
 {
 }
 
-DeviceImpl::~DeviceImpl() = default;
+DeviceImpl::~DeviceImpl()
+{
+    wgpuDeviceSetUncapturedErrorCallback(m_backing.get(), nullptr, nullptr);
+}
 
 Ref<Queue> DeviceImpl::queue()
 {
@@ -165,7 +174,7 @@ Ref<ExternalTexture> DeviceImpl::importExternalTexture(const ExternalTextureDesc
     auto pixelBuffer = std::get_if<RetainPtr<CVPixelBufferRef>>(&descriptor.videoBacking);
     WGPUExternalTextureDescriptor backingDescriptor {
         .nextInChain = nullptr,
-        label.data(),
+        .label = label.data(),
         .pixelBuffer = pixelBuffer ? pixelBuffer->get() : nullptr,
         .colorSpace = convertToWGPUColorSpace(descriptor.colorSpace),
     };
@@ -246,7 +255,7 @@ Ref<BindGroup> DeviceImpl::createBindGroup(const BindGroupDescriptor& descriptor
     auto backingEntries = descriptor.entries.map([&convertToBackingContext = m_convertToBackingContext.get(), &chainedEntries](const auto& bindGroupEntry) {
         auto externalTexture = std::holds_alternative<std::reference_wrapper<ExternalTexture>>(bindGroupEntry.resource) ? convertToBackingContext.convertToBacking(std::get<std::reference_wrapper<ExternalTexture>>(bindGroupEntry.resource).get()) : nullptr;
         chainedEntries.append(WGPUBindGroupExternalTextureEntry {
-            {
+            .chain = {
                 .next = nullptr,
                 .sType = static_cast<WGPUSType>(WGPUSTypeExtended_BindGroupEntryExternalTexture)
             },
@@ -318,7 +327,12 @@ static auto convertToBacking(const ComputePipelineDescriptor& descriptor, Conver
 {
     auto label = descriptor.label.utf8();
 
-    auto entryPoint = descriptor.compute.entryPoint.utf8();
+    std::optional<CString> entryPoint;
+    if (auto& descriptorEntryPoint = descriptor.compute.entryPoint) {
+        entryPoint = descriptorEntryPoint->utf8();
+        if (descriptorEntryPoint->length() != String::fromUTF8(entryPoint->data()).length())
+            entryPoint = invalidEntryPointName();
+    }
 
     auto constantNames = descriptor.compute.constants.map([](const auto& constant) {
         bool lengthsMatch = constant.key.length() == String::fromUTF8(constant.key.utf8().data()).length();
@@ -340,7 +354,7 @@ static auto convertToBacking(const ComputePipelineDescriptor& descriptor, Conver
         descriptor.layout ? convertToBackingContext.convertToBacking(*descriptor.layout) : nullptr, {
             nullptr,
             convertToBackingContext.convertToBacking(descriptor.compute.module),
-            entryPoint.data(),
+            entryPoint ? entryPoint->data() : nullptr,
             static_cast<uint32_t>(backingConstantEntries.size()),
             backingConstantEntries.data(),
         }
@@ -357,11 +371,16 @@ Ref<ComputePipeline> DeviceImpl::createComputePipeline(const ComputePipelineDesc
 }
 
 template <typename T>
-static auto convertToBacking(const RenderPipelineDescriptor& descriptor, bool depthClipControlIsEnabled, ConvertToBackingContext& convertToBackingContext, T&& callback)
+static auto convertToBacking(const RenderPipelineDescriptor& descriptor, ConvertToBackingContext& convertToBackingContext, T&& callback)
 {
     auto label = descriptor.label.utf8();
 
-    auto vertexEntryPoint = descriptor.vertex.entryPoint.utf8();
+    std::optional<CString> vertexEntryPoint;
+    if (auto& descriptorEntryPoint = descriptor.vertex.entryPoint) {
+        vertexEntryPoint = descriptorEntryPoint->utf8();
+        if (descriptorEntryPoint->length() != String::fromUTF8(vertexEntryPoint->data()).length())
+            vertexEntryPoint = invalidEntryPointName();
+    }
 
     auto vertexConstantNames = descriptor.vertex.constants.map([](const auto& constant) {
         bool lengthsMatch = constant.key.length() == String::fromUTF8(constant.key.utf8().data()).length();
@@ -424,10 +443,15 @@ static auto convertToBacking(const RenderPipelineDescriptor& descriptor, bool de
         .depthBiasClamp = descriptor.depthStencil ? descriptor.depthStencil->depthBiasClamp : 0,
     };
 
-    auto fragmentEntryPoint = descriptor.fragment ? descriptor.fragment->entryPoint.utf8() : CString("");
-
+    std::optional<CString> fragmentEntryPoint;
     Vector<CString> fragmentConstantNames;
     if (descriptor.fragment) {
+        if (auto& descriptorEntryPoint = descriptor.fragment->entryPoint) {
+            fragmentEntryPoint = descriptorEntryPoint->utf8();
+            if (descriptorEntryPoint->length() != String::fromUTF8(descriptor.fragment->entryPoint->utf8().data()).length())
+                fragmentEntryPoint = invalidEntryPointName();
+        }
+
         fragmentConstantNames = descriptor.fragment->constants.map([](const auto& constant) {
             bool lengthsMatch = constant.key.length() == String::fromUTF8(constant.key.utf8().data()).length();
             return lengthsMatch ? constant.key.utf8() : "";
@@ -489,7 +513,7 @@ static auto convertToBacking(const RenderPipelineDescriptor& descriptor, bool de
     WGPUFragmentState fragmentState {
         nullptr,
         descriptor.fragment ? convertToBackingContext.convertToBacking(descriptor.fragment->module) : nullptr,
-        fragmentEntryPoint.data(),
+        fragmentEntryPoint ? fragmentEntryPoint->data() : nullptr,
         static_cast<uint32_t>(fragmentConstantEntries.size()),
         fragmentConstantEntries.data(),
         static_cast<uint32_t>(colorTargets.size()),
@@ -505,30 +529,33 @@ static auto convertToBacking(const RenderPipelineDescriptor& descriptor, bool de
     };
 
     WGPURenderPipelineDescriptor backingDescriptor {
-        nullptr,
-        label.data(),
-        descriptor.layout ? convertToBackingContext.convertToBacking(*descriptor.layout) : nullptr, {
+        .nextInChain = nullptr,
+        .label = label.data(),
+        .layout = descriptor.layout ? convertToBackingContext.convertToBacking(*descriptor.layout) : nullptr,
+        .vertex = {
             nullptr,
             convertToBackingContext.convertToBacking(descriptor.vertex.module),
-            vertexEntryPoint.data(),
+            vertexEntryPoint ? vertexEntryPoint->data() : nullptr,
             static_cast<uint32_t>(vertexConstantEntries.size()),
             vertexConstantEntries.data(),
             static_cast<uint32_t>(backingBuffers.size()),
             backingBuffers.data(),
-        }, {
-            descriptor.primitive && depthClipControlIsEnabled ? &depthClipControl.chain : nullptr,
+        },
+        .primitive = {
+            descriptor.primitive && descriptor.primitive->unclippedDepth ? &depthClipControl.chain : nullptr,
             descriptor.primitive ? convertToBackingContext.convertToBacking(descriptor.primitive->topology) : WGPUPrimitiveTopology_TriangleList,
             descriptor.primitive && descriptor.primitive->stripIndexFormat ? convertToBackingContext.convertToBacking(*descriptor.primitive->stripIndexFormat) : WGPUIndexFormat_Undefined,
             descriptor.primitive ? convertToBackingContext.convertToBacking(descriptor.primitive->frontFace) : WGPUFrontFace_CCW,
             descriptor.primitive ? convertToBackingContext.convertToBacking(descriptor.primitive->cullMode) : WGPUCullMode_None,
         },
-        descriptor.depthStencil ? &depthStencilState : nullptr, {
+        .depthStencil = descriptor.depthStencil ? &depthStencilState : nullptr,
+        .multisample = {
             nullptr,
             descriptor.multisample ? descriptor.multisample->count : 1,
             descriptor.multisample ? descriptor.multisample->mask : 0xFFFFFFFFU,
             descriptor.multisample ? descriptor.multisample->alphaToCoverageEnabled : false,
         },
-        descriptor.fragment ? &fragmentState : nullptr,
+        .fragment = descriptor.fragment ? &fragmentState : nullptr,
     };
 
     return callback(backingDescriptor);
@@ -536,8 +563,7 @@ static auto convertToBacking(const RenderPipelineDescriptor& descriptor, bool de
 
 Ref<RenderPipeline> DeviceImpl::createRenderPipeline(const RenderPipelineDescriptor& descriptor)
 {
-    bool depthClipControlIsEnabled = wgpuDeviceHasFeature(m_backing.get(), WGPUFeatureName_DepthClipControl);
-    return convertToBacking(descriptor, depthClipControlIsEnabled, m_convertToBackingContext, [backing = m_backing.copyRef(), &convertToBackingContext = m_convertToBackingContext.get()](const WGPURenderPipelineDescriptor& backingDescriptor) {
+    return convertToBacking(descriptor, m_convertToBackingContext, [backing = m_backing.copyRef(), &convertToBackingContext = m_convertToBackingContext.get()](const WGPURenderPipelineDescriptor& backingDescriptor) {
         return RenderPipelineImpl::create(adoptWebGPU(wgpuDeviceCreateRenderPipeline(backing.get(), &backingDescriptor)), convertToBackingContext);
     });
 }
@@ -571,8 +597,7 @@ static void createRenderPipelineAsyncCallback(WGPUCreatePipelineAsyncStatus stat
 
 void DeviceImpl::createRenderPipelineAsync(const RenderPipelineDescriptor& descriptor, CompletionHandler<void(RefPtr<RenderPipeline>&&)>&& callback)
 {
-    bool depthClipControlIsEnabled = wgpuDeviceHasFeature(m_backing.get(), WGPUFeatureName_DepthClipControl);
-    convertToBacking(descriptor, depthClipControlIsEnabled, m_convertToBackingContext, [backing = m_backing.copyRef(), convertToBackingContext = m_convertToBackingContext.copyRef(), callback = WTFMove(callback)](const WGPURenderPipelineDescriptor& backingDescriptor) mutable {
+    convertToBacking(descriptor, m_convertToBackingContext, [backing = m_backing.copyRef(), convertToBackingContext = m_convertToBackingContext.copyRef(), callback = WTFMove(callback)](const WGPURenderPipelineDescriptor& backingDescriptor) mutable {
         auto blockPtr = makeBlockPtr([convertToBackingContext = convertToBackingContext.copyRef(), callback = WTFMove(callback)](WGPUCreatePipelineAsyncStatus status, WGPURenderPipeline pipeline, const char*) mutable {
             if (status == WGPUCreatePipelineAsyncStatus_Success)
                 callback(RenderPipelineImpl::create(adoptWebGPU(pipeline), convertToBackingContext));
@@ -643,15 +668,27 @@ static void popErrorScopeCallback(WGPUErrorType type, const char* message, void*
     Block_release(block); // Block_release is matched with Block_copy below in DeviceImpl::popErrorScope().
 }
 
-void DeviceImpl::popErrorScope(CompletionHandler<void(std::optional<Error>&&)>&& callback)
+static void setUncapturedScopeCallback(WGPUErrorType type, const char* message, void* userdata)
+{
+    auto block = reinterpret_cast<void(^)(WGPUErrorType, const char*)>(userdata);
+    block(type, message);
+    Block_release(block);
+}
+
+void DeviceImpl::popErrorScope(CompletionHandler<void(bool, std::optional<Error>&&)>&& callback)
 {
     auto blockPtr = makeBlockPtr([callback = WTFMove(callback)](WGPUErrorType errorType, const char* message) mutable {
         std::optional<Error> error;
+        bool succeeded = false;
         switch (errorType) {
         case WGPUErrorType_NoError:
+            succeeded = true;
+            break;
         case WGPUErrorType_Force32:
             break;
         case WGPUErrorType_Internal:
+            error = { { InternalError::create(String::fromLatin1(message)) } };
+            break;
         case WGPUErrorType_Validation:
             error = { { ValidationError::create(String::fromLatin1(message)) } };
             break;
@@ -659,16 +696,45 @@ void DeviceImpl::popErrorScope(CompletionHandler<void(std::optional<Error>&&)>&&
             error = { { OutOfMemoryError::create() } };
             break;
         case WGPUErrorType_Unknown:
-            error = { { OutOfMemoryError::create() } };
             break;
         case WGPUErrorType_DeviceLost:
-            error = { { OutOfMemoryError::create() } };
             break;
         }
 
-        callback(WTFMove(error));
+        callback(succeeded, WTFMove(error));
     });
     wgpuDevicePopErrorScope(m_backing.get(), &popErrorScopeCallback, Block_copy(blockPtr.get())); // Block_copy is matched with Block_release above in popErrorScopeCallback().
+}
+
+void DeviceImpl::resolveUncapturedErrorEvent(CompletionHandler<void(bool, std::optional<Error>&&)>&& callback)
+{
+    auto blockPtr = makeBlockPtr([callback = WTFMove(callback)](WGPUErrorType errorType, const char* message) mutable {
+        std::optional<Error> error;
+        bool hasUncapturedError = true;
+        switch (errorType) {
+        case WGPUErrorType_NoError:
+            hasUncapturedError = false;
+            break;
+        case WGPUErrorType_Force32:
+            break;
+        case WGPUErrorType_Internal:
+            error = { { InternalError::create(String::fromLatin1(message)) } };
+            break;
+        case WGPUErrorType_Validation:
+            error = { { ValidationError::create(String::fromLatin1(message)) } };
+            break;
+        case WGPUErrorType_OutOfMemory:
+            error = { { OutOfMemoryError::create() } };
+            break;
+        case WGPUErrorType_Unknown:
+            break;
+        case WGPUErrorType_DeviceLost:
+            break;
+        }
+
+        callback(hasUncapturedError, WTFMove(error));
+    });
+    wgpuDeviceSetUncapturedErrorCallback(m_backing.get(), &setUncapturedScopeCallback, Block_copy(blockPtr.get()));
 }
 
 void DeviceImpl::resolveDeviceLostPromise(CompletionHandler<void(WebCore::WebGPU::DeviceLostReason)>&& callback)

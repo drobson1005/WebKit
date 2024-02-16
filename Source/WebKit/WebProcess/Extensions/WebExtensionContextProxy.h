@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2022-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,6 +44,7 @@ OBJC_CLASS _WKWebExtensionLocalization;
 namespace WebKit {
 
 class WebExtensionAPINamespace;
+class WebExtensionAPIStorage;
 class WebExtensionMatchPattern;
 class WebFrame;
 
@@ -80,17 +81,29 @@ public:
 
     _WKWebExtensionLocalization *localization() { return m_localization.get(); }
 
+    bool isSessionStorageAllowedInContentScripts() { return m_isSessionStorageAllowedInContentScripts; }
+
     bool inTestingMode() { return m_testingMode; }
+
+    WebCore::DOMWrapperWorld& toDOMWorld(WebExtensionContentWorldType);
 
     static WebCore::DOMWrapperWorld& mainWorld() { return WebCore::mainThreadNormalWorld(); }
 
-    WebCore::DOMWrapperWorld& contentScriptWorld() { return *m_contentScriptWorld; }
+    bool hasContentScriptWorld() const { return !!m_contentScriptWorld; }
+    WebCore::DOMWrapperWorld& contentScriptWorld() const { RELEASE_ASSERT(hasContentScriptWorld()); return *m_contentScriptWorld; }
     void setContentScriptWorld(WebCore::DOMWrapperWorld* world) { m_contentScriptWorld = world; }
 
     void addFrameWithExtensionContent(WebFrame&);
 
+    std::optional<WebExtensionTabIdentifier> tabIdentifier(WebPage&) const;
+
     RefPtr<WebPage> backgroundPage() const;
     void setBackgroundPage(WebPage&);
+
+#if ENABLE(INSPECTOR_EXTENSIONS)
+    void addInspectorBackgroundPage(WebPage&, std::optional<WebExtensionTabIdentifier>, std::optional<WebExtensionWindowIdentifier>);
+    bool isInspectorBackgroundPage(WebPage&) const;
+#endif
 
     Vector<Ref<WebPage>> popupPages(std::optional<WebExtensionTabIdentifier> = std::nullopt, std::optional<WebExtensionWindowIdentifier> = std::nullopt) const;
     void addPopupPage(WebPage&, std::optional<WebExtensionTabIdentifier>, std::optional<WebExtensionWindowIdentifier>);
@@ -127,6 +140,18 @@ private:
     void dispatchCommandsCommandEvent(const String& identifier, const std::optional<WebExtensionTabParameters>&);
     void dispatchCommandsChangedEvent(const String& identifier, const String& oldShortcut, const String& newShortcut);
 
+    // Cookies
+    void dispatchCookiesChangedEvent();
+
+#if ENABLE(INSPECTOR_EXTENSIONS)
+    // DevTools
+    void addInspectorBackgroundPageIdentifier(WebCore::PageIdentifier, std::optional<WebExtensionTabIdentifier>, std::optional<WebExtensionWindowIdentifier>);
+    void dispatchDevToolsExtensionPanelShownEvent(Inspector::ExtensionTabID, WebCore::FrameIdentifier);
+    void dispatchDevToolsExtensionPanelHiddenEvent(Inspector::ExtensionTabID);
+    void dispatchDevToolsNetworkNavigatedEvent(const URL&);
+    void dispatchDevToolsPanelsThemeChangedEvent(Inspector::ExtensionAppearance);
+#endif
+
     // Extension
     void setBackgroundPageIdentifier(WebCore::PageIdentifier);
     void addPopupPageIdentifier(WebCore::PageIdentifier, std::optional<WebExtensionTabIdentifier>, std::optional<WebExtensionWindowIdentifier>);
@@ -139,7 +164,7 @@ private:
     void dispatchPermissionsEvent(WebExtensionEventListenerType, HashSet<String> permissions, HashSet<String> origins);
 
     // Port
-    void dispatchPortMessageEvent(WebExtensionPortChannelIdentifier, const String& messageJSON);
+    void dispatchPortMessageEvent(std::optional<WebKit::WebPageProxyIdentifier>, WebExtensionPortChannelIdentifier, const String& messageJSON);
     void dispatchPortDisconnectEvent(WebExtensionPortChannelIdentifier);
 
     // Runtime
@@ -149,6 +174,10 @@ private:
     void dispatchRuntimeConnectEvent(WebExtensionContentWorldType, WebExtensionPortChannelIdentifier, const String& name, std::optional<WebExtensionFrameIdentifier>, const WebExtensionMessageSenderParameters&, CompletionHandler<void(size_t firedEventCount)>&&);
     void dispatchRuntimeInstalledEvent(WebExtensionContext::InstallReason, String previousVersion);
     void dispatchRuntimeStartupEvent();
+
+    // Storage
+    void setStorageAccessLevel(bool);
+    void dispatchStorageChangedEvent(const String& onChangedJSON, WebExtensionDataType, WebExtensionContentWorldType);
 
     // Tabs
     void dispatchTabsCreatedEvent(const WebExtensionTabParameters&);
@@ -164,6 +193,13 @@ private:
     // Web Navigation
     void dispatchWebNavigationEvent(WebExtensionEventListenerType, WebExtensionTabIdentifier, WebExtensionFrameIdentifier, WebExtensionFrameIdentifier parentFrameID, const URL&, WallTime);
 
+    // Web Request
+    void resourceLoadDidSendRequest(WebExtensionTabIdentifier, WebExtensionWindowIdentifier, const WebCore::ResourceRequest&, const ResourceLoadInfo&);
+    void resourceLoadDidPerformHTTPRedirection(WebExtensionTabIdentifier, WebExtensionWindowIdentifier, const WebCore::ResourceResponse&, const ResourceLoadInfo&, const WebCore::ResourceRequest& newRequest);
+    void resourceLoadDidReceiveChallenge(WebExtensionTabIdentifier, WebExtensionWindowIdentifier, const WebCore::AuthenticationChallenge&, const ResourceLoadInfo&);
+    void resourceLoadDidReceiveResponse(WebExtensionTabIdentifier, WebExtensionWindowIdentifier, const WebCore::ResourceResponse&, const ResourceLoadInfo&);
+    void resourceLoadDidCompleteWithError(WebExtensionTabIdentifier, WebExtensionWindowIdentifier, const WebCore::ResourceResponse&, const WebCore::ResourceError&, const ResourceLoadInfo&);
+
     // Windows
     void dispatchWindowsEvent(WebExtensionEventListenerType, const std::optional<WebExtensionWindowParameters>&);
 
@@ -177,9 +213,13 @@ private:
     RetainPtr<NSDictionary> m_manifest;
     double m_manifestVersion { 0 };
     bool m_testingMode { false };
+    bool m_isSessionStorageAllowedInContentScripts { false };
     RefPtr<WebCore::DOMWrapperWorld> m_contentScriptWorld;
     WeakFrameSet m_extensionContentFrames;
     WeakPtr<WebPage> m_backgroundPage;
+#if ENABLE(INSPECTOR_EXTENSIONS)
+    WeakPageTabWindowMap m_inspectorBackgroundPageMap;
+#endif
     WeakPageTabWindowMap m_popupPageMap;
     WeakPageTabWindowMap m_tabPageMap;
 };

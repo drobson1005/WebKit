@@ -135,6 +135,7 @@ public:
 
 #if ENABLE(THREADED_ANIMATION_RESOLUTION)
     void setAcceleratedEffectsAndBaseValues(const WebCore::AcceleratedEffects&, const WebCore::AcceleratedEffectValues&, RemoteLayerTreeHost&);
+    const RemoteAcceleratedEffectStack* effectStack() const { return m_effectStack.get(); }
     RefPtr<RemoteAcceleratedEffectStack> takeEffectStack() { return std::exchange(m_effectStack, nullptr); }
 #endif
 
@@ -167,7 +168,7 @@ private:
     WebCore::EventRegion m_eventRegion;
 
 #if ENABLE(SCROLLING_THREAD)
-    WebCore::ScrollingNodeID m_scrollingNodeID { 0 };
+    WebCore::ScrollingNodeID m_scrollingNodeID;
 #endif
 
     WebCore::PlatformLayerIdentifier m_actingScrollContainerID;

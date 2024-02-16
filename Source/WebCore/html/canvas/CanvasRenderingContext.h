@@ -59,7 +59,7 @@ public:
     static HashSet<CanvasRenderingContext*>& instances() WTF_REQUIRES_LOCK(instancesLock());
     static Lock& instancesLock() WTF_RETURNS_LOCK(s_instancesLock);
 
-    void ref();
+    WEBCORE_EXPORT void ref();
     WEBCORE_EXPORT void deref();
 
     CanvasBase& canvasBase() const { return m_canvas; }
@@ -96,6 +96,12 @@ public:
 
     bool hasActiveInspectorCanvasCallTracer() const { return m_hasActiveInspectorCanvasCallTracer; }
     void setHasActiveInspectorCanvasCallTracer(bool hasActiveInspectorCanvasCallTracer) { m_hasActiveInspectorCanvasCallTracer = hasActiveInspectorCanvasCallTracer; }
+
+    // Returns true if there are pending deferred operations that might consume memory.
+    virtual bool hasDeferredOperations() const { return false; }
+
+    // Called periodically if needsFlush() was true when canvas change happened.
+    virtual void flushDeferredOperations() { }
 
     virtual bool compositingResultsNeedUpdating() const { return false; }
     virtual bool needsPreparationForDisplay() const { return false; }

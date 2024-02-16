@@ -706,7 +706,14 @@ bool CDMInstanceFairPlayStreamingAVFObjC::isAnyKeyUsable(const Keys& keys) const
 
 void CDMInstanceFairPlayStreamingAVFObjC::addKeyStatusesChangedObserver(const KeyStatusesChangedObserver& observer)
 {
+    ASSERT(!m_keyStatusChangedObservers.contains(observer));
     m_keyStatusChangedObservers.add(observer);
+}
+
+void CDMInstanceFairPlayStreamingAVFObjC::removeKeyStatusesChangedObserver(const KeyStatusesChangedObserver& observer)
+{
+    ASSERT(m_keyStatusChangedObservers.contains(observer));
+    m_keyStatusChangedObservers.remove(observer);
 }
 
 void CDMInstanceFairPlayStreamingAVFObjC::sessionKeyStatusesChanged(const CDMInstanceSessionFairPlayStreamingAVFObjC&)
@@ -735,6 +742,10 @@ static Keys keyIDsForRequest(AVContentKeyRequest* request)
     if (request.initializationData) {
         if (auto sinfKeyIDs = CDMPrivateFairPlayStreaming::extractKeyIDsSinf(SharedBuffer::create(request.initializationData)))
             return WTFMove(sinfKeyIDs.value());
+#if HAVE(FAIRPLAYSTREAMING_MTPS_INITDATA)
+        if (auto mptsKeyIDs = CDMPrivateFairPlayStreaming::extractKeyIDsMpts(SharedBuffer::create(request.initializationData)))
+            return WTFMove(mptsKeyIDs.value());
+#endif
     }
     return { };
 }
@@ -806,6 +817,10 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
         auto psshString = base64EncodeToString(initData->makeContiguous()->data(), initData->size());
         initializationData = [NSJSONSerialization dataWithJSONObject:@{ @"pssh": (NSString*)psshString } options:NSJSONWritingPrettyPrinted error:nil];
     }
+#endif
+#if HAVE(FAIRPLAYSTREAMING_MTPS_INITDATA)
+    else if (initDataType == CDMPrivateFairPlayStreaming::mptsName())
+        initializationData = initData->makeContiguous()->createNSData();
 #endif
     else {
         ERROR_LOG(LOGIDENTIFIER, " false, initDataType not suppported");
@@ -1367,7 +1382,17 @@ void CDMInstanceSessionFairPlayStreamingAVFObjC::didProvideRenewingRequest(AVCon
         return;
     }
 
-    m_requests[renewingIndex] = *m_currentRequest;
+    auto replaceRequest = [](Vector<RetainPtr<AVContentKeyRequest>>& requests, AVContentKeyRequest* replacementRequest) {
+        for (auto& request : requests) {
+            if (![[request contentKeySpecifier].identifier isEqual:replacementRequest.contentKeySpecifier.identifier])
+                continue;
+
+            request = replacementRequest;
+            return;
+        }
+    };
+
+    replaceRequest(m_requests[renewingIndex].requests, request);
     m_renewingRequest = std::nullopt;
 
     RetainPtr<NSData> appIdentifier;

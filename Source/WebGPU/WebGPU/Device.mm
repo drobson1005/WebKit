@@ -128,6 +128,11 @@ bool Device::shouldStopCaptureAfterSubmit()
     return GPUFrameCapture::shouldStopCaptureAfterSubmit();
 }
 
+bool Device::isDestroyed() const
+{
+    return m_destroyed;
+}
+
 Ref<Device> Device::create(id<MTLDevice> device, String&& deviceLabel, HardwareCapabilities&& capabilities, Adapter& adapter)
 {
     id<MTLCommandQueue> commandQueue = [device newCommandQueue];
@@ -183,6 +188,17 @@ Device::Device(id<MTLDevice> device, id<MTLCommandQueue> defaultQueue, HardwareC
     m_coreVideoTextureCache = coreVideoTextureCache;
 #endif
     GPUFrameCapture::registerForFrameCapture(m_device);
+
+    m_placeholderBuffer = safeCreateBuffer(1, MTLStorageModeShared);
+    auto desc = [MTLTextureDescriptor new];
+    desc.width = 1;
+    desc.height = 1;
+    desc.mipmapLevelCount = 1;
+    desc.pixelFormat = MTLPixelFormatR8Unorm;
+    desc.textureType = MTLTextureType2D;
+    desc.storageMode = MTLStorageModeShared;
+    desc.usage = MTLTextureUsageShaderRead;
+    m_placeholderTexture = [m_device newTextureWithDescriptor:desc];
 }
 
 Device::Device(Adapter& adapter)
@@ -206,7 +222,7 @@ Device::~Device()
 
 void Device::loseTheDevice(WGPUDeviceLostReason reason)
 {
-    // https://gpuweb.github.io/gpuweb/#lose-the-device
+    m_device = nil;
 
     m_adapter->makeInvalid();
 
@@ -217,17 +233,13 @@ void Device::loseTheDevice(WGPUDeviceLostReason reason)
         m_deviceLostCallback = nullptr;
     }
 
-    // FIXME: The spec doesn't actually say to do this, but it's pretty important because
-    // the total number of command queues alive at a time is limited to a pretty low limit.
-    // We should make sure either that this is unobservable or that the spec says to do this.
     m_defaultQueue->makeInvalid();
-
     m_isLost = true;
 }
 
 void Device::destroy()
 {
-    // https://gpuweb.github.io/gpuweb/#dom-gpudevice-destroy
+    m_destroyed = true;
 
     loseTheDevice(WGPUDeviceLostReason_Destroyed);
 }
@@ -248,6 +260,16 @@ bool Device::getLimits(WGPUSupportedLimits& limits)
 
     limits.limits = m_capabilities.limits;
     return true;
+}
+
+id<MTLBuffer> Device::placeholderBuffer() const
+{
+    return m_placeholderBuffer;
+}
+
+id<MTLTexture> Device::placeholderTexture() const
+{
+    return m_placeholderTexture;
 }
 
 Queue& Device::getQueue()
@@ -283,11 +305,8 @@ void Device::generateAValidationError(String&& message)
         return;
     }
 
-    if (m_uncapturedErrorCallback) {
-        instance().scheduleWork([protectedThis = Ref { *this }, message = WTFMove(message)]() mutable {
-            protectedThis->m_uncapturedErrorCallback(WGPUErrorType_Validation, WTFMove(message));
-        });
-    }
+    if (m_uncapturedErrorCallback)
+        m_uncapturedErrorCallback(WGPUErrorType_Validation, WTFMove(message));
 }
 
 void Device::generateAnOutOfMemoryError(String&& message)
@@ -302,11 +321,8 @@ void Device::generateAnOutOfMemoryError(String&& message)
         return;
     }
 
-    if (m_uncapturedErrorCallback) {
-        instance().scheduleWork([protectedThis = Ref { *this }, message = WTFMove(message)]() mutable {
-            protectedThis->m_uncapturedErrorCallback(WGPUErrorType_OutOfMemory, WTFMove(message));
-        });
-    }
+    if (m_uncapturedErrorCallback)
+        m_uncapturedErrorCallback(WGPUErrorType_OutOfMemory, WTFMove(message));
 }
 
 void Device::generateAnInternalError(String&& message)
@@ -321,11 +337,8 @@ void Device::generateAnInternalError(String&& message)
         return;
     }
 
-    if (m_uncapturedErrorCallback) {
-        instance().scheduleWork([protectedThis = Ref { *this }, message = WTFMove(message)]() mutable {
-            protectedThis->m_uncapturedErrorCallback(WGPUErrorType_Internal, WTFMove(message));
-        });
-    }
+    if (m_uncapturedErrorCallback)
+        m_uncapturedErrorCallback(WGPUErrorType_Internal, WTFMove(message));
 }
 
 uint32_t Device::maxBuffersPlusVertexBuffersForVertexStage() const
@@ -355,25 +368,23 @@ void Device::captureFrameIfNeeded() const
     GPUFrameCapture::captureSingleFrameIfNeeded(m_device);
 }
 
-bool Device::validatePopErrorScope() const
+std::optional<WGPUErrorType> Device::validatePopErrorScope() const
 {
     if (m_isLost)
-        return false;
+        return WGPUErrorType_NoError;
 
     if (m_errorScopeStack.isEmpty())
-        return false;
+        return WGPUErrorType_Unknown;
 
-    return true;
+    return std::nullopt;
 }
 
 bool Device::popErrorScope(CompletionHandler<void(WGPUErrorType, String&&)>&& callback)
 {
     // https://gpuweb.github.io/gpuweb/#dom-gpudevice-poperrorscope
 
-    if (!validatePopErrorScope()) {
-        instance().scheduleWork([callback = WTFMove(callback)]() mutable {
-            callback(WGPUErrorType_Unknown, "popErrorScope() failed validation."_s);
-        });
+    if (auto errorType = validatePopErrorScope()) {
+        callback(*errorType, "popErrorScope() failed validation."_s);
         return false;
     }
 
@@ -406,6 +417,11 @@ void Device::setDeviceLostCallback(Function<void(WGPUDeviceLostReason, String&&)
         loseTheDevice(WGPUDeviceLostReason_Destroyed);
     else if (!m_adapter->isValid())
         loseTheDevice(WGPUDeviceLostReason_Undefined);
+}
+
+bool Device::isValid() const
+{
+    return m_device;
 }
 
 void Device::setUncapturedErrorCallback(Function<void(WGPUErrorType, String&&)>&& callback)

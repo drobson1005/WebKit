@@ -31,6 +31,7 @@
 #include "BackgroundFetchChange.h"
 #include <WebCore/NotificationData.h>
 #include <wtf/CompletionHandler.h>
+#include <wtf/Seconds.h>
 
 namespace WebCore {
 enum class WindowProxyProperty : uint8_t;
@@ -109,6 +110,14 @@ public:
     }
 
     virtual void didAccessWindowProxyProperty(const WebCore::RegistrableDomain&, const WebCore::RegistrableDomain&, WebCore::WindowProxyProperty, bool)
+    {
+    }
+
+    virtual void didAllowPrivateTokenUsageByThirdPartyForTesting(bool, URL&&)
+    {
+    }
+
+    virtual void didExceedMemoryFootprintThreshold(size_t footprint, const String& domain, unsigned pageCount, Seconds processLifetime, bool inForeground)
     {
     }
 };

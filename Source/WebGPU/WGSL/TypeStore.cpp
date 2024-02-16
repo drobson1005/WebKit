@@ -50,9 +50,22 @@ struct MatrixKey {
 
 struct ArrayKey {
     const Type* elementType;
-    std::optional<unsigned> size;
+    Types::Array::Size size;
 
-    TypeCache::EncodedKey encode() const { return std::tuple(TypeCache::Array, 0, 0, size.value_or(0), bitwise_cast<uintptr_t>(elementType)); }
+    TypeCache::EncodedKey encode() const
+    {
+        auto encodedSize = WTF::switchOn(size,
+            [&](unsigned size) -> unsigned {
+                return size;
+            },
+            [&](std::monostate) -> unsigned {
+                return 0;
+            },
+            [&](AST::Expression*) -> unsigned {
+                RELEASE_ASSERT_NOT_REACHED();
+            });
+        return std::tuple(TypeCache::Array, 0, 0, encodedSize, bitwise_cast<uintptr_t>(elementType));
+    }
 };
 
 struct TextureKey {
@@ -140,8 +153,12 @@ const Type* TypeStore::structType(AST::Structure& structure, HashMap<String, con
     return allocateType<Struct>(structure, fields);
 }
 
-const Type* TypeStore::arrayType(const Type* elementType, std::optional<unsigned> size)
+const Type* TypeStore::arrayType(const Type* elementType, Types::Array::Size size)
 {
+    // don't cache override-sized arrays as they are only used once
+    if (std::holds_alternative<AST::Expression*>(size))
+        return allocateType<Array>(elementType, size);
+
     ArrayKey key { elementType, size };
     const Type* type = m_cache.find(key);
     if (type)
@@ -195,9 +212,9 @@ const Type* TypeStore::textureStorageType(TextureStorage::Kind kind, TexelFormat
     return type;
 }
 
-const Type* TypeStore::functionType(WTF::Vector<const Type*>&& parameters, const Type* result)
+const Type* TypeStore::functionType(WTF::Vector<const Type*>&& parameters, const Type* result, bool mustUse)
 {
-    return allocateType<Function>(WTFMove(parameters), result);
+    return allocateType<Function>(WTFMove(parameters), result, mustUse);
 }
 
 const Type* TypeStore::referenceType(AddressSpace addressSpace, const Type* element, AccessMode accessMode)
@@ -273,7 +290,7 @@ const Type* TypeStore::atomicCompareExchangeResultType(const Type* type)
         FixedVector<const Type*> values(2);
         values[PrimitiveStruct::AtomicCompareExchangeResult::oldValue] = type;
         values[PrimitiveStruct::AtomicCompareExchangeResult::exchanged] = boolType();
-        member = allocateType<PrimitiveStruct>("__atomic_compare_exchange_result"_s, PrimitiveStruct::ModfResult::kind, values);
+        member = allocateType<PrimitiveStruct>("__atomic_compare_exchange_result"_s, PrimitiveStruct::AtomicCompareExchangeResult::kind, values);
         return member;
     };
 

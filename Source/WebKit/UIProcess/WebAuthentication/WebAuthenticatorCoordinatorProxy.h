@@ -67,7 +67,7 @@ class WebPageProxy;
 struct FrameInfoData;
 struct WebAuthenticationRequestData;
 
-using CapbilitiesCompletionHandler = CompletionHandler<void(const HashMap<WTF::String, bool>&)>;
+using CapabilitiesCompletionHandler = CompletionHandler<void(Vector<KeyValuePair<String, bool>>&&)>;
 using RequestCompletionHandler = CompletionHandler<void(const WebCore::AuthenticatorResponseData&, WebCore::AuthenticatorAttachment, const WebCore::ExceptionData&)>;
 
 class WebAuthenticatorCoordinatorProxy : public IPC::MessageReceiver {
@@ -89,12 +89,12 @@ private:
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
     // Receivers.
-    void makeCredential(WebCore::FrameIdentifier, FrameInfoData&&, Vector<uint8_t>&& hash, WebCore::PublicKeyCredentialCreationOptions&&, RequestCompletionHandler&&);
-    void getAssertion(WebCore::FrameIdentifier, FrameInfoData&&, Vector<uint8_t>&& hash, WebCore::PublicKeyCredentialRequestOptions&&, WebCore::MediationRequirement, std::optional<WebCore::SecurityOriginData>, RequestCompletionHandler&&);
+    void makeCredential(WebCore::FrameIdentifier, FrameInfoData&&, WebCore::PublicKeyCredentialCreationOptions&&, RequestCompletionHandler&&);
+    void getAssertion(WebCore::FrameIdentifier, FrameInfoData&&, WebCore::PublicKeyCredentialRequestOptions&&, WebCore::MediationRequirement, std::optional<WebCore::SecurityOriginData>, RequestCompletionHandler&&);
     void isUserVerifyingPlatformAuthenticatorAvailable(const WebCore::SecurityOriginData&, QueryCompletionHandler&&);
     void isConditionalMediationAvailable(const WebCore::SecurityOriginData&, QueryCompletionHandler&&);
-    void getClientCapabilities(const WebCore::SecurityOriginData&, CapbilitiesCompletionHandler&&);
-    void cancel();
+    void getClientCapabilities(const WebCore::SecurityOriginData&, CapabilitiesCompletionHandler&&);
+    void cancel(CompletionHandler<void()>&&);
 
     void handleRequest(WebAuthenticationRequestData&&, RequestCompletionHandler&&);
 
@@ -104,9 +104,9 @@ private:
     bool isASCAvailable();
 
 #if HAVE(WEB_AUTHN_AS_MODERN)
-    RetainPtr<ASAuthorizationController> constructASController(WebAuthenticationRequestData&&);
-    RetainPtr<NSArray> requestsForRegisteration(const WebCore::PublicKeyCredentialCreationOptions&, const Vector<uint8_t>& hash);
-    RetainPtr<NSArray> requestsForAssertion(const WebCore::PublicKeyCredentialRequestOptions&, const Vector<uint8_t>& hash, std::optional<WebCore::SecurityOriginData>& parentOrigin);
+    RetainPtr<ASAuthorizationController> constructASController(const WebAuthenticationRequestData&);
+    RetainPtr<NSArray> requestsForRegisteration(const WebCore::PublicKeyCredentialCreationOptions&, const WebCore::SecurityOriginData& callerOrigin);
+    RetainPtr<NSArray> requestsForAssertion(const WebCore::PublicKeyCredentialRequestOptions&, const WebCore::SecurityOriginData& callerOrigin, const std::optional<WebCore::SecurityOriginData>& parentOrigin);
 #endif
 
     void performRequest(WebAuthenticationRequestData&&, RequestCompletionHandler&&);
@@ -124,6 +124,7 @@ private:
 
     RetainPtr<ASCAuthorizationRemotePresenter> m_presenter;
     RetainPtr<ASCAgentProxy> m_proxy;
+    CompletionHandler<void()> m_cancelHandler;
 #endif // HAVE(UNIFIED_ASC_AUTH_UI)
 };
 

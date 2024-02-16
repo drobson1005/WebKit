@@ -2,7 +2,8 @@
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2024 Apple Inc. All rights reserved.
+ * Copyright (C) 2017 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -71,10 +72,6 @@ public:
         int detail, int screenX, int screenY, int clientX, int clientY, bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
         int16_t button, EventTarget* relatedTarget);
 
-    void initMouseEventQuirk(JSC::JSGlobalObject&, ScriptExecutionContext&, const AtomString& type, bool canBubble, bool cancelable, RefPtr<WindowProxy>&&,
-        int detail, int screenX, int screenY, int clientX, int clientY, bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
-        int16_t button, JSC::JSValue relatedTarget);
-
     MouseButton button() const;
     int16_t buttonAsShort() const { return m_button; }
     unsigned short buttons() const { return m_buttons; }
@@ -89,7 +86,7 @@ public:
 
     static bool canTriggerActivationBehavior(const Event&);
 
-    int which() const final;
+    unsigned which() const final;
 
 protected:
     MouseEvent(const AtomString& type, CanBubble, IsCancelable, IsComposed, MonotonicTime timestamp, RefPtr<WindowProxy>&&, int detail,

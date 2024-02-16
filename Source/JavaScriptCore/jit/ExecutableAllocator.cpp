@@ -86,7 +86,7 @@ extern "C" {
 
 #if USE(INLINE_JIT_PERMISSIONS_API)
 #include <wtf/darwin/WeakLinking.h>
-WTF_WEAK_LINK_FORCE_IMPORT(se_memory_inline_jit_restrict_with_witness_supported);
+WTF_WEAK_LINK_FORCE_IMPORT(be_memory_inline_jit_restrict_with_witness_supported);
 #endif
 
 namespace JSC {
@@ -284,7 +284,7 @@ static ALWAYS_INLINE MacroAssemblerCodeRef<JITThunkPtrTag> jitWriteThunkGenerato
     // to appear in the console or anywhere in memory, via the PrintStream buffer.
     // The second is we can't guarantee that the code is readable when using the
     // asyncDisassembly option as our caller will set our pages execute only.
-    return linkBuffer.finalizeCodeWithoutDisassembly<JITThunkPtrTag>();
+    return linkBuffer.finalizeCodeWithoutDisassembly<JITThunkPtrTag>(nullptr);
 }
 #else // not USE(EXECUTE_ONLY_JIT_WRITE_FUNCTION)
 static void genericWriteToJITRegion(off_t offset, const void* data, size_t dataSize)
@@ -416,19 +416,7 @@ static ALWAYS_INLINE JITReservation initializeJITPageReservation()
     if (reservation.pageReservation) {
         ASSERT(reservation.pageReservation.size() == reservation.size);
         reservation.base = reservation.pageReservation.base();
-
-        bool fastJITPermissionsIsSupported = false;
-#if OS(DARWIN) && CPU(ARM64)
-#if USE(INLINE_JIT_PERMISSIONS_API)
-        //FIXME: Check for the existence of `se_memory_inline_jit_restrict_with_witness_supported` once the fix for rdar://119669257 is in the SDK.
-        fastJITPermissionsIsSupported = !!se_memory_inline_jit_restrict_with_witness_supported();
-#elif USE(PTHREAD_JIT_PERMISSIONS_API)
-        fastJITPermissionsIsSupported = !!pthread_jit_write_protect_supported_np();
-#elif USE(APPLE_INTERNAL_SDK)
-        fastJITPermissionsIsSupported = !!os_thread_self_restrict_rwx_is_supported();
-#endif
-#endif
-        g_jscConfig.useFastJITPermissions = fastJITPermissionsIsSupported;
+        g_jscConfig.useFastJITPermissions = threadSelfRestrictSupported();
 
         if (g_jscConfig.useFastJITPermissions)
             threadSelfRestrictRWXToRX();
@@ -448,6 +436,7 @@ static ALWAYS_INLINE JITReservation initializeJITPageReservation()
         g_jscConfig.endExecutableMemory = reservationEnd;
 
 #if !USE(SYSTEM_MALLOC) && ENABLE(UNIFIED_AND_FREEZABLE_CONFIG_RECORD)
+        static_assert(WebConfig::reservedSlotsForExecutableAllocator >= 2);
         WebConfig::g_config[0] = bitwise_cast<uintptr_t>(reservation.base);
         WebConfig::g_config[1] = bitwise_cast<uintptr_t>(reservationEnd);
 #endif
@@ -795,9 +784,9 @@ private:
             auto emitJumpTo = [&] (void* target) {
                 RELEASE_ASSERT(Assembler::canEmitJump(bitwise_cast<void*>(jumpLocation), target));
                 if (useMemcpy)
-                    Assembler::fillNearTailCall<memcpyWrapper>(currentIsland, target);
+                    Assembler::fillNearTailCall<MachineCodeCopyMode::Memcpy>(currentIsland, target);
                 else
-                    Assembler::fillNearTailCall<performJITMemcpy>(currentIsland, target);
+                    Assembler::fillNearTailCall<MachineCodeCopyMode::JITMemcpy>(currentIsland, target);
             };
 
             if (Assembler::canEmitJump(bitwise_cast<void*>(jumpLocation), bitwise_cast<void*>(target))) {

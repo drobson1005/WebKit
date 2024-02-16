@@ -26,6 +26,7 @@
 #pragma once
 
 #include "MediaUniqueIdentifier.h"
+#include "NowPlayingInfo.h"
 #include "PlatformMediaSession.h"
 #include "RemoteCommandListener.h"
 #include "Timer.h"
@@ -75,6 +76,11 @@ public:
     WEBCORE_EXPORT static bool shouldEnableVP9SWDecoder();
 #endif
 
+#if ENABLE(EXTENSION_CAPABILITIES)
+    WEBCORE_EXPORT static bool mediaCapabilityGrantsEnabled();
+    WEBCORE_EXPORT static void setMediaCapabilityGrantsEnabled(bool);
+#endif
+
     virtual ~PlatformMediaSessionManager() = default;
 
     virtual void scheduleSessionStatusUpdate() { }
@@ -82,8 +88,10 @@ public:
     bool has(PlatformMediaSession::MediaType) const;
     int count(PlatformMediaSession::MediaType) const;
     bool activeAudioSessionRequired() const;
+    bool hasActiveAudioSession() const;
     bool canProduceAudio() const;
 
+    virtual std::optional<NowPlayingInfo> nowPlayingInfo() const { return { }; }
     virtual bool hasActiveNowPlayingSession() const { return false; }
     virtual String lastUpdatedNowPlayingTitle() const { return emptyString(); }
     virtual double lastUpdatedNowPlayingDuration() const { return NAN; }
@@ -255,6 +263,10 @@ private:
     static bool m_vp9DecoderEnabled;
     static bool m_vp8DecoderEnabled;
     static bool m_vp9SWDecoderEnabled;
+#endif
+
+#if ENABLE(EXTENSION_CAPABILITIES)
+    static bool s_mediaCapabilityGrantsEnabled;
 #endif
 
 #if !RELEASE_LOG_DISABLED

@@ -110,7 +110,7 @@ private:
     StreamServerConnection(Ref<Connection>, StreamServerConnectionBuffer&&);
 
     // MessageReceiveQueue
-    void enqueueMessage(Connection&, std::unique_ptr<Decoder>&&) final;
+    void enqueueMessage(Connection&, UniqueRef<Decoder>&&) final;
 
     // Connection::Client
     void didReceiveMessage(Connection&, Decoder&) final;
@@ -122,13 +122,15 @@ private:
     bool dispatchStreamMessage(Decoder&&, StreamMessageReceiver&);
     bool dispatchOutOfStreamMessage(Decoder&&);
 
+    RefPtr<StreamConnectionWorkQueue> protectedWorkQueue() const;
+
     using WakeUpClient = StreamServerConnectionBuffer::WakeUpClient;
     const Ref<IPC::Connection> m_connection;
     RefPtr<StreamConnectionWorkQueue> m_workQueue;
     StreamServerConnectionBuffer m_buffer;
 
     Lock m_outOfStreamMessagesLock;
-    Deque<std::unique_ptr<Decoder>> m_outOfStreamMessages WTF_GUARDED_BY_LOCK(m_outOfStreamMessagesLock);
+    Deque<UniqueRef<Decoder>> m_outOfStreamMessages WTF_GUARDED_BY_LOCK(m_outOfStreamMessagesLock);
 
     bool m_isDispatchingStreamMessage { false };
     Lock m_receiversLock;

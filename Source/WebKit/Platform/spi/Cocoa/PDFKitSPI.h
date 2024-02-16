@@ -25,17 +25,34 @@
 
 #pragma once
 
+#import <PDFKit/PDFKit.h>
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 
 #if USE(APPLE_INTERNAL_SDK)
 
-#if HAVE(PDFKIT) && PLATFORM(IOS_FAMILY)
+#if HAVE(PDFKIT)
+
+#if PLATFORM(IOS_FAMILY)
 #import <PDFKit/PDFHostViewController.h>
-#endif // HAVE(PDFKIT) && PLATFORM(IOS_FAMILY)
+#endif // PLATFORM(IOS_FAMILY)
+
+#import <PDFKit/PDFDocumentPriv.h>
+#import <PDFKit/PDFSelectionPriv.h>
+#if __has_include(<PDFKit/PDFActionPriv.h>)
+#import <PDFKit/PDFActionPriv.h>
+#else
+@interface PDFAction(SPI)
+- (NSArray *) nextActions;
+@end
+#endif // __has_include(PDFKIT/PDFActionPriv.h)
+
+#endif // HAVE(PDFKIT)
 
 #else
 
-#if HAVE(PDFKIT) && PLATFORM(IOS_FAMILY)
+#if HAVE(PDFKIT)
+
+#if PLATFORM(IOS_FAMILY)
 #import "UIKitSPI.h"
 
 @interface _UIRemoteViewController : UIViewController
@@ -71,11 +88,34 @@
 - (void) snapshotViewRect: (CGRect) rect snapshotWidth: (NSNumber*) width afterScreenUpdates: (BOOL) afterScreenUpdates withResult: (void (^)(UIImage* image)) completion;
 
 @end
-#endif // HAVE(PDFKIT) && PLATFORM(IOS_FAMILY)
+#endif // PLATFORM(IOS_FAMILY)
+
+@interface PDFSelection (SPI)
+- (void)drawForPage:(PDFPage *)page withBox:(CGPDFBox)box active:(BOOL)active inContext:(CGContextRef)context;
+- (PDFPoint)firstCharCenter;
+- (/*nullable*/ NSString *)html;
+- (/*nullable*/ NSData *)webArchive;
+- (NSAttributedString *)attributedStringScaled:(CGFloat)scale;
+@end
+
+#endif // HAVE(PDFKIT)
 
 #endif // USE(APPLE_INTERNAL_SDK)
 
+#if HAVE(INCREMENTAL_PDF_APIS)
+@interface PDFDocument ()
+-(instancetype)initWithProvider:(CGDataProviderRef)dataProvider;
+-(void)preloadDataOfPagesInRange:(NSRange)range onQueue:(dispatch_queue_t)queue completion:(void (^)(NSIndexSet* loadedPageIndexes))completionBlock;
+-(void)resetFormFields:(PDFActionResetForm *) action;
+@property (readwrite, nonatomic) BOOL hasHighLatencyDataProvider;
+@end
+#endif // HAVE(INCREMENTAL_PDF_APIS)
+
 #if ENABLE(UNIFIED_PDF)
+@interface PDFDocument (IPI)
+- (PDFDestination *)namedDestination:(NSString *)name;
+@end
+
 @interface PDFPage (IPI)
 - (CGPDFPageLayoutRef) pageLayout;
 @end

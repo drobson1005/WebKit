@@ -64,7 +64,7 @@ namespace WebCore {
 WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLPlugInImageElement);
 
 HTMLPlugInImageElement::HTMLPlugInImageElement(const QualifiedName& tagName, Document& document)
-    : HTMLPlugInElement(tagName, document)
+    : HTMLPlugInElement(tagName, document, TypeFlag::HasDidMoveToNewDocument)
 {
 }
 
@@ -176,7 +176,7 @@ void HTMLPlugInImageElement::didAttachRenderers()
         if (auto* renderImage = dynamicDowncast<RenderImage>(renderer())) {
             auto& renderImageResource = renderImage->imageResource();
             if (!renderImageResource.cachedImage())
-                renderImageResource.setCachedImage(m_imageLoader->image());
+                renderImageResource.setCachedImage(m_imageLoader->protectedImage());
         }
     }
 

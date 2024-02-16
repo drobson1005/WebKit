@@ -276,7 +276,11 @@ void PageClientImpl::doneWithKeyEvent(const NativeWebKeyboardEvent& event, bool 
     }
 
     WebKitWebViewBase* webkitWebViewBase = WEBKIT_WEB_VIEW_BASE(m_viewWidget);
+#if USE(GTK4)
+    webkitWebViewBaseProcessAcceleratorsForKeyPressEvent(webkitWebViewBase, event.nativeEvent());
+#else
     webkitWebViewBasePropagateKeyEvent(webkitWebViewBase, event.nativeEvent());
+#endif
 }
 
 RefPtr<WebPopupMenuProxy> PageClientImpl::createPopupMenuProxy(WebPageProxy& page)
@@ -478,7 +482,7 @@ void PageClientImpl::wheelEventWasNotHandledByWebCore(const NativeWebWheelEvent&
     webkitWebViewBasePropagateWheelEvent(WEBKIT_WEB_VIEW_BASE(m_viewWidget), event.nativeEvent());
 }
 
-void PageClientImpl::didFinishLoadingDataForCustomContentProvider(const String&, const IPC::DataReference&)
+void PageClientImpl::didFinishLoadingDataForCustomContentProvider(const String&, std::span<const uint8_t>)
 {
 }
 

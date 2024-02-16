@@ -36,6 +36,7 @@
 #import "WebExtensionAction.h"
 #import "WebExtensionCommand.h"
 #import "WebExtensionContext.h"
+#import "WebExtensionMatchPattern.h"
 #import "_WKWebExtensionCommandInternal.h"
 #import "_WKWebExtensionControllerInternal.h"
 #import "_WKWebExtensionInternal.h"
@@ -120,6 +121,7 @@ using CocoaMenuItem = UIMenuElement;
     NSParameterAssert([baseURL isKindOfClass:NSURL.class]);
     NSAssert1(WTF::URLParser::maybeCanonicalizeScheme(String(baseURL.scheme)), @"Invalid parameter: '%@' is not a valid URL scheme", baseURL.scheme);
     NSAssert1(![WKWebView handlesURLScheme:baseURL.scheme], @"Invalid parameter: '%@' is a URL scheme that WKWebView handles natively and cannot be used for extensions", baseURL.scheme);
+    NSAssert1(WebKit::WebExtensionMatchPattern::extensionSchemes().contains(baseURL.scheme), @"Invalid parameter: '%@' is not a registered custom scheme with _WKWebExtensionMatchPattern", baseURL.scheme);
     NSAssert(!baseURL.path.length || [baseURL.path isEqualToString:@"/"], @"Invalid parameter: a URL with a path cannot be used");
 
     _webExtensionContext->setBaseURL(baseURL);
@@ -601,7 +603,7 @@ static inline NSArray *toAPI(const WebKit::WebExtensionContext::WindowVector& wi
 
     NSMutableArray *result = [[NSMutableArray alloc] initWithCapacity:windows.size()];
 
-    for (auto& window : windows) {
+    for (Ref window : windows) {
         if (auto delegate = window->delegate())
             [result addObject:delegate];
     }
@@ -619,14 +621,14 @@ static inline NSArray *toAPI(const WebKit::WebExtensionContext::WindowVector& wi
     return toAPI(_webExtensionContext->focusedWindow(WebKit::WebExtensionContext::IgnoreExtensionAccess::Yes));
 }
 
-static inline NSSet *toAPI(const WebKit::WebExtensionContext::TabMapValueIterator& tabs)
+static inline NSSet *toAPI(const WebKit::WebExtensionContext::TabVector& tabs)
 {
     if (tabs.isEmpty())
         return [NSSet set];
 
     NSMutableSet *result = [[NSMutableSet alloc] initWithCapacity:tabs.size()];
 
-    for (auto& tab : tabs) {
+    for (Ref tab : tabs) {
         if (auto delegate = tab->delegate())
             [result addObject:delegate];
     }

@@ -125,8 +125,6 @@ public:
     static Ref<OffscreenCanvas> create(ScriptExecutionContext&, HTMLCanvasElement&);
     WEBCORE_EXPORT virtual ~OffscreenCanvas();
 
-    unsigned width() const final;
-    unsigned height() const final;
     void setWidth(unsigned);
     void setHeight(unsigned);
 
@@ -158,6 +156,7 @@ public:
     void dispatchEvent(Event&) final;
     using RefCounted::ref;
     using RefCounted::deref;
+    bool isDetached() const { return m_detached; };
 
 private:
     OffscreenCanvas(ScriptExecutionContext&, unsigned width, unsigned height);

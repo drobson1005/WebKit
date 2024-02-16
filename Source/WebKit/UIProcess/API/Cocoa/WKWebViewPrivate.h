@@ -184,6 +184,7 @@ typedef NS_OPTIONS(NSUInteger, _WKRectEdge) {
 @property (nonatomic, readonly) pid_t _webProcessIdentifier;
 @property (nonatomic, readonly) pid_t _provisionalWebProcessIdentifier WK_API_AVAILABLE(macos(10.14.4), ios(12.2));
 @property (nonatomic, readonly) pid_t _gpuProcessIdentifier WK_API_AVAILABLE(macos(13.0), ios(16.0));
+@property (nonatomic, readonly) pid_t _modelProcessIdentifier WK_API_AVAILABLE(macos(WK_MAC_TBA), ios(WK_IOS_TBA));
 
 @property (nonatomic, getter=_isEditable, setter=_setEditable:) BOOL _editable WK_API_AVAILABLE(macos(10.11), ios(9.0));
 
@@ -366,13 +367,18 @@ for this property.
 - (void)_stopMediaCapture WK_API_AVAILABLE(macos(10.15.4), ios(13.4));
 
 @property (nonatomic, readonly) BOOL _canTogglePictureInPicture;
+@property (nonatomic, readonly) BOOL _canToggleInWindow;
 @property (nonatomic, readonly) BOOL _isPictureInPictureActive;
+@property (nonatomic, readonly) BOOL _isInWindowActive;
 - (void)_updateMediaPlaybackControlsManager;
 - (void)_togglePictureInPicture;
+- (void)_toggleInWindow;
 - (void)_stopAllMediaPlayback;
 - (void)_suspendAllMediaPlayback;
 - (void)_resumeAllMediaPlayback;
 - (void)_closeAllMediaPresentations;
+
+- (void)_nowPlayingMediaTitleAndArtist:(void (^)(NSString *, NSString *))completionHandler;
 
 - (void)_takePDFSnapshotWithConfiguration:(WKSnapshotConfiguration *)snapshotConfiguration completionHandler:(void (^)(NSData *pdfSnapshotData, NSError *error))completionHandler WK_API_AVAILABLE(macos(10.15.4), ios(13.4));
 - (void)_getPDFFirstPageSizeInFrame:(_WKFrameHandle *)frame completionHandler:(void(^)(CGSize))completionHandler WK_API_AVAILABLE(macos(12.0), ios(15.0));
@@ -524,6 +530,8 @@ typedef NS_OPTIONS(NSUInteger, WKDisplayCaptureSurfaces) {
 - (void)_playAllAnimationsWithCompletionHandler:(void(^)(void))completionHandler WK_API_AVAILABLE(macos(13.3), ios(16.4));
 
 - (BOOL)_allowAnimationControls WK_API_AVAILABLE(macos(14.0), ios(17.0));
+
+- (void)_setStatisticsCrossSiteLoadWithLinkDecorationForTesting:(NSString *)fromHost withToHost:(NSString *)toHost withWasFiltered:(BOOL)wasFiltered withCompletionHandler:(void(^)(void))completionHandler WK_API_AVAILABLE(macos(WK_MAC_TBA), ios(WK_IOS_TBA));
 
 @end
 

@@ -36,6 +36,7 @@
 #include "ChromeClient.h"
 #include "EventHandler.h"
 #include "EventNames.h"
+#include "HTMLDivElement.h"
 #include "HTMLInputElement.h"
 #include "InputTypeNames.h"
 #include "KeyboardEvent.h"
@@ -49,8 +50,7 @@
 #include "ScopedEventQueue.h"
 #include "ScriptDisallowedScope.h"
 #include "ShadowRoot.h"
-#include "SwitchThumbElement.h"
-#include "SwitchTrackElement.h"
+#include "UserAgentParts.h"
 
 #if ENABLE(IOS_TOUCH_EVENTS)
 #include "TouchEvent.h"
@@ -82,11 +82,16 @@ void CheckboxInputType::createShadowSubtree()
     ASSERT(element());
     ASSERT(element()->userAgentShadowRoot());
 
-    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { *element()->userAgentShadowRoot() };
+    Ref shadowRoot = *element()->userAgentShadowRoot();
+    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
 
     Ref document = element()->document();
-    element()->userAgentShadowRoot()->appendChild(ContainerNode::ChildChange::Source::Parser, SwitchTrackElement::create(document));
-    element()->userAgentShadowRoot()->appendChild(ContainerNode::ChildChange::Source::Parser, SwitchThumbElement::create(document));
+    Ref track = HTMLDivElement::create(document);
+    track->setUserAgentPart(UserAgentParts::track());
+    shadowRoot->appendChild(ContainerNode::ChildChange::Source::Parser, track);
+    Ref thumb = HTMLDivElement::create(document);
+    thumb->setUserAgentPart(UserAgentParts::thumb());
+    shadowRoot->appendChild(ContainerNode::ChildChange::Source::Parser, thumb);
 }
 
 void CheckboxInputType::handleKeyupEvent(KeyboardEvent& event)
@@ -334,9 +339,7 @@ void CheckboxInputType::performSwitchAnimation(SwitchAnimationType type)
 {
     ASSERT(isSwitch());
     ASSERT(element());
-    ASSERT(element()->renderer());
-
-    if (!element()->renderer()->style().hasEffectiveAppearance())
+    if (!element()->renderer() || !element()->renderer()->style().hasEffectiveAppearance())
         return;
 
     auto updateInterval = switchAnimationUpdateInterval(element());

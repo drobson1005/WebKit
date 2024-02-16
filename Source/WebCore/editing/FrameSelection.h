@@ -204,6 +204,10 @@ public:
     WEBCORE_EXPORT void setCaretBlinkingSuspended(bool);
     WEBCORE_EXPORT bool isCaretBlinkingSuspended() const;
 
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    WEBCORE_EXPORT void setPrefersNonBlinkingCursor(bool);
+#endif
+
     WEBCORE_EXPORT void setFocused(bool);
     bool isFocused() const { return m_focused; }
     WEBCORE_EXPORT bool isFocusedAndActive() const;
@@ -215,6 +219,8 @@ public:
     String debugDescription() const;
     void showTreeForThis() const;
 #endif
+
+    WEBCORE_EXPORT std::optional<SimpleRange> rangeByExtendingCurrentSelection(TextGranularity) const;
 
 #if PLATFORM(IOS_FAMILY)
     WEBCORE_EXPORT void expandSelectionToElementContainingCaretSelection();
@@ -335,7 +341,7 @@ private:
     void updateAssociatedLiveRange();
     LayoutRect localCaretRect() const final { return localCaretRectWithoutUpdate(); }
 
-    CheckedPtr<Document> m_document;
+    WeakPtr<Document, WeakPtrImplWithEventTargetData> m_document;
     RefPtr<Range> m_associatedLiveRange;
     std::optional<LayoutUnit> m_xPosForVerticalArrowNavigation;
     VisibleSelection m_selection;
@@ -386,7 +392,7 @@ inline void FrameSelection::clearTypingStyle()
     m_typingStyle = nullptr;
 }
 
-#if !(ENABLE(ACCESSIBILITY) && (PLATFORM(COCOA) || USE(ATSPI)))
+#if !(PLATFORM(COCOA) || USE(ATSPI))
 
 inline void FrameSelection::notifyAccessibilityForSelectionChange(const AXTextStateChangeIntent&)
 {

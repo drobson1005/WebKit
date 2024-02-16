@@ -44,7 +44,7 @@
 #include "ScriptDisallowedScope.h"
 #include "Settings.h"
 #include "ShadowRoot.h"
-#include "UserAgentPartIds.h"
+#include "UserAgentParts.h"
 #include "UserGestureIndicator.h"
 #include <wtf/FileSystem.h>
 #include <wtf/IsoMallocInlines.h>
@@ -224,15 +224,16 @@ void FileInputType::createShadowSubtree()
     ASSERT(element());
     ASSERT(element()->shadowRoot());
 
-    auto button = HTMLInputElement::create(inputTag, element()->document(), nullptr, false);
+    Ref button = HTMLInputElement::create(inputTag, element()->protectedDocument(), nullptr, false);
     {
         ScriptDisallowedScope::EventAllowedScope eventAllowedScopeBeforeAppend { button };
         button->setType(InputTypeNames::button());
-        button->setPseudo(UserAgentPartIds::fileSelectorButton());
+        button->setUserAgentPart(UserAgentParts::fileSelectorButton());
         button->setValue(element()->multiple() ? fileButtonChooseMultipleFilesLabel() : fileButtonChooseFileLabel());
     }
-    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { *element()->userAgentShadowRoot() };
-    element()->userAgentShadowRoot()->appendChild(ContainerNode::ChildChange::Source::Parser, button);
+    Ref shadowRoot = *element()->userAgentShadowRoot();
+    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
+    shadowRoot->appendChild(ContainerNode::ChildChange::Source::Parser, button);
     disabledStateChanged();
 }
 

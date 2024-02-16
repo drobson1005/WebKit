@@ -45,29 +45,29 @@
 
 namespace WebKit {
 
-static HashMap<WebExtensionContextIdentifier, WeakPtr<WebExtensionContextProxy>>& webExtensionContextProxies()
+static HashMap<WebExtensionContextIdentifier, WeakRef<WebExtensionContextProxy>>& webExtensionContextProxies()
 {
-    static MainThreadNeverDestroyed<HashMap<WebExtensionContextIdentifier, WeakPtr<WebExtensionContextProxy>>> contexts;
+    static MainThreadNeverDestroyed<HashMap<WebExtensionContextIdentifier, WeakRef<WebExtensionContextProxy>>> contexts;
     return contexts;
 }
 
 RefPtr<WebExtensionContextProxy> WebExtensionContextProxy::get(WebExtensionContextIdentifier identifier)
 {
-    return webExtensionContextProxies().get(identifier).get();
+    return webExtensionContextProxies().get(identifier);
 }
 
 WebExtensionContextProxy::WebExtensionContextProxy(const WebExtensionContextParameters& parameters)
     : m_identifier(parameters.identifier)
 {
-    ASSERT(!webExtensionContextProxies().contains(m_identifier));
-    webExtensionContextProxies().add(m_identifier, this);
+    ASSERT(!get(m_identifier));
+    webExtensionContextProxies().add(m_identifier, *this);
 
     WebProcess::singleton().addMessageReceiver(Messages::WebExtensionContextProxy::messageReceiverName(), m_identifier, *this);
 }
 
 WebExtensionContextProxy::~WebExtensionContextProxy()
 {
-    WebProcess::singleton().removeMessageReceiver(Messages::WebExtensionContextProxy::messageReceiverName(), m_identifier);
+    WebProcess::singleton().removeMessageReceiver(*this);
 }
 
 Ref<WebExtensionContextProxy> WebExtensionContextProxy::getOrCreate(const WebExtensionContextParameters& parameters, WebPage* newPage)
@@ -79,50 +79,69 @@ Ref<WebExtensionContextProxy> WebExtensionContextProxy::getOrCreate(const WebExt
         context.m_manifest = parseJSON(parameters.manifestJSON.get());
         context.m_manifestVersion = parameters.manifestVersion;
         context.m_testingMode = parameters.testingMode;
+        context.m_isSessionStorageAllowedInContentScripts = parameters.isSessionStorageAllowedInContentScripts;
 
         if (parameters.backgroundPageIdentifier) {
             if (newPage && parameters.backgroundPageIdentifier.value() == newPage->identifier())
                 context.setBackgroundPage(*newPage);
-            else if (auto* page = WebProcess::singleton().webPage(parameters.backgroundPageIdentifier.value()))
+            else if (RefPtr page = WebProcess::singleton().webPage(parameters.backgroundPageIdentifier.value()))
                 context.setBackgroundPage(*page);
         }
 
-        for (auto& identifierTuple : parameters.popupPageIdentifiers) {
-            auto& pageIdentifier = std::get<WebCore::PageIdentifier>(identifierTuple);
-            auto& tabIdentifier = std::get<std::optional<WebExtensionTabIdentifier>>(identifierTuple);
-            auto& windowIdentifier = std::get<std::optional<WebExtensionWindowIdentifier>>(identifierTuple);
+        auto processPageIdentifiers = [&context, &newPage](auto& identifiers, auto addPage) {
+            for (auto& identifierTuple : identifiers) {
+                auto& pageIdentifier = std::get<WebCore::PageIdentifier>(identifierTuple);
+                auto& tabIdentifier = std::get<std::optional<WebExtensionTabIdentifier>>(identifierTuple);
+                auto& windowIdentifier = std::get<std::optional<WebExtensionWindowIdentifier>>(identifierTuple);
 
-            if (newPage && pageIdentifier == newPage->identifier())
-                context.addPopupPage(*newPage, tabIdentifier, windowIdentifier);
-            else if (auto* page = WebProcess::singleton().webPage(pageIdentifier))
-                context.addPopupPage(*page, tabIdentifier, windowIdentifier);
-        }
+                if (newPage && pageIdentifier == newPage->identifier())
+                    addPage(context, *newPage, tabIdentifier, windowIdentifier);
+                else if (RefPtr<WebPage> page = WebProcess::singleton().webPage(pageIdentifier))
+                    addPage(context, *page, tabIdentifier, windowIdentifier);
+            }
+        };
 
-        for (auto& identifierTuple : parameters.tabPageIdentifiers) {
-            auto& pageIdentifier = std::get<WebCore::PageIdentifier>(identifierTuple);
-            auto& tabIdentifier = std::get<std::optional<WebExtensionTabIdentifier>>(identifierTuple);
-            auto& windowIdentifier = std::get<std::optional<WebExtensionWindowIdentifier>>(identifierTuple);
+#if ENABLE(INSPECTOR_EXTENSIONS)
+        processPageIdentifiers(parameters.inspectorBackgroundPageIdentifiers, [](auto& context, auto& page, auto& tabIdentifier, auto& windowIdentifier) {
+            context.addInspectorBackgroundPage(page, tabIdentifier, windowIdentifier);
+        });
+#endif
 
-            if (newPage && pageIdentifier == newPage->identifier())
-                context.addTabPage(*newPage, tabIdentifier, windowIdentifier);
-            else if (auto* page = WebProcess::singleton().webPage(pageIdentifier))
-                context.addTabPage(*page, tabIdentifier, windowIdentifier);
-        }
+        processPageIdentifiers(parameters.popupPageIdentifiers, [](auto& context, auto& page, auto& tabIdentifier, auto& windowIdentifier) {
+            context.addPopupPage(page, tabIdentifier, windowIdentifier);
+        });
+
+        processPageIdentifiers(parameters.tabPageIdentifiers, [](auto& context, auto& page, auto& tabIdentifier, auto& windowIdentifier) {
+            context.addTabPage(page, tabIdentifier, windowIdentifier);
+        });
     };
 
-    if (auto context = webExtensionContextProxies().get(parameters.identifier)) {
+    if (RefPtr context = get(parameters.identifier)) {
         updateProperties(*context);
         return *context;
     }
 
-    auto result = adoptRef(new WebExtensionContextProxy(parameters));
-    updateProperties(*result);
-    return result.releaseNonNull();
+    Ref result = adoptRef(*new WebExtensionContextProxy(parameters));
+    updateProperties(result);
+    return result;
 }
 
 _WKWebExtensionLocalization *WebExtensionContextProxy::parseLocalization(API::Data& json, const URL& baseURL)
 {
     return [[_WKWebExtensionLocalization alloc] initWithLocalizedDictionary:parseJSON(json) uniqueIdentifier:baseURL.host().toString()];
+}
+
+WebCore::DOMWrapperWorld& WebExtensionContextProxy::toDOMWorld(WebExtensionContentWorldType contentWorldType)
+{
+    switch (contentWorldType) {
+    case WebExtensionContentWorldType::Main:
+        return mainWorld();
+    case WebExtensionContentWorldType::ContentScript:
+        return contentScriptWorld();
+    case WebExtensionContentWorldType::Native:
+        ASSERT_NOT_REACHED();
+        return mainWorld();
+    }
 }
 
 } // namespace WebKit

@@ -340,6 +340,25 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'extract-test-results',
             'set-permissions',
         ],
+        'Apple-Sonoma-Debug-WK2-Site-Isolation-Tree-Tests': [
+            'configure-build',
+            'configuration',
+            'clean-and-update-working-directory',
+            'checkout-specific-revision',
+            'show-identifier',
+            'kill-old-processes',
+            'delete-WebKitBuild-directory',
+            'delete-stale-build-files',
+            'prune-coresymbolicationd-cache-if-too-large',
+            'download-built-product',
+            'extract-built-product',
+            'layout-test',
+            'dashboard-tests',
+            'archive-test-results',
+            'upload',
+            'extract-test-results',
+            'set-permissions',
+        ],
         'Apple-Ventura-Release-Build': [
             'configure-build',
             'configuration',
@@ -1274,6 +1293,17 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'API-tests',
             'webdriver-test'
         ],
+        'GTK-Linux-64-bit-Release-Debian-11-Build': [
+            'configure-build',
+            'configuration',
+            'clean-and-update-working-directory',
+            'checkout-specific-revision',
+            'show-identifier',
+            'kill-old-processes',
+            'delete-WebKitBuild-directory',
+            'delete-stale-build-files',
+            'compile-webkit'
+        ],
         'GTK-Linux-64-bit-Release-Debian-Stable-Build': [
             'configure-build',
             'configuration',
@@ -1837,6 +1867,18 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'download-built-product',
             'extract-built-product',
             'benchmark-test'
+        ],
+        'WPE-Linux-64-bit-Release-Skia-Build': [
+            'configure-build',
+            'configuration',
+            'clean-and-update-working-directory',
+            'checkout-specific-revision',
+            'show-identifier',
+            'kill-old-processes',
+            'delete-WebKitBuild-directory',
+            'delete-stale-build-files',
+            'jhbuild',
+            'compile-webkit'
         ],
     }
 

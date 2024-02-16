@@ -29,6 +29,7 @@
 #include "InlineLineBuilder.h"
 #include "RenderStyleInlines.h"
 #include <limits>
+#include <wtf/MathExtras.h>
 
 namespace WebCore {
 namespace Layout {
@@ -39,18 +40,6 @@ namespace Layout {
 // Typically, if inline content spans many lines, the likelihood of someone caring about the vertical space
 // used decreases. So, we ignore this ideal number of lines requirement beyond this threshold.
 static const size_t maximumLinesToBalanceWithLineRequirement { 12 };
-
-static Vector<size_t> computeBreakOpportunities(const InlineItemList& inlineItemList, InlineItemRange range)
-{
-    Vector<size_t> breakOpportunities;
-    size_t currentIndex = range.startIndex();
-    while (currentIndex < range.endIndex()) {
-        currentIndex = InlineFormattingUtils::nextWrapOpportunity(currentIndex, range, inlineItemList);
-        breakOpportunities.append(currentIndex);
-    }
-    return breakOpportunities;
-}
-
 
 static float computeCost(InlineLayoutUnit candidateLineWidth, InlineLayoutUnit idealLineWidth)
 {
@@ -110,8 +99,17 @@ InlineContentBalancer::InlineContentBalancer(InlineFormattingContext& inlineForm
 
 void InlineContentBalancer::initialize()
 {
+    auto lineClamp = m_inlineFormattingContext.layoutState().parentBlockLayoutState().lineClamp();
+    auto numberOfVisibleLinesAllowed = lineClamp ? std::make_optional(lineClamp->allowedLineCount()) : std::nullopt;
+
     if (!m_inlineFormattingContext.layoutState().placedFloats().isEmpty()) {
         m_cannotBalanceContent = true;
+        return;
+    }
+
+    // if we have a single line content, we don't have anything to be balanced.
+    if (numberOfVisibleLinesAllowed == 1) {
+        m_hasSingleLineVisibleContent = true;
         return;
     }
 
@@ -153,7 +151,11 @@ void InlineContentBalancer::initialize()
         auto textIndent = m_inlineFormattingContext.formattingUtils().computedTextIndent(InlineFormattingUtils::IsIntrinsicWidthMode::No, previousLineEndsWithLineBreak, m_maximumLineWidth);
         m_originalLineWidths.append(textIndent + lineSlidingWidth.width());
 
-        layoutRange.start = InlineFormattingUtils::leadingInlineItemPositionForNextLine(lineLayoutResult.inlineItemRange.end, previousLineEnd, layoutRange.end);
+        // If next line count would match (or exceed) the number of visible lines due to line-clamp, we can bail out early.
+        if (numberOfVisibleLinesAllowed && (lineIndex + 1 >= numberOfVisibleLinesAllowed))
+            break;
+
+        layoutRange.start = InlineFormattingUtils::leadingInlineItemPositionForNextLine(lineLayoutResult.inlineItemRange.end, previousLineEnd, !lineLayoutResult.floatContent.hasIntrusiveFloat.isEmpty(), layoutRange.end);
         previousLineEnd = layoutRange.start;
         previousLine = PreviousLine { lineIndex, lineLayoutResult.contentGeometry.trailingOverflowingContentWidth, !lineLayoutResult.inlineContent.isEmpty() && lineLayoutResult.inlineContent.last().isLineBreak(), !lineLayoutResult.inlineContent.isEmpty(), lineLayoutResult.directionality.inlineBaseDirection, WTFMove(lineLayoutResult.floatContent.suspendedFloats) };
         lineIndex++;
@@ -164,7 +166,7 @@ void InlineContentBalancer::initialize()
 
 std::optional<Vector<LayoutUnit>> InlineContentBalancer::computeBalanceConstraints()
 {
-    if (m_cannotBalanceContent)
+    if (m_cannotBalanceContent || m_hasSingleLineVisibleContent)
         return std::nullopt;
 
     // If forced line breaks exist, then we can balance each forced-break-delimited
@@ -215,7 +217,7 @@ std::optional<Vector<LayoutUnit>> InlineContentBalancer::computeBalanceConstrain
 std::optional<Vector<LayoutUnit>> InlineContentBalancer::balanceRangeWithLineRequirement(InlineItemRange range, InlineLayoutUnit idealLineWidth, size_t numberOfLines, bool isFirstChunk)
 {
     // breakOpportunities holds the indices i such that a line break can occur before m_inlineItemList[i].
-    auto breakOpportunities = computeBreakOpportunities(m_inlineItemList, range);
+    auto breakOpportunities = computeBreakOpportunities(range);
 
     // We need a dummy break opportunity at the beginning for algorithmic base case purposes
     breakOpportunities.insert(0, range.startIndex());
@@ -279,7 +281,8 @@ std::optional<Vector<LayoutUnit>> InlineContentBalancer::balanceRangeWithLineReq
             // Compute the cost of this line based on the line index
             for (size_t lineIndex = 1; lineIndex <= numberOfLines; lineIndex++) {
                 auto accumulatedCost = candidateLineCost + state[startIndex][lineIndex - 1].accumulatedCost;
-                if (accumulatedCost < state[breakIndex][lineIndex].accumulatedCost) {
+                auto currentAccumulatedCost = state[breakIndex][lineIndex].accumulatedCost;
+                if (accumulatedCost < currentAccumulatedCost || WTF::areEssentiallyEqual(accumulatedCost, currentAccumulatedCost)) {
                     state[breakIndex][lineIndex].accumulatedCost = accumulatedCost;
                     state[breakIndex][lineIndex].previousBreakIndex = startIndex;
                 }
@@ -315,7 +318,7 @@ std::optional<Vector<LayoutUnit>> InlineContentBalancer::balanceRangeWithLineReq
 std::optional<Vector<LayoutUnit>> InlineContentBalancer::balanceRangeWithNoLineRequirement(InlineItemRange range, InlineLayoutUnit idealLineWidth, bool isFirstChunk)
 {
     // breakOpportunities holds the indices i such that a line break can occur before m_inlineItemList[i].
-    auto breakOpportunities = computeBreakOpportunities(m_inlineItemList, range);
+    auto breakOpportunities = computeBreakOpportunities(range);
 
     // We need a dummy break opportunity at the beginning for algorithmic base case purposes
     breakOpportunities.insert(0, range.startIndex());
@@ -547,6 +550,17 @@ void InlineContentBalancer::SlidingWidth::advanceEndTo(size_t newEnd)
     ASSERT(m_end <= newEnd);
     while (m_end < newEnd)
         advanceEnd();
+}
+
+Vector<size_t> InlineContentBalancer::computeBreakOpportunities(InlineItemRange range) const
+{
+    Vector<size_t> breakOpportunities;
+    size_t currentIndex = range.startIndex();
+    while (currentIndex < range.endIndex()) {
+        currentIndex = m_inlineFormattingContext.formattingUtils().nextWrapOpportunity(currentIndex, range, m_inlineItemList);
+        breakOpportunities.append(currentIndex);
+    }
+    return breakOpportunities;
 }
 
 }

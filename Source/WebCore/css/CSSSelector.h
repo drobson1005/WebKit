@@ -23,6 +23,7 @@
 
 #include "CSSParserContext.h"
 #include "CSSSelectorEnums.h"
+#include "PseudoElementIdentifier.h"
 #include "QualifiedName.h"
 #include "RenderStyleConstants.h"
 #include <wtf/EnumTraits.h>
@@ -113,18 +114,20 @@ public:
         Right,
     };
 
+    enum AttributeMatchType { CaseSensitive, CaseInsensitive };
+
     static PseudoId pseudoId(PseudoElement);
     static bool isPseudoClassEnabled(PseudoClass, const CSSSelectorParserContext&);
     static bool isPseudoElementEnabled(PseudoElement, StringView, const CSSSelectorParserContext&);
-    static std::optional<PseudoElement> parsePseudoElement(StringView, const CSSSelectorParserContext&);
-    static std::optional<PseudoId> parseStandalonePseudoElement(StringView, const CSSSelectorParserContext&);
+    static std::pair<bool, std::optional<Style::PseudoElementIdentifier>> parsePseudoElement(const String&, const CSSSelectorParserContext&);
+    static std::optional<PseudoElement> parsePseudoElementName(StringView, const CSSSelectorParserContext&);
     static bool pseudoClassRequiresArgument(PseudoClass);
     static bool pseudoElementRequiresArgument(PseudoElement);
     static bool pseudoClassMayHaveArgument(PseudoClass);
     static bool pseudoElementMayHaveArgument(PseudoElement);
 
     static const ASCIILiteral selectorTextForPseudoClass(PseudoClass);
-    static const ASCIILiteral nameForShadowPseudoElementLegacyAlias(StringView);
+    static const ASCIILiteral nameForUserAgentPartLegacyAlias(StringView);
 
     // Selectors are kept in an array by CSSSelectorList.
     // The next component of the selector is the next item in the array.
@@ -143,62 +146,62 @@ public:
     const CSSSelectorList* selectorList() const { return m_hasRareData ? m_data.rareData->selectorList.get() : nullptr; }
     CSSSelectorList* selectorList() { return m_hasRareData ? m_data.rareData->selectorList.get() : nullptr; }
 
+    bool matchNth(int count) const;
+    int nthA() const;
+    int nthB() const;
+
+    bool hasDescendantRelation() const { return relation() == Relation::DescendantSpace; }
+    bool hasDescendantOrChildRelation() const { return relation() == Relation::Child || hasDescendantRelation(); }
+
+    PseudoClass pseudoClass() const;
+    PseudoElement pseudoElement() const;
+    PagePseudoClass pagePseudoClass() const;
+
+    bool matchesPseudoElement() const;
+    bool isSiblingSelector() const;
+    bool isAttributeSelector() const;
+
+    Relation relation() const { return static_cast<Relation>(m_relation); }
+    Match match() const { return static_cast<Match>(m_match); }
+
+    bool isLastInSelectorList() const { return m_isLastInSelectorList; }
+    bool isFirstInTagHistory() const { return m_isFirstInTagHistory; }
+    bool isLastInTagHistory() const { return m_isLastInTagHistory; }
+
+    // FIXME: These should ideally be private, but CSSSelectorList and StyleRule use them.
+    void setLastInSelectorList() { m_isLastInSelectorList = true; }
+    void setNotFirstInTagHistory() { m_isFirstInTagHistory = false; }
+    void setNotLastInTagHistory() { m_isLastInTagHistory = false; }
+
+    bool isForPage() const { return m_isForPage; }
+
+    // Implicit means that this selector is not author/UA written.
+    bool isImplicit() const { return m_isImplicit; }
+
+private:
+    friend class MutableCSSSelector;
+
     void setValue(const AtomString&, bool matchLowerCase = false);
 
-    enum AttributeMatchType { CaseSensitive, CaseInsensitive };
     void setAttribute(const QualifiedName&, AttributeMatchType);
     void setNth(int a, int b);
     void setArgument(const AtomString&);
     void setArgumentList(FixedVector<PossiblyQuotedIdentifier>);
     void setSelectorList(std::unique_ptr<CSSSelectorList>);
 
-    bool matchNth(int count) const;
-    int nthA() const;
-    int nthB() const;
-
-    bool hasDescendantRelation() const { return relation() == Relation::DescendantSpace; }
-
-    bool hasDescendantOrChildRelation() const { return relation() == Relation::Child || hasDescendantRelation(); }
-
-    PseudoClass pseudoClass() const;
     void setPseudoClass(PseudoClass);
-
-    PseudoElement pseudoElement() const;
     void setPseudoElement(PseudoElement);
-
-    PagePseudoClass pagePseudoClass() const;
     void setPagePseudoClass(PagePseudoClass);
 
-    bool matchesPseudoElement() const;
-    bool isUserAgentPartPseudoElement() const;
-    bool isSiblingSelector() const;
-    bool isAttributeSelector() const;
-
-    Relation relation() const { return static_cast<Relation>(m_relation); }
     void setRelation(Relation);
-
-    Match match() const { return static_cast<Match>(m_match); }
     void setMatch(Match);
 
-    bool isLastInSelectorList() const { return m_isLastInSelectorList; }
-    void setLastInSelectorList() { m_isLastInSelectorList = true; }
-    void setNotLastInSelectorList() { m_isLastInSelectorList = false; }
-
-    bool isFirstInTagHistory() const { return m_isFirstInTagHistory; }
-    void setNotFirstInTagHistory() { m_isFirstInTagHistory = false; }
-
-    bool isLastInTagHistory() const { return m_isLastInTagHistory; }
-    void setNotLastInTagHistory() { m_isLastInTagHistory = false; }
-    void setLastInTagHistory() { m_isLastInTagHistory = true; }
-
-    bool isForPage() const { return m_isForPage; }
     void setForPage() { m_isForPage = true; }
-
     void setImplicit() { m_isImplicit = true; }
-    // Implicit means that this selector is not author/UA written.
-    bool isImplicit() const { return m_isImplicit; }
 
-private:
+    unsigned simpleSelectorSpecificityForPage() const;
+    CSSSelector* tagHistory() { return m_isLastInTagHistory ? nullptr : this + 1; }
+
     unsigned m_relation : 4 { enumToUnderlyingType(Relation::DescendantSpace) };
     mutable unsigned m_match : 5 { enumToUnderlyingType(Match::Unknown) };
     mutable unsigned m_pseudoType : 8 { 0 }; // PseudoType.
@@ -215,9 +218,6 @@ private:
 #if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
     unsigned m_destructorHasBeenCalled : 1 { false };
 #endif
-
-    unsigned simpleSelectorSpecificityForPage() const;
-    CSSSelector* tagHistory() { return m_isLastInTagHistory ? nullptr : this + 1; }
 
     CSSSelector& operator=(const CSSSelector&) = delete;
     CSSSelector(CSSSelector&&) = delete;
@@ -270,11 +270,6 @@ inline const QualifiedName& CSSSelector::attribute() const
 inline bool CSSSelector::matchesPseudoElement() const
 {
     return match() == Match::PseudoElement;
-}
-
-inline bool CSSSelector::isUserAgentPartPseudoElement() const
-{
-    return pseudoElement() == PseudoElement::UserAgentPart || pseudoElement() == PseudoElement::UserAgentPartLegacyAlias;
 }
 
 static inline bool pseudoClassIsRelativeToSiblings(CSSSelector::PseudoClass type)
@@ -332,7 +327,7 @@ inline bool CSSSelector::isAttributeSelector() const
 inline void CSSSelector::setValue(const AtomString& value, bool matchLowerCase)
 {
     ASSERT(match() != Match::Tag);
-    AtomString matchingValue = matchLowerCase ? value.convertToASCIILowercase() : value;
+    auto matchingValue = matchLowerCase ? value.convertToASCIILowercase() : value;
     if (!m_hasRareData && matchingValue != value)
         createRareData();
 

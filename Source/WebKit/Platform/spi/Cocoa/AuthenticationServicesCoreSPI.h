@@ -29,8 +29,8 @@
 
 @interface ASCWebKitSPISupport : NSObject
 @property (class, nonatomic) BOOL shouldUseAlternateCredentialStore;
-+ (BOOL)arePasskeysDisallowedForRelyingParty:(nonnull NSString *)relyingParty;
-+ (BOOL)canCurrentProcessAccessPasskeysForRelyingParty:(nonnull NSString *)relyingParty;
++ (void)getArePasskeysDisallowedForRelyingParty:(nonnull NSString *)relyingParty withCompletionHandler:(void (^ _Nonnull)(BOOL))completionHandler NS_REFINED_FOR_SWIFT;
++ (void)getCanCurrentProcessAccessPasskeysForRelyingParty:(nonnull NSString *)relyingParty withCompletionHandler:(void (^ _Nonnull)(BOOL))completionHandler;
 + (void)getClientCapabilitiesForRelyingParty:(nonnull NSString *)relyingParty withCompletionHandler:(void (^ _Nonnull)(NSDictionary<NSString *, NSNumber *> * _Nonnull))completionHandler;
 @end
 
@@ -406,17 +406,23 @@ typedef NS_ENUM(NSInteger, ASCredentialRequestStyle) {
 extern NSErrorDomain const ASCAuthorizationErrorDomain;
 
 typedef NS_ERROR_ENUM(ASCAuthorizationErrorDomain, ASCAuthorizationError) {
-    ASCAuthorizationErrorUnknown,
-    ASCAuthorizationErrorFailed,
-    ASCAuthorizationErrorUserCanceled,
-    ASCAuthorizationErrorPINRequired,
-    ASCAuthorizationErrorMultipleNFCTagsPresent,
-    ASCAuthorizationErrorNoCredentialsFound,
-    ASCAuthorizationErrorLAError,
-    ASCAuthorizationErrorLAExcludeCredentialsMatched,
-    ASCAuthorizationErrorPINInvalid,
-    ASCAuthorizationErrorAuthenticatorTemporarilyLocked,
-    ASCAuthorizationErrorAuthenticatorPermanentlyLocked,
+    ASCAuthorizationErrorUnknown = 0,
+    ASCAuthorizationErrorFailed = 1,
+    ASCAuthorizationErrorUserCanceled = 2,
+    ASCAuthorizationErrorPINRequired = 3,
+    ASCAuthorizationErrorMultipleNFCTagsPresent = 4,
+    ASCAuthorizationErrorNoCredentialsFound = 5,
+    ASCAuthorizationErrorLAError = 6,
+    ASCAuthorizationErrorLAExcludeCredentialsMatched = 7,
+    ASCAuthorizationErrorPINInvalid = 8,
+    ASCAuthorizationErrorAuthenticatorTemporarilyLocked = 9,
+    ASCAuthorizationErrorAuthenticatorPermanentlyLocked = 10,
+    ASCAuthorizationErrorAlreadyStarted = 11,
+    ASCAuthorizationErrorInternalCancel = 12,
+    ASCAuthorizationErrorKeyStoreFull = 13,
+    ASCAuthorizationErrorInvalidResponse = 14,
+    ASCAuthorizationErrorNotSupportedInSTP = 16,
+    ASCAuthorizationErrorSecurityError = 17,
 };
 
 NS_ASSUME_NONNULL_END

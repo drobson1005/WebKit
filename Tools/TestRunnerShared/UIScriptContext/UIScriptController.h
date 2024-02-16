@@ -106,6 +106,10 @@ public:
     
     virtual void setSafeAreaInsets(double, double, double, double) { notImplemented(); }
 
+    virtual void beginInteractiveObscuredInsetsChange() { notImplemented(); }
+    virtual void endInteractiveObscuredInsetsChange() { notImplemented(); }
+    virtual void setObscuredInsets(double, double, double, double) { notImplemented(); }
+
     // View Parenting and Visibility
 
     virtual void becomeFirstResponder() { notImplemented(); }
@@ -163,7 +167,7 @@ public:
     virtual JSRetainPtr<JSStringRef> uiViewTreeAsText() const { notImplemented(); return nullptr; }
     virtual JSRetainPtr<JSStringRef> caLayerTreeAsText() const { notImplemented(); return nullptr; }
     
-    virtual JSRetainPtr<JSStringRef> scrollbarStateForScrollingNodeID(unsigned long long, bool) const { notImplemented(); return nullptr; }
+    virtual JSRetainPtr<JSStringRef> scrollbarStateForScrollingNodeID(unsigned long long, unsigned long long, bool) const { notImplemented(); return nullptr; }
 
     // Touches
 

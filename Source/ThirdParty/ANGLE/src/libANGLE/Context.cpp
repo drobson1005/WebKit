@@ -892,7 +892,6 @@ egl::Error Context::onDestroy(const egl::Display *display)
 
     releaseShaderCompiler();
 
-    mState.ensureNoPendingLink(this);
     mState.reset(this);
 
     releaseSharedObjects();
@@ -6142,6 +6141,7 @@ void Context::bindBufferRange(BufferBinding target,
     if (target == BufferBinding::Uniform)
     {
         mUniformBufferObserverBindings[index].bind(object);
+        mState.onUniformBufferStateChange(index);
         mStateCache.onUniformBufferStateChange(this);
     }
     else if (target == BufferBinding::AtomicCounter)
@@ -6157,6 +6157,11 @@ void Context::bindBufferRange(BufferBinding target,
     else
     {
         mStateCache.onBufferBindingChange(this);
+    }
+
+    if (object)
+    {
+        object->onBind(this, target);
     }
 }
 
@@ -7848,13 +7853,6 @@ void Context::uniformBlockBinding(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     programObject->bindUniformBlock(uniformBlockIndex, uniformBlockBinding);
-
-    // Note: If the Program is shared between Contexts we would be better using Observer/Subject.
-    if (programObject->isInUse())
-    {
-        mState.setObjectDirty(GL_PROGRAM);
-        mStateCache.onUniformBufferStateChange(this);
-    }
 }
 
 GLsync Context::fenceSync(GLenum condition, GLbitfield flags)
@@ -8547,8 +8545,9 @@ void Context::texStorageMem2D(TextureType target,
                               MemoryObjectID memory,
                               GLuint64 offset)
 {
-    texStorageMemFlags2D(target, levels, internalFormat, width, height, memory, offset, 0,
-                         std::numeric_limits<uint32_t>::max(), nullptr);
+    texStorageMemFlags2D(target, levels, internalFormat, width, height, memory, offset,
+                         std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max(),
+                         nullptr);
 }
 
 void Context::texStorageMem2DMultisample(TextureType target,
@@ -9301,6 +9300,13 @@ std::shared_ptr<angle::WorkerThreadPool> Context::getWorkerThreadPool() const
     return mDisplay->getMultiThreadPool();
 }
 
+void Context::onUniformBlockBindingUpdated(GLuint uniformBlockIndex)
+{
+    mState.mDirtyBits.set(state::DIRTY_BIT_UNIFORM_BUFFER_BINDINGS);
+    mState.mDirtyUniformBlocks.set(uniformBlockIndex);
+    mStateCache.onUniformBufferStateChange(this);
+}
+
 void Context::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message)
 {
     switch (index)
@@ -9368,6 +9374,12 @@ void Context::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
                     break;
                 }
                 default:
+                    if (angle::IsProgramUniformBlockBindingUpdatedMessage(message))
+                    {
+                        onUniformBlockBindingUpdated(
+                            angle::ProgramUniformBlockBindingUpdatedMessageToIndex(message));
+                        break;
+                    }
                     // Ignore all the other notifications
                     break;
             }
@@ -9384,6 +9396,17 @@ void Context::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
                     mStateCache.onProgramExecutableChange(this);
                     break;
                 default:
+                    if (angle::IsProgramUniformBlockBindingUpdatedMessage(message))
+                    {
+                        // Note: if there's a program bound, its executable is used (and not the
+                        // PPO's)
+                        if (mState.getProgram() == nullptr)
+                        {
+                            onUniformBlockBindingUpdated(
+                                angle::ProgramUniformBlockBindingUpdatedMessageToIndex(message));
+                        }
+                        break;
+                    }
                     UNREACHABLE();
                     break;
             }
@@ -9820,6 +9843,66 @@ void Context::drawPixelLocalStorageEXTDisable(const PixelLocalStoragePlane plane
     ANGLE_CONTEXT_TRY(mImplementation->drawPixelLocalStorageEXTDisable(this, planes, storeops));
 }
 
+void Context::framebufferFoveationConfig(FramebufferID framebufferPacked,
+                                         GLuint numLayers,
+                                         GLuint focalPointsPerLayer,
+                                         GLuint requestedFeatures,
+                                         GLuint *providedFeatures)
+{
+    ASSERT(numLayers <= gl::IMPLEMENTATION_MAX_NUM_LAYERS);
+    ASSERT(focalPointsPerLayer <= gl::IMPLEMENTATION_MAX_FOCAL_POINTS);
+    ASSERT(providedFeatures);
+
+    Framebuffer *framebuffer = getFramebuffer(framebufferPacked);
+    ASSERT(!framebuffer->isFoveationConfigured());
+
+    *providedFeatures = 0;
+    if (framebuffer->canSupportFoveatedRendering())
+    {
+        // We only support GL_FOVEATION_ENABLE_BIT_QCOM feature, for now.
+        // If requestedFeatures == 0 return without configuring the framebuffer.
+        if (requestedFeatures != 0)
+        {
+            framebuffer->configureFoveation();
+            *providedFeatures = framebuffer->getSupportedFoveationFeatures();
+        }
+    }
+}
+
+void Context::framebufferFoveationParameters(FramebufferID framebufferPacked,
+                                             GLuint layer,
+                                             GLuint focalPoint,
+                                             GLfloat focalX,
+                                             GLfloat focalY,
+                                             GLfloat gainX,
+                                             GLfloat gainY,
+                                             GLfloat foveaArea)
+{
+    Framebuffer *framebuffer = getFramebuffer(framebufferPacked);
+    ASSERT(framebuffer);
+    framebuffer->setFocalPoint(layer, focalPoint, focalX, focalY, gainX, gainY, foveaArea);
+    mState.mDirtyBits.set(state::DIRTY_BIT_EXTENDED);
+    mState.mExtendedDirtyBits.set(
+        state::ExtendedDirtyBitType::EXTENDED_DIRTY_BIT_FOVEATED_RENDERING);
+}
+
+void Context::textureFoveationParameters(TextureID texturePacked,
+                                         GLuint layer,
+                                         GLuint focalPoint,
+                                         GLfloat focalX,
+                                         GLfloat focalY,
+                                         GLfloat gainX,
+                                         GLfloat gainY,
+                                         GLfloat foveaArea)
+{
+    Texture *texture = getTexture(texturePacked);
+    ASSERT(texture);
+    texture->setFocalPoint(layer, focalPoint, focalX, focalY, gainX, gainY, foveaArea);
+    mState.mDirtyBits.set(state::DIRTY_BIT_EXTENDED);
+    mState.mExtendedDirtyBits.set(
+        state::ExtendedDirtyBitType::EXTENDED_DIRTY_BIT_FOVEATED_RENDERING);
+}
+
 // ErrorSet implementation.
 ErrorSet::ErrorSet(Debug *debug,
                    const angle::FrontendFeatures &frontendFeatures,
@@ -10003,13 +10086,13 @@ GLenum ErrorSet::getGraphicsResetStatus(rx::ContextImpl *contextImpl)
 
 // StateCache implementation.
 StateCache::StateCache()
-    : mCachedHasAnyEnabledClientAttrib(false),
-      mCachedNonInstancedVertexElementLimit(0),
+    : mCachedNonInstancedVertexElementLimit(0),
       mCachedInstancedVertexElementLimit(0),
       mCachedBasicDrawStatesErrorString(kInvalidPointer),
       mCachedBasicDrawStatesErrorCode(GL_NO_ERROR),
       mCachedBasicDrawElementsError(kInvalidPointer),
       mCachedProgramPipelineError(kInvalidPointer),
+      mCachedHasAnyEnabledClientAttrib(false),
       mCachedTransformFeedbackActiveUnpaused(false),
       mCachedCanDraw(false)
 {
@@ -10097,8 +10180,14 @@ void StateCache::updateVertexElementLimitsImpl(Context *context)
         GLint64 limit = attrib.getCachedElementLimit();
         if (binding.getDivisor() > 0)
         {
+            // For instanced draw calls, |divisor| times this limit is the limit for instance count
+            // (because every |divisor| instances accesses the same attribute)
+            angle::CheckedNumeric<GLint64> checkedLimit = limit;
+            checkedLimit *= binding.getDivisor();
+
             mCachedInstancedVertexElementLimit =
-                std::min(mCachedInstancedVertexElementLimit, limit);
+                std::min<GLint64>(mCachedInstancedVertexElementLimit,
+                                  checkedLimit.ValueOrDefault(VertexAttribute::kIntegerOverflow));
         }
         else
         {
@@ -10208,6 +10297,11 @@ void StateCache::onVertexArrayBufferStateChange(Context *context)
 }
 
 void StateCache::onGLES1ClientStateChange(Context *context)
+{
+    updateActiveAttribsMask(context);
+}
+
+void StateCache::onGLES1TextureStateChange(Context *context)
 {
     updateActiveAttribsMask(context);
 }
@@ -10424,9 +10518,11 @@ void StateCache::updateActiveShaderStorageBufferIndices(Context *context)
     const ProgramExecutable *executable = context->getState().getProgramExecutable();
     if (executable)
     {
-        for (const InterfaceBlock &block : executable->getShaderStorageBlocks())
+        const std::vector<InterfaceBlock> &blocks = executable->getShaderStorageBlocks();
+        for (size_t blockIndex = 0; blockIndex < blocks.size(); ++blockIndex)
         {
-            mCachedActiveShaderStorageBufferIndices.set(block.pod.binding);
+            const GLuint binding = executable->getShaderStorageBlockBinding(blockIndex);
+            mCachedActiveShaderStorageBufferIndices.set(binding);
         }
     }
 }

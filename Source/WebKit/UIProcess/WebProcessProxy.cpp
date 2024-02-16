@@ -30,11 +30,12 @@
 #include "APIPageHandle.h"
 #include "APIUIClient.h"
 #include "AuthenticatorManager.h"
-#include "DataReference.h"
 #include "DownloadProxyMap.h"
 #include "GoToBackForwardItemParameters.h"
 #include "LoadParameters.h"
 #include "Logging.h"
+#include "ModelProcessConnectionParameters.h"
+#include "ModelProcessProxy.h"
 #include "NetworkProcessConnectionInfo.h"
 #include "NotificationManagerMessageHandlerMessages.h"
 #include "PageLoadState.h"
@@ -109,6 +110,10 @@
 
 #if PLATFORM(MAC)
 #include "HighPerformanceGPUManager.h"
+#endif
+
+#if ENABLE(GPU_PROCESS)
+#include "APIPageConfiguration.h"
 #endif
 
 #if ENABLE(SEC_ITEM_SHIM)
@@ -278,7 +283,7 @@ private:
         return dummy.get();
     }
 
-    CheckedRef<WebProcessProxy> m_process;
+    WeakRef<WebProcessProxy> m_process;
 };
 #endif
 
@@ -344,8 +349,7 @@ WebProcessProxy::~WebProcessProxy()
     WebPasteboardProxy::singleton().removeWebProcessProxy(*this);
 
 #if HAVE(DISPLAY_LINK)
-    // Unable to ref the process pool as it may have started destruction.
-    if (auto* processPool = m_processPool.get())
+    if (RefPtrAllowingPartiallyDestroyed<WebProcessPool> processPool = m_processPool.get())
         processPool->displayLinks().stopDisplayLinks(m_displayLinkClient);
 #endif
 
@@ -390,7 +394,9 @@ void WebProcessProxy::setIsInProcessCache(bool value, WillShutDown willShutDown)
     if (willShutDown == WillShutDown::Yes)
         return;
 
-    send(Messages::WebProcess::SetIsInProcessCache(m_isInProcessCache), 0);
+    // The WebProcess might be task_suspended at this point, so use sendWithAsyncReply to resume
+    // the process via a background activity long enough to process the IPC if necessary.
+    sendWithAsyncReply(Messages::WebProcess::SetIsInProcessCache(m_isInProcessCache), []() { });
 
     if (m_isInProcessCache) {
         // WebProcessProxy objects normally keep the process pool alive but we do not want this to be the case
@@ -400,6 +406,8 @@ void WebProcessProxy::setIsInProcessCache(bool value, WillShutDown willShutDown)
         RELEASE_ASSERT(m_processPool);
         m_processPool.setIsWeak(IsWeak::No);
     }
+
+    updateRuntimeStatistics();
 }
 
 void WebProcessProxy::setWebsiteDataStore(WebsiteDataStore& dataStore)
@@ -611,8 +619,7 @@ void WebProcessProxy::processWillShutDown(IPC::Connection& connection)
 
 #if HAVE(DISPLAY_LINK)
     m_displayLinkClient.setConnection(nullptr);
-    // Unable to protect the process pool as it may have started destruction.
-    processPool().displayLinks().stopDisplayLinks(m_displayLinkClient);
+    RefAllowingPartiallyDestroyed<WebProcessPool> { processPool() }->displayLinks().stopDisplayLinks(m_displayLinkClient);
 #endif
 }
 
@@ -681,8 +688,7 @@ void WebProcessProxy::shutDown()
     m_routingArbitrator->processDidTerminate();
 #endif
 
-    // Unable to protect the process pool as it may have started destruction.
-    processPool().disconnectProcess(*this);
+    RefAllowingPartiallyDestroyed<WebProcessPool> { processPool() }->disconnectProcess(*this);
 }
 
 RefPtr<WebPageProxy> WebProcessProxy::webPage(WebPageProxyIdentifier pageID)
@@ -820,6 +826,8 @@ void WebProcessProxy::markIsNoLongerInPrewarmedPool()
     m_processPool.setIsWeak(IsWeak::No);
 
     send(Messages::WebProcess::MarkIsNoLongerPrewarmed(), 0);
+
+    updateRuntimeStatistics();
 }
 
 void WebProcessProxy::removeWebPage(WebPageProxy& webPage, EndsUsingDataStore endsUsingDataStore)
@@ -1049,6 +1057,41 @@ void WebProcessProxy::gpuProcessExited(ProcessTerminationReason reason)
 }
 #endif
 
+#if ENABLE(MODEL_PROCESS)
+void WebProcessProxy::createModelProcessConnection(IPC::Connection::Handle&& connectionIdentifier, WebKit::ModelProcessConnectionParameters&& parameters)
+{
+    bool anyPageHasModelProcessEnabled = false;
+    for (auto& page : m_pageMap.values())
+        anyPageHasModelProcessEnabled |= page->preferences().modelProcessEnabled();
+    MESSAGE_CHECK(anyPageHasModelProcessEnabled);
+
+#if ENABLE(IPC_TESTING_API)
+    parameters.ignoreInvalidMessageForTesting = ignoreInvalidMessageForTesting();
+#endif
+
+#if HAVE(AUDIT_TOKEN)
+    parameters.presentingApplicationAuditToken = m_processPool->configuration().presentingApplicationProcessToken();
+#endif
+
+    protectedProcessPool()->createModelProcessConnection(*this, WTFMove(connectionIdentifier), WTFMove(parameters));
+}
+
+void WebProcessProxy::modelProcessDidFinishLaunching()
+{
+    for (auto& page : m_pageMap.values())
+        page->modelProcessDidFinishLaunching();
+}
+
+void WebProcessProxy::modelProcessExited(ProcessTerminationReason reason)
+{
+    WEBPROCESSPROXY_RELEASE_LOG_ERROR(Process, "modelProcessExited: reason=%{public}s", processTerminationReasonToString(reason));
+
+    for (auto& page : m_pageMap.values())
+        page->modelProcessExited(reason);
+}
+
+#endif // ENABLE(MODEL_PROCESS)
+
 #if !PLATFORM(MAC)
 bool WebProcessProxy::shouldAllowNonValidInjectedCode() const
 {
@@ -1159,6 +1202,9 @@ void WebProcessProxy::processDidTerminateOrFailedToLaunch(ProcessTerminationReas
 
     for (auto& page : pages)
         page->dispatchProcessDidTerminate(reason);
+
+    for (auto& remotePage : m_remotePages)
+        remotePage.processDidTerminate(coreProcessIdentifier());
 }
 
 void WebProcessProxy::didReceiveInvalidMessage(IPC::Connection& connection, IPC::MessageName messageName)
@@ -1267,6 +1313,10 @@ void WebProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Connect
 
 #if USE(RUNNINGBOARD)
     m_throttler.didConnectToProcess(*this);
+#if USE(EXTENSIONKIT)
+    if (launcher)
+        launcher->releaseLaunchGrant();
+#endif
 #if PLATFORM(MAC)
     for (Ref page : pages()) {
         if (page->preferences().backgroundWebContentRunningBoardThrottlingEnabled())
@@ -1620,20 +1670,20 @@ RefPtr<API::Object> WebProcessProxy::transformHandlesToObjects(API::Object* obje
 
             case API::Object::Type::PageHandle:
                 ASSERT(static_cast<API::PageHandle&>(object).isAutoconverting());
-                return checkedProcess()->webPage(static_cast<API::PageHandle&>(object).pageProxyID());
+                return protectedProcess()->webPage(static_cast<API::PageHandle&>(object).pageProxyID());
 
 #if PLATFORM(COCOA)
             case API::Object::Type::ObjCObjectGraph:
-                return checkedProcess()->transformHandlesToObjects(static_cast<ObjCObjectGraph&>(object));
+                return protectedProcess()->transformHandlesToObjects(static_cast<ObjCObjectGraph&>(object));
 #endif
             default:
                 return &object;
             }
         }
 
-        CheckedRef<WebProcessProxy> checkedProcess() const { return m_webProcessProxy; }
+        Ref<WebProcessProxy> protectedProcess() const { return m_webProcessProxy.get(); }
 
-        CheckedRef<WebProcessProxy> m_webProcessProxy;
+        WeakRef<WebProcessProxy> m_webProcessProxy;
     };
 
     return UserData::transform(object, Transformer(*this));
@@ -1703,6 +1753,10 @@ void WebProcessProxy::setThrottleStateForTesting(ProcessThrottleState state)
 
 void WebProcessProxy::didChangeThrottleState(ProcessThrottleState type)
 {
+    auto scope = makeScopeExit([this]() {
+        updateRuntimeStatistics();
+    });
+
     if (UNLIKELY(!m_areThrottleStateChangesEnabled))
         return;
     WEBPROCESSPROXY_RELEASE_LOG(ProcessSuspension, "didChangeThrottleState: type=%u", (unsigned)type);
@@ -1751,20 +1805,30 @@ void WebProcessProxy::didChangeThrottleState(ProcessThrottleState type)
 void WebProcessProxy::didDropLastAssertion()
 {
     m_backgroundResponsivenessTimer.updateState();
+    updateRuntimeStatistics();
 }
 
 void WebProcessProxy::prepareToDropLastAssertion(CompletionHandler<void()>&& completionHandler)
 {
-#if PLATFORM(MAC)
-    if (isInProcessCache()) {
-        // We don't free caches in cached WebProcesses on macOS for performance reasons.
-        // Cached WebProcess will anyway shutdown on memory pressure.
+#if ENABLE(WEBPROCESS_CACHE)
+    if (isInProcessCache() || !m_suspendedPages.isEmptyIgnoringNullReferences() || (canTerminateAuxiliaryProcess() && canBeAddedToWebProcessCache())) {
+        // We avoid freeing caches if:
+        //
+        //  1. The process is already in the WebProcess cache.
+        //  2. The process is already in the back/forward cache.
+        //  3. The process might end up in the process cache (canTerminateAuxiliaryProcess() && canBeAddedToWebProcessCache())
+        //
+        // The idea here is that we want these cached processes to retain useful data if they're
+        // reused. They have a low jetsam priority and will be killed by our low memory handler or
+        // the kernel if necessary.
         return completionHandler();
     }
-#endif
-    // We don't slim down the process in the PrepareToSuspend IPC, we delay clearing the
-    // caches until we release the suspended assertion.
+    // When the WebProcess cache is enabled, instead of freeing caches in the PrepareToSuspend
+    // we free caches here just before we drop our last process assertion.
     sendWithAsyncReply(Messages::WebProcess::ReleaseMemory(), WTFMove(completionHandler), 0, { }, ShouldStartProcessThrottlerActivity::No);
+#else
+    completionHandler();
+#endif
 }
 
 String WebProcessProxy::environmentIdentifier() const
@@ -1913,6 +1977,32 @@ void WebProcessProxy::didExceedInactiveMemoryLimit()
     WEBPROCESSPROXY_RELEASE_LOG_ERROR(PerformanceLogging, "didExceedInactiveMemoryLimit: Terminating WebProcess because it has exceeded the inactive memory limit");
     logDiagnosticMessageForResourceLimitTermination(DiagnosticLoggingKeys::exceededInactiveMemoryLimitKey());
     requestTermination(ProcessTerminationReason::ExceededMemoryLimit);
+}
+
+void WebProcessProxy::didExceedMemoryFootprintThreshold(size_t footprint)
+{
+    WEBPROCESSPROXY_RELEASE_LOG(PerformanceLogging, "didExceedMemoryFootprintThreshold: WebProcess exceeded notification threshold (current footprint: %zu MB)", footprint >> 20);
+
+    RefPtr dataStore = protectedWebsiteDataStore();
+    if (!dataStore)
+        return;
+
+    String domain;
+    for (auto& page : this->pages()) {
+#if ENABLE(PUBLIC_SUFFIX_LIST)
+        String pageDomain = topPrivatelyControlledDomain(URL({ }, page->currentURL()).host().toString());
+        if (domain.isEmpty())
+            domain = WTFMove(pageDomain);
+        else if (domain != pageDomain)
+            domain = "multiple"_s;
+#endif
+    }
+
+    if (domain.isEmpty())
+        domain = "unknown"_s;
+
+    auto activeTime = totalForegroundTime() + totalBackgroundTime() + totalSuspendedTime();
+    dataStore->client().didExceedMemoryFootprintThreshold(footprint, domain, pageCount(), activeTime, throttler().currentState() == ProcessThrottleState::Foreground);
 }
 
 void WebProcessProxy::didExceedCPULimit()
@@ -2518,6 +2608,65 @@ void WebProcessProxy::resetState()
 {
     m_hasCommittedAnyProvisionalLoads = false;
     m_hasCommittedAnyMeaningfulProvisionalLoads = false;
+}
+
+Seconds WebProcessProxy::totalForegroundTime() const
+{
+    if (m_throttleStateForStatistics == ProcessThrottleState::Foreground && m_throttleStateForStatisticsTimestamp)
+        return m_totalForegroundTime + (MonotonicTime::now() - m_throttleStateForStatisticsTimestamp);
+    return m_totalForegroundTime;
+}
+
+Seconds WebProcessProxy::totalBackgroundTime() const
+{
+    if (m_throttleStateForStatistics == ProcessThrottleState::Background && m_throttleStateForStatisticsTimestamp)
+        return m_totalBackgroundTime + (MonotonicTime::now() - m_throttleStateForStatisticsTimestamp);
+    return m_totalBackgroundTime;
+}
+
+Seconds WebProcessProxy::totalSuspendedTime() const
+{
+    if (m_throttleStateForStatistics == ProcessThrottleState::Suspended && m_throttleStateForStatisticsTimestamp)
+        return m_totalSuspendedTime + (MonotonicTime::now() - m_throttleStateForStatisticsTimestamp);
+    return m_totalSuspendedTime;
+}
+
+void WebProcessProxy::updateRuntimeStatistics()
+{
+    auto newState = ProcessThrottleState::Suspended;
+    auto newTimestamp = MonotonicTime { };
+
+    // We only start a new interval for foreground/background/suspended time if the process isn't
+    // prewarmed or in the process cache.
+    if (!isPrewarmed() && !isInProcessCache()) {
+        // ProcessThrottleState can be misleading, as it can claim the process is suspended even
+        // when the process is holding an assertion that actually prevents suspension. So we only
+        // transition to the suspended state if the process is actually holding no assertions
+        // (when `ProcessThrottler::isSuspended()` returns true).
+        newState = throttler().currentState();
+        if (newState == ProcessThrottleState::Suspended && !throttler().isSuspended())
+            newState = ProcessThrottleState::Background;
+
+        newTimestamp = MonotonicTime::now();
+    }
+
+    if (m_throttleStateForStatisticsTimestamp) {
+        auto delta = MonotonicTime::now() - m_throttleStateForStatisticsTimestamp;
+        switch (m_throttleStateForStatistics) {
+        case ProcessThrottleState::Suspended:
+            m_totalSuspendedTime += delta;
+            break;
+        case ProcessThrottleState::Background:
+            m_totalBackgroundTime += delta;
+            break;
+        case ProcessThrottleState::Foreground:
+            m_totalForegroundTime += delta;
+            break;
+        }
+    }
+
+    m_throttleStateForStatistics = newState;
+    m_throttleStateForStatisticsTimestamp = newTimestamp;
 }
 
 TextStream& operator<<(TextStream& ts, const WebProcessProxy& process)

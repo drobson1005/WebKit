@@ -534,6 +534,14 @@ bool ValidatePlatformType(const ValidationContext *val,
             }
             break;
 
+        case EGL_PLATFORM_ANGLE_TYPE_WEBGPU_ANGLE:
+            if (!clientExtensions.platformANGLEWebgpu)
+            {
+                val->setError(EGL_BAD_ATTRIBUTE, "WebGPU platform is unsupported.");
+                return false;
+            }
+            break;
+
         case EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE:
             if (!clientExtensions.platformANGLEVulkan)
             {
@@ -3489,6 +3497,15 @@ bool ValidateCreateImage(const ValidationContext *val,
                     val->setError(EGL_BAD_ATTRIBUTE,
                                   "EGL_D3D11_TEXTURE_ARRAY_SLICE_ANGLE cannot be used without "
                                   "EGL_ANGLE_image_d3d11_texture support.");
+                    return false;
+                }
+                break;
+            case EGL_METAL_TEXTURE_ARRAY_SLICE_ANGLE:
+                if (!displayExtensions.mtlTextureClientBuffer)
+                {
+                    val->setError(EGL_BAD_ATTRIBUTE,
+                                  "EGL_METAL_TEXTURE_ARRAY_SLICE_ANGLE cannot be used without "
+                                  "EGL_ANGLE_metal_texture_client_buffer support.");
                     return false;
                 }
                 break;

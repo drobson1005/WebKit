@@ -39,6 +39,7 @@
 #include "WebFrame.h"
 #include "WebPage.h"
 #include <WebCore/Document.h>
+#include <WebCore/DocumentInlines.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/LocalFrame.h>
@@ -54,6 +55,11 @@ WKTypeID WKBundleFrameGetTypeID()
 bool WKBundleFrameIsMainFrame(WKBundleFrameRef frameRef)
 {
     return WebKit::toImpl(frameRef)->isMainFrame();
+}
+
+bool WKBundleFrameIsRemote(WKBundleFrameRef frameRef)
+{
+    return WebKit::toImpl(frameRef)->coreFrame()->frameType() == WebCore::Frame::FrameType::Remote;
 }
 
 WKBundleFrameRef WKBundleFrameGetParentFrame(WKBundleFrameRef frameRef)

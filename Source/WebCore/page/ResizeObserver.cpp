@@ -143,7 +143,7 @@ size_t ResizeObserver::gatherObservations(size_t deeperThan)
                 LOG_WITH_STREAM(ResizeObserver, stream << "ResizeObserver " << this << " gatherObservations - recording observation " << observation.get());
 
                 m_activeObservations.append(observation.get());
-                m_activeObservationTargets.append(*observation->target());
+                m_activeObservationTargets.append(*observation->protectedTarget());
                 minObservedDepth = std::min(depth, minObservedDepth);
             } else
                 m_hasSkippedObservations = true;
@@ -177,7 +177,7 @@ void ResizeObserver::deliverObservations()
     if (!jsCallback->hasCallback())
         return;
 
-    auto* context = jsCallback->scriptExecutionContext();
+    RefPtr context = jsCallback->scriptExecutionContext();
     if (!context)
         return;
 
@@ -192,10 +192,12 @@ bool ResizeObserver::isReachableFromOpaqueRoots(JSC::AbstractSlotVisitor& visito
         if (auto* target = observation->target(); target && containsWebCoreOpaqueRoot(visitor, target))
             return true;
     }
+IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_CALL_ARGS_BEGIN
     for (auto& target : m_activeObservationTargets) {
         if (containsWebCoreOpaqueRoot(visitor, target.get()))
             return true;
     }
+IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_CALL_ARGS_END
     return !m_targetsWaitingForFirstObservation.isEmpty();
 }
 
@@ -212,7 +214,7 @@ bool ResizeObserver::removeTarget(Element& target)
 void ResizeObserver::removeAllTargets()
 {
     for (auto& observation : m_observations) {
-        bool removed = removeTarget(*observation->target());
+        bool removed = removeTarget(*observation->protectedTarget());
         ASSERT_UNUSED(removed, removed);
     }
     m_activeObservationTargets.clear();

@@ -101,12 +101,10 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
     bool hasIsolation = style.hasIsolation();
     bool isolateMaskForBlending = false;
 
-#if ENABLE(CSS_COMPOSITING)
     if (style.hasPositionedMask()) {
         if (auto* graphicsElement = dynamicDowncast<SVGGraphicsElement>(*renderer.element()))
             isolateMaskForBlending = graphicsElement->shouldIsolateBlending();
     }
-#endif
 
     if (opacity < 1 || hasBlendMode || isolateMaskForBlending || hasIsolation) {
         FloatRect repaintRect = m_renderer->repaintRectInLocalCoordinates();
@@ -126,8 +124,7 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
         }
     }
 
-    PathOperation* clipPathOperation = style.clipPath();
-    bool hasCSSClipping = is<ShapePathOperation>(clipPathOperation) || is<BoxPathOperation>(clipPathOperation);
+    bool hasCSSClipping = is<ShapePathOperation>(style.clipPath()) || is<BoxPathOperation>(style.clipPath());
     if (hasCSSClipping)
         SVGRenderSupport::clipContextToCSSClippingArea(m_paintInfo->context(), renderer);
 
@@ -187,7 +184,7 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
             // changes, we need to paint the whole filter region. Otherwise, elements not visible
             // at the time of the initial paint (due to scrolling, window size, etc.) will never
             // be drawn.
-            m_paintInfo->rect = IntRect(m_filter->drawingRegion(m_renderer));
+            m_paintInfo->rect = IntRect(m_filter->drawingRegion(*m_renderer));
         }
     }
 

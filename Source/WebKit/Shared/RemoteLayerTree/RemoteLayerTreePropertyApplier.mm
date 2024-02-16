@@ -147,7 +147,7 @@ static void updateCustomAppearance(CALayer *layer, GraphicsLayer::CustomAppearan
 #endif
 }
 
-void RemoteLayerTreePropertyApplier::applyPropertiesToLayer(CALayer *layer, RemoteLayerTreeNode* layerTreeNode, RemoteLayerTreeHost* layerTreeHost, const LayerProperties& properties, RemoteLayerBackingStoreProperties::LayerContentsType layerContentsType)
+void RemoteLayerTreePropertyApplier::applyPropertiesToLayer(CALayer *layer, RemoteLayerTreeNode* layerTreeNode, RemoteLayerTreeHost* layerTreeHost, const LayerProperties& properties, LayerContentsType layerContentsType)
 {
     if (properties.changedProperties & LayerChange::PositionChanged) {
         layer.position = CGPointMake(properties.position.x(), properties.position.y());
@@ -320,7 +320,7 @@ void RemoteLayerTreePropertyApplier::applyPropertiesToLayer(CALayer *layer, Remo
 #endif
 }
 
-void RemoteLayerTreePropertyApplier::applyProperties(RemoteLayerTreeNode& node, RemoteLayerTreeHost* layerTreeHost, const LayerProperties& properties, const RelatedLayerMap& relatedLayers, RemoteLayerBackingStoreProperties::LayerContentsType layerContentsType)
+void RemoteLayerTreePropertyApplier::applyProperties(RemoteLayerTreeNode& node, RemoteLayerTreeHost* layerTreeHost, const LayerProperties& properties, const RelatedLayerMap& relatedLayers, LayerContentsType layerContentsType)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS
 
@@ -338,7 +338,7 @@ void RemoteLayerTreePropertyApplier::applyProperties(RemoteLayerTreeNode& node, 
 
 #if ENABLE(SCROLLING_THREAD)
     if (properties.changedProperties & LayerChange::ScrollingNodeIDChanged)
-        node.setScrollingNodeID(properties.scrollingNodeID);
+        node.setScrollingNodeID(properties.scrollingNodeID.value_or(ScrollingNodeID { }));
 #endif
 
 #if PLATFORM(IOS_FAMILY)

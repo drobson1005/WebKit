@@ -90,6 +90,7 @@ WebExtensionTab::WebExtensionTab(const WebExtensionContext& context, _WKWebExten
     , m_respondsToDeselect([delegate respondsToSelector:@selector(deselectForWebExtensionContext:completionHandler:)])
     , m_respondsToDuplicate([delegate respondsToSelector:@selector(duplicateForWebExtensionContext:withOptions:completionHandler:)])
     , m_respondsToClose([delegate respondsToSelector:@selector(closeForWebExtensionContext:completionHandler:)])
+    , m_respondsToShouldGrantTabPermissionsOnUserGesture([delegate respondsToSelector:@selector(shouldGrantTabPermissionsOnUserGestureForWebExtensionContext:)])
 {
     ASSERT([delegate conformsToProtocol:@protocol(_WKWebExtensionTab)]);
 
@@ -110,9 +111,9 @@ bool WebExtensionTab::operator==(const WebExtensionTab& other) const
 WebExtensionTabParameters WebExtensionTab::parameters() const
 {
     bool hasPermission = extensionHasPermission();
-    auto window = this->window();
+    RefPtr window = this->window();
     auto index = this->index();
-    auto parentTab = this->parentTab();
+    RefPtr parentTab = this->parentTab();
 
     return {
         identifier(),
@@ -257,7 +258,7 @@ bool WebExtensionTab::extensionHasPermission() const
     return extensionContext()->hasPermission(url(), const_cast<WebExtensionTab*>(this));
 }
 
-RefPtr<WebExtensionWindow> WebExtensionTab::window(SkipContainsCheck skipCheck) const
+RefPtr<WebExtensionWindow> WebExtensionTab::window() const
 {
     if (!isValid() || !m_respondsToWindow)
         return nullptr;
@@ -268,12 +269,7 @@ RefPtr<WebExtensionWindow> WebExtensionTab::window(SkipContainsCheck skipCheck) 
 
     THROW_UNLESS([window conformsToProtocol:@protocol(_WKWebExtensionWindow)], @"Object returned by windowForWebExtensionContext: does not conform to the _WKWebExtensionWindow protocol");
 
-    auto result = m_extensionContext->getOrCreateWindow(window);
-
-    if (skipCheck == SkipContainsCheck::No)
-        THROW_UNLESS(result->tabs().contains(*this), @"Window returned by windowForWebExtensionContext: does not contain the tab");
-
-    return result;
+    return m_extensionContext->getOrCreateWindow(window);
 }
 
 size_t WebExtensionTab::index() const
@@ -281,14 +277,11 @@ size_t WebExtensionTab::index() const
     if (!isValid() || !m_respondsToWindow)
         return notFound;
 
-    auto window = this->window();
+    RefPtr window = this->window();
     if (!window)
         return notFound;
 
-    auto result = window->tabs().find(*this);
-    THROW_UNLESS(result != notFound, @"Window returned by windowForWebExtensionContext: does not contain the tab");
-
-    return result;
+    return window->tabs().find(*this);
 }
 
 RefPtr<WebExtensionTab> WebExtensionTab::parentTab() const
@@ -301,6 +294,7 @@ RefPtr<WebExtensionTab> WebExtensionTab::parentTab() const
         return nullptr;
 
     THROW_UNLESS([parentTab conformsToProtocol:@protocol(_WKWebExtensionTab)], @"Object returned by parentTabForWebExtensionContext: does not conform to the _WKWebExtensionTab protocol");
+
     return m_extensionContext->getOrCreateTab(parentTab);
 }
 
@@ -332,6 +326,7 @@ WKWebView *WebExtensionTab::mainWebView() const
         return nil;
 
     THROW_UNLESS([mainWebView isKindOfClass:WKWebView.class], @"Object returned by mainWebViewForWebExtensionContext: is not a WKWebView");
+    THROW_UNLESS(mainWebView.configuration._webExtensionController, @"WKWebView returned by mainWebViewForWebExtensionContext: is not configured with a _WKWebExtensionController");
     THROW_UNLESS(mainWebView.configuration._webExtensionController == extensionContext()->extensionController()->wrapper(), @"WKWebView returned by mainWebViewForWebExtensionContext: is not configured with the same _WKWebExtensionController as extension context");
 
     if (m_respondsToWebViews) {
@@ -355,6 +350,7 @@ NSArray *WebExtensionTab::webViews() const
 
     for (WKWebView *webView in webViews) {
         THROW_UNLESS([webView isKindOfClass:WKWebView.class], @"Object in array returned by webViewsForWebExtensionContext: is not a WKWebView");
+        THROW_UNLESS(webView.configuration._webExtensionController, @"WKWebView returned by webViewsForWebExtensionContext: is not configured with a _WKWebExtensionController");
         THROW_UNLESS(webView.configuration._webExtensionController == extensionContext()->extensionController()->wrapper(), @"WKWebView returned by webViewsForWebExtensionContext: is not configured with the same _WKWebExtensionController as extension context");
     }
 
@@ -375,12 +371,17 @@ String WebExtensionTab::title() const
     return tabTitle;
 }
 
+bool WebExtensionTab::isOpen() const
+{
+    return m_isOpen && isValid();
+}
+
 bool WebExtensionTab::isActive() const
 {
     if (!isValid())
         return false;
 
-    auto window = this->window();
+    RefPtr window = this->window();
     return window ? window->activeTab() == this : false;
 }
 
@@ -444,7 +445,7 @@ bool WebExtensionTab::isPrivate() const
     if (!isValid())
         return false;
 
-    auto window = this->window(SkipContainsCheck::Yes);
+    RefPtr window = this->window();
     if (!window)
         return false;
 
@@ -627,6 +628,14 @@ void WebExtensionTab::detectWebpageLocale(CompletionHandler<void(NSLocale *, Err
 
 void WebExtensionTab::captureVisibleWebpage(CompletionHandler<void(CocoaImage *, Error)>&& completionHandler)
 {
+    bool delegateIsUnavailable = !isValid() || !m_respondsToCaptureVisibleWebpage;
+    WKWebView *mainWebView = delegateIsUnavailable ? this->mainWebView() : nil;
+
+    if (delegateIsUnavailable && !mainWebView) {
+        completionHandler(nil, toErrorString(@"tabs.captureVisibleTab()", nil, @"capture is unavailable for this tab"));
+        return;
+    }
+
     auto internalCompletionHandler = makeBlockPtr([completionHandler = WTFMove(completionHandler)](CocoaImage *image, NSError *error) mutable {
         if (error) {
             RELEASE_LOG_ERROR(Extensions, "Error for captureVisibleWebpage: %{private}@", error);
@@ -638,13 +647,7 @@ void WebExtensionTab::captureVisibleWebpage(CompletionHandler<void(CocoaImage *,
         completionHandler(image, std::nullopt);
     });
 
-    if (!isValid() || !m_respondsToCaptureVisibleWebpage) {
-        auto *mainWebView = this->mainWebView();
-        if (!mainWebView) {
-            completionHandler(nil, toErrorString(@"tabs.captureVisibleTab()", nil, @"capture is unavailable for this tab"));
-            return;
-        }
-
+    if (delegateIsUnavailable) {
         NSRect snapshotRect = mainWebView.bounds;
 #if PLATFORM(MAC)
         snapshotRect.size.height -= mainWebView._topContentInset;
@@ -877,12 +880,21 @@ void WebExtensionTab::close(CompletionHandler<void(Error)>&& completionHandler)
     }).get()];
 }
 
+bool WebExtensionTab::shouldGrantTabPermissionsOnUserGesture() const
+{
+    if (!isValid() || !m_respondsToShouldGrantTabPermissionsOnUserGesture)
+        return true;
+
+    return [m_delegate shouldGrantTabPermissionsOnUserGestureForWebExtensionContext:m_extensionContext->wrapper()];
+}
+
 WebExtensionTab::WebProcessProxySet WebExtensionTab::processes(WebExtensionEventListenerType type, WebExtensionContentWorldType contentWorldType, MainWebViewOnly mainWebViewOnly) const
 {
     if (!isValid())
         return { };
 
-    auto *webViews = mainWebViewOnly == MainWebViewOnly::Yes ? [NSArray arrayWithObject:mainWebView()] : this->webViews();
+    // This approach is nil-safe, unlike using @[ mainWebView() ] or [NSArray arrayWithObject:].
+    auto *webViews = mainWebViewOnly == MainWebViewOnly::Yes ? [NSArray arrayWithObjects:mainWebView(), nil] : this->webViews();
 
     WebProcessProxySet result;
     for (WKWebView *webView in webViews) {

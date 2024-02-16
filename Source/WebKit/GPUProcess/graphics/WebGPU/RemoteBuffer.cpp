@@ -34,11 +34,12 @@
 
 namespace WebKit {
 
-RemoteBuffer::RemoteBuffer(WebCore::WebGPU::Buffer& buffer, WebGPU::ObjectHeap& objectHeap, Ref<IPC::StreamServerConnection>&& streamConnection, WebGPUIdentifier identifier)
+RemoteBuffer::RemoteBuffer(WebCore::WebGPU::Buffer& buffer, WebGPU::ObjectHeap& objectHeap, Ref<IPC::StreamServerConnection>&& streamConnection, bool mappedAtCreation, WebGPUIdentifier identifier)
     : m_backing(buffer)
     , m_objectHeap(objectHeap)
     , m_streamConnection(WTFMove(streamConnection))
     , m_identifier(identifier)
+    , m_isMapped(mappedAtCreation)
 {
     m_streamConnection->startReceivingMessages(*this, Messages::RemoteBuffer::messageReceiverName(), m_identifier.toUInt64());
 }
@@ -82,7 +83,8 @@ void RemoteBuffer::unmap(Vector<uint8_t>&& data)
     if (m_isMapped && m_mappedRange && m_mappedRange->byteLength >= data.size() && m_mapModeFlags.contains(WebCore::WebGPU::MapMode::Write))
         memcpy(m_mappedRange->source, data.data(), data.size());
 
-    m_backing->unmap();
+    if (m_isMapped)
+        m_backing->unmap();
     m_isMapped = false;
     m_mappedRange = std::nullopt;
     m_mapModeFlags = { };
@@ -90,6 +92,7 @@ void RemoteBuffer::unmap(Vector<uint8_t>&& data)
 
 void RemoteBuffer::destroy()
 {
+    unmap(Vector<uint8_t>());
     m_backing->destroy();
 }
 

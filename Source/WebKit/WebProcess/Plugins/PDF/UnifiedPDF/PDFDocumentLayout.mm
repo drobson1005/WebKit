@@ -29,6 +29,7 @@
 #if ENABLE(UNIFIED_PDF)
 
 #import "Logging.h"
+#import <WebCore/AffineTransform.h>
 #import <wtf/text/TextStream.h>
 
 #import "PDFKitSoftLink.h"
@@ -44,6 +45,15 @@ PDFDocumentLayout::~PDFDocumentLayout() = default;
 RetainPtr<PDFPage> PDFDocumentLayout::pageAtIndex(PageIndex index) const
 {
     return [m_pdfDocument pageAtIndex:index];
+}
+
+std::optional<unsigned> PDFDocumentLayout::indexForPage(RetainPtr<PDFPage> page) const
+{
+    for (unsigned pageIndex = 0; pageIndex < [m_pdfDocument pageCount]; ++pageIndex) {
+        if (page == [m_pdfDocument pageAtIndex:pageIndex])
+            return pageIndex;
+    }
+    return std::nullopt;
 }
 
 void PDFDocumentLayout::updateLayout(IntSize pluginSize)
@@ -84,7 +94,7 @@ void PDFDocumentLayout::updateLayout(IntSize pluginSize)
         auto pageCropBox = FloatRect { [page boundsForBox:kPDFDisplayBoxCropBox] };
         auto rotation = normalizeRotation([page rotation]);
 
-        LOG_WITH_STREAM(Plugins, stream << "PDFDocumentLayout::updateLayout() - page " << i << " crop box " << pageCropBox << " rotation " << rotation);
+        LOG_WITH_STREAM(PDF, stream << "PDFDocumentLayout::updateLayout() - page " << i << " crop box " << pageCropBox << " rotation " << rotation);
 
         auto pageBounds = normalizePageBounds(pageCropBox, rotation);
 
@@ -100,14 +110,14 @@ void PDFDocumentLayout::updateLayout(IntSize pluginSize)
         } else
             maxRowWidth = std::max(maxRowWidth, pageBounds.width());
 
-        m_pageGeometry.append({ pageBounds, rotation });
+        m_pageGeometry.append({ pageCropBox, pageBounds, rotation });
     }
 
     maxRowWidth += 2 * documentMargin.width();
 
     layoutPages(pluginSize.width(), maxRowWidth);
 
-    LOG_WITH_STREAM(Plugins, stream << "PDFDocumentLayout::updateLayout() - plugin size " << pluginSize << " document bounds " << m_documentBounds << " scale " << m_scale);
+    LOG_WITH_STREAM(PDF, stream << "PDFDocumentLayout::updateLayout() - plugin size " << pluginSize << " document bounds " << m_documentBounds << " scale " << m_scale);
 }
 
 void PDFDocumentLayout::layoutPages(float availableWidth, float maxRowWidth)
@@ -135,21 +145,26 @@ void PDFDocumentLayout::layoutSingleColumn(float availableWidth, float maxRowWid
         if (i >= m_pageGeometry.size())
             break;
 
-        auto pageBounds = m_pageGeometry[i].normalizedBounds;
+        auto pageBounds = m_pageGeometry[i].layoutBounds;
+
+        LOG_WITH_STREAM(PDF, stream << "PDFDocumentLayout::layoutSingleColumn - page " << i << " bounds " << pageBounds);
 
         auto pageLeft = std::max<float>(std::floor((maxRowWidth - pageBounds.width()) / 2), 0);
         pageBounds.setLocation({ pageLeft, currentYOffset });
 
         currentYOffset += pageBounds.height() + pageMargin.height();
 
-        m_pageGeometry[i].normalizedBounds = pageBounds;
+        m_pageGeometry[i].layoutBounds = pageBounds;
     }
 
     currentYOffset -= pageMargin.height();
     currentYOffset += documentMargin.height();
 
-    m_scale = std::max<float>(availableWidth / maxRowWidth, minScale);
+    if (m_autoSizeState == ShouldUpdateAutoSizeScale::Yes)
+        m_scale = std::max<float>(availableWidth / maxRowWidth, minScale);
     m_documentBounds = FloatRect { 0, 0, maxRowWidth, currentYOffset };
+
+    LOG_WITH_STREAM(PDF, stream << "PDFDocumentLayout::layoutSingleColumn - document bounds " << m_documentBounds << " scale " << m_scale);
 }
 
 void PDFDocumentLayout::layoutTwoUpColumn(float availableWidth, float maxRowWidth)
@@ -162,14 +177,14 @@ void PDFDocumentLayout::layoutTwoUpColumn(float availableWidth, float maxRowWidt
         if (i >= m_pageGeometry.size())
             break;
 
-        auto pageBounds = m_pageGeometry[i].normalizedBounds;
+        auto pageBounds = m_pageGeometry[i].layoutBounds;
 
         // Lay out the pages in pairs.
         if (i % 2) {
             currentRowSize.expand(pageMargin.width() + pageBounds.width(), 0);
             currentRowSize.setHeight(std::max(currentRowSize.height(), pageBounds.height()));
 
-            auto leftPageBounds = m_pageGeometry[i - 1].normalizedBounds;
+            auto leftPageBounds = m_pageGeometry[i - 1].layoutBounds;
             auto rightPageBounds = pageBounds;
 
             // Center each page vertically in the row.
@@ -184,8 +199,8 @@ void PDFDocumentLayout::layoutTwoUpColumn(float availableWidth, float maxRowWidt
             float rightVerticalSpace = currentRowSize.height() - rightPageBounds.height();
             rightPageBounds.setY(currentYOffset + std::floor(rightVerticalSpace / 2));
 
-            m_pageGeometry[i - 1].normalizedBounds = leftPageBounds;
-            m_pageGeometry[i].normalizedBounds = rightPageBounds;
+            m_pageGeometry[i - 1].layoutBounds = leftPageBounds;
+            m_pageGeometry[i].layoutBounds = rightPageBounds;
 
             currentYOffset += currentRowSize.height() + pageMargin.height();
         } else {
@@ -193,7 +208,7 @@ void PDFDocumentLayout::layoutTwoUpColumn(float availableWidth, float maxRowWidt
             if (i == pageCount - 1) {
                 // Position the last page, which is centered horizontally.
                 float horizontalSpace = maxRowWidth - 2 * documentMargin.width() - pageBounds.width();
-                m_pageGeometry[i].normalizedBounds.setLocation({ documentMargin.width() + std::floor(horizontalSpace / 2), currentYOffset });
+                m_pageGeometry[i].layoutBounds.setLocation({ documentMargin.width() + std::floor(horizontalSpace / 2), currentYOffset });
                 currentYOffset += currentRowSize.height() + pageMargin.height();
             }
         }
@@ -203,7 +218,8 @@ void PDFDocumentLayout::layoutTwoUpColumn(float availableWidth, float maxRowWidt
     currentYOffset -= pageMargin.height();
     currentYOffset += documentMargin.height();
 
-    m_scale = std::max<float>(availableWidth / maxRowWidth, minScale);
+    if (m_autoSizeState == ShouldUpdateAutoSizeScale::Yes)
+        m_scale = std::max<float>(availableWidth / maxRowWidth, minScale);
     m_documentBounds = FloatRect { 0, 0, maxRowWidth, currentYOffset };
 }
 
@@ -215,12 +231,12 @@ size_t PDFDocumentLayout::pageCount() const
     return [m_pdfDocument pageCount];
 }
 
-WebCore::FloatRect PDFDocumentLayout::boundsForPageAtIndex(PageIndex index) const
+WebCore::FloatRect PDFDocumentLayout::layoutBoundsForPageAtIndex(PageIndex index) const
 {
     if (index >= m_pageGeometry.size())
         return { };
 
-    return m_pageGeometry[index].normalizedBounds;
+    return m_pageGeometry[index].layoutBounds;
 }
 
 IntDegrees PDFDocumentLayout::rotationForPageAtIndex(PageIndex index) const
@@ -234,6 +250,80 @@ IntDegrees PDFDocumentLayout::rotationForPageAtIndex(PageIndex index) const
 WebCore::FloatSize PDFDocumentLayout::scaledContentsSize() const
 {
     return m_documentBounds.size().scaled(m_scale);
+}
+
+AffineTransform PDFDocumentLayout::toPageTransform(const PageGeometry& pageGeometry) const
+{
+    AffineTransform matrix;
+    switch (pageGeometry.rotation) {
+    default:
+        FALLTHROUGH;
+    case 0:
+        matrix = AffineTransform::makeTranslation(FloatSize { pageGeometry.cropBox.x(), pageGeometry.cropBox.y() });
+        break;
+    case 90:
+        matrix = AffineTransform::makeRotation(pageGeometry.rotation);
+        matrix.translate(pageGeometry.cropBox.y(), -pageGeometry.cropBox.width() - pageGeometry.cropBox.x());
+        break;
+    case 180:
+        matrix = AffineTransform::makeRotation(pageGeometry.rotation);
+        matrix.translate(-pageGeometry.cropBox.width() - pageGeometry.cropBox.x(), -pageGeometry.cropBox.height() - pageGeometry.cropBox.y());
+        break;
+    case 270:
+        matrix = AffineTransform::makeRotation(pageGeometry.rotation);
+        matrix.translate(-pageGeometry.cropBox.height() - pageGeometry.cropBox.y(), pageGeometry.cropBox.x());
+        break;
+    }
+    return matrix;
+}
+
+WebCore::FloatPoint PDFDocumentLayout::documentPointToPDFPagePoint(WebCore::FloatPoint documentPoint, PageIndex pageIndex) const
+{
+    if (pageIndex >= m_pageGeometry.size())
+        return documentPoint;
+
+    auto& pageGeometry = m_pageGeometry[pageIndex];
+
+    auto mappedPoint = documentPoint;
+    mappedPoint.moveBy(-pageGeometry.layoutBounds.location());
+
+    mappedPoint.setY(pageGeometry.layoutBounds.height() - mappedPoint.y());
+
+    auto matrix = toPageTransform(pageGeometry);
+    mappedPoint = matrix.mapPoint(mappedPoint);
+    return mappedPoint;
+}
+
+WebCore::FloatPoint PDFDocumentLayout::pdfPagePointToDocumentPoint(WebCore::FloatPoint pagePoint, PageIndex pageIndex) const
+{
+    if (pageIndex >= m_pageGeometry.size())
+        return pagePoint;
+
+    auto& pageGeometry = m_pageGeometry[pageIndex];
+
+    auto matrix = toPageTransform(pageGeometry);
+    auto mappedPoint = matrix.inverse().value_or(AffineTransform { }).mapPoint(pagePoint);
+
+    mappedPoint.setY(pageGeometry.layoutBounds.height() - mappedPoint.y());
+    mappedPoint.moveBy(pageGeometry.layoutBounds.location());
+
+    return mappedPoint;
+}
+
+WebCore::FloatRect PDFDocumentLayout::pdfPageRectToDocumentRect(const WebCore::FloatRect pageSpaceRect, PageIndex pageIndex) const
+{
+    if (pageIndex >= m_pageGeometry.size())
+        return pageSpaceRect;
+
+    auto& pageGeometry = m_pageGeometry[pageIndex];
+
+    auto matrix = toPageTransform(pageGeometry);
+    auto mappedRect = matrix.inverse().value_or(AffineTransform { }).mapRect(pageSpaceRect);
+
+    mappedRect.setY(pageGeometry.layoutBounds.height() - mappedRect.y() - mappedRect.height());
+    mappedRect.moveBy(pageGeometry.layoutBounds.location());
+
+    return mappedRect;
 }
 
 } // namespace WebKit

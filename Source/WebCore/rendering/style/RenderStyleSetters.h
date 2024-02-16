@@ -266,6 +266,7 @@ inline void RenderStyle::setPaintOrder(PaintOrder order) { SET(m_rareInheritedDa
 inline void RenderStyle::setPerspective(float perspective) { SET_NESTED(m_nonInheritedData, rareData, perspective, perspective); }
 inline void RenderStyle::setPerspectiveOriginX(Length&& length) { SET_NESTED(m_nonInheritedData, rareData, perspectiveOriginX, WTFMove(length)); }
 inline void RenderStyle::setPerspectiveOriginY(Length&& length) { SET_NESTED(m_nonInheritedData, rareData, perspectiveOriginY, WTFMove(length)); }
+inline void RenderStyle::setPosition(PositionType position) { SET_NESTED(m_nonInheritedData, boxData, m_position, static_cast<unsigned>(position)); }
 inline void RenderStyle::setResize(Resize r) { SET_NESTED(m_nonInheritedData, miscData, resize, static_cast<unsigned>(r)); }
 inline void RenderStyle::setRight(Length&& length) { SET_NESTED(m_nonInheritedData, surroundData, offset.right(), WTFMove(length)); }
 inline void RenderStyle::setRowGap(GapLength&& gapLength) { SET_NESTED(m_nonInheritedData, rareData, rowGap, WTFMove(gapLength)); }
@@ -279,7 +280,7 @@ inline void RenderStyle::setScrollbarColor(const std::optional<ScrollbarColor>& 
 inline void RenderStyle::setScrollbarThumbColor(const StyleColor& color) { m_rareInheritedData.access().scrollbarColor->thumbColor = color; }
 inline void RenderStyle::setScrollbarTrackColor(const StyleColor& color) { m_rareInheritedData.access().scrollbarColor->trackColor = color; }
 inline void RenderStyle::setShapeMargin(Length&& margin) { SET_NESTED(m_nonInheritedData, rareData, shapeMargin, WTFMove(margin)); }
-inline void RenderStyle::setSkippedContentReason(ContentVisibility effectiveSkippedContent) { SET(m_rareInheritedData, effectiveSkippedContent, static_cast<unsigned>(effectiveSkippedContent)); }
+inline void RenderStyle::setEffectiveContentVisibility(ContentVisibility effectiveContentVisibility) { SET(m_rareInheritedData, effectiveContentVisibility, static_cast<unsigned>(effectiveContentVisibility)); }
 inline void RenderStyle::setSpeakAs(OptionSet<SpeakAs> style) { SET(m_rareInheritedData, speakAs, style.toRaw()); }
 inline void RenderStyle::setSpecifiedZIndex(int value) { SET_NESTED_PAIR(m_nonInheritedData, boxData, m_hasAutoSpecifiedZIndex, false, m_specifiedZIndex, value); }
 inline void RenderStyle::setStrokeColor(const StyleColor& color) { SET(m_rareInheritedData, strokeColor, color); }
@@ -465,6 +466,16 @@ inline void RenderStyle::setFlexShrink(float shrink)
     SET_DOUBLY_NESTED(m_nonInheritedData, miscData, flexibleBox, flexShrink, clampedShrink);
 }
 
+inline void RenderStyle::setPseudoElementNameArgument(const AtomString& identifier)
+{
+    ASSERT(pseudoElementType() == PseudoId::ViewTransitionGroup
+        || pseudoElementType() == PseudoId::ViewTransitionImagePair
+        || pseudoElementType() == PseudoId::ViewTransitionNew
+        || pseudoElementType() == PseudoId::ViewTransitionOld
+        || pseudoElementType() == PseudoId::Highlight);
+    SET_NESTED(m_nonInheritedData, rareData, pseudoElementNameArgument, identifier);
+}
+
 inline void RenderStyle::setGridColumnList(const GridTrackList& list)
 {
     if (!compareEqual(m_nonInheritedData->rareData->grid->columns(), list))
@@ -618,8 +629,6 @@ inline void RenderStyle::containIntrinsicHeightAddAuto()
         setContainIntrinsicHeightType(ContainIntrinsicSizeType::AutoAndLength);
 }
 
-#if ENABLE(CSS_COMPOSITING)
-
 inline void RenderStyle::setBlendMode(BlendMode mode)
 {
     SET_NESTED(m_nonInheritedData, rareData, effectiveBlendMode, static_cast<unsigned>(mode));
@@ -627,8 +636,6 @@ inline void RenderStyle::setBlendMode(BlendMode mode)
 }
 
 inline void RenderStyle::setIsolation(Isolation isolation) { SET_NESTED(m_nonInheritedData, rareData, isolation, static_cast<unsigned>(isolation)); }
-
-#endif
 
 #undef SET
 #undef SET_BORDER_COLOR

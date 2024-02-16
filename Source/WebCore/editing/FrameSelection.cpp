@@ -154,7 +154,7 @@ IntRect DragCaretController::editableElementRectInRootViewCoordinates() const
 
 static inline bool shouldAlwaysUseDirectionalSelection(Document* document)
 {
-    return !document || document->editor().behavior().shouldConsiderSelectionAsDirectional();
+    return !document || document->editingBehavior().shouldConsiderSelectionAsDirectional();
 }
 
 static inline bool isPageActive(Document* document)
@@ -546,10 +546,8 @@ static bool removingNodeRemovesPosition(Node& node, const Position& position)
     if (position.anchorNode() == &node)
         return true;
 
-    if (!is<Element>(node))
-        return false;
-
-    return downcast<Element>(node).containsIncludingShadowDOM(position.anchorNode());
+    RefPtr element = dynamicDowncast<Element>(node);
+    return element && element->containsIncludingShadowDOM(position.anchorNode());
 }
 
 void DragCaretController::nodeWillBeRemoved(Node& node)
@@ -1941,7 +1939,9 @@ void CaretBase::paintCaret(const Node& node, GraphicsContext& context, const Lay
         return;
 
     Color caretColor = Color::black;
-    RefPtr element = is<Element>(node) ? downcast<Element>(&node) : node.parentElement();
+    RefPtr element = dynamicDowncast<Element>(node);
+    if (!element)
+        element = node.parentElement();
     if (element && element->renderer())
         caretColor = CaretBase::computeCaretColor(element->renderer()->style(), &node);
 
@@ -1972,6 +1972,13 @@ void FrameSelection::caretAnimationDidUpdate(CaretAnimator&)
 {
     invalidateCaretRect();
 }
+
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+void FrameSelection::setPrefersNonBlinkingCursor(bool enabled)
+{
+    caretAnimator().setPrefersNonBlinkingCursor(enabled);
+}
+#endif
 
 #if PLATFORM(MAC)
 void FrameSelection::caretAnimatorInvalidated(CaretAnimatorType caretType)
@@ -2084,10 +2091,9 @@ void FrameSelection::selectFrameElementInParentIfFullySelected()
 void FrameSelection::selectAll()
 {
     RefPtr focusedElement = m_document->focusedElement();
-    if (is<HTMLSelectElement>(focusedElement)) {
-        HTMLSelectElement& selectElement = downcast<HTMLSelectElement>(*focusedElement);
-        if (selectElement.canSelectAll()) {
-            selectElement.selectAll();
+    if (RefPtr selectElement = dynamicDowncast<HTMLSelectElement>(focusedElement)) {
+        if (selectElement->canSelectAll()) {
+            selectElement->selectAll();
             return;
         }
     }
@@ -2479,12 +2485,12 @@ static RefPtr<HTMLFormElement> scanForForm(Element* start)
     if (!start)
         return nullptr;
     for (Ref element : descendantsOfType<HTMLElement>(start->document())) {
-        if (is<HTMLFormElement>(element))
-            return downcast<HTMLFormElement>(WTFMove(element));
+        if (RefPtr form = dynamicDowncast<HTMLFormElement>(element))
+            return form;
         if (element->isFormListedElement())
             return element->asFormListedElement()->form();
-        if (is<HTMLFrameElementBase>(element)) {
-            if (RefPtr contentDocument = downcast<HTMLFrameElementBase>(element.get()).contentDocument()) {
+        if (RefPtr frameElement = dynamicDowncast<HTMLFrameElementBase>(element)) {
+            if (RefPtr contentDocument = frameElement->contentDocument()) {
                 if (RefPtr frameResult = scanForForm(contentDocument->documentElement()))
                     return frameResult;
             }
@@ -2625,6 +2631,20 @@ void FrameSelection::showTreeForThis() const
 }
 
 #endif
+
+std::optional<SimpleRange> FrameSelection::rangeByExtendingCurrentSelection(TextGranularity granularity) const
+{
+    if (m_selection.isNone())
+        return std::nullopt;
+
+    FrameSelection frameSelection;
+    frameSelection.setSelection(m_selection);
+
+    frameSelection.modify(Alteration::Move, SelectionDirection::Backward, granularity);
+    frameSelection.modify(Alteration::Extend, SelectionDirection::Forward, granularity);
+
+    return frameSelection.selection().toNormalizedRange();
+}
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -2893,12 +2913,12 @@ void FrameSelection::setCaretColor(const Color& caretColor)
 
 #endif // PLATFORM(IOS_FAMILY)
 
-static bool containsEndpoints(const CheckedPtr<Document>& document, const std::optional<SimpleRange>& range)
+static bool containsEndpoints(const WeakPtr<Document, WeakPtrImplWithEventTargetData>& document, const std::optional<SimpleRange>& range)
 {
     return document && range && document->contains(range->start.container) && document->contains(range->end.container);
 }
 
-static bool containsEndpoints(const CheckedPtr<Document>& document, const Range& liveRange)
+static bool containsEndpoints(const WeakPtr<Document, WeakPtrImplWithEventTargetData>& document, const Range& liveRange)
 {
     // Only need to check the start container because live ranges enforce the invariant that start and end have a common ancestor.
     return document && document->contains(liveRange.startContainer());

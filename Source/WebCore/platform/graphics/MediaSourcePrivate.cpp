@@ -39,7 +39,7 @@ bool MediaSourcePrivate::hasFutureTime(const MediaTime& currentTime) const
     if (currentTime >= duration())
         return false;
 
-    auto& ranges = buffered();
+    auto ranges = buffered();
     MediaTime nearest = ranges.nearest(currentTime);
     if (abs(nearest - currentTime) > timeFudgeFactor())
         return false;
@@ -56,7 +56,13 @@ bool MediaSourcePrivate::hasFutureTime(const MediaTime& currentTime) const
 }
 
 MediaSourcePrivate::MediaSourcePrivate(MediaSourcePrivateClient& client)
-    : m_client(client)
+    : MediaSourcePrivate(client, RunLoop::current())
+{
+}
+
+MediaSourcePrivate::MediaSourcePrivate(MediaSourcePrivateClient& client, RefCountedSerialFunctionDispatcher& dispatcher)
+    : m_dispatcher(dispatcher)
+    , m_client(client)
 {
 }
 
@@ -67,8 +73,10 @@ RefPtr<MediaSourcePrivateClient> MediaSourcePrivate::client() const
     return m_client.get();
 }
 
-const MediaTime& MediaSourcePrivate::duration() const
+MediaTime MediaSourcePrivate::duration() const
 {
+    Locker locker { m_lock };
+
     return m_duration;
 }
 
@@ -88,6 +96,8 @@ Ref<MediaPromise> MediaSourcePrivate::seekToTime(const MediaTime& time)
 
 void MediaSourcePrivate::removeSourceBuffer(SourceBufferPrivate& sourceBuffer)
 {
+    assertIsCurrent(m_dispatcher);
+
     ASSERT(m_sourceBuffers.contains(&sourceBuffer));
 
     size_t pos = m_activeSourceBuffers.find(&sourceBuffer);
@@ -100,6 +110,8 @@ void MediaSourcePrivate::removeSourceBuffer(SourceBufferPrivate& sourceBuffer)
 
 void MediaSourcePrivate::sourceBufferPrivateDidChangeActiveState(SourceBufferPrivate& sourceBuffer, bool active)
 {
+    assertIsCurrent(m_dispatcher);
+
     size_t position = m_activeSourceBuffers.find(&sourceBuffer);
     if (active && position == notFound) {
         m_activeSourceBuffers.append(&sourceBuffer);
@@ -116,6 +128,8 @@ void MediaSourcePrivate::sourceBufferPrivateDidChangeActiveState(SourceBufferPri
 
 bool MediaSourcePrivate::hasAudio() const
 {
+    assertIsCurrent(m_dispatcher);
+
     return std::any_of(m_activeSourceBuffers.begin(), m_activeSourceBuffers.end(), [] (SourceBufferPrivate* sourceBuffer) {
         return sourceBuffer->hasAudio();
     });
@@ -123,6 +137,8 @@ bool MediaSourcePrivate::hasAudio() const
 
 bool MediaSourcePrivate::hasVideo() const
 {
+    assertIsCurrent(m_dispatcher);
+
     return std::any_of(m_activeSourceBuffers.begin(), m_activeSourceBuffers.end(), [] (SourceBufferPrivate* sourceBuffer) {
         return sourceBuffer->hasVideo();
     });
@@ -130,28 +146,55 @@ bool MediaSourcePrivate::hasVideo() const
 
 void MediaSourcePrivate::durationChanged(const MediaTime& duration)
 {
-    m_duration = duration;
-    for (auto& sourceBuffer : m_sourceBuffers)
-        sourceBuffer->setMediaSourceDuration(duration);
+    {
+        Locker locker { m_lock };
+        m_duration = duration;
+    }
+    ensureOnDispatcher([protectedThis = Ref { *this }, this, duration] {
+        for (auto& sourceBuffer : m_sourceBuffers)
+            sourceBuffer->setMediaSourceDuration(duration);
+    });
 }
 
 void MediaSourcePrivate::bufferedChanged(const PlatformTimeRanges& buffered)
 {
+    Locker locker { m_lock };
+
     m_buffered = buffered;
 }
 
-const PlatformTimeRanges& MediaSourcePrivate::buffered() const
+PlatformTimeRanges MediaSourcePrivate::buffered() const
 {
+    Locker locker { m_lock };
+
     return m_buffered;
 }
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 void MediaSourcePrivate::setCDMSession(LegacyCDMSession* session)
 {
+    assertIsCurrent(m_dispatcher);
+
     for (auto& sourceBuffer : m_sourceBuffers)
         sourceBuffer->setCDMSession(session);
 }
 #endif
+
+void MediaSourcePrivate::ensureOnDispatcher(Function<void()>&& function) const
+{
+    if (m_dispatcher->isCurrent()) {
+        function();
+        return;
+    }
+    m_dispatcher->dispatch(WTFMove(function));
+}
+
+MediaTime MediaSourcePrivate::currentTime() const
+{
+    if (RefPtr player = this->player())
+        return player->currentOrPendingSeekTime();
+    return MediaTime::invalidTime();
+}
 
 } // namespace WebCore
 

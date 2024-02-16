@@ -25,9 +25,9 @@
 
 #import "config.h"
 
-#import "HandleXPCEndpointMessages.h"
 #import "Logging.h"
 #import "WKCrashReporter.h"
+#import "XPCEndpointMessages.h"
 #import "XPCServiceEntryPoint.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <mach/mach.h>
@@ -42,6 +42,10 @@
 #import <wtf/spi/cocoa/OSLogSPI.h>
 #import <wtf/spi/darwin/SandboxSPI.h>
 #import <wtf/spi/darwin/XPCSPI.h>
+
+#if __has_include(<WebKitAdditions/DyldCallbackAdditions.h>)
+#import <WebKitAdditions/DyldCallbackAdditions.h>
+#endif
 
 namespace WebKit {
 
@@ -147,6 +151,10 @@ void XPCServiceEventHandler(xpc_connection_t peer)
             bool disableLogging = xpc_dictionary_get_bool(event, "disable-logging");
             initializeLogd(disableLogging);
 
+#if __has_include(<WebKitAdditions/DyldCallbackAdditions.h>)
+            register_for_dlsym_callbacks();
+#endif
+
 #if PLATFORM(IOS_FAMILY)
             auto containerEnvironmentVariables = xpc_dictionary_get_value(event, "ContainerEnvironmentVariables");
             xpc_dictionary_apply(containerEnvironmentVariables, ^(const char *key, xpc_object_t value) {
@@ -167,6 +175,8 @@ void XPCServiceEventHandler(xpc_connection_t peer)
                 entryPointFunctionName = CFSTR(STRINGIZE_VALUE_OF(NETWORK_SERVICE_INITIALIZER));
             else if (!strcmp(serviceName, "com.apple.WebKit.GPU"))
                 entryPointFunctionName = CFSTR(STRINGIZE_VALUE_OF(GPU_SERVICE_INITIALIZER));
+            else if (!strcmp(serviceName, "com.apple.WebKit.Model"))
+                entryPointFunctionName = CFSTR(STRINGIZE_VALUE_OF(MODEL_SERVICE_INITIALIZER));
             else {
                 RELEASE_LOG_ERROR(IPC, "XPCServiceEventHandler: Unexpected 'service-name': %{public}s", serviceName);
                 return;
@@ -210,7 +220,7 @@ void XPCServiceEventHandler(xpc_connection_t peer)
             return;
         }
 
-        handleXPCEndpointMessages(event, messageName);
+        handleXPCEndpointMessage(event, messageName);
     });
 
     xpc_connection_resume(peer);

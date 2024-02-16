@@ -748,7 +748,7 @@ JSC_DEFINE_CUSTOM_SETTER(testStaticAccessorPutter, (JSGlobalObject* globalObject
     return thisObject->putDirect(vm, PropertyName(Identifier::fromString(vm, "testField"_s)), JSValue::decode(value));
 }
 
-#if PLATFORM(MAC)
+#if ENABLE(WYHASH_STRING_HASHER)
 static const struct CompactHashIndex staticCustomAccessorTableIndex[5] = {
     { 0, 4 },
     { -1, -1 },
@@ -854,7 +854,7 @@ JSC_DEFINE_CUSTOM_SETTER(testStaticValuePutterSetFlag, (JSGlobalObject* globalOb
     return thisObject->putDirect(vm, PropertyName(Identifier::fromString(vm, "testStaticValueSetterCalled"_s)), jsBoolean(true));
 }
 
-#if PLATFORM(MAC)
+#if ENABLE(WYHASH_STRING_HASHER)
 static const struct CompactHashIndex staticCustomValueTableIndex[5] = {
     { 1, 4 },
     { 2, -1 },
@@ -958,7 +958,7 @@ JSC_DEFINE_HOST_FUNCTION(staticDontDeleteDontEnumMethod, (JSGlobalObject*, CallF
     return encodedJSUndefined();
 }
 
-#if PLATFORM(MAC)
+#if ENABLE(WYHASH_STRING_HASHER)
 static const struct CompactHashIndex staticDontDeleteDontEnumTableIndex[5] = {
     { 0, -1 },
     { 1, 4 },
@@ -4072,8 +4072,11 @@ JSC_DEFINE_HOST_FUNCTION(functionCallFromCPP, (JSGlobalObject* globalObject, Cal
         return JSValue::encode(jsUndefined());
 
     MarkedArgumentBuffer arguments;
-    for (unsigned i = 2; i < callFrame->argumentCount(); ++i)
-        arguments.append(callFrame->argument(i));
+    if (callFrame->argumentCount() > 2) {
+        arguments.ensureCapacity(callFrame->argumentCount() - 2);
+        for (unsigned i = 2; i < callFrame->argumentCount(); ++i)
+            arguments.append(callFrame->argument(i));
+    }
     ASSERT(!arguments.hasOverflowed());
     RETURN_IF_EXCEPTION(scope, { });
 

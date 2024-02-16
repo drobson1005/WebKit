@@ -96,7 +96,6 @@ public:
     using ImageFormat = WebExtensionTabImageFormat;
 
     enum class AssumeWindowMatches : bool { No, Yes };
-    enum class SkipContainsCheck : bool { No, Yes };
     enum class MainWebViewOnly : bool { No, Yes };
 
     using Error = std::optional<String>;
@@ -125,7 +124,7 @@ public:
     void addChangedProperties(OptionSet<ChangedProperties> properties) { m_changedProperties.add(properties); }
     void clearChangedProperties() { m_changedProperties = { }; }
 
-    RefPtr<WebExtensionWindow> window(SkipContainsCheck = SkipContainsCheck::No) const;
+    RefPtr<WebExtensionWindow> window() const;
     size_t index() const;
 
     RefPtr<WebExtensionTab> parentTab() const;
@@ -135,6 +134,10 @@ public:
     NSArray *webViews() const;
 
     String title() const;
+
+    bool isOpen() const;
+    void didOpen() { ASSERT(!m_isOpen); m_isOpen = true; }
+    void didClose() { ASSERT(m_isOpen); m_isOpen = false; }
 
     bool isActive() const;
     bool isSelected() const;
@@ -185,6 +188,8 @@ public:
 
     void close(CompletionHandler<void(Error)>&&);
 
+    bool shouldGrantTabPermissionsOnUserGesture() const;
+
     WebProcessProxySet processes(WebExtensionEventListenerType, WebExtensionContentWorldType, MainWebViewOnly = MainWebViewOnly::Yes) const;
 
 #ifdef __OBJC__
@@ -200,6 +205,7 @@ private:
     RefPtr<WebExtensionMatchPattern> m_temporaryPermissionMatchPattern;
     OptionSet<ChangedProperties> m_changedProperties;
     bool m_activeUserGesture : 1 { false };
+    bool m_isOpen : 1 { false };
     mutable bool m_private : 1 { false };
     mutable bool m_cachedPrivate : 1 { false };
     bool m_respondsToWindow : 1 { false };
@@ -237,27 +243,9 @@ private:
     bool m_respondsToDeselect : 1 { false };
     bool m_respondsToDuplicate : 1 { false };
     bool m_respondsToClose : 1 { false };
+    bool m_respondsToShouldGrantTabPermissionsOnUserGesture : 1 { false };
 };
 
 } // namespace WebKit
-
-namespace WTF {
-
-template<> struct EnumTraits<WebKit::WebExtensionTab::ChangedProperties> {
-    using values = EnumValues<
-        WebKit::WebExtensionTab::ChangedProperties,
-        WebKit::WebExtensionTab::ChangedProperties::Audible,
-        WebKit::WebExtensionTab::ChangedProperties::Loading,
-        WebKit::WebExtensionTab::ChangedProperties::Muted,
-        WebKit::WebExtensionTab::ChangedProperties::Pinned,
-        WebKit::WebExtensionTab::ChangedProperties::ReaderMode,
-        WebKit::WebExtensionTab::ChangedProperties::Size,
-        WebKit::WebExtensionTab::ChangedProperties::Title,
-        WebKit::WebExtensionTab::ChangedProperties::URL,
-        WebKit::WebExtensionTab::ChangedProperties::ZoomFactor
-    >;
-};
-
-} // namespace WTF
 
 #endif // ENABLE(WK_WEB_EXTENSIONS)

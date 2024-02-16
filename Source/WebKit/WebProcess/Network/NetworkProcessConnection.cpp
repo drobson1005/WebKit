@@ -26,7 +26,6 @@
 #include "config.h"
 #include "NetworkProcessConnection.h"
 
-#include "DataReference.h"
 #include "LibWebRTCNetwork.h"
 #include "Logging.h"
 #include "NetworkConnectionToWebProcessMessages.h"
@@ -275,6 +274,11 @@ void NetworkProcessConnection::allCookiesDeleted()
     WebProcess::singleton().cookieJar().allCookiesDeleted();
 }
 #endif
+
+void NetworkProcessConnection::updateCachedCookiesEnabled()
+{
+    WebProcess::singleton().updateCachedCookiesEnabled();
+}
 
 #if ENABLE(SHAREABLE_RESOURCE)
 void NetworkProcessConnection::didCacheResource(const ResourceRequest& request, ShareableResource::Handle&& handle)

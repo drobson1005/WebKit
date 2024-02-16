@@ -111,6 +111,7 @@ WTF_EXTERN_C_END
 #import <PassKitCore/PKError_Private.h>
 #import <PassKitCore/PKPassLibrary.h>
 #import <PassKitCore/PKPayment.h>
+#import <PassKitCore/PKPaymentMerchantSession_Private.h>
 #import <PassKitCore/PKPaymentMethod.h>
 #import <PassKitCore/PKPaymentPass.h>
 #import <PassKitCore/PKPaymentSetupConfiguration_WebKit.h>
@@ -181,6 +182,12 @@ typedef NS_ENUM(NSUInteger, PKPaymentRequestAPIType) {
     PKPaymentRequestAPITypeWebJS,
     PKPaymentRequestAPITypeWebPaymentRequest,
 };
+
+@class PKPayment;
+@class PKPaymentToken;
+@class PKShippingMethod;
+@class PKDateComponentsRange;
+@class PKPaymentMethod;
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -310,6 +317,28 @@ NS_ASSUME_NONNULL_END
 #endif // USE(APPLE_INTERNAL_SDK)
 
 NS_ASSUME_NONNULL_BEGIN
+
+@interface PKPaymentMethod ()
+@property (nonatomic, copy, readwrite) NSString *displayName;
+@property (nonatomic, copy, readwrite) NSString *network;
+@property (nonatomic, assign, readwrite) PKPaymentMethodType type;
+@property (nonatomic, copy, readwrite) CNContact *billingAddress;
+@end
+
+@interface PKPaymentToken () <NSSecureCoding>
+@property (nonatomic, strong, readwrite) PKPaymentMethod *paymentMethod;
+@property (nonatomic, copy, readwrite) NSString *transactionIdentifier;
+@property (nonatomic, copy, readwrite) NSData *paymentData;
+@property (nonatomic, strong) NSURL *redeemURL;
+@property (nonatomic, copy) NSString *retryNonce;
+@end
+
+@interface PKPayment () <NSSecureCoding>
+@property (nonatomic, strong, readwrite) PKContact *billingContact;
+@property (nonatomic, strong, readwrite) PKContact *shippingContact;
+@property (nonatomic, strong, readwrite) PKPaymentToken *token;
+@property (nonatomic, strong, readwrite) PKShippingMethod *shippingMethod;
+@end
 
 #if HAVE(PASSKIT_DEFAULT_SHIPPING_METHOD) && !USE(APPLE_INTERNAL_SDK)
 @interface PKShippingMethods : NSObject

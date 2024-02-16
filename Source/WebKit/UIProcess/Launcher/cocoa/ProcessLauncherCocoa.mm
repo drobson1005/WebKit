@@ -57,66 +57,66 @@
 #endif
 
 #if USE(EXTENSIONKIT)
+#import <BrowserEngineKit/BENetworkingProcess.h>
+#import <BrowserEngineKit/BERenderingProcess.h>
+#import <BrowserEngineKit/BEWebContentProcess.h>
 #import "ExtensionKitSPI.h"
-
-SOFT_LINK_FRAMEWORK_OPTIONAL(ServiceExtensions);
-SOFT_LINK_CLASS_OPTIONAL(ServiceExtensions, _SEServiceConfiguration);
-SOFT_LINK_CLASS_OPTIONAL(ServiceExtensions, _SEServiceManager);
 #endif
 
 namespace WebKit {
 
 #if USE(EXTENSIONKIT)
-static std::pair<ASCIILiteral, RetainPtr<NSString>> serviceNameAndIdentifier(ProcessLauncher::ProcessType processType, ProcessLauncher::Client* client)
+static std::pair<ASCIILiteral, RetainPtr<NSString>> serviceNameAndIdentifier(ProcessLauncher::ProcessType processType, ProcessLauncher::Client* client, bool isRetryingLaunch)
 {
     switch (processType) {
     case ProcessLauncher::ProcessType::Web: {
         if (client && client->shouldEnableLockdownMode())
-            return { "com.apple.WebKit.WebContent"_s, @"com.apple.WebKit.WebContentExtension.CaptivePortal" };
-        return { "com.apple.WebKit.WebContent"_s, @"com.apple.WebKit.WebContentExtension" };
+            return { "com.apple.WebKit.WebContent"_s, isRetryingLaunch ? @"com.apple.WebKit.WebContentExtension.CaptivePortal" : @"com.apple.WebKit.WebContent.CaptivePortal" };
+        return { "com.apple.WebKit.WebContent"_s, isRetryingLaunch ? @"com.apple.WebKit.WebContentExtension" : @"com.apple.WebKit.WebContent" };
     }
     case ProcessLauncher::ProcessType::Network:
-        return { "com.apple.WebKit.Networking"_s, @"com.apple.WebKit.NetworkingExtension" };
+        return { "com.apple.WebKit.Networking"_s, isRetryingLaunch ? @"com.apple.WebKit.NetworkingExtension" : @"com.apple.WebKit.Networking" };
 #if ENABLE(GPU_PROCESS)
     case ProcessLauncher::ProcessType::GPU:
-        return { "com.apple.WebKit.GPU"_s, @"com.apple.WebKit.GPUExtension" };
+        return { "com.apple.WebKit.GPU"_s, isRetryingLaunch ? @"com.apple.WebKit.GPUExtension" : @"com.apple.WebKit.GPU" };
 #endif
     }
 }
 
-static void launchWithExtensionKit(ProcessLauncher& processLauncher, ProcessLauncher::ProcessType processType, ProcessLauncher::Client* client, std::function<void(ThreadSafeWeakPtr<ProcessLauncher> weakProcessLauncher, _SEExtensionProcess* process, ASCIILiteral name, NSError* error)> handler)
+static void launchWithExtensionKit(ProcessLauncher& processLauncher, ProcessLauncher::ProcessType processType, ProcessLauncher::Client* client, std::function<void(ThreadSafeWeakPtr<ProcessLauncher> weakProcessLauncher, ExtensionProcess&& process, ASCIILiteral name, NSError *error)> handler)
 {
-    auto [name, identifier] = serviceNameAndIdentifier(processType, client);
-
-    auto configuration = adoptNS([alloc_SEServiceConfigurationInstance() initWithServiceIdentifier:identifier.get()]);
-    _SEServiceManager* manager = [get_SEServiceManagerClass() performSelector:@selector(sharedInstance)];
+    auto [name, identifier] = serviceNameAndIdentifier(processType, client, processLauncher.isRetryingLaunch());
 
     switch (processType) {
     case ProcessLauncher::ProcessType::Web: {
-        auto block = [handler = handler, weakProcessLauncher = ThreadSafeWeakPtr { processLauncher }, name = name](_SEContentProcess* _Nullable process, NSError* _Nullable error) {
-            handler(weakProcessLauncher, process, name, error);
+        auto block = [handler = handler, weakProcessLauncher = ThreadSafeWeakPtr { processLauncher }, name = name](BEWebContentProcess *_Nullable process, NSError *_Nullable error) {
+            ExtensionProcess extensionProcess(process);
+            handler(weakProcessLauncher, WTFMove(extensionProcess), name, error);
         };
-        [manager performSelector:@selector(contentProcessWithConfiguration:completion:) withObject:configuration.get() withObject:block];
+        [BEWebContentProcess webContentProcessWithBundleID:identifier.get() interruptionHandler: ^{ } completion:block];
         break;
     }
     case ProcessLauncher::ProcessType::Network: {
-        auto block = [handler = handler, weakProcessLauncher = ThreadSafeWeakPtr { processLauncher }, name = name](_SENetworkProcess* _Nullable process, NSError* _Nullable error) {
-            handler(weakProcessLauncher, process, name, error);
+        auto block = [handler = handler, weakProcessLauncher = ThreadSafeWeakPtr { processLauncher }, name = name](BENetworkingProcess *_Nullable process, NSError *_Nullable error) {
+            ExtensionProcess extensionProcess(process);
+            handler(weakProcessLauncher, WTFMove(extensionProcess), name, error);
         };
-        [manager performSelector:@selector(networkProcessWithConfiguration:completion:) withObject:configuration.get() withObject:block];
+        [BENetworkingProcess networkProcessWithBundleID:identifier.get() interruptionHandler: ^{ } completion:block];
         break;
     }
     case ProcessLauncher::ProcessType::GPU: {
-        auto block = [handler = handler, weakProcessLauncher = ThreadSafeWeakPtr { processLauncher }, name = name](_SEGPUProcess* _Nullable process, NSError* _Nullable error) {
-            handler(weakProcessLauncher, process, name, error);
+        auto block = [handler = handler, weakProcessLauncher = ThreadSafeWeakPtr { processLauncher }, name = name](BERenderingProcess *_Nullable process, NSError *_Nullable error) {
+            ExtensionProcess extensionProcess(process);
+            handler(weakProcessLauncher, WTFMove(extensionProcess), name, error);
         };
-        [manager performSelector:@selector(gpuProcessWithConfiguration:completion:) withObject:configuration.get() withObject:block];
+        [BERenderingProcess renderingProcessWithBundleID:identifier.get() interruptionHandler: ^{ } completion:block];
         break;
     }
     }
 }
 #endif // USE(EXTENSIONKIT)
 
+#if !USE(EXTENSIONKIT) || !PLATFORM(IOS)
 static const char* webContentServiceName(const ProcessLauncher::LaunchOptions& launchOptions, ProcessLauncher::Client* client)
 {
     if (client && client->shouldEnableLockdownMode())
@@ -136,13 +136,37 @@ static const char* serviceName(const ProcessLauncher::LaunchOptions& launchOptio
     case ProcessLauncher::ProcessType::GPU:
         return "com.apple.WebKit.GPU";
 #endif
+#if ENABLE(MODEL_PROCESS)
+    case ProcessLauncher::ProcessType::Model:
+        return "com.apple.WebKit.Model";
+#endif
     }
 }
+#endif // !USE(EXTENSIONKIT) || !PLATFORM(IOS)
+
+#if USE(EXTENSIONKIT)
+Ref<LaunchGrant> LaunchGrant::create(ExtensionProcess& process)
+{
+    return adoptRef(*new LaunchGrant(process));
+}
+
+LaunchGrant::LaunchGrant(ExtensionProcess& process)
+{
+    BEProcessCapability* capability = [BEProcessCapability foreground];
+    m_grant = process.grantCapability(capability);
+}
+
+LaunchGrant::~LaunchGrant()
+{
+    [m_grant invalidate];
+}
+#endif
 
 void ProcessLauncher::platformDestroy()
 {
 #if USE(EXTENSIONKIT)
-    [m_process invalidate];
+    if (m_process)
+        m_process->invalidate();
 #endif
 }
 
@@ -151,14 +175,27 @@ void ProcessLauncher::launchProcess()
     ASSERT(!m_xpcConnection);
 
 #if USE(EXTENSIONKIT)
-    auto handler = [](ThreadSafeWeakPtr<ProcessLauncher> weakProcessLauncher, _SEExtensionProcess* process, ASCIILiteral name, NSError* error)
+    auto handler = [](ThreadSafeWeakPtr<ProcessLauncher> weakProcessLauncher, ExtensionProcess&& process, ASCIILiteral name, NSError *error)
     {
-        if (!weakProcessLauncher.get()) {
-            [process invalidate];
+        RefPtr launcher = weakProcessLauncher.get();
+        if (!launcher) {
+            process.invalidate();
             return;
         }
         if (error) {
-            NSLog(@"Error launching process %@ error %@", process, error);
+            RELEASE_LOG_FAULT(Process, "Error launching process, description '%s', reason '%s'", String([error localizedDescription]).utf8().data(), String([error localizedFailureReason]).utf8().data());
+#if PLATFORM(IOS)
+            // Fallback to legacy extension identifiers
+            // FIXME: this fallback is temporary and should be removed when possible. See rdar://120793705.
+            callOnMainRunLoop([weakProcessLauncher = weakProcessLauncher] {
+                auto launcher = weakProcessLauncher.get();
+                if (!launcher || launcher->isRetryingLaunch())
+                    return;
+                launcher->setIsRetryingLaunch();
+                launcher->launchProcess();
+            });
+#else
+            // Fallback to XPC service launch
             callOnMainRunLoop([weakProcessLauncher = weakProcessLauncher] {
                 auto launcher = weakProcessLauncher.get();
                 if (!launcher)
@@ -167,30 +204,42 @@ void ProcessLauncher::launchProcess()
                 launcher->m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
                 launcher->finishLaunchingProcess(name);
             });
-            [process invalidate];
+#endif
+            process.invalidate();
             return;
         }
-        callOnMainRunLoop([weakProcessLauncher = weakProcessLauncher, name = name, process = RetainPtr<_SEExtensionProcess>(process)] {
-            auto connection = [process makeLibXPCConnectionError:nil];
-            auto launcher = weakProcessLauncher.get();
+
+        Ref launchGrant = LaunchGrant::create(process);
+
+        callOnMainRunLoop([weakProcessLauncher, name, process = WTFMove(process), launchGrant = WTFMove(launchGrant)] () mutable {
+            RefPtr launcher = weakProcessLauncher.get();
             if (!launcher) {
-                [process invalidate];
+                process.invalidate();
                 return;
             }
-            launcher->m_xpcConnection = connection;
+
+            auto xpcConnection = process.makeLibXPCConnection();
+
+            if (!xpcConnection) {
+                RELEASE_LOG_ERROR(Process, "Failed to make libxpc connection for process");
+                process.invalidate();
+                launcher->didFinishLaunchingProcess(0, { });
+                return;
+            }
+
+            launcher->m_xpcConnection = WTFMove(xpcConnection);
             launcher->m_process = WTFMove(process);
+            launcher->m_launchGrant = WTFMove(launchGrant);
             launcher->finishLaunchingProcess(name.characters());
         });
     };
 
-    if (m_launchOptions.launchAsExtensions) {
-        launchWithExtensionKit(*this, m_launchOptions.processType, m_client, handler);
-        return;
-    }
-#endif
+    launchWithExtensionKit(*this, m_launchOptions.processType, m_client, handler);
+#else
     const char* name = serviceName(m_launchOptions, m_client);
     m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
     finishLaunchingProcess(name);
+#endif
 }
 
 void ProcessLauncher::finishLaunchingProcess(const char* name)
@@ -431,7 +480,9 @@ void ProcessLauncher::terminateProcess()
 void ProcessLauncher::platformInvalidate()
 {
 #if USE(EXTENSIONKIT)
-    [m_process invalidate];
+    releaseLaunchGrant();
+    if (m_process)
+        m_process->invalidate();
 #endif
 
     terminateXPCConnection();

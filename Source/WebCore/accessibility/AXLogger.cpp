@@ -29,6 +29,7 @@
 #include "config.h"
 #include "AXLogger.h"
 
+#include "AXTextRun.h"
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 #include "AXIsolatedObject.h"
 #endif
@@ -173,6 +174,16 @@ void AXLogger::log(AccessibilityObjectInclusion inclusion)
 
     TextStream stream(TextStream::LineMode::SingleLine);
     stream.dumpProperty("ObjectInclusion", inclusion);
+    LOG(Accessibility, "%s", stream.release().utf8().data());
+}
+
+void AXLogger::log(AXRelationType relationType)
+{
+    if (!shouldLog())
+        return;
+
+    TextStream stream(TextStream::LineMode::SingleLine);
+    stream.dumpProperty("RelationType", relationType);
     LOG(Accessibility, "%s", stream.release().utf8().data());
 }
 
@@ -506,8 +517,8 @@ TextStream& operator<<(TextStream& stream, AXRelationType relationType)
     case AXRelationType::HeaderFor:
         stream << "HeaderFor";
         break;
-    case AXRelationType::LabelledBy:
-        stream << "LabelledBy";
+    case AXRelationType::LabeledBy:
+        stream << "LabeledBy";
         break;
     case AXRelationType::LabelFor:
         stream << "LabelFor";
@@ -610,6 +621,9 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
     case AXObjectCache::AXNotification::AXKeyShortcutsChanged:
         stream << "AXKeyShortcutsChanged";
         break;
+    case AXObjectCache::AXNotification::AXLabelChanged:
+        stream << "AXLabelChanged";
+        break;
     case AXObjectCache::AXNotification::AXLanguageChanged:
         stream << "AXLanguageChanged";
         break;
@@ -696,9 +710,6 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
         break;
     case AXObjectCache::AXNotification::AXScrolledToAnchor:
         stream << "AXScrolledToAnchor";
-        break;
-    case AXObjectCache::AXNotification::AXLabelCreated:
-        stream << "AXLabelCreated";
         break;
     case AXObjectCache::AXNotification::AXLiveRegionCreated:
         stream << "AXLiveRegionCreated";
@@ -850,6 +861,20 @@ TextStream& operator<<(TextStream& stream, AXObjectCache& axObjectCache)
     return stream;
 }
 
+#if ENABLE(AX_THREAD_TEXT_APIS)
+static void streamTextRuns(TextStream& stream, const AXTextRuns& runs)
+{
+    StringBuilder result;
+    for (size_t i = 0; i < runs.size(); i++) {
+        result.append(makeString(runs[i].lineIndex, ":|", runs[i].text, "|(len: ", runs[i].text.length(), ")"));
+        if (i != runs.size() - 1)
+            result.append(", ");
+    }
+
+    stream.dumpProperty("textRuns", result);
+}
+#endif // ENABLE(AX_THREAD_TEXT_APIS)
+
 void streamAXCoreObject(TextStream& stream, const AXCoreObject& object, const OptionSet<AXStreamOptions>& options)
 {
     if (options & AXStreamOptions::ObjectID)
@@ -860,11 +885,12 @@ void streamAXCoreObject(TextStream& stream, const AXCoreObject& object, const Op
 
     if (options & AXStreamOptions::ParentID) {
         auto* parent = object.parentObjectUnignored();
-        stream.dumpProperty("parentObject", parent ? parent->objectID() : AXID());
+        stream.dumpProperty("parentID", parent ? parent->objectID() : AXID());
     }
 
-    if (options & AXStreamOptions::IdentifierAttribute)
-        stream.dumpProperty("identifierAttribute", object.identifierAttribute());
+    auto id = options & AXStreamOptions::IdentifierAttribute ? object.identifierAttribute() : emptyString();
+    if (!id.isEmpty())
+        stream.dumpProperty("identifier", WTFMove(id));
 
     if (options & AXStreamOptions::OuterHTML) {
         auto role = object.roleValue();
@@ -878,6 +904,18 @@ void streamAXCoreObject(TextStream& stream, const AXCoreObject& object, const Op
         if (objectWithInterestingHTML)
             stream.dumpProperty("outerHTML", objectWithInterestingHTML->outerHTML().left(150));
     }
+
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    if (options & AXStreamOptions::TextRuns) {
+        if (auto* isolatedObject = dynamicDowncast<AXIsolatedObject>(&object)) {
+            if (auto* runs = isolatedObject->textRuns(); runs && runs->size())
+                streamTextRuns(stream, *runs);
+        } else if (auto* liveObject = dynamicDowncast<AccessibilityObject>(&object)) {
+            if (auto runs = const_cast<AccessibilityObject*>(liveObject)->textRuns(); runs.size())
+                streamTextRuns(stream, runs);
+        }
+    }
+#endif // ENABLE(AX_THREAD_TEXT_APIS)
 
     if (options & AXStreamOptions::DisplayContents) {
         if (auto* axObject = dynamicDowncast<AccessibilityObject>(&object); axObject && axObject->hasDisplayContents())

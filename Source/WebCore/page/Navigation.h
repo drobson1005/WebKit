@@ -27,12 +27,15 @@
 
 #include "DOMPromiseProxy.h"
 #include "EventTarget.h"
+#include "JSDOMPromise.h"
 #include "LocalDOMWindowProperty.h"
 #include "NavigationHistoryEntry.h"
 #include "NavigationTransition.h"
 #include <JavaScriptCore/JSCJSValue.h>
 
 namespace WebCore {
+
+class HistoryItem;
 
 class Navigation final : public RefCounted<Navigation>, public EventTarget, public ContextDestructionObserver, public LocalDOMWindowProperty {
     WTF_MAKE_ISO_ALLOCATED(Navigation);
@@ -68,27 +71,28 @@ public:
     };
 
     struct Result {
-        bool todo;
-        // NavigationHistoryEntryPromise committed;
-        // NavigationHistoryEntryPromise finished;
+        RefPtr<DOMPromise> committed;
+        RefPtr<DOMPromise> finished;
     };
 
-    Vector<Ref<NavigationHistoryEntry>> entries() { return m_entries; };
-    RefPtr<NavigationHistoryEntry> currentEntry() { return m_currentEntry; };
+    const Vector<Ref<NavigationHistoryEntry>>& entries() const;
+    NavigationHistoryEntry* currentEntry() const;
     RefPtr<NavigationTransition> transition() { return m_transition; };
 
-    bool canGoBack() const { return m_canGoBack; };
-    bool canGoForward() const { return m_canGoForward; };
+    bool canGoBack() const;
+    bool canGoForward() const;
 
-    Result navigate(const String& url, NavigateOptions&&);
+    void initializeEntries(const Ref<HistoryItem>& currentItem, Vector<Ref<HistoryItem>> &items);
 
-    Result reload(ReloadOptions&&);
+    Result navigate(const String& url, NavigateOptions&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
 
-    Result traverseTo(const String& key, Options&&);
-    Result back(Options&&);
-    Result forward(Options&&);
+    Result reload(ReloadOptions&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
 
-    void updateCurrentEntry(UpdateCurrentEntryOptions&&);
+    Result traverseTo(const String& key, Options&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
+    Result back(Options&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
+    Result forward(Options&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
+
+    ExceptionOr<void> updateCurrentEntry(JSDOMGlobalObject&, UpdateCurrentEntryOptions&&);
 
 private:
     Navigation(ScriptExecutionContext*, LocalDOMWindow&);
@@ -98,10 +102,10 @@ private:
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
-    RefPtr<NavigationHistoryEntry> m_currentEntry;
+    bool hasEntriesAndEventsDisabled() const;
+
+    std::optional<size_t> m_currentEntryIndex;
     RefPtr<NavigationTransition> m_transition;
-    bool m_canGoBack { false };
-    bool m_canGoForward { false };
     Vector<Ref<NavigationHistoryEntry>> m_entries;
 };
 

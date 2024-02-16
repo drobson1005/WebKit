@@ -153,7 +153,7 @@ void MediaPlayerPrivateGStreamerMSE::pause()
     updateStates();
 }
 
-MediaTime MediaPlayerPrivateGStreamerMSE::durationMediaTime() const
+MediaTime MediaPlayerPrivateGStreamerMSE::duration() const
 {
     if (UNLIKELY(!m_pipeline || m_didErrorOccur))
         return MediaTime();
@@ -264,7 +264,7 @@ void MediaPlayerPrivateGStreamerMSE::propagateReadyStateToPlayer()
 
     // The readyState change may be a result of monitorSourceBuffers() finding that currentTime == duration, which
     // should cause the video to be marked as ended. Let's have the player check that.
-    if (player && (!m_isWaitingForPreroll || currentMediaTime() == durationMediaTime()))
+    if (player && (!m_isWaitingForPreroll || currentTime() == duration()))
         player->timeChanged();
 }
 
@@ -277,7 +277,7 @@ void MediaPlayerPrivateGStreamerMSE::didPreroll()
     // c) At the end of a flush (forced quality change). These should not produce either of these outcomes.
     // We identify (a) and (b) by setting m_isWaitingForPreroll = true at the initialization of the player and
     // at the beginning of a seek.
-    GST_DEBUG("Pipeline prerolled. currentMediaTime = %s", currentMediaTime().toString().utf8().data());
+    GST_DEBUG("Pipeline prerolled. currentMediaTime = %s", currentTime().toString().utf8().data());
     if (!m_isWaitingForPreroll) {
         GST_DEBUG("Preroll was consequence of a flush, nothing to do at this level.");
         return;
@@ -290,9 +290,9 @@ void MediaPlayerPrivateGStreamerMSE::didPreroll()
 
     if (m_isSeeking) {
         m_isSeeking = false;
-        GST_DEBUG("Seek complete because of preroll. currentMediaTime = %s", currentMediaTime().toString().utf8().data());
+        GST_DEBUG("Seek complete because of preroll. currentMediaTime = %s", currentTime().toString().utf8().data());
         // By calling timeChanged(), m_isSeeking will be checked an a "seeked" event will be emitted.
-        timeChanged(currentMediaTime());
+        timeChanged(currentTime());
     }
 
     propagateReadyStateToPlayer();
@@ -300,8 +300,7 @@ void MediaPlayerPrivateGStreamerMSE::didPreroll()
 
 const PlatformTimeRanges& MediaPlayerPrivateGStreamerMSE::buffered() const
 {
-    if (m_mediaSourcePrivate)
-        return m_mediaSourcePrivate->buffered();
+    ASSERT_NOT_REACHED();
     return PlatformTimeRanges::emptyRanges();
 }
 
@@ -318,18 +317,20 @@ void MediaPlayerPrivateGStreamerMSE::sourceSetup(GstElement* sourceElement)
 
 void MediaPlayerPrivateGStreamerMSE::updateStates()
 {
+    bool isSeeking = isPipelineSeeking();
     bool shouldBePlaying = (!m_isPaused && readyState() >= MediaPlayer::ReadyState::HaveFutureData && m_playbackRatePausedState != PlaybackRatePausedState::RatePaused)
         || m_playbackRatePausedState == PlaybackRatePausedState::ShouldMoveToPlaying;
-    GST_DEBUG_OBJECT(pipeline(), "shouldBePlaying = %s, m_isPipelinePlaying = %s", boolForPrinting(shouldBePlaying), boolForPrinting(m_isPipelinePlaying));
-    if (shouldBePlaying && !m_isPipelinePlaying) {
-        if (!changePipelineState(GST_STATE_PLAYING))
+    GST_DEBUG_OBJECT(pipeline(), "shouldBePlaying = %s, m_isPipelinePlaying = %s, is seeking %s", boolForPrinting(shouldBePlaying),
+        boolForPrinting(m_isPipelinePlaying), boolForPrinting(isSeeking));
+    if (!isSeeking && shouldBePlaying && !m_isPipelinePlaying) {
+        auto result = changePipelineState(GST_STATE_PLAYING);
+        if (result == ChangePipelineStateResult::Failed)
             GST_ERROR_OBJECT(pipeline(), "Setting the pipeline to PLAYING failed");
-        m_isPipelinePlaying = true;
-        m_playbackRatePausedState = PlaybackRatePausedState::Playing;
-    } else if (!shouldBePlaying && m_isPipelinePlaying) {
-        if (!changePipelineState(GST_STATE_PAUSED))
+        else if (result == ChangePipelineStateResult::Ok)
+            m_playbackRatePausedState = PlaybackRatePausedState::Playing;
+    } else if (!isSeeking && !shouldBePlaying && m_isPipelinePlaying) {
+        if (changePipelineState(GST_STATE_PAUSED) == ChangePipelineStateResult::Failed)
             GST_ERROR_OBJECT(pipeline(), "Setting the pipeline to PAUSED failed");
-        m_isPipelinePlaying = false;
     }
 }
 
@@ -413,13 +414,13 @@ MediaPlayer::SupportsType MediaPlayerPrivateGStreamerMSE::supportsType(const Med
     return result;
 }
 
-MediaTime MediaPlayerPrivateGStreamerMSE::maxMediaTimeSeekable() const
+MediaTime MediaPlayerPrivateGStreamerMSE::maxTimeSeekable() const
 {
     if (UNLIKELY(m_didErrorOccur))
         return MediaTime::zeroTime();
 
-    GST_DEBUG("maxMediaTimeSeekable");
-    MediaTime result = durationMediaTime();
+    GST_DEBUG("maxTimeSeekable");
+    MediaTime result = duration();
     // Infinite duration means live stream.
     if (result.isPositiveInfinite()) {
         MediaTime maxBufferedTime = buffered().maximumBufferedTime();
@@ -430,11 +431,11 @@ MediaTime MediaPlayerPrivateGStreamerMSE::maxMediaTimeSeekable() const
     return result;
 }
 
-bool MediaPlayerPrivateGStreamerMSE::currentMediaTimeMayProgress() const
+bool MediaPlayerPrivateGStreamerMSE::currentTimeMayProgress() const
 {
     if (!m_mediaSourcePrivate)
         return false;
-    return m_mediaSourcePrivate->hasFutureTime(currentMediaTime());
+    return m_mediaSourcePrivate->hasFutureTime(currentTime());
 }
 
 void MediaPlayerPrivateGStreamerMSE::notifyActiveSourceBuffersChanged()

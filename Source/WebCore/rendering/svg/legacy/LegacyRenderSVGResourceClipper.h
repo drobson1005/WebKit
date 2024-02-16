@@ -64,6 +64,7 @@ public:
     virtual ~LegacyRenderSVGResourceClipper();
 
     inline SVGClipPathElement& clipPathElement() const;
+    inline Ref<SVGClipPathElement> protectedClipPathElement() const;
 
     void removeAllClientsFromCacheIfNeeded(bool markForInvalidation, SingleThreadWeakHashSet<RenderObject>* visitedRenderers) override;
     void removeClientFromCache(RenderElement&, bool markForInvalidation = true) override;
@@ -96,7 +97,7 @@ private:
     void calculateClipContentRepaintRect(RepaintRectCalculation);
 
     EnumeratedArray<RepaintRectCalculation, FloatRect, RepaintRectCalculation::Accurate> m_clipBoundaries;
-    HashMap<const RenderObject*, std::unique_ptr<ClipperData>> m_clipperMap;
+    HashMap<SingleThreadWeakRef<const RenderObject>, std::unique_ptr<ClipperData>> m_clipperMap;
 };
 
 }

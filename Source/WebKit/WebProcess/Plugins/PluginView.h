@@ -43,15 +43,21 @@ namespace WebCore {
 class HTMLPlugInElement;
 class LocalFrame;
 class RenderEmbeddedObject;
+class ShareableBitmap;
 }
 
 namespace WebKit {
 
 class PDFPluginBase;
-class ShareableBitmap;
+class WebFrame;
 class WebPage;
 
 struct WebHitTestResultData;
+
+struct LookupTextResult {
+    String text;
+    RetainPtr<PDFSelection> correspondingSelection;
+};
 
 class PluginView final : public WebCore::PluginViewBase {
 public:
@@ -76,6 +82,7 @@ public:
     void layerHostingStrategyDidChange() final;
 
     WebCore::HTMLPlugInElement& pluginElement() const { return m_pluginElement; }
+    Ref<WebCore::HTMLPlugInElement> protectedPluginElement() const;
     const URL& mainResourceURL() const { return m_mainResourceURL; }
 
     void didBeginMagnificationGesture();
@@ -92,14 +99,15 @@ public:
     
     unsigned countFindMatches(const String& target, WebCore::FindOptions, unsigned maxMatchCount);
     bool findString(const String& target, WebCore::FindOptions, unsigned maxMatchCount);
+    Vector<WebCore::FloatRect> rectsForTextMatchesInRect(const WebCore::IntRect&) const;
+    bool drawsFindOverlay() const;
 
-    String getSelectionString() const;
+    String selectionString() const;
 
     RefPtr<WebCore::FragmentedSharedBuffer> liveResourceData() const;
     bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&);
-    bool existingSelectionContainsPoint(const WebCore::FloatPoint&) const;
 
-    std::tuple<String, PDFSelection *, NSDictionary *> lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) const;
+    LookupTextResult lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) const;
     WebCore::FloatRect rectForSelectionInRootView(PDFSelection *) const;
     CGFloat contentScaleFactor() const;
     
@@ -108,6 +116,10 @@ public:
     void invalidateRect(const WebCore::IntRect&) final;
 
     void didChangeSettings();
+
+    void windowActivityDidChange();
+
+    void didSameDocumentNavigationForFrame(WebFrame&);
 
 private:
     PluginView(WebCore::HTMLPlugInElement&, const URL&, const String& contentType, bool shouldUseManualLoader, WebPage&);
@@ -150,6 +162,7 @@ private:
 
     bool usesAsyncScrolling() const final;
     WebCore::ScrollingNodeID scrollingNodeID() const final;
+    void didAttachScrollingNode() final;
 
     // WebCore::Widget
     void setFrameRect(const WebCore::IntRect&) final;
@@ -163,6 +176,8 @@ private:
     void setParentVisible(bool) final;
     bool transformsAffectFrameRect() final;
     void clipRectChanged() final;
+
+    RefPtr<WebPage> protectedWebPage() const;
 
     Ref<WebCore::HTMLPlugInElement> m_pluginElement;
     Ref<PDFPluginBase> m_plugin;
@@ -188,9 +203,7 @@ private:
     WebCore::SharedBufferBuilder m_manualStreamData;
 
     // This snapshot is used to avoid side effects should the plugin run JS during painting.
-    RefPtr<ShareableBitmap> m_transientPaintingSnapshot;
-
-    double m_pageScaleFactor { 1 };
+    RefPtr<WebCore::ShareableBitmap> m_transientPaintingSnapshot;
 };
 
 } // namespace WebKit

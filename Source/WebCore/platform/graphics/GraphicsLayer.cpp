@@ -504,7 +504,7 @@ void GraphicsLayer::noteDeviceOrPageScaleFactorChangedIncludingDescendants()
 
 void GraphicsLayer::setIsInWindow(bool inWindow)
 {
-    if (TiledBacking* tiledBacking = this->tiledBacking())
+    if (auto* tiledBacking = this->tiledBacking())
         tiledBacking->setIsInWindow(inWindow);
 }
 
@@ -870,10 +870,8 @@ void GraphicsLayer::dumpProperties(TextStream& ts, OptionSet<LayerTreeAsTextOpti
     if (m_opacity != 1)
         ts << indent << "(opacity " << m_opacity << ")\n";
 
-#if ENABLE(CSS_COMPOSITING)
     if (m_blendMode != BlendMode::Normal)
         ts << indent << "(blendMode " << compositeOperatorName(CompositeOperator::SourceOver, m_blendMode) << ")\n";
-#endif
 
     if (type() == Type::Normal && tiledBacking())
         ts << indent << "(usingTiledLayer 1)\n";

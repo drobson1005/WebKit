@@ -33,7 +33,7 @@
 #include <wtf/Forward.h>
 
 namespace WebCore {
-    
+
 class AXObjectCache;
 class Element;
 class HTMLLabelElement;
@@ -55,6 +55,7 @@ public:
 
     bool isBusy() const override;
     bool isControl() const override;
+    bool isRadioInput() const override;
     bool isFieldset() const override;
     bool isHovered() const override;
     bool isInputImage() const override;
@@ -122,10 +123,8 @@ public:
     Element* mouseButtonListener(MouseButtonListenerResultFilter = ExcludeBodyElement) const;
     Element* anchorElement() const override;
     RefPtr<Element> popoverTargetElement() const final;
-    AccessibilityObject* internalLinkElement() const;
-    void addRadioButtonGroupMembers(AccessibilityChildrenVector& linkedUIElements) const;
-    void addRadioButtonGroupChildren(AXCoreObject&, AccessibilityChildrenVector&) const;
-    AccessibilityChildrenVector linkedObjects() const override;
+    AXCoreObject* internalLinkElement() const final;
+    AccessibilityChildrenVector radioButtonGroup() const final;
     AccessibilityObject* menuForMenuButton() const;
    
     virtual void changeValueByPercent(float percentChange);
@@ -144,6 +143,10 @@ public:
     bool toggleDetailsAncestor() final;
 
     LayoutRect elementRect() const override;
+
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    bool shouldEmitNewlinesBeforeAndAfterNode() const final;
+#endif
 
 protected:
     explicit AccessibilityNodeObject(Node*);
@@ -193,9 +196,9 @@ protected:
 
     String accessKey() const final;
     bool isLabelable() const;
-    AccessibilityObject* correspondingControlForLabelElement() const override;
-    AccessibilityObject* correspondingLabelForControlElement() const override;
-    String textForLabelElements(Vector<Ref<HTMLLabelElement>>&&) const;
+    AccessibilityObject* controlForLabelElement() const final;
+    String textAsLabel() const;
+    String textForLabelElements(Vector<Ref<HTMLElement>>&&) const;
     HTMLLabelElement* labelElementContainer() const;
 
     String ariaAccessibilityDescription() const;
@@ -208,9 +211,7 @@ protected:
     Element* menuItemElementForMenu() const;
     AccessibilityObject* menuButtonForMenu() const;
     AccessibilityObject* captionForFigure() const;
-    virtual void titleElementText(Vector<AccessibilityText>&) const;
-    AccessibilityObject* titleUIElement() const override;
-
+    virtual void labelText(Vector<AccessibilityText>&) const;
 private:
     bool isAccessibilityNodeObject() const final { return true; }
     void accessibilityText(Vector<AccessibilityText>&) const override;
@@ -230,9 +231,16 @@ private:
     void setNeedsToUpdateSubtree() override { m_subtreeDirty = true; }
 
     bool isDescendantOfElementType(const HashSet<QualifiedName>&) const;
-
+protected:
     WeakPtr<Node, WeakPtrImplWithEventTargetData> m_node;
 };
+
+namespace Accessibility {
+
+RefPtr<HTMLElement> controlForLabelElement(const HTMLLabelElement&);
+Vector<Ref<HTMLElement>> labelsForElement(Element*);
+
+} // namespace Accessibility
 
 } // namespace WebCore
 

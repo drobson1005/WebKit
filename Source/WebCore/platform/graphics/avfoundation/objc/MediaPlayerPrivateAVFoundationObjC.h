@@ -34,6 +34,7 @@
 #include <wtf/Function.h>
 #include <wtf/Observer.h>
 #include <wtf/RobinHoodHashMap.h>
+#include <wtf/WorkQueue.h>
 
 OBJC_CLASS AVAssetImageGenerator;
 OBJC_CLASS AVAssetTrack;
@@ -127,7 +128,7 @@ public:
 
     void outputObscuredDueToInsufficientExternalProtectionChanged(bool);
 
-    MediaTime currentMediaTime() const final;
+    MediaTime currentTime() const final;
     void outputMediaDataWillChange();
     void processChapterTracks();
 
@@ -139,8 +140,6 @@ private:
     void setWaitingForKey(bool);
     bool waitingForKey() const final { return m_waitingForKey; }
 #endif
-
-    float currentTime() const final;
 
     // engine support
     class Factory;
@@ -330,6 +329,7 @@ private:
     void updateRotationSession();
 
     std::optional<VideoPlaybackQualityMetrics> videoPlaybackQualityMetrics() final;
+    Ref<VideoPlaybackQualityMetricsPromise> asyncVideoPlaybackQualityMetrics() final;
 
 #if !RELEASE_LOG_DISABLED
     const char* logClassName() const final { return "MediaPlayerPrivateAVFoundationObjC"; }
@@ -337,16 +337,16 @@ private:
 
     AVPlayer *objCAVFoundationAVPlayer() const final { return m_avPlayer.get(); }
 
-    bool performTaskAtMediaTime(Function<void()>&&, const MediaTime&) final;
+    bool performTaskAtTime(Function<void()>&&, const MediaTime&) final;
     void setShouldObserveTimeControlStatus(bool);
 
     void setPreferredDynamicRangeMode(DynamicRangeMode) final;
     void audioOutputDeviceChanged() final;
 
-    void currentMediaTimeDidChange(MediaTime&&) const;
+    void currentTimeDidChange(MediaTime&&) const;
     bool setCurrentTimeDidChangeCallback(MediaPlayer::CurrentTimeDidChangeCallback&&) final;
 
-    bool currentMediaTimeIsBuffered() const;
+    bool currentTimeIsBuffered() const;
 
     bool supportsPlayAtHostTime() const final { return true; }
     bool supportsPauseAtHostTime() const final { return true; }
@@ -367,10 +367,14 @@ private:
     bool containsDisabledTracks() const;
     bool trackIsPlayable(AVAssetTrack*) const;
 
+    std::optional<VideoPlaybackQualityMetrics> videoPlaybackQualityMetrics(AVPlayerLayer*) const;
+
+    void setVideoReceiverEndpoint(const VideoReceiverEndpoint&) final { }
+
     RetainPtr<AVURLAsset> m_avAsset;
     RetainPtr<AVPlayer> m_avPlayer;
     RetainPtr<AVPlayerItem> m_avPlayerItem;
-    RetainPtr<AVPlayerLayer> m_videoLayer;
+    RetainPtr<AVPlayerLayer> m_videoLayer WTF_GUARDED_BY_CAPABILITY(mainThread);
     std::unique_ptr<VideoLayerManagerObjC> m_videoLayerManager;
     MediaPlayer::VideoGravity m_videoFullscreenGravity { MediaPlayer::VideoGravity::ResizeAspect };
     RetainPtr<WebCoreAVFMovieObserver> m_objcObserver;
@@ -439,7 +443,7 @@ private:
     RetainPtr<NSArray> m_currentMetaData;
     FloatSize m_cachedPresentationSize;
     mutable MediaPlayer::CurrentTimeDidChangeCallback m_currentTimeDidChangeCallback;
-    mutable MediaTime m_cachedCurrentMediaTime { -1, 1, 0 };
+    mutable MediaTime m_cachedCurrentTime { -1, 1, 0 };
     mutable MediaTime m_lastPeriodicObserverMediaTime;
     mutable Markable<WallTime> m_wallClockAtCachedCurrentTime;
     mutable int m_timeControlStatusAtCachedCurrentTime { 0 };
@@ -490,6 +494,7 @@ private:
     ProcessIdentity m_resourceOwner;
     PlatformTimeRanges m_buffered;
     TrackID m_currentTextTrackID { 0 };
+    Ref<WorkQueue> m_targetQueue { WorkQueue::main() };
 };
 
 }

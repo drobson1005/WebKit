@@ -75,7 +75,7 @@ CaptureSourceOrError GStreamerAudioCaptureSource::create(String&& deviceID, Medi
 
     if (constraints) {
         if (auto result = source->applyConstraints(*constraints))
-            return CaptureSourceOrError({ WTFMove(result->badConstraint), MediaAccessDenialReason::InvalidConstraint });
+            return CaptureSourceOrError(CaptureSourceError { result->invalidConstraint });
     }
     return CaptureSourceOrError(WTFMove(source));
 }
@@ -136,7 +136,7 @@ const RealtimeMediaSourceCapabilities& GStreamerAudioCaptureSource::capabilities
         return m_capabilities.value();
 
     uint i;
-    GRefPtr<GstCaps> caps = m_capturer->caps();
+    auto caps = m_capturer->caps();
     int minSampleRate = 0, maxSampleRate = 0;
     for (i = 0; i < gst_caps_get_size(caps.get()); i++) {
         int capabilityMinSampleRate = 0, capabilityMaxSampleRate = 0;

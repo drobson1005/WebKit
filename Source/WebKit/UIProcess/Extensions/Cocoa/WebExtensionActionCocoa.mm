@@ -43,6 +43,7 @@
 #import "WebExtensionMenuItem.h"
 #import "WebExtensionMenuItemContextParameters.h"
 #import "WebExtensionMenuItemParameters.h"
+#import "WebExtensionTabParameters.h"
 #import "WebPageProxy.h"
 #import "WebProcessProxy.h"
 #import "_WKWebExtensionActionInternal.h"
@@ -77,10 +78,31 @@ constexpr NSTimeInterval popoverShowTimeout = 1;
 
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
 {
-    NSURL *targetURL = navigationAction.request.URL;
+    if (!_webExtensionAction || !_webExtensionAction->extensionContext()) {
+        decisionHandler(WKNavigationActionPolicyCancel);
+        return;
+    }
 
-    if (!navigationAction.targetFrame) {
-        // FIXME: Handle new tab/window navigation.
+    NSURL *targetURL = navigationAction.request.URL;
+    bool isURLForThisExtension = _webExtensionAction->extensionContext()->isURLForThisExtension(targetURL);
+
+    // New window or main frame navigation to an external URL opens in a new tab.
+    if (!navigationAction.targetFrame || (navigationAction.targetFrame.isMainFrame && !isURLForThisExtension)) {
+        RefPtr currentWindow = _webExtensionAction->window();
+        RefPtr currentTab = _webExtensionAction->tab();
+        if (!currentWindow && currentTab)
+            currentWindow = currentTab->window();
+
+        WebKit::WebExtensionTabParameters tabParameters;
+        tabParameters.url = targetURL;
+        tabParameters.windowIdentifier = currentWindow ? currentWindow->identifier() : WebKit::WebExtensionWindowConstants::CurrentIdentifier;
+        tabParameters.index = currentTab ? std::optional(currentTab->index() + 1) : std::nullopt;
+        tabParameters.active = true;
+
+        _webExtensionAction->extensionContext()->openNewTab(tabParameters, [](RefPtr<WebKit::WebExtensionTab> newTab) {
+            ASSERT(newTab);
+        });
+
         decisionHandler(WKNavigationActionPolicyCancel);
         return;
     }
@@ -91,24 +113,26 @@ constexpr NSTimeInterval popoverShowTimeout = 1;
         return;
     }
 
-    ASSERT(navigationAction.targetFrame.mainFrame);
-
     // Require an extension URL for the main frame.
-    if (!_webExtensionAction->extensionContext()->isURLForThisExtension(targetURL)) {
-        decisionHandler(WKNavigationActionPolicyCancel);
-        return;
-    }
+    ASSERT(navigationAction.targetFrame.isMainFrame);
+    ASSERT(isURLForThisExtension);
 
     decisionHandler(WKNavigationActionPolicyAllow);
 }
 
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
 {
+    if (!_webExtensionAction)
+        return;
+
     _webExtensionAction->popupDidClose();
 }
 
 - (void)webViewDidClose:(WKWebView *)webView
 {
+    if (!_webExtensionAction)
+        return;
+
     _webExtensionAction->popupDidClose();
 }
 
@@ -150,11 +174,6 @@ namespace WebKit {
 WebExtensionAction::WebExtensionAction(WebExtensionContext& extensionContext)
     : m_extensionContext(extensionContext)
 {
-    auto delegate = extensionContext.extensionController()->delegate();
-    m_respondsToPresentPopup = [delegate respondsToSelector:@selector(webExtensionController:presentPopupForAction:forExtensionContext:completionHandler:)];
-
-    if (!m_respondsToPresentPopup)
-        RELEASE_LOG_ERROR(Extensions, "%{public}@ does not implement the webExtensionController:presentPopupForAction:forExtensionContext:completionHandler: method", delegate.debugDescription);
 }
 
 WebExtensionAction::WebExtensionAction(WebExtensionContext& extensionContext, WebExtensionTab& tab)
@@ -208,6 +227,23 @@ void WebExtensionAction::propertiesDidChange()
     }).get());
 }
 
+WebExtensionAction* WebExtensionAction::fallbackAction() const
+{
+    if (!extensionContext())
+        return nullptr;
+
+    // Tab actions fallback to the window action.
+    if (m_tab)
+        return extensionContext()->getAction(m_tab->window().get()).ptr();
+
+    // Window actions fallback to the default action.
+    if (m_window)
+        return &extensionContext()->defaultAction();
+
+    // Default actions have no fallback.
+    return nullptr;
+}
+
 CocoaImage *WebExtensionAction::icon(CGSize idealSize)
 {
     if (!extensionContext())
@@ -216,12 +252,10 @@ CocoaImage *WebExtensionAction::icon(CGSize idealSize)
     if (m_customIcons)
         return extensionContext()->extension().bestImageInIconsDictionary(m_customIcons.get(), idealSize.width > idealSize.height ? idealSize.width : idealSize.height);
 
-    if (m_tab)
-        return extensionContext()->getAction(m_tab->window().get())->icon(idealSize);
+    if (RefPtr fallback = fallbackAction())
+        return fallback->icon(idealSize);
 
-    if (m_window)
-        return extensionContext()->defaultAction().icon(idealSize);
-
+    // Default
     return extensionContext()->extension().actionIcon(idealSize);
 }
 
@@ -240,12 +274,10 @@ String WebExtensionAction::popupPath() const
     if (!m_customPopupPath.isNull())
         return m_customPopupPath;
 
-    if (m_tab)
-        return extensionContext()->getAction(m_tab->window().get())->popupPath();
+    if (RefPtr fallback = fallbackAction())
+        return fallback->popupPath();
 
-    if (m_window)
-        return extensionContext()->defaultAction().popupPath();
-
+    // Default
     return extensionContext()->extension().actionPopupPath();
 }
 
@@ -297,10 +329,7 @@ WKWebView *WebExtensionAction::popupWebView(LoadOnFirstAccess loadOnFirstAccess)
     ]];
 #endif // USE(APPKIT)
 
-    auto popupPage = m_popupWebView.get()._page;
-    auto tabIdentifier = m_tab ? std::optional(m_tab->identifier()) : std::nullopt;
-    auto windowIdentifier = m_window ? std::optional(m_window->identifier()) : std::nullopt;
-    popupPage->process().send(Messages::WebExtensionContextProxy::AddPopupPageIdentifier(popupPage->webPageID(), tabIdentifier, windowIdentifier), extensionContext()->identifier());
+    extensionContext()->addPopupPage(*m_popupWebView.get()._page.get(), *this);
 
     auto url = URL { extensionContext()->baseURL(), popupPath() };
     [m_popupWebView loadRequest:[NSURLRequest requestWithURL:url]];
@@ -308,10 +337,27 @@ WKWebView *WebExtensionAction::popupWebView(LoadOnFirstAccess loadOnFirstAccess)
     return m_popupWebView.get();
 }
 
+bool WebExtensionAction::canProgrammaticallyPresentPopup() const
+{
+    if (!extensionContext())
+        return false;
+
+    RefPtr extensionController = extensionContext()->extensionController();
+    if (!extensionController)
+        return false;
+
+    return [extensionController->delegate() respondsToSelector:@selector(webExtensionController:presentPopupForAction:forExtensionContext:completionHandler:)];
+}
+
 void WebExtensionAction::presentPopupWhenReady()
 {
-    if (!extensionContext() || !m_respondsToPresentPopup)
+    if (!extensionContext())
         return;
+
+    if (!canProgrammaticallyPresentPopup()) {
+        RELEASE_LOG_ERROR(Extensions, "Delegate does not implement the webExtensionController:presentPopupForAction:forExtensionContext:completionHandler: method");
+        return;
+    }
 
     m_popupPresented = false;
 
@@ -330,14 +376,26 @@ void WebExtensionAction::presentPopupWhenReady()
 
 void WebExtensionAction::readyToPresentPopup()
 {
-    if (m_popupPresented || !m_respondsToPresentPopup)
+    ASSERT(canProgrammaticallyPresentPopup());
+
+    if (m_popupPresented)
         return;
+
+    setHasUnreadBadgeText(false);
 
     m_popupPresented = true;
 
     dispatch_async(dispatch_get_main_queue(), makeBlockPtr([this, protectedThis = Ref { *this }]() {
-        auto* extensionController = extensionContext()->extensionController();
-        auto delegate = extensionController->delegate();
+        if (!extensionContext())
+            return;
+
+        RefPtr extensionController = extensionContext()->extensionController();
+        auto delegate = extensionController ? extensionController->delegate() : nil;
+
+        if (!delegate || ![delegate respondsToSelector:@selector(webExtensionController:presentPopupForAction:forExtensionContext:completionHandler:)]) {
+            closePopupWebView();
+            return;
+        }
 
         [delegate webExtensionController:extensionController->wrapper() presentPopupForAction:wrapper() forExtensionContext:extensionContext()->wrapper() completionHandler:makeBlockPtr([this, protectedThis = Ref { *this }](NSError *error) {
             if (error)
@@ -376,12 +434,10 @@ String WebExtensionAction::label(FallbackWhenEmpty fallback) const
         return extensionContext()->extension().displayName();
     }
 
-    if (m_tab)
-        return extensionContext()->getAction(m_tab->window().get())->label();
+    if (RefPtr fallback = fallbackAction())
+        return fallback->label();
 
-    if (m_window)
-        return extensionContext()->defaultAction().label();
-
+    // Default
     if (auto *defaultLabel = extensionContext()->extension().displayActionLabel(); defaultLabel.length || fallback == FallbackWhenEmpty::No)
         return defaultLabel;
 
@@ -409,12 +465,10 @@ String WebExtensionAction::badgeText() const
     if (m_blockedResourceCount)
         return String::number(m_blockedResourceCount);
 
-    if (m_tab)
-        return extensionContext()->getAction(m_tab->window().get())->badgeText();
+    if (RefPtr fallback = fallbackAction())
+        return fallback->badgeText();
 
-    if (m_window)
-        return extensionContext()->defaultAction().badgeText();
-
+    // Default
     return emptyString();
 }
 
@@ -425,6 +479,37 @@ void WebExtensionAction::setBadgeText(String badgeText)
 
     m_customBadgeText = badgeText;
 
+    if (!badgeText.isNull())
+        m_hasUnreadBadgeText = !badgeText.isEmpty();
+    else
+        m_hasUnreadBadgeText = std::nullopt;
+
+    propertiesDidChange();
+}
+
+bool WebExtensionAction::hasUnreadBadgeText() const
+{
+    if (!extensionContext())
+        return false;
+
+    if (m_hasUnreadBadgeText)
+        return m_hasUnreadBadgeText.value();
+
+    if (RefPtr fallback = fallbackAction())
+        return fallback->hasUnreadBadgeText();
+
+    // Default
+    return false;
+}
+
+void WebExtensionAction::setHasUnreadBadgeText(bool hasUnreadBadgeText)
+{
+    m_hasUnreadBadgeText = !badgeText().isEmpty() ? std::optional(hasUnreadBadgeText) : std::nullopt;
+
+    // Only propagate the change if we're setting it to false.
+    if (RefPtr fallback = fallbackAction(); fallback && !hasUnreadBadgeText)
+        fallback->setHasUnreadBadgeText(false);
+
     propertiesDidChange();
 }
 
@@ -434,6 +519,9 @@ void WebExtensionAction::incrementBlockedResourceCount(ssize_t amount)
 
     if (m_blockedResourceCount < 0)
         m_blockedResourceCount = 0;
+
+    if (!badgeText().isEmpty())
+        m_hasUnreadBadgeText = true;
 
     propertiesDidChange();
 }
@@ -446,12 +534,10 @@ bool WebExtensionAction::isEnabled() const
     if (m_customEnabled)
         return m_customEnabled.value();
 
-    if (m_tab)
-        return extensionContext()->getAction(m_tab->window().get())->isEnabled();
+    if (RefPtr fallback = fallbackAction())
+        return fallback->isEnabled();
 
-    if (m_window)
-        return extensionContext()->defaultAction().isEnabled();
-
+    // Default
     return true;
 }
 

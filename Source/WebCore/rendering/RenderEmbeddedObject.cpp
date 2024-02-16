@@ -123,8 +123,16 @@ ScrollingNodeID RenderEmbeddedObject::scrollingNodeID() const
 {
     auto* pluginViewBase = dynamicDowncast<PluginViewBase>(widget());
     if (!pluginViewBase)
-        return false;
+        return { };
     return pluginViewBase->scrollingNodeID();
+}
+
+void RenderEmbeddedObject::didAttachScrollingNode()
+{
+    auto* pluginViewBase = dynamicDowncast<PluginViewBase>(widget());
+    if (!pluginViewBase)
+        return;
+    pluginViewBase->didAttachScrollingNode();
 }
 
 #if !PLATFORM(IOS_FAMILY)
@@ -270,7 +278,7 @@ void RenderEmbeddedObject::paintReplaced(PaintInfo& paintInfo, const LayoutPoint
 
     const FontMetrics& fontMetrics = font.metricsOfPrimaryFont();
     float labelX = roundf(replacementTextRect.location().x() + replacementTextRoundedRectLeftTextMargin);
-    float labelY = roundf(replacementTextRect.location().y() + (replacementTextRect.size().height() - fontMetrics.height()) / 2 + fontMetrics.ascent() + replacementTextRoundedRectTopTextMargin);
+    float labelY = roundf(replacementTextRect.location().y() + (replacementTextRect.size().height() - fontMetrics.intHeight()) / 2 + fontMetrics.intAscent() + replacementTextRoundedRectTopTextMargin);
     context.setFillColor(replacementTextColor);
     context.drawBidiText(font, run, FloatPoint(labelX, labelY));
 
@@ -396,10 +404,8 @@ bool RenderEmbeddedObject::nodeAtPoint(const HitTestRequest& request, HitTestRes
 
 bool RenderEmbeddedObject::scroll(ScrollDirection direction, ScrollGranularity granularity, unsigned, Element**, RenderBox*, const IntPoint&)
 {
-    if (!is<PluginViewBase>(widget()))
-        return false;
-
-    return downcast<PluginViewBase>(*widget()).scroll(direction, granularity);
+    RefPtr pluginView = dynamicDowncast<PluginViewBase>(widget());
+    return pluginView && pluginView->scroll(direction, granularity);
 }
 
 bool RenderEmbeddedObject::logicalScroll(ScrollLogicalDirection direction, ScrollGranularity granularity, unsigned stepCount, Element** stopElement)
@@ -423,13 +429,13 @@ void RenderEmbeddedObject::handleUnavailablePluginIndicatorEvent(Event* event)
     if (!shouldUnavailablePluginMessageBeButton(page(), m_pluginUnavailabilityReason))
         return;
 
-    if (!is<MouseEvent>(*event))
+    RefPtr mouseEvent = dynamicDowncast<MouseEvent>(*event);
+    if (!mouseEvent)
         return;
 
-    Ref mouseEvent = downcast<MouseEvent>(*event);
     Ref element = downcast<HTMLPlugInElement>(frameOwnerElement());
     if (mouseEvent->type() == eventNames().mousedownEvent && mouseEvent->button() == MouseButton::Left) {
-        m_mouseDownWasInUnavailablePluginIndicator = isInUnavailablePluginIndicator(mouseEvent);
+        m_mouseDownWasInUnavailablePluginIndicator = isInUnavailablePluginIndicator(*mouseEvent);
         if (m_mouseDownWasInUnavailablePluginIndicator) {
             frame().eventHandler().setCapturingMouseEventsElement(element.copyRef());
             element->setIsCapturingMouseEvents(true);
@@ -443,14 +449,14 @@ void RenderEmbeddedObject::handleUnavailablePluginIndicatorEvent(Event* event)
             element->setIsCapturingMouseEvents(false);
             setUnavailablePluginIndicatorIsPressed(false);
         }
-        if (m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(mouseEvent)) {
+        if (m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(*mouseEvent)) {
             page().chrome().client().unavailablePluginButtonClicked(element.get(), m_pluginUnavailabilityReason);
         }
         m_mouseDownWasInUnavailablePluginIndicator = false;
         event->setDefaultHandled();
     }
     if (mouseEvent->type() == eventNames().mousemoveEvent) {
-        setUnavailablePluginIndicatorIsPressed(m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(mouseEvent));
+        setUnavailablePluginIndicatorIsPressed(m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(*mouseEvent));
         mouseEvent->setDefaultHandled();
     }
 }

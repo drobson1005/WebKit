@@ -343,9 +343,8 @@ RenderElement* RenderView::rendererForRootBackground() const
     auto* firstChild = this->firstChild();
     if (!firstChild)
         return nullptr;
-    ASSERT(is<RenderElement>(*firstChild));
-    auto& documentRenderer = downcast<RenderElement>(*firstChild);
 
+    auto& documentRenderer = downcast<RenderElement>(*firstChild);
     if (documentRenderer.hasBackground())
         return &documentRenderer;
 
@@ -780,10 +779,10 @@ void RenderView::updateHitTestResult(HitTestResult& result, const LayoutPoint& p
     if (multiColumnFlow() && multiColumnFlow()->firstMultiColumnSet())
         return multiColumnFlow()->firstMultiColumnSet()->updateHitTestResult(result, point);
 
-    if (auto* node = nodeForHitTest()) {
-        result.setInnerNode(node);
+    if (RefPtr node = nodeForHitTest()) {
+        result.setInnerNode(node.get());
         if (!result.innerNonSharedNode())
-            result.setInnerNonSharedNode(node);
+            result.setInnerNonSharedNode(node.get());
 
         LayoutPoint adjustedPoint = point;
         offsetForContents(adjustedPoint);
@@ -1109,6 +1108,16 @@ void RenderView::addCounterNeedingUpdate(RenderCounter& renderer)
 SingleThreadWeakHashSet<RenderCounter> RenderView::takeCountersNeedingUpdate()
 {
     return std::exchange(m_countersNeedingUpdate, { });
+}
+
+SingleThreadWeakPtr<RenderElement> RenderView::viewTransitionRoot() const
+{
+    return m_viewTransitionRoot;
+}
+
+void RenderView::setViewTransitionRoot(RenderElement& renderer)
+{
+    m_viewTransitionRoot = renderer;
 }
 
 } // namespace WebCore

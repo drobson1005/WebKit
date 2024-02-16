@@ -52,6 +52,8 @@ public:
         TwoUpContinuous,
     };
 
+    enum class ShouldUpdateAutoSizeScale : bool { No, Yes };
+
     PDFDocumentLayout();
     ~PDFDocumentLayout();
 
@@ -63,9 +65,16 @@ public:
     static constexpr WebCore::FloatSize pageMargin { 4, 6 };
 
     RetainPtr<PDFPage> pageAtIndex(PageIndex) const;
-    WebCore::FloatRect boundsForPageAtIndex(PageIndex) const;
+    std::optional<unsigned> indexForPage(RetainPtr<PDFPage>) const;
+
+    // This is not scaled by scale().
+    WebCore::FloatRect layoutBoundsForPageAtIndex(PageIndex) const;
     // Returns 0, 90, 180, 270.
     WebCore::IntDegrees rotationForPageAtIndex(PageIndex) const;
+
+    WebCore::FloatPoint documentPointToPDFPagePoint(WebCore::FloatPoint documentPoint, PageIndex) const;
+    WebCore::FloatPoint pdfPagePointToDocumentPoint(WebCore::FloatPoint pagePoint, PageIndex) const;
+    WebCore::FloatRect pdfPageRectToDocumentRect(WebCore::FloatRect pageRect, PageIndex) const;
 
     // This is the scale that scales the largest page or pair of pages up or down to fit the available width.
     float scale() const { return m_scale; }
@@ -76,6 +85,9 @@ public:
     void setDisplayMode(DisplayMode displayMode) { m_displayMode = displayMode; }
     DisplayMode displayMode() const { return m_displayMode; }
 
+    void setShouldUpdateAutoSizeScale(ShouldUpdateAutoSizeScale autoSizeState) { m_autoSizeState = autoSizeState; }
+    ShouldUpdateAutoSizeScale shouldUpdateAutoSizeScale() const { return m_autoSizeState; }
+
 private:
     void layoutPages(float availableWidth, float maxRowWidth);
 
@@ -83,15 +95,19 @@ private:
     void layoutTwoUpColumn(float availableWidth, float maxRowWidth);
 
     struct PageGeometry {
-        WebCore::FloatRect normalizedBounds;
+        WebCore::FloatRect cropBox;
+        WebCore::FloatRect layoutBounds;
         WebCore::IntDegrees rotation { 0 };
     };
+
+    WebCore::AffineTransform toPageTransform(const PageGeometry&) const;
 
     RetainPtr<PDFDocument> m_pdfDocument;
     Vector<PageGeometry> m_pageGeometry;
     WebCore::FloatRect m_documentBounds;
     float m_scale { 1 };
     DisplayMode m_displayMode { DisplayMode::Continuous };
+    ShouldUpdateAutoSizeScale m_autoSizeState { ShouldUpdateAutoSizeScale::Yes };
 };
 
 } // namespace WebKit

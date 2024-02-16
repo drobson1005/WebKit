@@ -51,6 +51,7 @@
 #include "VideoFrameMetadata.h"
 #include <JavaScriptCore/ArrayBuffer.h>
 #include <wtf/Lock.h>
+#include <wtf/NativePromise.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/CString.h>
 #include "InbandTextTrackPrivate.h"
@@ -132,9 +133,6 @@ public:
 
     void setPageIsVisible(bool, String&&) final { }
 
-    double durationDouble() const final { return 0; }
-
-    double currentTimeDouble() const final { return 0; }
     void seekToTarget(const SeekTarget&) final { }
     bool seeking() const final { return false; }
 
@@ -152,8 +150,6 @@ public:
     MediaPlayer::NetworkState networkState() const final { return MediaPlayer::NetworkState::Empty; }
     MediaPlayer::ReadyState readyState() const final { return MediaPlayer::ReadyState::HaveNothing; }
 
-    float maxTimeSeekable() const final { return 0; }
-    double minTimeSeekable() const final { return 0; }
     const PlatformTimeRanges& buffered() const final { return PlatformTimeRanges::emptyRanges(); }
 
     double seekableTimeRangesLastModifiedTime() const final { return 0; }
@@ -645,6 +641,8 @@ void MediaPlayer::loadWithNextMediaEngine(const MediaPlayerFactory* current)
     }
 
     if (m_private) {
+        m_private->setShouldCheckHardwareSupport(client().mediaPlayerShouldCheckHardwareSupport());
+
 #if ENABLE(MEDIA_SOURCE)
         if (RefPtr mediaSource = m_mediaSource.get())
             m_private->load(m_url, m_contentMIMETypeWasInferredFromExtension ? ContentType() : m_contentType, *mediaSource);
@@ -769,7 +767,7 @@ void MediaPlayer::setShouldContinueAfterKeyNeeded(bool should)
 
 MediaTime MediaPlayer::duration() const
 {
-    return m_private->durationMediaTime();
+    return m_private->duration();
 }
 
 MediaTime MediaPlayer::startTime() const
@@ -784,12 +782,12 @@ MediaTime MediaPlayer::initialTime() const
 
 MediaTime MediaPlayer::currentTime() const
 {
-    return m_private->currentMediaTime();
+    return m_private->currentTime();
 }
 
 bool MediaPlayer::currentTimeMayProgress() const
 {
-    return m_private->currentMediaTimeMayProgress();
+    return m_private->currentTimeMayProgress();
 }
 
 bool MediaPlayer::setCurrentTimeDidChangeCallback(CurrentTimeDidChangeCallback&& callback)
@@ -802,8 +800,14 @@ MediaTime MediaPlayer::getStartDate() const
     return m_private->getStartDate();
 }
 
+void MediaPlayer::willSeekToTarget(const MediaTime& time)
+{
+    m_private->willSeekToTarget(time);
+}
+
 void MediaPlayer::seekToTarget(const SeekTarget& target)
 {
+    m_private->willSeekToTarget(MediaTime::invalidTime());
     m_private->seekToTarget(target);
 }
 
@@ -1058,12 +1062,12 @@ const PlatformTimeRanges& MediaPlayer::seekable() const
 
 MediaTime MediaPlayer::maxTimeSeekable() const
 {
-    return m_private->maxMediaTimeSeekable();
+    return m_private->maxTimeSeekable();
 }
 
 MediaTime MediaPlayer::minTimeSeekable() const
 {
-    return m_private->minMediaTimeSeekable();
+    return m_private->minTimeSeekable();
 }
 
 double MediaPlayer::seekableTimeRangesLastModifiedTime()
@@ -1709,6 +1713,14 @@ std::optional<VideoPlaybackQualityMetrics> MediaPlayer::videoPlaybackQualityMetr
     return m_private->videoPlaybackQualityMetrics();
 }
 
+Ref<MediaPlayer::VideoPlaybackQualityMetricsPromise> MediaPlayer::asyncVideoPlaybackQualityMetrics()
+{
+    if (!m_private)
+        return VideoPlaybackQualityMetricsPromise::createAndReject(PlatformMediaError::Cancelled);
+
+    return m_private->asyncVideoPlaybackQualityMetrics();
+}
+
 String MediaPlayer::sourceApplicationIdentifier() const
 {
     return client().mediaPlayerSourceApplicationIdentifier();
@@ -1757,11 +1769,6 @@ const Vector<ContentType>& MediaPlayer::mediaContentTypesRequiringHardwareSuppor
     return client().mediaContentTypesRequiringHardwareSupport();
 }
 
-bool MediaPlayer::shouldCheckHardwareSupport() const
-{
-    return client().mediaPlayerShouldCheckHardwareSupport();
-}
-
 const std::optional<Vector<String>>& MediaPlayer::allowedMediaContainerTypes() const
 {
     return client().allowedMediaContainerTypes();
@@ -1806,9 +1813,9 @@ AVPlayer* MediaPlayer::objCAVFoundationAVPlayer() const
 
 #endif
 
-bool MediaPlayer::performTaskAtMediaTime(Function<void()>&& task, const MediaTime& time)
+bool MediaPlayer::performTaskAtTime(Function<void()>&& task, const MediaTime& time)
 {
-    return m_private->performTaskAtMediaTime(WTFMove(task), time);
+    return m_private->performTaskAtTime(WTFMove(task), time);
 }
 
 bool MediaPlayer::shouldIgnoreIntrinsicSize()
@@ -1915,6 +1922,11 @@ bool MediaPlayer::pauseAtHostTime(const MonotonicTime& hostTime)
     // media player does not support it.
     ASSERT(supportsPauseAtHostTime());
     return m_private->pauseAtHostTime(hostTime);
+}
+
+void MediaPlayer::setShouldCheckHardwareSupport(bool value)
+{
+    m_private->setShouldCheckHardwareSupport(value);
 }
 
 #if !RELEASE_LOG_DISABLED

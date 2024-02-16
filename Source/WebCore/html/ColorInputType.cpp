@@ -54,7 +54,7 @@
 #include "ScriptDisallowedScope.h"
 #include "ShadowRoot.h"
 #include "TypedElementDescendantIteratorInlines.h"
-#include "UserAgentPartIds.h"
+#include "UserAgentParts.h"
 #include "UserGestureIndicator.h"
 
 namespace WebCore {
@@ -144,16 +144,17 @@ void ColorInputType::createShadowSubtree()
     ASSERT(element());
     ASSERT(element()->shadowRoot());
 
-    Document& document = element()->document();
-    auto wrapperElement = HTMLDivElement::create(document);
-    auto colorSwatch = HTMLDivElement::create(document);
+    Ref document = element()->document();
+    Ref wrapperElement = HTMLDivElement::create(document);
+    Ref colorSwatch = HTMLDivElement::create(document);
 
-    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { *element()->userAgentShadowRoot() };
-    element()->userAgentShadowRoot()->appendChild(ContainerNode::ChildChange::Source::Parser, wrapperElement);
+    Ref shadowRoot = *element()->userAgentShadowRoot();
+    ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
+    shadowRoot->appendChild(ContainerNode::ChildChange::Source::Parser, wrapperElement);
 
     wrapperElement->appendChild(ContainerNode::ChildChange::Source::Parser, colorSwatch);
-    wrapperElement->setPseudo(UserAgentPartIds::webkitColorSwatchWrapper());
-    colorSwatch->setPseudo(UserAgentPartIds::webkitColorSwatch());
+    wrapperElement->setUserAgentPart(UserAgentParts::webkitColorSwatchWrapper());
+    colorSwatch->setUserAgentPart(UserAgentParts::webkitColorSwatch());
 
     updateColorSwatch();
 }
@@ -282,11 +283,11 @@ void ColorInputType::updateColorSwatch()
 HTMLElement* ColorInputType::shadowColorSwatch() const
 {
     ASSERT(element());
-    RefPtr<ShadowRoot> shadow = element()->userAgentShadowRoot();
+    RefPtr shadow = element()->userAgentShadowRoot();
     if (!shadow)
         return nullptr;
 
-    auto wrapper = childrenOfType<HTMLDivElement>(*shadow).first();
+    RefPtr wrapper = childrenOfType<HTMLDivElement>(*shadow).first();
     if (!wrapper)
         return nullptr;
 

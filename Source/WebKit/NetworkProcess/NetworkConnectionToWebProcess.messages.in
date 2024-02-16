@@ -39,6 +39,8 @@ messages -> NetworkConnectionToWebProcess LegacyReceiver {
 
     CookiesForDOM(URL firstParty, struct WebCore::SameSiteInfo sameSiteInfo, URL url, WebCore::FrameIdentifier frameID, WebCore::PageIdentifier pageID, enum:bool WebCore::IncludeSecureCookies includeSecureCookies, enum:bool WebCore::ApplyTrackingPrevention applyTrackingPrevention, enum:bool WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking) -> (String cookieString, bool didAccessSecureCookies) Synchronous
     SetCookiesFromDOM(URL firstParty, struct WebCore::SameSiteInfo sameSiteInfo, URL url, WebCore::FrameIdentifier frameID, WebCore::PageIdentifier pageID, enum:bool WebCore::ApplyTrackingPrevention applyTrackingPrevention, String cookieString, enum:bool WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking)
+    CookiesEnabledSync(URL firstParty, URL url, std::optional<WebCore::FrameIdentifier> frameID, std::optional<WebCore::PageIdentifier> pageID, enum:bool WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking) -> (bool enabled) Synchronous
+    CookiesEnabled(URL firstParty, URL url, std::optional<WebCore::FrameIdentifier> frameID, std::optional<WebCore::PageIdentifier> pageID, enum:bool WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking) -> (bool enabled)
     CookieRequestHeaderFieldValue(URL firstParty, struct WebCore::SameSiteInfo sameSiteInfo, URL url, std::optional<WebCore::FrameIdentifier> frameID, std::optional<WebCore::PageIdentifier> pageID, enum:bool WebCore::IncludeSecureCookies includeSecureCookies, enum:bool WebCore::ApplyTrackingPrevention applyTrackingPrevention, enum:bool WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking) -> (String cookieString, bool didAccessSecureCookies) Synchronous
     GetRawCookies(URL firstParty, struct WebCore::SameSiteInfo sameSiteInfo, URL url, std::optional<WebCore::FrameIdentifier> frameID, std::optional<WebCore::PageIdentifier> pageID, enum:bool WebCore::ApplyTrackingPrevention applyTrackingPrevention, enum:bool WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking) -> (Vector<WebCore::Cookie> cookies) Synchronous
     SetRawCookie(struct WebCore::Cookie cookie)
@@ -118,7 +120,7 @@ messages -> NetworkConnectionToWebProcess LegacyReceiver {
     InstallMockContentFilter(WebCore::MockContentFilterSettings settings)
 #endif
 #if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
-    LogOnBehalfOfWebContent(IPC::DataReference logChannel, IPC::DataReference logCategory, IPC::DataReference logString, uint8_t logType, int32_t pid)
+    LogOnBehalfOfWebContent(std::span<const uint8_t> logChannel, std::span<const uint8_t> logCategory, std::span<const uint8_t> logString, uint8_t logType, int32_t pid)
 #endif
 
     AddAllowedFirstPartyForCookies(WebCore::RegistrableDomain firstPartyDomain)
@@ -133,4 +135,6 @@ messages -> NetworkConnectionToWebProcess LegacyReceiver {
 
     InitializeWebTransportSession(URL url) -> (std::optional<WebKit::WebTransportSessionIdentifier> identifier)
     DestroyWebTransportSession(WebKit::WebTransportSessionIdentifier identifier)
+
+    ClearFrameLoadRecordsForStorageAccess(WebCore::FrameIdentifier frameID)
 }

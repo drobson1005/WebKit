@@ -26,7 +26,6 @@
 #import "config.h"
 #import "Connection.h"
 
-#import "DataReference.h"
 #import "Encoder.h"
 #import "IPCUtilities.h"
 #import "ImportanceAssertion.h"
@@ -210,7 +209,7 @@ void Connection::platformOpen()
         mach_port_mod_refs(mach_task_self(), receivePort, MACH_PORT_RIGHT_RECEIVE, -1);
     });
 
-    m_connectionQueue->dispatch([strongRef = Ref { *this }, this] {
+    protectedConnectionQueue()->dispatch([strongRef = Ref { *this }, this] {
         dispatch_resume(m_receiveSource.get());
     });
 }
@@ -433,7 +432,7 @@ static std::unique_ptr<Decoder> createMessageDecoder(mach_msg_header_t* header, 
         size_t messageBodySize = descriptor->out_of_line.size;
         descriptor->out_of_line.deallocate = false; // We are taking ownership of the memory.
 
-        return Decoder::create({ messageBody, messageBodySize }, [](DataReference buffer) {
+        return Decoder::create({ messageBody, messageBodySize }, [](auto buffer) {
             // FIXME: <rdar://problem/62086358> bufferDeallocator block ignores mach_msg_ool_descriptor_t->deallocate
             vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(buffer.data()), buffer.size_bytes());
         }, WTFMove(attachments));
@@ -521,8 +520,14 @@ void Connection::receiveSourceEventHandler()
     if (decoder->messageName() == MessageName::InitializeConnection) {
         ASSERT(m_isServer);
         ASSERT(!m_sendPort);
-        MachSendRight sendRight;
-        if (m_isConnected || !decoder->decode(sendRight)) {
+        if (m_isConnected) {
+            // The sender sent an invalid message deliberately, close immediately.
+            ASSERT_IS_TESTING_IPC();
+            connectionDidClose();
+            return;
+        }
+        auto sendRight = decoder->decode<MachSendRight>();
+        if (!sendRight) {
             // The sender sent an invalid message deliberately, close immediately.
             ASSERT_IS_TESTING_IPC();
             connectionDidClose();
@@ -531,7 +536,7 @@ void Connection::receiveSourceEventHandler()
 
         m_isConnected = true;
 
-        if (!MACH_PORT_VALID(sendRight.sendRight())) {
+        if (!MACH_PORT_VALID(sendRight->sendRight())) {
             // The InitializeConnection message was valid message. We received MACH_PORT_DEAD
             // because by the time we read the message, the port was already closed.
             // Do not initialize the send source, as there is nobody to send to.
@@ -539,12 +544,12 @@ void Connection::receiveSourceEventHandler()
             // the NO_SENDERS notification.
             return;
         }
-        m_sendPort = sendRight.leakSendRight();
+        m_sendPort = sendRight->leakSendRight();
         initializeSendSource();
         return;
     }
 
-    processIncomingMessage(WTFMove(decoder));
+    processIncomingMessage(makeUniqueRefFromNonNullUniquePtr(WTFMove(decoder)));
 }
 
 IPC::Connection::Identifier Connection::identifier() const

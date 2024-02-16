@@ -48,7 +48,9 @@
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashSet.h>
 #include <wtf/RefCounter.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/WeakHashMap.h>
+#include <wtf/text/ASCIILiteral.h>
 #include <wtf/text/AtomString.h>
 #include <wtf/text/AtomStringHash.h>
 
@@ -122,6 +124,7 @@ class GPUProcessConnection;
 class InjectedBundle;
 class LibWebRTCCodecs;
 class LibWebRTCNetwork;
+class ModelProcessConnection;
 class NetworkProcessConnection;
 class ObjCObjectGraph;
 class RemoteCDMFactory;
@@ -172,7 +175,7 @@ class SpeechRecognitionRealtimeMediaSourceManager;
 
 class WebProcess : public AuxiliaryProcess
 {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_WK_TZONE_ALLOCATED(WebProcess);
 public:
     using TopFrameDomain = WebCore::RegistrableDomain;
     using SubResourceDomain = WebCore::RegistrableDomain;
@@ -270,6 +273,12 @@ public:
 #endif
     RemoteMediaEngineConfigurationFactory& mediaEngineConfigurationFactory();
 #endif // ENABLE(GPU_PROCESS)
+
+#if ENABLE(MODEL_PROCESS)
+    ModelProcessConnection& ensureModelProcessConnection();
+    void modelProcessConnectionClosed(ModelProcessConnection&);
+    ModelProcessConnection* existingModelProcessConnection() { return m_modelProcessConnection.get(); }
+#endif // ENABLE(MODEL_PROCESS)
 
     LibWebRTCNetwork& libWebRTCNetwork();
 
@@ -413,6 +422,9 @@ public:
 
     bool isLockdownModeEnabled() const { return m_isLockdownModeEnabled; }
     bool imageAnimationEnabled() const { return m_imageAnimationEnabled; }
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    bool prefersNonBlinkingCursor() const { return m_prefersNonBlinkingCursor; }
+#endif
 
     void setHadMainFrameMainResourcePrivateRelayed() { m_hadMainFrameMainResourcePrivateRelayed = true; }
     bool hadMainFrameMainResourcePrivateRelayed() const { return m_hadMainFrameMainResourcePrivateRelayed; }
@@ -440,6 +452,7 @@ public:
     FileSystem::Salt mediaKeysStorageSalt() const { return m_mediaKeysStorageSalt; }
 
     bool haveStorageAccessQuirksForDomain(const WebCore::RegistrableDomain&);
+    void updateCachedCookiesEnabled();
 
 private:
     WebProcess();
@@ -470,7 +483,7 @@ private:
     void platformTerminate();
 
     void setHasSuspendedPageProxy(bool);
-    void setIsInProcessCache(bool);
+    void setIsInProcessCache(bool, CompletionHandler<void()>&&);
     void markIsNoLongerPrewarmed();
 
     void registerURLSchemeAsEmptyDocument(const String&);
@@ -484,6 +497,10 @@ private:
     void registerURLSchemeAsAlwaysRevalidated(const String&) const;
     void registerURLSchemeAsCachePartitioned(const String&) const;
     void registerURLSchemeAsCanDisplayOnlyIfCanRequest(const String&) const;
+
+#if ENABLE(WK_WEB_EXTENSIONS)
+    void registerURLSchemeAsWebExtension(const String&) const;
+#endif
 
     void setDefaultRequestTimeoutInterval(double);
     void setAlwaysUsesComplexTextCodePath(bool);
@@ -530,8 +547,8 @@ private:
 #endif
 
     void handleInjectedBundleMessage(const String& messageName, const UserData& messageBody);
-    void setInjectedBundleParameter(const String& key, const IPC::DataReference&);
-    void setInjectedBundleParameters(const IPC::DataReference&);
+    void setInjectedBundleParameter(const String& key, std::span<const uint8_t>);
+    void setInjectedBundleParameters(std::span<const uint8_t>);
 
     bool areAllPagesSuspended() const;
 
@@ -602,7 +619,7 @@ private:
     void displayConfigurationChanged(CGDirectDisplayID, CGDisplayChangeSummaryFlags);
 #endif
 
-#if PLATFORM(COCOA) || PLATFORM(GTK)
+#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
     void setScreenProperties(const WebCore::ScreenProperties&);
 #endif
 
@@ -616,6 +633,7 @@ private:
 #endif
 
     void accessibilityPreferencesDidChange(const AccessibilityPreferences&);
+    void updatePageAccessibilitySettings();
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK)
     void setMediaAccessibilityPreferences(WebCore::CaptionUserPreferences::CaptionDisplayMode, const Vector<String>&);
 #endif
@@ -687,7 +705,7 @@ private:
 
     HashMap<WebCore::FrameIdentifier, WeakPtr<WebFrame>> m_frameMap;
 
-    typedef HashMap<const char*, std::unique_ptr<WebProcessSupplement>, PtrHash<const char*>> WebProcessSupplementMap;
+    using WebProcessSupplementMap = HashMap<ASCIILiteral, std::unique_ptr<WebProcessSupplement>, ASCIILiteralPtrHash>;
     WebProcessSupplementMap m_supplements;
 
     TextCheckerState m_textCheckerState;
@@ -711,6 +729,11 @@ private:
     std::unique_ptr<AudioMediaStreamTrackRendererInternalUnitManager> m_audioMediaStreamTrackRendererInternalUnitManager;
 #endif
 #endif
+
+#if ENABLE(MODEL_PROCESS)
+    RefPtr<ModelProcessConnection> m_modelProcessConnection;
+#endif
+
     Ref<WebCacheStorageProvider> m_cacheStorageProvider;
     Ref<WebBadgeClient> m_badgeClient;
 #if ENABLE(GPU_PROCESS) && ENABLE(VIDEO)
@@ -781,7 +804,7 @@ private:
 #endif
 
     bool m_hasSuspendedPageProxy { false };
-    bool m_isSuspending { false };
+    bool m_allowExitOnMemoryPressure { true };
     bool m_isLockdownModeEnabled { false };
 
 #if ENABLE(MEDIA_STREAM) && ENABLE(SANDBOX_EXTENSIONS)
@@ -825,6 +848,10 @@ private:
     bool m_hadMainFrameMainResourcePrivateRelayed { false };
     bool m_imageAnimationEnabled { true };
     bool m_hasEverHadAnyWebPages { false };
+    bool m_hasPendingAccessibilityUnsuspension { false };
+#if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
+    bool m_prefersNonBlinkingCursor { false };
+#endif
 
     HashSet<WebCore::RegistrableDomain> m_allowedFirstPartiesForCookies;
     String m_mediaKeysStorageDirectory;

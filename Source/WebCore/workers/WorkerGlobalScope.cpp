@@ -34,6 +34,7 @@
 #include "CommonVM.h"
 #include "ContentSecurityPolicy.h"
 #include "Crypto.h"
+#include "DocumentInlines.h"
 #include "FontCustomPlatformData.h"
 #include "FontFaceSet.h"
 #include "IDBConnectionProxy.h"
@@ -512,6 +513,11 @@ Crypto& WorkerGlobalScope::crypto()
 }
 
 Performance& WorkerGlobalScope::performance() const
+{
+    return *m_performance;
+}
+
+Ref<Performance> WorkerGlobalScope::protectedPerformance() const
 {
     return *m_performance;
 }

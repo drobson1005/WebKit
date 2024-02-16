@@ -32,9 +32,12 @@
 #include "AbortSignal.h"
 #include "CredentialCreationOptions.h"
 #include "CredentialRequestOptions.h"
+#include "DigitalCredentialRequestOptions.h"
+#include "DigitalIdentity.h"
 #include "Document.h"
 #include "ExceptionOr.h"
 #include "JSDOMPromiseDeferred.h"
+#include "JSDigitalIdentity.h"
 #include "Page.h"
 #include "SecurityOrigin.h"
 #include "WebAuthenticationConstants.h"
@@ -65,7 +68,7 @@ ScopeAndCrossOriginParent CredentialsContainer::scopeAndCrossOriginParent() cons
     if (!crossOriginParent)
         return std::pair { WebAuthn::Scope::SameOrigin, std::nullopt };
     if (isSameSite)
-        return std::pair { WebAuthn::Scope::SameSite, std::nullopt };
+        return std::pair { WebAuthn::Scope::SameSite, crossOriginParent };
     return std::pair { WebAuthn::Scope::CrossOrigin, crossOriginParent };
 }
 

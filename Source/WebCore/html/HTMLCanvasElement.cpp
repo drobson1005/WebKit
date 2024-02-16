@@ -37,6 +37,7 @@
 #include "CanvasRenderingContext2DSettings.h"
 #include "DisplayListDrawingContext.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "ElementInlines.h"
 #include "EventNames.h"
 #include "GPU.h"
@@ -61,6 +62,7 @@
 #include "Navigator.h"
 #include "OffscreenCanvas.h"
 #include "PlaceholderRenderingContext.h"
+#include "Quirks.h"
 #include "RenderBoxInlines.h"
 #include "RenderElement.h"
 #include "RenderHTMLCanvas.h"
@@ -118,7 +120,7 @@ const int defaultWidth = 300;
 const int defaultHeight = 150;
 
 HTMLCanvasElement::HTMLCanvasElement(const QualifiedName& tagName, Document& document)
-    : HTMLElement(tagName, document)
+    : HTMLElement(tagName, document, TypeFlag::HasDidMoveToNewDocument)
     , CanvasBase(IntSize(defaultWidth, defaultHeight), document.noiseInjectionHashSalt())
     , ActiveDOMObject(document)
 {
@@ -145,7 +147,7 @@ HTMLCanvasElement::~HTMLCanvasElement()
     // downcasts the CanvasBase object to HTMLCanvasElement. That invokes virtual methods, which should be
     // avoided in destructors, but works as long as it's done before HTMLCanvasElement destructs completely.
     notifyObserversCanvasDestroyed();
-    document().clearCanvasPreparation(*this);
+    removeCanvasNeedingPreparationForDisplayOrFlush();
 
     m_context = nullptr; // Ensure this goes away before the ImageBuffer.
     setImageBuffer(nullptr);
@@ -433,10 +435,6 @@ WebGLRenderingContextBase* HTMLCanvasElement::createContextWebGL(WebGLVersion ty
     // adapter when there is an active immersive device.
     m_context = WebGLRenderingContextBase::create(*this, attrs, type);
     if (m_context) {
-        // This new context needs to be observed by the Document, in order
-        // for it to be correctly preparedForRendering before it is composited.
-        addObserver(document());
-
         // Need to make sure a RenderLayer and compositing layer get created for the Canvas.
         invalidateStyleAndLayerComposition();
         if (renderBox())
@@ -480,6 +478,7 @@ ImageBitmapRenderingContext* HTMLCanvasElement::createContextBitmapRenderer(cons
     ASSERT(!m_context);
 
     m_context = ImageBitmapRenderingContext::create(*this, WTFMove(settings));
+    downcast<ImageBitmapRenderingContext>(m_context.get())->transferFromImageBitmap(nullptr);
 
 #if USE(IOSURFACE_CANVAS_BACKING_STORE)
     // Need to make sure a RenderLayer and compositing layer get created for the Canvas.
@@ -513,10 +512,6 @@ GPUCanvasContext* HTMLCanvasElement::createContextWebGPU(const String& type, GPU
     m_context = GPUCanvasContext::create(*this, *gpu);
 
     if (m_context) {
-        // Adds the current document as an observer, so that the document calls prepareForDisplay
-        // when the canvas changes.
-        addObserver(document());
-
         // Need to make sure a RenderLayer and compositing layer get created for the Canvas.
         invalidateStyleAndLayerComposition();
     }
@@ -542,34 +537,30 @@ GPUCanvasContext* HTMLCanvasElement::getContextWebGPU(const String& type, GPU* g
 
 void HTMLCanvasElement::didDraw(const std::optional<FloatRect>& rect, ShouldApplyPostProcessingToDirtyRect shouldApplyPostProcessingToDirtyRect)
 {
-    CanvasBase::didDraw(rect, shouldApplyPostProcessingToDirtyRect);
-
     clearCopiedImage();
-    
-    if (!rect) {
-        notifyObserversCanvasChanged(std::nullopt);
-        return;
-    }
-
-    auto dirtyRect = rect.value();
+    auto adjustedRect = rect;
     if (CheckedPtr renderer = renderBox()) {
-        FloatRect destRect;
-        if (CheckedPtr renderReplaced = dynamicDowncast<RenderReplaced>(*renderer))
-            destRect = renderReplaced->replacedContentRect();
-        else
-            destRect = renderer->contentBoxRect();
+        if (isGPUBased() && renderer->hasAcceleratedCompositing())
+            renderer->contentChanged(CanvasPixelsChanged);
+        else if (adjustedRect) {
+            FloatRect destRect;
+            if (CheckedPtr renderReplaced = dynamicDowncast<RenderReplaced>(*renderer))
+                destRect = renderReplaced->replacedContentRect();
+            else
+                destRect = renderer->contentBoxRect();
 
-        // Inflate dirty rect to cover antialiasing on image buffers.
-        if (drawingContext() && drawingContext()->shouldAntialias())
-            dirtyRect.inflate(1);
+            // Inflate dirty rect to cover antialiasing on image buffers.
+            if (drawingContext() && drawingContext()->shouldAntialias())
+                adjustedRect->inflate(1);
 
-        FloatRect r = mapRect(dirtyRect, FloatRect(0, 0, size().width(), size().height()), destRect);
-        r.intersect(destRect);
+            FloatRect r = mapRect(*adjustedRect, FloatRect { { }, size() }, destRect);
+            r.intersect(destRect);
 
-        if (!r.isEmpty())
-            renderer->repaintRectangle(enclosingIntRect(r));
+            if (!r.isEmpty())
+                renderer->repaintRectangle(enclosingIntRect(r));
+        }
     }
-    notifyObserversCanvasChanged(dirtyRect);
+    CanvasBase::didDraw(adjustedRect, shouldApplyPostProcessingToDirtyRect);
 }
 
 void HTMLCanvasElement::reset()
@@ -674,11 +665,6 @@ void HTMLCanvasElement::setSurfaceSize(const IntSize& size)
     m_hasCreatedImageBuffer = false;
     setImageBuffer(nullptr);
     clearCopiedImage();
-
-    if (!needsPreparationForDisplay()) {
-        document().clearCanvasPreparation(*this);
-        removeObserver(document());
-    }
 }
 
 static String toEncodingMimeType(const String& mimeType)
@@ -888,9 +874,6 @@ void HTMLCanvasElement::createImageBuffer() const
         const_cast<HTMLCanvasElement*>(this)->invalidateStyleAndLayerComposition();
     }
 #endif
-
-    if (m_context && buffer() && buffer()->prefersPreparationForDisplay())
-        const_cast<HTMLCanvasElement*>(this)->addObserver(document());
 }
 
 void HTMLCanvasElement::setImageBufferAndMarkDirty(RefPtr<ImageBuffer>&& buffer)
@@ -973,37 +956,9 @@ void HTMLCanvasElement::eventListenersDidChange()
 
 void HTMLCanvasElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
-    if (needsPreparationForDisplay()) {
-        oldDocument.clearCanvasPreparation(*this);
-        removeObserver(oldDocument);
-        addObserver(newDocument);
-    }
-
+    oldDocument.removeCanvasNeedingPreparationForDisplayOrFlush(*this);
+    newDocument.addCanvasNeedingPreparationForDisplayOrFlush(*this);
     HTMLElement::didMoveToNewDocument(oldDocument, newDocument);
-}
-
-Node::InsertedIntoAncestorResult HTMLCanvasElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
-{
-    if (needsPreparationForDisplay() && insertionType.connectedToDocument) {
-        auto& document = parentOfInsertedTree.document();
-        addObserver(document);
-        // Drawing commands may have been issued to the canvas before now, so we need to
-        // tell the document if we need preparation.
-        if (m_context && m_context->compositingResultsNeedUpdating())
-            document.canvasChanged(*this, FloatRect { });
-    }
-
-    return HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
-}
-
-void HTMLCanvasElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
-{
-    if (needsPreparationForDisplay() && removalType.disconnectedFromDocument) {
-        oldParentOfRemovedTree.document().clearCanvasPreparation(*this);
-        removeObserver(oldParentOfRemovedTree.document());
-    }
-
-    HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
 }
 
 bool HTMLCanvasElement::needsPreparationForDisplay()

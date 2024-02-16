@@ -40,6 +40,7 @@
 #include "LayerProperties.h"
 #include "PlatformClass.h"
 #include "RValueWithFunctionCalls.h"
+#include "RemoteVideoFrameIdentifier.h"
 #if ENABLE(TEST_FEATURE)
 #include "SecondMemberType.h"
 #endif
@@ -49,12 +50,24 @@
 #include "TemplateTest.h"
 #include <Namespace/EmptyConstructorStruct.h>
 #include <Namespace/EmptyConstructorWithIf.h>
+#if !(ENABLE(OUTER_CONDITION))
+#include <Namespace/OtherOuterClass.h>
+#endif
+#if ENABLE(OUTER_CONDITION)
+#include <Namespace/OuterClass.h>
+#endif
 #include <Namespace/ReturnRefClass.h>
+#if USE(APPKIT)
+#include <WebCore/AppKitControlSystemImage.h>
+#endif
 #include <WebCore/FloatBoxExtent.h>
 #include <WebCore/InheritanceGrandchild.h>
 #include <WebCore/InheritsFrom.h>
 #include <WebCore/MoveOnlyBaseClass.h>
 #include <WebCore/MoveOnlyDerivedClass.h>
+#if USE(APPKIT)
+#include <WebCore/ScrollbarTrackCornerSystemImageMac.h>
+#endif
 #include <WebCore/ScrollingStateFrameHostingNode.h>
 #include <WebCore/ScrollingStateFrameHostingNodeWithStuffAfterTuple.h>
 #include <WebCore/TimingFunction.h>
@@ -102,6 +115,12 @@ Vector<SerializedTypeInfo> allSerializedTypes()
             {
                 "RetainPtr<NSArray>"_s,
                 "dataDetectorResults"_s
+            },
+        } },
+        { "Namespace::ClassWithMemberPrecondition"_s, {
+            {
+                "RetainPtr<PKPaymentMethod>"_s,
+                "m_pkPaymentMethod"_s
             },
         } },
         { "Namespace::ReturnRefClass"_s, {
@@ -156,11 +175,23 @@ Vector<SerializedTypeInfo> allSerializedTypes()
         } },
         { "WebCore::InheritsFrom"_s, {
             {
+                "int"_s,
+                "a"_s
+            },
+            {
                 "float"_s,
                 "b"_s
             },
         } },
         { "WebCore::InheritanceGrandchild"_s, {
+            {
+                "int"_s,
+                "a"_s
+            },
+            {
+                "float"_s,
+                "b"_s
+            },
             {
                 "double"_s,
                 "c"_s
@@ -328,98 +359,76 @@ Vector<SerializedTypeInfo> allSerializedTypes()
                 "request"_s
             },
         } },
-        { "webkit_secure_coding AVOutputContext"_s, {
-            {
-                "AVOutputContextSerializationKeyContextID"_s,
-                "WebKit::CoreIPCString"_s
-            },
-            {
-                "AVOutputContextSerializationKeyContextType"_s,
-                "WebKit::CoreIPCString"_s
-            },
-        } },
         { "WebKit::CoreIPCAVOutputContext"_s, {
-            {
-                "WebKit::CoreIPCDictionary"_s,
-                "m_propertyList"_s
-            },
-        } },
-        { "webkit_secure_coding NSSomeFoundationType"_s, {
-            {
-                "StringKey"_s,
-                "WebKit::CoreIPCString"_s
-            },
-            {
-                "NumberKey"_s,
-                "WebKit::CoreIPCNumber"_s
-            },
-            {
-                "OptionalNumberKey"_s,
-                "WebKit::CoreIPCNumber?"_s
-            },
-            {
-                "ArrayKey"_s,
-                "WebKit::CoreIPCArray"_s
-            },
-            {
-                "OptionalArrayKey"_s,
-                "WebKit::CoreIPCArray?"_s
-            },
-            {
-                "DictionaryKey"_s,
-                "WebKit::CoreIPCDictionary"_s
-            },
-            {
-                "OptionalDictionaryKey"_s,
-                "WebKit::CoreIPCDictionary?"_s
-            },
+            { "RetainPtr<NSString>"_s , "AVOutputContextSerializationKeyContextID"_s },
+            { "RetainPtr<NSString>"_s , "AVOutputContextSerializationKeyContextType"_s },
         } },
         { "WebKit::CoreIPCNSSomeFoundationType"_s, {
-            {
-                "WebKit::CoreIPCDictionary"_s,
-                "m_propertyList"_s
-            },
-        } },
-        { "webkit_secure_coding DDScannerResult"_s, {
-            {
-                "StringKey"_s,
-                "WebKit::CoreIPCString"_s
-            },
-            {
-                "NumberKey"_s,
-                "WebKit::CoreIPCNumber"_s
-            },
-            {
-                "OptionalNumberKey"_s,
-                "WebKit::CoreIPCNumber?"_s
-            },
-            {
-                "ArrayKey"_s,
-                "WebKit::CoreIPCArray<WebKit::CoreIPCDDScannerResult>"_s
-            },
-            {
-                "OptionalArrayKey"_s,
-                "WebKit::CoreIPCArray<WebKit::CoreIPCDDScannerResult>?"_s
-            },
-            {
-                "DictionaryKey"_s,
-                "WebKit::CoreIPCDictionary<WebKit::CoreIPCString, WebKit::CoreIPCNumber>"_s
-            },
-            {
-                "OptionalDictionaryKey"_s,
-                "WebKit::CoreIPCDictionary<WebKit::CoreIPCString, WebKit::CoreIPCDDScannerResult>?"_s
-            },
+            { "RetainPtr<NSString>"_s , "StringKey"_s },
+            { "RetainPtr<NSNumber>"_s , "NumberKey"_s },
+            { "RetainPtr<NSNumber>"_s , "OptionalNumberKey"_s },
+            { "RetainPtr<NSArray>"_s , "ArrayKey"_s },
+            { "RetainPtr<NSArray>"_s , "OptionalArrayKey"_s },
+            { "RetainPtr<NSDictionary>"_s , "DictionaryKey"_s },
+            { "RetainPtr<NSDictionary>"_s , "OptionalDictionaryKey"_s },
         } },
         { "WebKit::CoreIPCDDScannerResult"_s, {
-            {
-                "WebKit::CoreIPCDictionary"_s,
-                "m_propertyList"_s
-            },
+            { "RetainPtr<NSString>"_s , "StringKey"_s },
+            { "RetainPtr<NSNumber>"_s , "NumberKey"_s },
+            { "RetainPtr<NSNumber>"_s , "OptionalNumberKey"_s },
+            { "Vector<RetainPtr<DDScannerResult>>"_s , "ArrayKey"_s },
+            { "std::optional<Vector<RetainPtr<DDScannerResult>>>"_s , "OptionalArrayKey"_s },
+            { "Vector<std::pair<String, RetainPtr<Number>>>"_s , "DictionaryKey"_s },
+            { "std::optional<Vector<std::pair<String, RetainPtr<DDScannerResult>>>>"_s , "OptionalDictionaryKey"_s },
+            { "Vector<RetainPtr<NSData>>"_s , "DataArrayKey"_s },
+            { "Vector<RetainPtr<SecTrustRef>>"_s , "SecTrustArrayKey"_s },
         } },
         { "WebKit::RValueWithFunctionCalls"_s, {
             {
                 "SandboxExtensionHandle"_s,
                 "callFunction()"_s
+            },
+        } },
+        { "WebKit::RemoteVideoFrameReference"_s, {
+            {
+                "WebKit::RemoteVideoFrameIdentifier"_s,
+                "identifier()"_s
+            },
+            {
+                "uint64_t"_s,
+                "version()"_s
+            },
+        } },
+        { "WebKit::RemoteVideoFrameWriteReference"_s, {
+            {
+                "IPC::ObjectIdentifierReference<WebKit::RemoteVideoFrameIdentifier>"_s,
+                "reference()"_s
+            },
+            {
+                "uint64_t"_s,
+                "pendingReads()"_s
+            },
+        } },
+        { "Namespace::OuterClass"_s, {
+            {
+                "int"_s,
+                "outerValue"_s
+            },
+        } },
+        { "Namespace::OtherOuterClass"_s, {
+            {
+                "int"_s,
+                "outerValue"_s
+            },
+        } },
+        { "WebCore::AppKitControlSystemImage"_s, {
+            {
+                "WebCore::Color"_s,
+                "m_tintColor"_s
+            },
+            {
+                "bool"_s,
+                "m_useDarkAppearance"_s
             },
         } },
         { "WebCore::SharedStringHash"_s, {
@@ -433,7 +442,7 @@ Vector<SerializedTypeInfo> allSerializedTypes()
             { "int"_s, "alias"_s }
         } },
 #endif
-#if !OS(WINDOWS)
+#if !(OS(WINDOWS))
         { "WTF::ProcessID"_s, {
             { "pid_t"_s, "alias"_s }
         } },
@@ -467,7 +476,7 @@ Vector<SerializedEnumInfo> allSerializedEnums()
 #if ENABLE(OPTION_SET_SECOND_VALUE)
             static_cast<uint64_t>(EnumNamespace2::OptionSetEnumType::OptionSetSecondValue),
 #endif
-#if !ENABLE(OPTION_SET_SECOND_VALUE)
+#if !(ENABLE(OPTION_SET_SECOND_VALUE))
             static_cast<uint64_t>(EnumNamespace2::OptionSetEnumType::OptionSetSecondValueElse),
 #endif
             static_cast<uint64_t>(EnumNamespace2::OptionSetEnumType::OptionSetThirdValue),
@@ -497,6 +506,22 @@ Vector<SerializedEnumInfo> allSerializedEnums()
             static_cast<uint64_t>(OptionSetEnumAllCondition::OptionSetThirdValue),
 #endif
         } },
+#if (ENABLE(OUTER_CONDITION)) && (ENABLE(INNER_CONDITION))
+        { "EnumNamespace::InnerEnumType"_s, sizeof(EnumNamespace::InnerEnumType), false, {
+            static_cast<uint64_t>(EnumNamespace::InnerEnumType::InnerValue),
+#if ENABLE(INNER_INNER_CONDITION)
+            static_cast<uint64_t>(EnumNamespace::InnerEnumType::InnerInnerValue),
+#endif
+#if !(ENABLE(INNER_INNER_CONDITION))
+            static_cast<uint64_t>(EnumNamespace::InnerEnumType::OtherInnerInnerValue),
+#endif
+        } },
+#endif
+#if (ENABLE(OUTER_CONDITION)) && (!(ENABLE(INNER_CONDITION)))
+        { "EnumNamespace::InnerBoolType"_s, sizeof(EnumNamespace::InnerBoolType), false, {
+            0, 1
+        } },
+#endif
     };
 }
 

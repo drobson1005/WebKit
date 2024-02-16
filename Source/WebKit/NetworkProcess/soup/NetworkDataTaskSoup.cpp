@@ -28,7 +28,6 @@
 
 #include "AuthenticationChallengeDisposition.h"
 #include "AuthenticationManager.h"
-#include "DataReference.h"
 #include "Download.h"
 #include "NetworkLoad.h"
 #include "NetworkProcess.h"
@@ -1476,7 +1475,7 @@ void NetworkDataTaskSoup::didFailDownload(const ResourceError& error)
     else {
         auto* download = m_session->networkProcess().downloadManager().download(m_pendingDownloadID);
         ASSERT(download);
-        download->didFail(error, IPC::DataReference());
+        download->didFail(error, { });
     }
 }
 
@@ -1705,10 +1704,10 @@ void NetworkDataTaskSoup::didGetFileInfo(GFileInfo* info)
         m_response.setExpectedContentLength(-1);
     } else {
         auto contentType = String::fromLatin1(g_file_info_get_content_type(info));
-        m_response.setMimeType(AtomString { extractMIMETypeFromMediaType(contentType) });
-        m_response.setTextEncodingName(extractCharsetFromMediaType(contentType).toAtomString());
+        m_response.setMimeType(extractMIMETypeFromMediaType(contentType));
+        m_response.setTextEncodingName(extractCharsetFromMediaType(contentType).toString());
         if (m_response.mimeType().isEmpty())
-            m_response.setMimeType(AtomString { MIMETypeRegistry::mimeTypeForPath(m_response.url().path().toString()) });
+            m_response.setMimeType(MIMETypeRegistry::mimeTypeForPath(m_response.url().path().toString()));
         m_response.setExpectedContentLength(g_file_info_get_size(info));
     }
 }

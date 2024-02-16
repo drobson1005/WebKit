@@ -293,7 +293,7 @@ static unsigned computeSubtypeHash(SupertypeCount supertypeCount, const TypeInde
     if (supertypeCount > 0)
         accumulator = WTF::pairIntHash(accumulator, WTF::IntHash<TypeIndex>::hash(superTypes[0]));
     accumulator = WTF::pairIntHash(accumulator, WTF::IntHash<TypeIndex>::hash(underlyingType));
-    accumulator = WTF::pairIntHash(accumulator, WTF::IntHash<TypeIndex>::hash(isFinal));
+    accumulator = WTF::pairIntHash(accumulator, WTF::IntHash<bool>::hash(isFinal));
     return accumulator;
 }
 
@@ -544,6 +544,15 @@ bool TypeDefinition::hasRecursiveReference() const
     return TypeInformation::get(as<Subtype>()->underlyingType()).hasRecursiveReference();
 }
 
+bool TypeDefinition::isFinalType() const
+{
+    const auto& unrolled = unroll();
+    if (unrolled.is<Subtype>())
+        return unrolled.as<Subtype>()->isFinal();
+
+    return true;
+}
+
 RefPtr<RTT> RTT::tryCreateRTT(RTTKind kind, DisplayCount displaySize)
 {
     auto result = tryFastMalloc(allocatedRTTSize(displaySize));
@@ -594,6 +603,11 @@ const TypeDefinition& TypeInformation::signatureForLLIntBuiltin(LLIntBuiltin bui
         return *singleton().m_Arrayref_I32I32I32I32;
     case LLIntBuiltin::AnyConvertExtern:
         return *singleton().m_Anyref_Externref;
+    case LLIntBuiltin::ArrayCopy:
+        return *singleton().m_Void_I32AnyrefI32I32AnyrefI32I32;
+    case LLIntBuiltin::ArrayInitElem:
+    case LLIntBuiltin::ArrayInitData:
+        return *singleton().m_Void_I32AnyrefI32I32I32I32;
     }
     RELEASE_ASSERT_NOT_REACHED();
     return *singleton().m_I64_Void;
@@ -832,6 +846,9 @@ struct SubtypeParameterTypes {
         if (subtype->underlyingType() != params.underlyingType)
             return false;
 
+        if (subtype->isFinal() != params.isFinal)
+            return false;
+
         return true;
     }
 
@@ -888,6 +905,8 @@ TypeInformation::TypeInformation()
     m_Ref_RefI32I32 = m_typeSet.template add<FunctionParameterTypes>(FunctionParameterTypes { { anyrefType() }, { anyrefType(), Wasm::Types::I32, Wasm::Types::I32 } }).iterator->key;
     m_Arrayref_I32I32I32I32 = m_typeSet.template add<FunctionParameterTypes>(FunctionParameterTypes { { arrayrefType(false) }, { Wasm::Types::I32, Wasm::Types::I32, Wasm::Types::I32, Wasm::Types::I32 } }).iterator->key;
     m_Anyref_Externref = m_typeSet.template add<FunctionParameterTypes>(FunctionParameterTypes { { anyrefType() }, { externrefType() } }).iterator->key;
+    m_Void_I32AnyrefI32I32AnyrefI32I32 = m_typeSet.template add<FunctionParameterTypes>(FunctionParameterTypes { { }, { Wasm::Types::I32, anyrefType(), Wasm::Types::I32, Wasm::Types::I32, anyrefType(), Wasm::Types::I32, Wasm::Types::I32 } }).iterator->key;
+    m_Void_I32AnyrefI32I32I32I32 = m_typeSet.template add<FunctionParameterTypes>(FunctionParameterTypes { { }, { Wasm::Types::I32, anyrefType(), Wasm::Types::I32, Wasm::Types::I32, Wasm::Types::I32, Wasm::Types::I32 } }).iterator->key;
 }
 
 RefPtr<TypeDefinition> TypeInformation::typeDefinitionForFunction(const Vector<Type, 16>& results, const Vector<Type, 16>& args)
@@ -1087,7 +1106,7 @@ bool TypeInformation::castReference(JSValue refValue, bool allowNull, TypeIndex 
             if (!funcRef)
                 return false;
             auto funcRTT = funcRef->rtt();
-            if (funcRTT.get() == signatureRTT.get())
+            if (funcRTT == signatureRTT.get())
                 return true;
             return funcRTT->isSubRTT(*signatureRTT);
         }

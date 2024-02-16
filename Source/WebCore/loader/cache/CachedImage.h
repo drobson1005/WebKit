@@ -31,6 +31,7 @@
 #include "SVGImageCache.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/WeakRef.h>
 
 namespace WebCore {
 
@@ -62,7 +63,7 @@ public:
     bool hasSVGImage() const;
     bool currentFrameKnownToBeOpaque(const RenderElement*);
 
-    std::pair<Image*, float> brokenImage(float deviceScaleFactor) const; // Returns an image and the image's resolution scale factor.
+    std::pair<WeakPtr<Image>, float> brokenImage(float deviceScaleFactor) const; // Returns an image and the image's resolution scale factor.
     bool willPaintBrokenImage() const;
 
     bool canRender(const RenderElement* renderer, float multiplier) { return !errorOccurred() && !imageSizeForRenderer(renderer, multiplier).isEmpty(); }
@@ -159,7 +160,6 @@ private:
         void decodedSizeChanged(const Image&, long long delta) final;
         void didDraw(const Image&) final;
 
-        bool canDestroyDecodedData(const Image&) final;
         void imageFrameAvailable(const Image&, ImageAnimatingState, const IntRect* changeRect = nullptr, DecodingStatus = DecodingStatus::Invalid) final;
         void changedInRect(const Image&, const IntRect*) final;
         void scheduleRenderingUpdate(const Image&) final;
@@ -173,7 +173,6 @@ private:
     void encodedDataStatusChanged(const Image&, EncodedDataStatus);
     void decodedSizeChanged(const Image&, long long delta);
     void didDraw(const Image&);
-    bool canDestroyDecodedData(const Image&);
     void imageFrameAvailable(const Image&, ImageAnimatingState, const IntRect* changeRect = nullptr, DecodingStatus = DecodingStatus::Invalid);
     void changedInRect(const Image&, const IntRect*);
     void scheduleRenderingUpdate(const Image&);
@@ -188,7 +187,7 @@ private:
         URL imageURL;
     };
 
-    using ContainerContextRequests = HashMap<const CachedImageClient*, ContainerContext>;
+    using ContainerContextRequests = HashMap<SingleThreadWeakRef<const CachedImageClient>, ContainerContext>;
     ContainerContextRequests m_pendingContainerContextRequests;
 
     SingleThreadWeakHashSet<CachedImageClient> m_clientsWaitingForAsyncDecoding;

@@ -56,14 +56,14 @@ static GRefPtr<GdkCursor> createNamedCursor(const char* name)
 static GRefPtr<GdkCursor> createCustomCursor(Image* image, const IntPoint& hotSpot)
 {
 #if USE(GTK4)
-    auto texture = image->gdkTexture();
+    auto texture = image->adapter().gdkTexture();
     if (!texture)
         return nullptr;
 
     IntPoint effectiveHotSpot = determineHotSpot(image, hotSpot);
     return adoptGRef(gdk_cursor_new_from_texture(texture.get(), effectiveHotSpot.x(), effectiveHotSpot.y(), fallbackCursor().get()));
 #else
-    auto nativeImage = image->nativeImageForCurrentFrame();
+    auto nativeImage = image->currentNativeImage();
     if (!nativeImage)
         return nullptr;
 

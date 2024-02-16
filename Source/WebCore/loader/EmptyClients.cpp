@@ -133,6 +133,10 @@ class EmptyContextMenuClient final : public ContextMenuClient {
     void handleTranslation(const TranslationContextMenuInfo&) final { }
 #endif
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    void handleSwapCharacters(IntRect) final { };
+#endif
+
 #if PLATFORM(GTK)
     void insertEmoji(LocalFrame&) final { }
 #endif
@@ -598,11 +602,11 @@ void EmptyChromeClient::requestCookieConsent(CompletionHandler<void(CookieConsen
     completion(CookieConsentDecisionResult::NotSupported);
 }
 
-void EmptyFrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, PolicyCheckIdentifier, FramePolicyFunction&&)
+void EmptyFrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&&)
 {
 }
 
-void EmptyFrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse&, FormState*, PolicyDecisionMode, PolicyCheckIdentifier, FramePolicyFunction&&)
+void EmptyFrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse&, FormState*, const String&, uint64_t, std::optional<HitTestResult>&&, bool, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&&)
 {
 }
 
@@ -633,7 +637,7 @@ RefPtr<LocalFrame> EmptyFrameLoaderClient::createFrame(const AtomString&, HTMLFr
     return nullptr;
 }
 
-RefPtr<Widget> EmptyFrameLoaderClient::createPlugin(const IntSize&, HTMLPlugInElement&, const URL&, const Vector<AtomString>&, const Vector<AtomString>&, const String&, bool)
+RefPtr<Widget> EmptyFrameLoaderClient::createPlugin(HTMLPlugInElement&, const URL&, const Vector<AtomString>&, const Vector<AtomString>&, const String&, bool)
 {
     return nullptr;
 }
@@ -821,7 +825,7 @@ void EmptyFrameLoaderClient::dispatchShow()
 {
 }
 
-void EmptyFrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse&, const ResourceRequest&, PolicyCheckIdentifier, const String&, FramePolicyFunction&&)
+void EmptyFrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse&, const ResourceRequest&, const String&, FramePolicyFunction&&)
 {
 }
 
@@ -1051,7 +1055,7 @@ void EmptyFrameLoaderClient::didDisplayInsecureContent()
 {
 }
 
-void EmptyFrameLoaderClient::didRunInsecureContent(SecurityOrigin&, const URL&)
+void EmptyFrameLoaderClient::didRunInsecureContent(SecurityOrigin&)
 {
 }
 
@@ -1219,6 +1223,7 @@ PageConfiguration pageConfigurationWithEmptyClients(std::optional<PageIdentifier
         makeUniqueRef<EmptyProgressTrackerClient>(),
         UniqueRef<LocalFrameLoaderClient>(makeUniqueRef<EmptyFrameLoaderClient>()),
         FrameIdentifier::generate(),
+        nullptr,
         makeUniqueRef<DummySpeechRecognitionProvider>(),
         makeUniqueRef<EmptyMediaRecorderProvider>(),
         EmptyBroadcastChannelRegistry::create(),

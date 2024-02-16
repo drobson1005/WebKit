@@ -26,16 +26,16 @@
 #include "config.h"
 #include "GlobalSorting.h"
 
-#include "ASTFunction.h"
 #include "ASTIdentifierExpression.h"
+#include "ASTScopedVisitorInlines.h"
 #include "ASTVariableStatement.h"
-#include "ASTVisitor.h"
 #include "ContextProviderInlines.h"
 #include "WGSLShaderModule.h"
 #include <wtf/DataLog.h>
 #include <wtf/Deque.h>
 #include <wtf/HashMap.h>
 #include <wtf/ListHashSet.h>
+#include <wtf/SetForScope.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WGSL {
@@ -131,12 +131,14 @@ public:
     FixedVector<Node>& nodes() { return m_nodes; }
     Node* addNode(unsigned index, AST::Declaration& astNode)
     {
-        if (m_nodeMap.find(astNode.name()) != m_nodeMap.end())
+        bool isConstAssert = is<AST::ConstAssert>(astNode);
+        if (!isConstAssert && m_nodeMap.find(astNode.name()) != m_nodeMap.end())
             return nullptr;
 
         m_nodes[index] = Node(index, astNode);
         auto* node = &m_nodes[index];
-        m_nodeMap.add(astNode.name(), node);
+        if (!isConstAssert)
+            m_nodeMap.add(astNode.name(), node);
         return node;
     }
     Node* getNode(const AST::Identifier& identifier)
@@ -150,7 +152,10 @@ public:
     EdgeSet& edges() { return m_edges; }
     void addEdge(Node& source, Node& target)
     {
-        dataLogLnIf(shouldLogGlobalSorting, "addEdge: source: ", source.astNode().name(), ", target: ", target.astNode().name());
+        if constexpr (shouldLogGlobalSorting) {
+            String sourceNodeName = is<AST::ConstAssert>(source.astNode()) ? "const_assert"_s : source.astNode().name().id();
+            dataLogLnIf(shouldLogGlobalSorting, "addEdge: source: ", sourceNodeName, ", target: ", target.astNode().name());
+        }
         auto result = m_edges.add(Edge(source, target));
         Edge& edge = *result.iterator;
         source.outgoingEdges().add(edge);
@@ -167,16 +172,18 @@ private:
 
 struct Empty { };
 
-class GraphBuilder : public AST::Visitor, public ContextProvider<Empty> {
+class GraphBuilder : public AST::ScopedVisitor<Empty> {
+    static constexpr unsigned s_maxExpressionDepth = 512;
+
+    using Base = AST::ScopedVisitor<Empty>;
+    using Base::visit;
+
 public:
-    static void visit(Graph&, Graph::Node&);
+    static Result<void> visit(Graph&, Graph::Node&);
 
-    using AST::Visitor::visit;
-
-    void visit(AST::Function&) override;
+    void visit(AST::Parameter&) override;
     void visit(AST::VariableStatement&) override;
-    void visit(AST::CompoundStatement&) override;
-    void visit(AST::ForStatement&) override;
+    void visit(AST::Expression&) override;
     void visit(AST::IdentifierExpression&) override;
 
 private:
@@ -187,11 +194,14 @@ private:
 
     Graph& m_graph;
     Graph::Node& m_currentNode;
+    unsigned m_expressionDepth { 0 };
 };
 
-void GraphBuilder::visit(Graph& graph, Graph::Node& node)
+Result<void> GraphBuilder::visit(Graph& graph, Graph::Node& node)
 {
-    GraphBuilder(graph, node).visit(node.astNode());
+    GraphBuilder graphBuilder(graph, node);
+    graphBuilder.visit(node.astNode());
+    return graphBuilder.result();
 }
 
 GraphBuilder::GraphBuilder(Graph& graph, Graph::Node& node)
@@ -200,37 +210,27 @@ GraphBuilder::GraphBuilder(Graph& graph, Graph::Node& node)
 {
 }
 
-void GraphBuilder::visit(AST::Function& function)
+void GraphBuilder::visit(AST::Parameter& parameter)
 {
-    ContextScope functionScope(this);
-
-    for (auto& parameter : function.parameters()) {
-        AST::Visitor::visit(parameter.typeName());
-        introduceVariable(parameter.name());
-    }
-
-    AST::Visitor::visit(function.body());
-
-    if (function.maybeReturnType())
-        AST::Visitor::visit(*function.maybeReturnType());
+    introduceVariable(parameter.name());
+    Base::visit(parameter);
 }
 
 void GraphBuilder::visit(AST::VariableStatement& variable)
 {
     introduceVariable(variable.variable().name());
-    AST::Visitor::visit(variable);
+    Base::visit(variable);
 }
 
-void GraphBuilder::visit(AST::CompoundStatement& statement)
+void GraphBuilder::visit(AST::Expression& expression)
 {
-    ContextScope blockScope(this);
-    AST::Visitor::visit(statement);
-}
+    SetForScope expressionDepthScope(m_expressionDepth, m_expressionDepth + 1);
+    if (UNLIKELY(m_expressionDepth > s_maxExpressionDepth)) {
+        setError({ makeString("reached maximum expression depth of "_s, String::number(s_maxExpressionDepth)), expression.span() });
+        return;
+    }
 
-void GraphBuilder::visit(AST::ForStatement& statement)
-{
-    ContextScope forScope(this);
-    AST::Visitor::visit(statement);
+    Base::visit(expression);
 }
 
 void GraphBuilder::visit(AST::IdentifierExpression& identifier)
@@ -271,15 +271,21 @@ static std::optional<FailedCheck> reorder(AST::Declaration::List& list)
         graphNodeList.append(graphNode);
     }
 
-    for (auto* graphNode : graphNodeList)
-        GraphBuilder::visit(graph, *graphNode);
+    for (auto* graphNode : graphNodeList) {
+        auto result = GraphBuilder::visit(graph, *graphNode);
+        if (!result)
+            return FailedCheck { Vector<Error> { result.error() }, { } };
+    }
 
     list.clear();
     Deque<Graph::Node> queue;
 
     std::function<void(Graph::Node&, unsigned)> processNode;
     processNode = [&](Graph::Node& node, unsigned currentIndex) {
-        dataLogLnIf(shouldLogGlobalSorting, "Process: ", node.astNode().name());
+        if constexpr (shouldLogGlobalSorting) {
+            String nodeName = is<AST::ConstAssert>(node.astNode()) ? "const_assert"_s : node.astNode().name().id();
+            dataLogLn("Process: ", nodeName);
+        }
         list.append(node.astNode());
         for (auto edge : node.incomingEdges()) {
             auto& source = edge.source();

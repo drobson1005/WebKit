@@ -703,13 +703,23 @@ void Options::notifyOptionsChanged()
     // https://webkit.org/b/239707
     Options::useFTLJIT() = false;
 #endif
-    
+
 #if !CPU(X86_64) && !CPU(ARM64)
     Options::useConcurrentGC() = false;
     Options::forceUnlinkedDFG() = false;
     Options::useWebAssemblySIMD() = false;
+#if !CPU(ARM_THUMB2)
     Options::useBBQJIT() = false;
 #endif
+#if CPU(ARM_THUMB2)
+    Options::useBBQTierUpChecks() = false;
+#endif
+#endif
+
+#if !CPU(ARM64)
+    Options::useRandomizingExecutableIslandAllocation() = false;
+#endif
+
     Options::useDataICInFTL() = false; // Currently, it is not completed. Disable forcefully.
     Options::forceUnlinkedDFG() = false; // Currently, IC is rapidly changing. We disable this until we get the final form of Data IC.
 
@@ -895,6 +905,9 @@ void Options::notifyOptionsChanged()
     Options::useWebAssemblyFastMemory() = false;
 #endif
 
+    uint8_t* reservedConfigBytes = reinterpret_cast_ptr<uint8_t*>(WebConfig::g_config + WebConfig::reservedSlotsForExecutableAllocator);
+    reservedConfigBytes[WebConfig::ReservedByteForAllocationProfiling] = Options::useAllocationProfiling() ? 1 : 0;
+
     // Do range checks where needed and make corrections to the options:
     ASSERT(Options::thresholdForOptimizeAfterLongWarmUp() >= Options::thresholdForOptimizeAfterWarmUp());
     ASSERT(Options::thresholdForOptimizeAfterWarmUp() >= 0);
@@ -1025,7 +1038,7 @@ bool Options::setOptions(const char* optionsStr)
             break;
 
         char* optionStart = p;
-        p = strstr(p, "=");
+        p = strchr(p, '=');
         if (!p) {
             dataLogF("'=' not found in option string: %p\n", optionStart);
             WTF::fastFree(optionsStrCopy);

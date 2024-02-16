@@ -38,9 +38,10 @@ public:
     virtual ~RenderSVGResourceClipper();
 
     inline SVGClipPathElement& clipPathElement() const;
+    inline Ref<SVGClipPathElement> protectedClipPathElement() const;
 
-    SVGGraphicsElement* shouldApplyPathClipping() const;
-    void applyPathClipping(GraphicsContext&, const FloatRect& objectBoundingBox, SVGGraphicsElement&);
+    RefPtr<SVGGraphicsElement> shouldApplyPathClipping() const;
+    void applyPathClipping(GraphicsContext&, const RenderLayerModelObject& targetRenderer, const FloatRect& objectBoundingBox, SVGGraphicsElement&);
     void applyMaskClipping(PaintInfo&, const RenderLayerModelObject& targetRenderer, const FloatRect& objectBoundingBox);
 
     FloatRect resourceBoundingBox(const RenderObject&, RepaintRectCalculation);

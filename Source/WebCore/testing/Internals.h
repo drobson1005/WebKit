@@ -683,6 +683,7 @@ public:
 
     String toolTipFromElement(Element&) const;
 
+    void forceAXObjectCacheUpdate() const;
     void forceReload(bool endToEnd);
     void reloadExpiredOnly();
 
@@ -786,6 +787,7 @@ public:
 
 #if ENABLE(MEDIA_SOURCE)
     WEBCORE_TESTSUPPORT_EXPORT void initializeMockMediaSource();
+    void setMaximumSourceBufferSize(SourceBuffer&, uint64_t, DOMPromiseDeferred<void>&&);
     using BufferedSamplesPromise = DOMPromiseDeferred<IDLSequence<IDLDOMString>>;
     void bufferedSamplesForTrackId(SourceBuffer&, const AtomString&, BufferedSamplesPromise&&);
     void enqueuedSamplesForTrackID(SourceBuffer&, const AtomString&, BufferedSamplesPromise&&);
@@ -1010,6 +1012,8 @@ public:
     double preferredAudioBufferSize() const;
     double currentAudioBufferSize() const;
     bool audioSessionActive() const;
+
+    void setHistoryTotalStateObjectPayloadLimitOverride(uint32_t);
 
     void storeRegistrationsOnDisk(DOMPromiseDeferred<void>&&);
     void sendH2Ping(String url, DOMPromiseDeferred<IDLDouble>&&);

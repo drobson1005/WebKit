@@ -74,6 +74,10 @@
 #include "SelectionGeometry.h"
 #endif
 
+#if ENABLE(MULTI_REPRESENTATION_HEIC)
+#include "MultiRepresentationHEICMetrics.h"
+#endif
+
 #if USE(CG)
 #include "PDFDocumentImage.h"
 #include "Settings.h"
@@ -148,7 +152,10 @@ using namespace HTMLNames;
 RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, OptionSet<ReplacedFlag> flags, StyleImage* styleImage, const float imageDevicePixelRatio)
     : RenderReplaced(type, element, WTFMove(style), IntSize(), flags | ReplacedFlag::IsImage)
     , m_imageResource(styleImage ? makeUnique<RenderImageResourceStyleImage>(*styleImage) : makeUnique<RenderImageResource>())
-    , m_hasImageOverlay(is<HTMLElement>(element) && ImageOverlay::hasOverlay(downcast<HTMLElement>(element)))
+    , m_hasImageOverlay([&] {
+        auto* htmlElement = dynamicDowncast<HTMLElement>(element);
+        return htmlElement && ImageOverlay::hasOverlay(*htmlElement);
+    }())
     , m_imageDevicePixelRatio(imageDevicePixelRatio)
 {
     updateAltText();
@@ -248,8 +255,16 @@ void RenderImage::styleDidChange(StyleDifference diff, const RenderStyle* oldSty
             repaintOrMarkForLayout(ImageSizeChangeForAltText);
         m_needsToSetSizeForAltText = false;
     }
-    if (diff == StyleDifference::Layout && oldStyle && oldStyle->imageOrientation() != style().imageOrientation())
-        return repaintOrMarkForLayout(ImageSizeChangeNone);
+
+    if (oldStyle && diff == StyleDifference::Layout) {
+        if (oldStyle->imageOrientation() != style().imageOrientation())
+            return repaintOrMarkForLayout(ImageSizeChangeNone);
+
+#if ENABLE(MULTI_REPRESENTATION_HEIC)
+        if (isMultiRepresentationHEIC() && oldStyle->fontCascade() != style().fontCascade())
+            return repaintOrMarkForLayout(ImageSizeChangeNone);
+#endif
+    }
 }
 
 bool RenderImage::shouldCollapseToEmpty() const
@@ -282,6 +297,18 @@ LayoutUnit RenderImage::computeReplacedLogicalHeight(std::optional<LayoutUnit> e
     if (shouldCollapseToEmpty())
         return { };
     return RenderReplaced::computeReplacedLogicalHeight(estimatedUsedWidth);
+}
+
+LayoutUnit RenderImage::baselinePosition(FontBaseline baselineType, bool firstLine, LineDirectionMode direction, LinePositionMode linePositionMode) const
+{
+    LayoutUnit offset;
+#if ENABLE(MULTI_REPRESENTATION_HEIC)
+    if (isMultiRepresentationHEIC()) {
+        auto metrics = style().fontCascade().primaryFont().metricsForMultiRepresentationHEIC();
+        offset = LayoutUnit::fromFloatRound(metrics.descent);
+    }
+#endif
+    return RenderBox::baselinePosition(baselineType, firstLine, direction, linePositionMode) - offset;
 }
 
 void RenderImage::imageChanged(WrappedImagePtr newImage, const IntRect* rect)
@@ -442,6 +469,17 @@ bool RenderImage::hasAnimatedImage() const
         return image->isAnimated();
     return false;
 }
+
+#if ENABLE(MULTI_REPRESENTATION_HEIC)
+bool RenderImage::isMultiRepresentationHEIC() const
+{
+    RefPtr imageElement = dynamicDowncast<HTMLImageElement>(element());
+    if (!imageElement)
+        return false;
+
+    return imageElement->isMultiRepresentationHEIC();
+}
+#endif
 
 void RenderImage::paintIncompleteImageOutline(PaintInfo& paintInfo, LayoutPoint paintOffset, LayoutUnit borderWidth) const
 {
@@ -710,7 +748,15 @@ ImageDrawResult RenderImage::paintIntoRect(PaintInfo& paintInfo, const FloatRect
         settings().showDebugBorders() ? ShowDebugBackground::Yes : ShowDebugBackground::No
     };
 
-    auto drawResult = paintInfo.context().drawImage(*img, rect, options);
+    auto drawResult = ImageDrawResult::DidNothing;
+#if ENABLE(MULTI_REPRESENTATION_HEIC)
+    if (isMultiRepresentationHEIC())
+        drawResult = paintInfo.context().drawMultiRepresentationHEIC(*img, style().fontCascade().primaryFont(), rect, options);
+#endif
+
+    if (drawResult == ImageDrawResult::DidNothing)
+        drawResult = paintInfo.context().drawImage(*img, rect, options);
+
     if (drawResult == ImageDrawResult::DidRequestDecoding)
         imageResource().cachedImage()->addClientWaitingForAsyncDecoding(*this);
 

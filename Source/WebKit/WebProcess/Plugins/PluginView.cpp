@@ -346,15 +346,21 @@ void PluginView::setPageScaleFactor(double scaleFactor, std::optional<IntPoint> 
     if (!m_isInitialized)
         return;
 
-    RefPtr webPage = m_webPage.get();
-    webPage->send(Messages::WebPageProxy::PluginScaleFactorDidChange(scaleFactor));
-    webPage->send(Messages::WebPageProxy::PluginZoomFactorDidChange(scaleFactor));
+    pluginScaleFactorDidChange();
     protectedPlugin()->setPageScaleFactor(scaleFactor, origin);
 }
 
 double PluginView::pageScaleFactor() const
 {
     return protectedPlugin()->scaleFactor();
+}
+
+void PluginView::pluginScaleFactorDidChange()
+{
+    auto scaleFactor = pageScaleFactor();
+    RefPtr webPage = m_webPage.get();
+    webPage->send(Messages::WebPageProxy::PluginScaleFactorDidChange(scaleFactor));
+    webPage->send(Messages::WebPageProxy::PluginZoomFactorDidChange(scaleFactor));
 }
 
 void PluginView::webPageDestroyed()
@@ -625,6 +631,14 @@ bool PluginView::drawsFindOverlay() const
     return protectedPlugin()->drawsFindOverlay();
 }
 
+RefPtr<TextIndicator> PluginView::textIndicatorForSelection(OptionSet<WebCore::TextIndicatorOption> options, WebCore::TextIndicatorPresentationTransition transition)
+{
+    if (!m_isInitialized)
+        return { };
+
+    return protectedPlugin()->textIndicatorForSelection(options, transition);
+}
+
 String PluginView::selectionString() const
 {
     if (!m_isInitialized)
@@ -715,6 +729,14 @@ ScrollingNodeID PluginView::scrollingNodeID() const
         return { };
 
     return protectedPlugin()->scrollingNodeID();
+}
+
+void PluginView::willAttachScrollingNode()
+{
+    if (!m_isInitialized)
+        return;
+
+    return protectedPlugin()->willAttachScrollingNode();
 }
 
 void PluginView::didAttachScrollingNode()
@@ -920,7 +942,7 @@ void PluginView::invalidateRect(const IntRect& dirtyRect)
 
 void PluginView::loadMainResource()
 {
-    auto referrer = SecurityPolicy::generateReferrerHeader(frame()->document()->referrerPolicy(), m_mainResourceURL, frame()->loader().outgoingReferrer(), OriginAccessPatternsForWebProcess::singleton());
+    auto referrer = SecurityPolicy::generateReferrerHeader(frame()->document()->referrerPolicy(), m_mainResourceURL, frame()->loader().outgoingReferrerURL(), OriginAccessPatternsForWebProcess::singleton());
     if (referrer.isEmpty())
         referrer = { };
 
@@ -952,7 +974,7 @@ bool PluginView::isBeingDestroyed() const
 
 RetainPtr<PDFDocument> PluginView::pdfDocumentForPrinting() const
 {
-    return protectedPlugin()->pdfDocumentForPrinting();
+    return protectedPlugin()->pdfDocument();
 }
 
 WebCore::FloatSize PluginView::pdfDocumentSizeForPrinting() const
@@ -977,7 +999,7 @@ WebCore::FloatRect PluginView::rectForSelectionInRootView(PDFSelection *selectio
 
 CGFloat PluginView::contentScaleFactor() const
 {
-    return protectedPlugin()->scaleFactor();
+    return protectedPlugin()->contentScaleFactor();
 }
 
 bool PluginView::isUsingUISideCompositing() const

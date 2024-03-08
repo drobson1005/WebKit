@@ -76,6 +76,7 @@ public:
     WEBCORE_EXPORT void setMouseIsOverContentArea(ScrollableArea&, bool) override;
     WEBCORE_EXPORT void setMouseMovedInContentArea(ScrollableArea&) override;
     WEBCORE_EXPORT void setLayerHostingContextIdentifierForFrameHostingNode(ScrollingNodeID, std::optional<LayerHostingContextIdentifier>) override;
+    LocalFrameView* frameViewForScrollingNode(LocalFrame& localMainFrame, ScrollingNodeID) const;
 
 
 protected:
@@ -190,8 +191,8 @@ class LayerTreeHitTestLocker {
 public:
     LayerTreeHitTestLocker(ScrollingCoordinator* scrollingCoordinator)
     {
-        if (is<AsyncScrollingCoordinator>(scrollingCoordinator)) {
-            m_scrollingTree = downcast<AsyncScrollingCoordinator>(*scrollingCoordinator).scrollingTree();
+        if (auto* asyncScrollingCoordinator = dynamicDowncast<AsyncScrollingCoordinator>(scrollingCoordinator)) {
+            m_scrollingTree = asyncScrollingCoordinator->scrollingTree();
             if (m_scrollingTree)
                 m_scrollingTree->lockLayersForHitTesting();
         }

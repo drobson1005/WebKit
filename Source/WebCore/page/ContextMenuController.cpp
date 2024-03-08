@@ -403,6 +403,13 @@ void ContextMenuController::contextMenuItemSelected(ContextMenuAction action, co
     case ContextMenuItemTagCopy:
         frame->checkedEditor()->copy();
         break;
+    case ContextMenuItemTagCopyLinkToHighlight:
+        if (Page* page = frame->page()) {
+            auto url = page->fragmentDirectiveURLForSelectedText();
+            if (url.isValid())
+                frame->editor().copyURL(url, { });
+        }
+        break;
     case ContextMenuItemTagGoBack:
         if (RefPtr page = frame->page())
             page->checkedBackForward()->goBackOrForward(-1);
@@ -555,11 +562,6 @@ void ContextMenuController::contextMenuItemSelected(ContextMenuAction action, co
     case ContextMenuItemTagTextDirectionRightToLeft:
         frame->editor().command("MakeTextWritingDirectionRightToLeft"_s).execute();
         break;
-#if PLATFORM(COCOA)
-    case ContextMenuItemTagSearchInSpotlight:
-        m_client->searchWithSpotlight();
-        break;
-#endif
     case ContextMenuItemTagShowSpellingPanel:
         frame->checkedEditor()->showSpellingGuessPanel();
         break;
@@ -946,10 +948,6 @@ void ContextMenuController::populate()
 #if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
     ContextMenuItem ToggleVideoEnhancedFullscreen(ContextMenuItemType::Action, ContextMenuItemTagToggleVideoEnhancedFullscreen, contextMenuItemTagEnterVideoEnhancedFullscreen());
 #endif
-#if PLATFORM(COCOA)
-    ContextMenuItem SearchSpotlightItem(ContextMenuItemType::Action, ContextMenuItemTagSearchInSpotlight,
-        contextMenuItemTagSearchInSpotlight());
-#endif
 
 #if ENABLE(PDFJS)
     ContextMenuItem PDFAutoSizeItem(ContextMenuItemType::Action, ContextMenuItemPDFAutoSize, contextMenuItemPDFAutoSize());
@@ -970,6 +968,7 @@ void ContextMenuController::populate()
     ContextMenuItem AddHighlightItem(ContextMenuItemType::Action, ContextMenuItemTagAddHighlightToCurrentQuickNote, contextMenuItemTagAddHighlightToCurrentQuickNote());
     ContextMenuItem AddHighlightToNewQuickNoteItem(ContextMenuItemType::Action, ContextMenuItemTagAddHighlightToNewQuickNote, contextMenuItemTagAddHighlightToNewQuickNote());
 #endif
+    ContextMenuItem CopyLinkToHighlightItem(ContextMenuItemType::Action, ContextMenuItemTagCopyLinkToHighlight, contextMenuItemTagCopyLinkToHighlight());
 #if !PLATFORM(GTK)
     ContextMenuItem SearchWebItem(ContextMenuItemType::Action, ContextMenuItemTagSearchWeb, contextMenuItemTagSearchWeb());
 #endif
@@ -1057,7 +1056,7 @@ void ContextMenuController::populate()
         if (!frame->page() || !frame->page()->settings().imageAnimationControlEnabled())
             return false;
 
-        return frame->page()->systemAllowsAnimationControls() || frame->page()->settings().allowAnimationControlsOverride();
+        return Image::systemAllowsAnimationControls() || frame->page()->settings().allowAnimationControlsOverride();
     };
 
     bool shouldAddPlayAllPauseAllAnimationsItem = canAddAnimationControls();
@@ -1169,6 +1168,8 @@ void ContextMenuController::populate()
                 addSelectedTextActionsIfNeeded(selectedText);
 
                 appendItem(CopyItem, m_contextMenu.get());
+                if (!selectionIsInsideImageOverlay && isMainFrame && page && page->settings().scrollToTextFragmentGenerationEnabled())
+                    appendItem(CopyLinkToHighlightItem, m_contextMenu.get());
 #if PLATFORM(COCOA)
                 appendItem(*separatorItem(), m_contextMenu.get());
 
@@ -1441,6 +1442,19 @@ void ContextMenuController::addDebuggingItems()
 #endif // ENABLE(VIDEO)
 }
 
+bool ContextMenuController::shouldEnableCopyLinkToHighlight() const
+{
+    RefPtr frame = m_context.hitTestResult().innerNonSharedNode()->document().frame();
+    if (!frame)
+        return false;
+
+    auto selectedRange = frame->selection().selection().range();
+    bool selectionIsInsideImageOverlay = selectedRange && ImageOverlay::isInsideOverlay(*selectedRange);
+    if (frame->page() && frame->page()->settings().scrollToTextFragmentGenerationEnabled() && !selectionIsInsideImageOverlay)
+        return frame->selection().isRange();
+    return false;
+}
+
 void ContextMenuController::checkOrEnableIfNeeded(ContextMenuItem& item) const
 {
     if (item.type() == ContextMenuItemType::Separator)
@@ -1502,6 +1516,9 @@ void ContextMenuController::checkOrEnableIfNeeded(ContextMenuItem& item) const
             break;
         case ContextMenuItemTagPaste:
             shouldEnable = frame->editor().canDHTMLPaste() || frame->editor().canPaste();
+            break;
+        case ContextMenuItemTagCopyLinkToHighlight:
+            shouldEnable = shouldEnableCopyLinkToHighlight();
             break;
 #if PLATFORM(GTK)
         case ContextMenuItemTagPasteAsPlainText:
@@ -1727,7 +1744,6 @@ void ContextMenuController::checkOrEnableIfNeeded(ContextMenuItem& item) const
         case ContextMenuItemTagOpenFrameInNewWindow:
         case ContextMenuItemTagSpellingGuess:
         case ContextMenuItemTagOther:
-        case ContextMenuItemTagSearchInSpotlight:
         case ContextMenuItemTagSearchWeb:
         case ContextMenuItemTagOpenWithDefaultApplication:
         case ContextMenuItemPDFActualSize:

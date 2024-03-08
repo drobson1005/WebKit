@@ -48,17 +48,17 @@ static void ensureDebugCategoryInitialized()
     });
 }
 
-AudioTrackPrivateGStreamer::AudioTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer> player, unsigned index, GRefPtr<GstPad>&& pad, bool shouldHandleStreamStartEvent)
+AudioTrackPrivateGStreamer::AudioTrackPrivateGStreamer(ThreadSafeWeakPtr<MediaPlayerPrivateGStreamer>&& player, unsigned index, GRefPtr<GstPad>&& pad, bool shouldHandleStreamStartEvent)
     : TrackPrivateBaseGStreamer(TrackPrivateBaseGStreamer::TrackType::Audio, this, index, WTFMove(pad), shouldHandleStreamStartEvent)
-    , m_player(player)
+    , m_player(WTFMove(player))
 {
     ensureDebugCategoryInitialized();
     installUpdateConfigurationHandlers();
 }
 
-AudioTrackPrivateGStreamer::AudioTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer> player, unsigned index, GstStream* stream)
+AudioTrackPrivateGStreamer::AudioTrackPrivateGStreamer(ThreadSafeWeakPtr<MediaPlayerPrivateGStreamer>&& player, unsigned index, GstStream* stream)
     : TrackPrivateBaseGStreamer(TrackPrivateBaseGStreamer::TrackType::Audio, this, index, stream)
-    , m_player(player)
+    , m_player(WTFMove(player))
 {
     ensureDebugCategoryInitialized();
     installUpdateConfigurationHandlers();
@@ -75,10 +75,11 @@ void AudioTrackPrivateGStreamer::capsChanged(const String& streamId, GRefPtr<Gst
     ASSERT(isMainThread());
     updateConfigurationFromCaps(WTFMove(caps));
 
-    if (!m_player)
+    RefPtr player = m_player.get();
+    if (!player)
         return;
 
-    auto codec = m_player->codecForStreamId(streamId);
+    auto codec = player->codecForStreamId(streamId);
     if (codec.isEmpty())
         return;
 
@@ -95,14 +96,11 @@ void AudioTrackPrivateGStreamer::updateConfigurationFromTags(GRefPtr<GstTagList>
     if (!tags)
         return;
 
-    GUniqueOutPtr<char> trackIDString;
-    if (gst_tag_list_get_string(tags.get(), "container-specific-track-id", &trackIDString.outPtr())) {
-        if (auto trackID = WTF::parseInteger<TrackID>(StringView { trackIDString.get(), static_cast<unsigned>(strlen(trackIDString.get())) })) {
-            m_trackID = *trackID;
-            GST_DEBUG_OBJECT(objectForLogging(), "Audio track ID set from container-specific-track-id tag %" G_GUINT64_FORMAT, *m_trackID);
-            m_stringId = AtomString::number(static_cast<unsigned long long>(*m_trackID));
-            client()->idChanged(*m_trackID);
-        }
+    if (updateTrackIDFromTags(tags)) {
+        GST_DEBUG_OBJECT(objectForLogging(), "Audio track ID set from container-specific-track-id tag %" G_GUINT64_FORMAT, *m_trackID);
+        notifyClients([trackID = *m_trackID](auto& client) {
+            client.idChanged(trackID);
+        });
     }
 
     unsigned bitrate;
@@ -177,8 +175,9 @@ void AudioTrackPrivateGStreamer::setEnabled(bool enabled)
         return;
     AudioTrackPrivate::setEnabled(enabled);
 
-    if (m_player)
-        m_player->updateEnabledAudioTrack();
+    RefPtr player = m_player.get();
+    if (player)
+        player->updateEnabledAudioTrack();
 }
 
 #undef GST_CAT_DEFAULT

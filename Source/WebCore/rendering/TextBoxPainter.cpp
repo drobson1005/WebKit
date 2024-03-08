@@ -53,6 +53,10 @@
 #include "TextPaintStyle.h"
 #include "TextPainter.h"
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+#include "GraphicsContextCG.h"
+#endif
+
 namespace WebCore {
 
 static FloatRect calculateDocumentMarkerBounds(const InlineIterator::TextBoxIterator&, const MarkedText&);
@@ -80,7 +84,10 @@ TextBoxPainter<TextBoxPath>::TextBoxPainter(TextBoxPath&& textBox, PaintInfo& pa
     , m_paintOffset(paintOffset)
     , m_paintRect(computePaintRect(paintOffset))
     , m_isFirstLine(m_textBox.isFirstLine())
-    , m_isCombinedText(is<RenderCombineText>(m_renderer) && downcast<RenderCombineText>(m_renderer).isCombined())
+    , m_isCombinedText([&] {
+        auto* combineTextRenderer = dynamicDowncast<RenderCombineText>(m_renderer);
+        return combineTextRenderer && combineTextRenderer->isCombined();
+    }())
     , m_isPrinting(m_document.printing())
     , m_haveSelection(computeHaveSelection())
     , m_containsComposition(m_renderer.textNode() && m_renderer.frame().editor().compositionNode() == m_renderer.textNode())
@@ -559,7 +566,7 @@ static inline float computedAutoTextDecorationThickness(const RenderStyle& style
 
 static inline float computedLinethroughCenter(const RenderStyle& styleToUse, float textDecorationThickness, float autoTextDecorationThickness)
 {
-    auto center = 2 * styleToUse.metricsOfPrimaryFont().ascent().value_or(0) / 3 + autoTextDecorationThickness / 2;
+    auto center = 2 * styleToUse.metricsOfPrimaryFont().ascent() / 3 + autoTextDecorationThickness / 2;
     return center - textDecorationThickness / 2;
 }
 
@@ -1034,14 +1041,32 @@ FloatRect LegacyTextBoxPainter::calculateUnionOfAllDocumentMarkerBounds(const Le
     return result;
 }
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+
+#if USE(APPLE_INTERNAL_SDK)
+#import <WebKitAdditions/TextBoxPainterAdditions.cpp>
+#else
+static void drawUnifiedTextReplacementUnderline(GraphicsContext&, const FloatRect&, IntSize) { }
+#endif
+
+#endif // ENABLE(UNIFIED_TEXT_REPLACEMENT)
+
 template<typename TextBoxPath>
 void TextBoxPainter<TextBoxPath>::paintPlatformDocumentMarker(const MarkedText& markedText)
 {
-    // Never print spelling/grammar markers (5327887)
+    // Never print document markers (rdar://5327887)
     if (m_document.printing())
         return;
 
     auto bounds = calculateDocumentMarkerBounds(makeIterator(), markedText);
+    bounds.moveBy(m_paintRect.location());
+
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    if (markedText.type == MarkedText::Type::UnifiedTextReplacement) {
+        drawUnifiedTextReplacementUnderline(m_paintInfo.context(), bounds,  m_renderer.frame().view()->size());
+        return;
+    }
+#endif
 
     auto lineStyleMode = [&] {
         switch (markedText.type) {
@@ -1068,7 +1093,6 @@ void TextBoxPainter<TextBoxPath>::paintPlatformDocumentMarker(const MarkedText& 
     if (auto* marker = markedText.marker)
         lineStyleColor = lineStyleColor.colorWithAlphaMultipliedBy(marker->opacity());
 
-    bounds.moveBy(m_paintRect.location());
     m_paintInfo.context().drawDotsForDocumentMarker(bounds, { lineStyleMode, lineStyleColor });
 }
 

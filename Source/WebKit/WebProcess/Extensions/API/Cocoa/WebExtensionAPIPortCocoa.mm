@@ -39,6 +39,7 @@
 #import "WebExtensionAPINamespace.h"
 #import "WebExtensionAPIRuntime.h"
 #import "WebExtensionContextMessages.h"
+#import "WebExtensionControllerProxy.h"
 #import "WebExtensionUtilities.h"
 #import "WebProcess.h"
 
@@ -68,6 +69,8 @@ WebExtensionAPIPort::PortSet WebExtensionAPIPort::get(WebExtensionPortChannelIde
 
 void WebExtensionAPIPort::add()
 {
+    ASSERT(!isQuarantined());
+
     auto addResult = webExtensionPorts().ensure(channelIdentifier(), [&] {
         return HashSet<WeakRef<WebExtensionAPIPort>> { };
     });
@@ -81,9 +84,14 @@ void WebExtensionAPIPort::remove()
 {
     disconnect();
 
+    if (isQuarantined())
+        return;
+
     auto entry = webExtensionPorts().find(channelIdentifier());
     if (entry == webExtensionPorts().end())
         return;
+
+    WebProcess::singleton().send(Messages::WebExtensionContext::PortRemoved(contentWorldType(), targetContentWorldType(), owningPageProxyIdentifier(), channelIdentifier()), extensionContext().identifier());
 
     entry->value.remove(*this);
 
@@ -117,7 +125,7 @@ void WebExtensionAPIPort::postMessage(WebFrame& frame, NSString *message, NSStri
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/Port#postmessage
 
-    if (disconnected()) {
+    if (isDisconnected()) {
         *outExceptionString = toErrorString(nil, nil, @"the port is disconnected");
         return;
     }
@@ -127,9 +135,12 @@ void WebExtensionAPIPort::postMessage(WebFrame& frame, NSString *message, NSStri
         return;
     }
 
+    if (isQuarantined())
+        return;
+
     RELEASE_LOG_DEBUG(Extensions, "Sent port message for channel %{public}llu from %{public}@ world", channelIdentifier().toUInt64(), (NSString *)toDebugString(contentWorldType()));
 
-    WebProcess::singleton().send(Messages::WebExtensionContext::PortPostMessage(targetContentWorldType(), owningPageProxyIdentifier(), channelIdentifier(), message), extensionContext().identifier());
+    WebProcess::singleton().send(Messages::WebExtensionContext::PortPostMessage(contentWorldType(), targetContentWorldType(), owningPageProxyIdentifier(), channelIdentifier(), message), extensionContext().identifier());
 }
 
 void WebExtensionAPIPort::disconnect()
@@ -141,7 +152,7 @@ void WebExtensionAPIPort::disconnect()
 
 void WebExtensionAPIPort::fireMessageEventIfNeeded(id message)
 {
-    if (disconnected() || !m_onMessage || m_onMessage->listeners().isEmpty())
+    if (isDisconnected() || isQuarantined() || !m_onMessage || m_onMessage->listeners().isEmpty())
         return;
 
     RELEASE_LOG_DEBUG(Extensions, "Fired port message event for channel %{public}llu in %{public}@ world", channelIdentifier().toUInt64(), (NSString *)toDebugString(contentWorldType()));
@@ -156,7 +167,7 @@ void WebExtensionAPIPort::fireMessageEventIfNeeded(id message)
 
 void WebExtensionAPIPort::fireDisconnectEventIfNeeded()
 {
-    if (disconnected())
+    if (isDisconnected())
         return;
 
     RELEASE_LOG_DEBUG(Extensions, "Port channel %{public}llu disconnected in %{public}@ world", channelIdentifier().toUInt64(), (NSString *)toDebugString(contentWorldType()));
@@ -167,8 +178,6 @@ void WebExtensionAPIPort::fireDisconnectEventIfNeeded()
         m_onMessage->removeAllListeners();
 
     remove();
-
-    WebProcess::singleton().send(Messages::WebExtensionContext::PortDisconnect(contentWorldType(), targetContentWorldType(), channelIdentifier()), extensionContext().identifier());
 
     if (!m_onDisconnect || m_onDisconnect->listeners().isEmpty())
         return;
@@ -190,7 +199,7 @@ WebExtensionAPIEvent& WebExtensionAPIPort::onMessage()
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/Port#onmessage
 
     if (!m_onMessage)
-        m_onMessage = WebExtensionAPIEvent::create(forMainWorld(), runtime(), extensionContext(), WebExtensionEventListenerType::PortOnMessage);
+        m_onMessage = WebExtensionAPIEvent::create(*this, WebExtensionEventListenerType::PortOnMessage);
 
     return *m_onMessage;
 }
@@ -200,7 +209,7 @@ WebExtensionAPIEvent& WebExtensionAPIPort::onDisconnect()
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/Port#ondisconnect
 
     if (!m_onDisconnect)
-        m_onDisconnect = WebExtensionAPIEvent::create(forMainWorld(), runtime(), extensionContext(), WebExtensionEventListenerType::PortOnDisconnect);
+        m_onDisconnect = WebExtensionAPIEvent::create(*this, WebExtensionEventListenerType::PortOnDisconnect);
 
     return *m_onDisconnect;
 }

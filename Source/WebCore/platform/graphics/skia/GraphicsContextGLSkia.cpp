@@ -27,10 +27,10 @@
 #include "GraphicsContextGL.h"
 
 #if ENABLE(WEBGL) && USE(SKIA)
-#include "BitmapImage.h"
 #include "GLContext.h"
 #include "GraphicsContextGLImageExtractor.h"
 #include "Image.h"
+#include "ImageSource.h"
 #include "NotImplemented.h"
 #include "PixelBuffer.h"
 #include "PlatformDisplay.h"
@@ -53,14 +53,14 @@ bool GraphicsContextGLImageExtractor::extractImage(bool premultiplyAlpha, bool i
     RefPtr<NativeImage> decodedImage;
     bool hasAlpha = !m_image->currentFrameKnownToBeOpaque();
     if ((ignoreGammaAndColorProfile || (hasAlpha && !premultiplyAlpha)) && m_image->data()) {
-        auto image = BitmapImage::create(nullptr, AlphaOption::NotPremultiplied, ignoreGammaAndColorProfile ? GammaAndColorProfileOption::Ignored : GammaAndColorProfileOption::Applied);
-        image->setData(m_image->data(), true);
-        if (!image->frameCount())
+        auto source = ImageSource::create(nullptr, AlphaOption::NotPremultiplied, ignoreGammaAndColorProfile ? GammaAndColorProfileOption::Ignored : GammaAndColorProfileOption::Applied);
+        source->setData(m_image->data(), true);
+        if (!source->frameCount())
             return false;
 
-        decodedImage = image->currentNativeImage();
+        decodedImage = source->createFrameImageAtIndex(0);
     } else
-        decodedImage = m_image->currentNativeImage();
+        decodedImage = m_image->nativeImageForCurrentFrame();
 
     if (!decodedImage)
         return false;
@@ -86,9 +86,10 @@ bool GraphicsContextGLImageExtractor::extractImage(bool premultiplyAlpha, bool i
 
     if (image->isTextureBacked()) {
         auto data = SkData::MakeUninitialized(imageInfo.computeMinByteSize());
+        if (!PlatformDisplay::sharedDisplayForCompositing().skiaGLContext()->makeContextCurrent())
+            return false;
+
         GrDirectContext* grContext = PlatformDisplay::sharedDisplayForCompositing().skiaGrContext();
-        auto* glContext = PlatformDisplay::sharedDisplayForCompositing().skiaGLContext();
-        GLContext::ScopedGLContextCurrent scopedCurrent(*glContext);
         if (!image->readPixels(grContext, imageInfo, static_cast<uint8_t*>(data->writable_data()), bytesPerRow, 0, 0))
             return false;
 
@@ -108,11 +109,23 @@ bool GraphicsContextGLImageExtractor::extractImage(bool premultiplyAlpha, bool i
     return true;
 }
 
-RefPtr<NativeImage> GraphicsContextGL::createNativeImageFromPixelBuffer(const GraphicsContextGLAttributes& /*sourceContextAttributes*/, Ref<PixelBuffer>&& pixelBuffer)
+RefPtr<NativeImage> GraphicsContextGL::createNativeImageFromPixelBuffer(const GraphicsContextGLAttributes& sourceContextAttributes, Ref<PixelBuffer>&& pixelBuffer)
 {
-    ASSERT_UNUSED(pixelBuffer, !pixelBuffer->size().isEmpty());
-    notImplemented();
-    return nullptr;
+    ASSERT(!pixelBuffer->size().isEmpty());
+    auto imageSize = pixelBuffer->size();
+    SkAlphaType alphaType = kUnpremul_SkAlphaType;
+    if (!sourceContextAttributes.alpha)
+        alphaType = kOpaque_SkAlphaType;
+    else if (sourceContextAttributes.premultipliedAlpha)
+        alphaType = kPremul_SkAlphaType;
+    auto imageInfo = SkImageInfo::Make(imageSize.width(), imageSize.height(), kRGBA_8888_SkColorType, alphaType);
+
+    Ref protectedPixelBuffer = pixelBuffer;
+    SkPixmap pixmap(imageInfo, pixelBuffer->bytes(), imageInfo.minRowBytes());
+    auto image = SkImages::RasterFromPixmap(pixmap, [](const void*, void* context) {
+        static_cast<PixelBuffer*>(context)->deref();
+    }, &protectedPixelBuffer.leakRef());
+    return NativeImage::create(WTFMove(image));
 }
 
 } // namespace WebCore

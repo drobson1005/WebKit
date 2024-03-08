@@ -104,9 +104,7 @@
 #import <wtf/SortedArrayMap.h>
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
-#import <WebCore/MediaPlaybackTargetCocoa.h>
-#import <WebCore/MediaPlaybackTargetContext.h>
-#import <WebCore/MediaPlaybackTargetMock.h>
+#import "MediaPlaybackTargetContextSerialized.h"
 #endif
 
 #import "PDFKitSoftLink.h"
@@ -123,16 +121,12 @@ void WebPage::platformInitializeAccessibility()
     // Currently, it is also needed to allocate and initialize an NSApplication object.
     [NSApplication _accessibilityInitialize];
 
-    auto mockAccessibilityElement = adoptNS([[WKAccessibilityWebPageObject alloc] init]);
-
     // Get the pid for the starting process.
     pid_t pid = WebCore::presentingApplicationPID();
-    if ([mockAccessibilityElement respondsToSelector:@selector(accessibilitySetPresenterProcessIdentifier:)])
-        [(id)mockAccessibilityElement.get() accessibilitySetPresenterProcessIdentifier:pid];
-    [mockAccessibilityElement setWebPage:this];
-    m_mockAccessibilityElement = WTFMove(mockAccessibilityElement);
-
-    accessibilityTransferRemoteToken(accessibilityRemoteTokenData());
+    createMockAccessibilityElement(pid);
+    RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
+    if (localMainFrame)
+        accessibilityTransferRemoteToken(accessibilityRemoteTokenData(), localMainFrame->frameID());
 
     // Close Mach connection to Launch Services.
 #if HAVE(LS_SERVER_CONNECTION_STATUS_RELEASE_NOTIFICATIONS_MASK)
@@ -144,9 +138,22 @@ void WebPage::platformInitializeAccessibility()
     WebProcess::singleton().revokeLaunchServicesSandboxExtension();
 }
 
+void WebPage::createMockAccessibilityElement(pid_t pid)
+{
+    auto mockAccessibilityElement = adoptNS([[WKAccessibilityWebPageObject alloc] init]);
+
+    if ([mockAccessibilityElement respondsToSelector:@selector(accessibilitySetPresenterProcessIdentifier:)])
+        [(id)mockAccessibilityElement.get() accessibilitySetPresenterProcessIdentifier:pid];
+    [mockAccessibilityElement setWebPage:this];
+    m_mockAccessibilityElement = WTFMove(mockAccessibilityElement);
+}
+
 void WebPage::platformReinitialize()
 {
-    accessibilityTransferRemoteToken(accessibilityRemoteTokenData());
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return;
+    accessibilityTransferRemoteToken(accessibilityRemoteTokenData(), frame->frameID());
 }
 
 RetainPtr<NSData> WebPage::accessibilityRemoteTokenData() const
@@ -255,7 +262,9 @@ static LocalFrame* frameForEvent(KeyboardEvent* event)
 
 bool WebPage::executeKeypressCommandsInternal(const Vector<WebCore::KeypressCommand>& commands, KeyboardEvent* event)
 {
-    Ref frame = event ? *frameForEvent(event) : m_page->focusController().focusedOrMainFrame();
+    RefPtr frame = event ? frameForEvent(event) : m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return false;
     ASSERT(frame->page() == corePage());
 
     bool eventWasHandled = false;
@@ -335,7 +344,9 @@ bool WebPage::handleEditingKeyboardEvent(KeyboardEvent& event)
 
 void WebPage::attributedSubstringForCharacterRangeAsync(const EditingRange& editingRange, CompletionHandler<void(const WebCore::AttributedString&, const EditingRange&)>&& completionHandler)
 {
-    Ref frame = m_page->focusController().focusedOrMainFrame();
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return completionHandler({ }, { });
 
     const VisibleSelection& selection = frame->selection().selection();
     if (selection.isNone() || !selection.isContentEditable() || selection.isInPasswordField()) {
@@ -343,7 +354,7 @@ void WebPage::attributedSubstringForCharacterRangeAsync(const EditingRange& edit
         return;
     }
 
-    auto range = EditingRange::toRange(frame, editingRange);
+    auto range = EditingRange::toRange(*frame, editingRange);
     if (!range) {
         completionHandler({ }, { });
         return;
@@ -469,12 +480,27 @@ bool WebPage::performNonEditingBehaviorForSelector(const String& selector, Keybo
     return didPerformAction;
 }
 
+void WebPage::updateRemotePageAccessibilityOffset(WebCore::FrameIdentifier frameID, WebCore::IntPoint offset)
+{
+    [accessibilityRemoteObject() setRemoteFrameOffset:offset];
+}
+
+void WebPage::registerRemoteFrameAccessibilityTokens(pid_t pid, std::span<const uint8_t> elementToken)
+{
+    NSData *elementTokenData = [NSData dataWithBytes:elementToken.data() length:elementToken.size()];
+    auto remoteElement = elementTokenData.length ? adoptNS([[NSAccessibilityRemoteUIElement alloc] initWithRemoteToken:elementTokenData]) : nil;
+
+    createMockAccessibilityElement(pid);
+    [accessibilityRemoteObject() setRemoteParent:remoteElement.get()];
+}
+
 void WebPage::registerUIProcessAccessibilityTokens(std::span<const uint8_t> elementToken, std::span<const uint8_t> windowToken)
 {
     NSData *elementTokenData = [NSData dataWithBytes:elementToken.data() length:elementToken.size()];
     NSData *windowTokenData = [NSData dataWithBytes:windowToken.data() length:windowToken.size()];
     auto remoteElement = elementTokenData.length ? adoptNS([[NSAccessibilityRemoteUIElement alloc] initWithRemoteToken:elementTokenData]) : nil;
     auto remoteWindow = windowTokenData.length ? adoptNS([[NSAccessibilityRemoteUIElement alloc] initWithRemoteToken:windowTokenData]) : nil;
+
     [remoteElement setWindowUIElement:remoteWindow.get()];
     [remoteElement setTopLevelUIElement:remoteWindow.get()];
 
@@ -483,10 +509,12 @@ void WebPage::registerUIProcessAccessibilityTokens(std::span<const uint8_t> elem
 
 void WebPage::getStringSelectionForPasteboard(CompletionHandler<void(String&&)>&& completionHandler)
 {
-    Ref frame = m_page->focusController().focusedOrMainFrame();
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return completionHandler({ });
 
 #if ENABLE(PDF_PLUGIN)
-    if (auto* pluginView = focusedPluginViewForFrame(frame)) {
+    if (auto* pluginView = focusedPluginViewForFrame(*frame)) {
         String selection = pluginView->selectionString();
         if (!selection.isNull())
             return completionHandler(WTFMove(selection));
@@ -501,7 +529,9 @@ void WebPage::getStringSelectionForPasteboard(CompletionHandler<void(String&&)>&
 
 void WebPage::getDataSelectionForPasteboard(const String pasteboardType, CompletionHandler<void(RefPtr<SharedBuffer>&&)>&& completionHandler)
 {
-    Ref frame = m_page->focusController().focusedOrMainFrame();
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return completionHandler({ });
     if (frame->selection().isNone())
         return completionHandler({ });
 
@@ -514,6 +544,11 @@ void WebPage::getDataSelectionForPasteboard(const String pasteboardType, Complet
 WKAccessibilityWebPageObject* WebPage::accessibilityRemoteObject()
 {
     return m_mockAccessibilityElement.get();
+}
+
+WebCore::IntPoint WebPage::accessibilityRemoteFrameOffset()
+{
+    return [m_mockAccessibilityElement accessibilityRemoteFrameOffset];
 }
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
@@ -544,7 +579,9 @@ bool WebPage::platformCanHandleRequest(const WebCore::ResourceRequest& request)
 
 void WebPage::shouldDelayWindowOrderingEvent(const WebKit::WebMouseEvent& event, CompletionHandler<void(bool)>&& completionHandler)
 {
-    Ref frame = m_page->focusController().focusedOrMainFrame();
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return completionHandler({ });
 
     bool result = false;
 #if ENABLE(DRAG_SUPPORT)
@@ -565,7 +602,9 @@ void WebPage::requestAcceptsFirstMouse(int eventNumber, const WebKit::WebMouseEv
         return;
     }
 
-    Ref frame = m_page->focusController().focusedOrMainFrame();
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return;
 
     constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::AllowChildFrameContent };
     HitTestResult hitResult = frame->eventHandler().hitTestResultAtPoint(frame->view()->windowToContents(event.position()), hitType);
@@ -861,7 +900,10 @@ void WebPage::performImmediateActionHitTestAtLocation(WebCore::FloatPoint locati
 
     WebHitTestResultData immediateActionResult(hitTestResult, { });
 
-    auto selectionRange = corePage()->focusController().focusedOrMainFrame().selection().selection().firstRange();
+    RefPtr focusedOrMainFrame = corePage()->focusController().focusedOrMainFrame();
+    if (!focusedOrMainFrame)
+        return;
+    auto selectionRange = focusedOrMainFrame->selection().selection().firstRange();
 
     auto indicatorOptions = [&](const SimpleRange& range) {
         OptionSet<TextIndicatorOption> options { TextIndicatorOption::UseBoundingRectAndPaintAllContentForComplexRanges, TextIndicatorOption::UseUserSelectAllCommonAncestor };
@@ -909,7 +951,7 @@ void WebPage::performImmediateActionHitTestAtLocation(WebCore::FloatPoint locati
     }
 
     // FIXME: Avoid scanning if we will just throw away the result (e.g. we're over a link).
-    if (!pageOverlayDidOverrideDataDetectors && hitTestResult.innerNode() && (hitTestResult.innerNode()->isTextNode() || hitTestResult.isOverTextInsideFormControlElement())) {
+    if (!pageOverlayDidOverrideDataDetectors && (is<Text>(hitTestResult.innerNode()) || hitTestResult.isOverTextInsideFormControlElement())) {
         if (auto result = DataDetection::detectItemAroundHitTestResult(hitTestResult)) {
             if (auto detectedContext = WTFMove(result->actionContext))
                 immediateActionResult.platformData.detectedDataActionContext = { { WTFMove(detectedContext) } };
@@ -1025,19 +1067,9 @@ void WebPage::updateVisibleContentRects(const VisibleContentRectUpdateInfo&, Mon
 }
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
-void WebPage::playbackTargetSelected(PlaybackTargetClientContextIdentifier contextId, WebCore::MediaPlaybackTargetContext&& targetContext) const
+void WebPage::playbackTargetSelected(PlaybackTargetClientContextIdentifier contextId, MediaPlaybackTargetContextSerialized&& targetContext) const
 {
-    switch (targetContext.type()) {
-    case MediaPlaybackTargetContext::Type::AVOutputContext:
-        m_page->setPlaybackTarget(contextId, MediaPlaybackTargetCocoa::create(WTFMove(targetContext)));
-        break;
-    case MediaPlaybackTargetContext::Type::Mock:
-        m_page->setPlaybackTarget(contextId, MediaPlaybackTargetMock::create(targetContext.deviceName(), targetContext.mockState()));
-        break;
-    case MediaPlaybackTargetContext::Type::None:
-        ASSERT_NOT_REACHED();
-        break;
-    }
+    m_page->setPlaybackTarget(contextId, MediaPlaybackTargetSerialized::create(WTFMove(targetContext)));
 }
 
 void WebPage::playbackTargetAvailabilityDidChange(PlaybackTargetClientContextIdentifier contextId, bool changed)

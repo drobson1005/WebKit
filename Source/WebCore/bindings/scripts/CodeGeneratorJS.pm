@@ -5233,7 +5233,6 @@ sub GenerateImplementation
     if (ShouldGenerateWrapperOwnerCode($hasParent, $interface) && !GetCustomIsReachable($interface)) {
         push(@implContent, "bool JS${interfaceName}Owner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, AbstractSlotVisitor& visitor, const char** reason)\n");
         push(@implContent, "{\n");
-        my $ignoresClangSmartPointerWarnings = 0;
         # All ActiveDOMObjects implement hasPendingActivity(), but not all of them
         # increment their C++ reference counts when hasPendingActivity() becomes
         # true. As a result, ActiveDOMObjects can be prematurely destroyed before
@@ -5243,9 +5242,7 @@ sub GenerateImplementation
         # check just above the (GetGenerateIsReachable($interface) eq "Impl") check below.
         my $emittedJSCast = 0;
         if ($codeGenerator->InheritsExtendedAttribute($interface, "ActiveDOMObject")) {
-            $ignoresClangSmartPointerWarnings = 1;
-            push(@implContent, "IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_LOCAL_VARS_BEGIN\n");
-            push(@implContent, "    auto* js${interfaceName} = jsCast<JS${interfaceName}*>(handle.slot()->asCell());\n");
+            push(@implContent, "    SUPPRESS_UNCOUNTED_LOCAL auto* js${interfaceName} = jsCast<JS${interfaceName}*>(handle.slot()->asCell());\n");
             $emittedJSCast = 1;
             push(@implContent, "    auto& wrapped = js${interfaceName}->wrapped();\n");
             push(@implContent, "    if (!wrapped.isContextStopped() && wrapped.hasPendingActivity()) {\n");
@@ -5341,7 +5338,6 @@ sub GenerateImplementation
             push(@implContent, "    UNUSED_PARAM(reason);\n");
             push(@implContent, "    return false;\n");
         }
-        push(@implContent, "IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_LOCAL_VARS_END\n") if $ignoresClangSmartPointerWarnings;
         push(@implContent, "}\n\n");
     }
 
@@ -6493,7 +6489,7 @@ sub GenerateParametersCheck
             my $globalObjectReference = $operation->isStatic ? "*jsCast<JSDOMGlobalObject*>(lexicalGlobalObject)" : "*castedThis->globalObject()";
             my $argumentExceptionThrower = GetArgumentExceptionThrower($interface, $argument, $argumentIndex, $quotedFunctionName);
 
-            my $nativeValue = JSValueToNative($interface, $argument, $argumentLookupForConversion, $conditional, "lexicalGlobalObject", "*lexicalGlobalObject", "*castedThis", $globalObjectReference, $argumentExceptionThrower);
+            my $nativeValue = JSValueToNative($interface, $argument, $argumentLookupForConversion, $conditional, "lexicalGlobalObject", "*lexicalGlobalObject", "*castedThis", $globalObjectReference, $argumentExceptionThrower, $functionImplementationName);
 
             $nativeValue = "${nativeValueCastFunction}(" . $nativeValue . ")" if defined $nativeValueCastFunction;
             $nativeValue = $optionalCheck . $nativeValue if defined $optionalCheck;
@@ -7263,6 +7259,7 @@ sub IsAnnotatedType
     return 1 if $type->extendedAttributes->{AtomString};
     return 1 if $type->extendedAttributes->{RequiresExistingAtomString};
     return 1 if $type->extendedAttributes->{AllowShared};
+    return 1 if $type->extendedAttributes->{StringContext};
 }
 
 sub GetAnnotatedIDLType
@@ -7272,12 +7269,29 @@ sub GetAnnotatedIDLType
     return "IDLClampAdaptor" if $type->extendedAttributes->{Clamp};
     return "IDLEnforceRangeAdaptor" if $type->extendedAttributes->{EnforceRange};
     if ($type->extendedAttributes->{LegacyNullToEmptyString}) {
+        if ($type->extendedAttributes->{StringContext}) {
+            return "IDLLegacyNullToEmptyStringStringContextTrustedHTMLAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedHTML";
+            return "IDLLegacyNullToEmptyStringStringContextTrustedScriptAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedScript";
+            return "IDLLegacyNullToEmptyStringStringContextTrustedScriptURLAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedScriptURL";
+        }
         return "IDLLegacyNullToEmptyAtomStringAdaptor" if $type->extendedAttributes->{AtomString};
         return "IDLLegacyNullToEmptyStringAdaptor";
     }
-    return "IDLAtomStringAdaptor" if $type->extendedAttributes->{AtomString};
+    if ($type->extendedAttributes->{AtomString}) {
+        if ($type->extendedAttributes->{StringContext}) {
+            return "IDLAtomStringStringContextTrustedHTMLAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedHTML";
+            return "IDLAtomStringStringContextTrustedScriptAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedScript";
+            return "IDLAtomStringStringContextTrustedScriptURLAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedScriptURL";
+        }
+        return "IDLAtomStringAdaptor";
+    }
     return "IDLRequiresExistingAtomStringAdaptor" if $type->extendedAttributes->{RequiresExistingAtomString};
     return "IDLAllowSharedAdaptor" if $type->extendedAttributes->{AllowShared};
+    if ($type->extendedAttributes->{StringContext}) {
+        return "IDLStringContextTrustedHTMLAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedHTML";
+        return "IDLStringContextTrustedScriptAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedScript";
+        return "IDLStringContextTrustedScriptURLAdaptor" if $type->extendedAttributes->{StringContext} eq "TrustedScriptURL";
+    }
 }
 
 sub GetBaseIDLType
@@ -7405,7 +7419,7 @@ sub IsValidContextForJSValueToNative
 
 sub JSValueToNative
 {
-    my ($interface, $context, $value, $conditional, $lexicalGlobalObjectPointer, $lexicalGlobalObjectReference, $thisObjectReference, $globalObjectReference, $exceptionThrower) = @_;
+    my ($interface, $context, $value, $conditional, $lexicalGlobalObjectPointer, $lexicalGlobalObjectReference, $thisObjectReference, $globalObjectReference, $exceptionThrower, $functionName) = @_;
 
     assert("Invalid context type") if !IsValidContextForJSValueToNative($context);
 
@@ -7427,6 +7441,15 @@ sub JSValueToNative
     push(@conversionArguments, $thisObjectReference) if JSValueToNativeDOMConvertNeedsThisObject($type);
     push(@conversionArguments, $globalObjectReference) if JSValueToNativeDOMConvertNeedsGlobalObject($type);
     push(@conversionArguments, $exceptionThrower) if $exceptionThrower;
+    if ($type->extendedAttributes->{StringContext}) {
+        my $interfaceName = $interface->type->name;
+        if ($functionName) {
+            push(@conversionArguments, "\"$interfaceName $functionName\"_s");
+        } else {
+            my $contextName = $context->name;
+            push(@conversionArguments, "\"$interfaceName $contextName\"_s");
+        }
+    }
 
     return "convert<$IDLType>(" . join(", ", @conversionArguments) . ")";
 }

@@ -150,6 +150,7 @@ SKIA_PUBLIC_HDRS = [
     "include/gpu/ganesh/gl/GrGLBackendSurface.h",
     "include/gpu/ganesh/gl/GrGLDirectContext.h",
     "include/gpu/ganesh/mtl/SkSurfaceMetal.h",
+    "include/gpu/ganesh/vk/GrBackendDrawableInfo.h",
     "include/gpu/ganesh/vk/GrVkBackendSemaphore.h",
     "include/gpu/ganesh/vk/GrVkBackendSurface.h",
     "include/gpu/ganesh/vk/GrVkDirectContext.h",
@@ -160,7 +161,6 @@ SKIA_PUBLIC_HDRS = [
     "include/gpu/gl/GrGLConfig.h",
     "include/gpu/gl/GrGLConfig_chrome.h",
     "include/gpu/GpuTypes.h",
-    "include/gpu/GrBackendDrawableInfo.h",
     "include/gpu/GrBackendSemaphore.h",
     "include/gpu/GrBackendSurface.h",
     "include/gpu/GrContextOptions.h",
@@ -383,7 +383,6 @@ BASE_SRCS_ALL = [
     "src/core/SkBitmapDevice.h",
     "src/core/SkBitmapProcState.h",  # needed for src/opts/SkBitmapProcState_opts.h
     "src/core/SkBitmapProcState_opts.cpp",
-    "src/core/SkBitmapProcState_opts_hsw.cpp",
     "src/core/SkBitmapProcState_opts_ssse3.cpp",
     "src/core/SkBlendMode.cpp",
     "src/core/SkBlendModeBlender.cpp",
@@ -507,6 +506,8 @@ BASE_SRCS_ALL = [
     "src/core/SkImageInfo.cpp",
     "src/core/SkImageInfoPriv.h",
     "src/core/SkImagePriv.h",
+    "src/core/SkKnownRuntimeEffects.cpp",
+    "src/core/SkKnownRuntimeEffects.h",
     "src/core/SkLRUCache.h",
     "src/core/SkLatticeIter.cpp",
     "src/core/SkLatticeIter.h",
@@ -685,8 +686,6 @@ BASE_SRCS_ALL = [
     "src/core/SkTaskGroup.h",
     "src/core/SkTextBlob.cpp",
     "src/core/SkTextBlobPriv.h",
-    "src/core/SkTextBlobTrace.cpp",
-    "src/core/SkTextBlobTrace.h",
     "src/core/SkTextFormatParams.h",
     "src/core/SkTraceEvent.h",
     "src/core/SkTraceEventCommon.h",
@@ -804,6 +803,7 @@ BASE_SRCS_ALL = [
     "src/gpu/SkRenderEngineAbortf.h",
     "src/gpu/Swizzle.cpp",
     "src/gpu/Swizzle.h",
+    "src/gpu/SwizzlePriv.h",
     "src/gpu/TiledTextureUtils.cpp",
     "src/gpu/TiledTextureUtils.h",
     # We include the ganesh files, but leave out any specific backend (e.g. GL, Vulkan)
@@ -1449,6 +1449,7 @@ BASE_SRCS_ALL = [
     "src/shaders/SkLocalMatrixShader.h",
     "src/shaders/SkPerlinNoiseShaderImpl.cpp",
     "src/shaders/SkPerlinNoiseShaderImpl.h",
+    "src/shaders/SkPerlinNoiseShaderType.h",
     "src/shaders/SkPictureShader.cpp",
     "src/shaders/SkPictureShader.h",
     "src/shaders/SkRuntimeShader.cpp",
@@ -1851,7 +1852,6 @@ CODEC_SRCS_LIMITED = [
     "src/codec/SkWbmpCodec.cpp",
     "src/codec/SkWbmpCodec.h",
     "src/codec/SkWuffsCodec.cpp",
-    "src/codec/SkWuffsCodec.h",
 ]
 
 CODEC_SRCS_ALL = CODEC_SRCS_LIMITED + [
@@ -2232,9 +2232,11 @@ BASE_DEFINES = [
     "SK_BUILD_FOR_GOOGLE3",
     # Should remove after we update golden images
     "SK_WEBP_ENCODER_USE_DEFAULT_METHOD",
-
     # JPEG is in codec_limited and is included in all
     # builds except the no_codec android build
+    # BMP and WBMP are on by default in this build.
+    "SK_CODEC_DECODES_BMP",
+    "SK_CODEC_DECODES_WBMP",
 ]
 UNIX_DEFINES = [
     "PNG_SKIP_SETJMP_CHECK",
@@ -2510,7 +2512,6 @@ SKOTTIE_LIB_SRCS = [
     "modules/skottie/src/text/Font.h",
     "modules/skottie/src/text/RangeSelector.cpp",
     "modules/skottie/src/text/RangeSelector.h",
-    "modules/skottie/src/text/SkottieShaper.h",
     "modules/skottie/src/text/TextAdapter.cpp",
     "modules/skottie/src/text/TextAdapter.h",
     "modules/skottie/src/text/TextAnimator.cpp",
@@ -2540,8 +2541,6 @@ SKOTTIE_UTILS_SRCS = [
 
 SKOTTIE_SHAPER_HDRS = [
     "modules/skottie/include/TextShaper.h",
-    # transitional
-    "modules/skottie/src/text/SkottieShaper.h",
 ]
 
 SKOTTIE_SHAPER_SRCS = [

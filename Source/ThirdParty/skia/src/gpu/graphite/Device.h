@@ -148,7 +148,13 @@ public:
                        SkCanvas::SrcRectConstraint) override;
 
     void drawVertices(const SkVertices*, sk_sp<SkBlender>, const SkPaint&, bool) override;
-
+    bool drawAsTiledImageRect(SkCanvas*,
+                              const SkImage*,
+                              const SkRect* src,
+                              const SkRect& dst,
+                              const SkSamplingOptions&,
+                              const SkPaint&,
+                              SkCanvas::SrcRectConstraint) override;
     // TODO: Implement these using per-edge AA quads and an inlined image shader program.
     void drawImageLattice(const SkImage*, const SkCanvas::Lattice&,
                           const SkRect& dst, SkFilterMode, const SkPaint&) override {}
@@ -204,7 +210,7 @@ private:
         // - drawShape after it's applied the path effect.
         kIgnorePathEffect = 0b010,
     };
-    SK_DECL_BITMASK_OPS_FRIENDS(DrawFlags);
+    SK_DECL_BITMASK_OPS_FRIENDS(DrawFlags)
 
     Device(Recorder*, sk_sp<DrawContext>, bool addInitialClear, bool registerWithRecorder);
 

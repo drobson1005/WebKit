@@ -382,7 +382,7 @@ static MediaConstraints createMediaConstraints(const std::optional<MediaTrackCon
 void MediaStreamTrack::applyConstraints(const std::optional<MediaTrackConstraints>& constraints, DOMPromiseDeferred<void>&& promise)
 {
     if (m_ended) {
-        promise.reject(Exception { ExceptionCode::InvalidAccessError, "Track has ended"_s });
+        promise.resolve();
         return;
     }
 
@@ -596,7 +596,11 @@ bool MediaStreamTrack::virtualHasPendingActivity() const
 
 RefPtr<WebAudioSourceProvider> MediaStreamTrack::createAudioSourceProvider()
 {
+#if ENABLE(WEB_AUDIO)
     return m_private->createAudioSourceProvider();
+#else
+    return nullptr;
+#endif
 }
 
 bool MediaStreamTrack::isCapturingAudio() const

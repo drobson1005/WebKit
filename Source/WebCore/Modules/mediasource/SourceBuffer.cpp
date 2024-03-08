@@ -73,9 +73,6 @@ namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(SourceBuffer);
 
-static const double ExponentialMovingAverageCoefficient = 0.2;
-
-
 class SourceBufferClientImpl final : public SourceBufferPrivateClient {
 public:
     static Ref<SourceBufferClientImpl> create(SourceBuffer& parent) { return adoptRef(*new SourceBufferClientImpl(parent)); }
@@ -90,13 +87,13 @@ public:
         return promise;
     }
 
-    Ref<MediaPromise> sourceBufferPrivateBufferedChanged(const Vector<PlatformTimeRanges>& trackBuffers, uint64_t extraMemory) final
+    Ref<MediaPromise> sourceBufferPrivateBufferedChanged(const Vector<PlatformTimeRanges>& trackBuffers) final
     {
         MediaPromise::AutoRejectProducer producer(PlatformMediaError::BufferRemoved);
         auto promise = producer.promise();
 
-        ensureWeakOnDispatcher([producer = WTFMove(producer), trackBuffers = trackBuffers, extraMemory](SourceBuffer& parent) mutable {
-            parent.sourceBufferPrivateBufferedChanged(WTFMove(trackBuffers), extraMemory)->chainTo(WTFMove(producer));
+        ensureWeakOnDispatcher([producer = WTFMove(producer), trackBuffers = trackBuffers](SourceBuffer& parent) mutable {
+            parent.sourceBufferPrivateBufferedChanged(WTFMove(trackBuffers))->chainTo(WTFMove(producer));
         });
 
         return promise;
@@ -187,6 +184,7 @@ SourceBuffer::SourceBuffer(Ref<SourceBufferPrivate>&& sourceBufferPrivate, Media
     ALWAYS_LOG(LOGIDENTIFIER);
 
     m_private->setClient(m_client);
+    m_private->setMaximumBufferSize(maximumBufferSize());
 }
 
 SourceBuffer::~SourceBuffer()
@@ -599,7 +597,7 @@ ExceptionOr<void> SourceBuffer::appendBufferInternal(const unsigned char* data, 
     if (isRemoved() || m_updating)
         return Exception { ExceptionCode::InvalidStateError };
 
-    ALWAYS_LOG(LOGIDENTIFIER, "size = ", size, ", buffered = ", m_buffered->ranges(), " streaming = ", m_source->streaming());
+    ALWAYS_LOG(LOGIDENTIFIER, "size = ", size, "maximumBufferSize = ", maximumBufferSize(), "buffered = ", m_buffered->ranges(), " streaming = ", m_source->streaming());
 
     // 3. If the readyState attribute of the parent media source is in the "ended" state then run the following steps:
     // 3.1. Set the readyState attribute of the parent media source to "open"
@@ -607,10 +605,10 @@ ExceptionOr<void> SourceBuffer::appendBufferInternal(const unsigned char* data, 
     m_source->openIfInEndedState();
 
     // 4. Run the coded frame eviction algorithm.
-    m_private->evictCodedFrames(size, maximumBufferSize(), m_source->currentTime());
+    bool bufferFull = m_private->evictCodedFrames(size, m_source->currentTime());
 
     // 5. If the buffer full flag equals true, then throw a QuotaExceededError exception and abort these step.
-    if (m_private->isBufferFullFor(size, maximumBufferSize())) {
+    if (bufferFull) {
         ERROR_LOG(LOGIDENTIFIER, "buffer full, failing with ExceptionCode::QuotaExceededError error");
         return Exception { ExceptionCode::QuotaExceededError };
     }
@@ -707,6 +705,9 @@ uint64_t SourceBuffer::maximumBufferSize() const
 {
     if (isRemoved() || !scriptExecutionContext())
         return 0;
+
+    if (m_maximumBufferSize)
+        return *m_maximumBufferSize;
 
     size_t platformMaximumBufferSize = m_private->platformMaximumBufferSize();
     if (platformMaximumBufferSize)
@@ -1038,6 +1039,9 @@ Ref<MediaPromise> SourceBuffer::sourceBufferPrivateDidReceiveInitializationSegme
 
         // 5.6 Set first initialization segment flag to true.
         m_receivedFirstInitializationSegment = true;
+
+        if (hasVideo())
+            m_private->setMaximumBufferSize(maximumBufferSize());
     }
 
     // (Note: Issue #155 adds this step after step 5:)
@@ -1280,30 +1284,6 @@ void SourceBuffer::sourceBufferPrivateDidDropSample()
     m_source->incrementDroppedFrameCount();
 }
 
-bool SourceBuffer::canPlayThroughRange(const PlatformTimeRanges& ranges)
-{
-    if (isRemoved())
-        return false;
-
-    MediaTime duration = m_source->duration();
-    if (!duration.isValid())
-        return false;
-
-    MediaTime currentTime = m_source->currentTime();
-    if (duration <= currentTime)
-        return true;
-
-    // If we have data up to the mediasource's duration or 3s ahead, we can
-    // assume that we can play without interruption.
-    MediaTime bufferedEnd = ranges.maximumBufferedTime();
-    // Same tolerance as contiguousFrameTolerance in SourceBufferPrivate::processMediaSample(),
-    // to account for small errors.
-    const MediaTime tolerance = MediaTime(1, 1000);
-    MediaTime timeAhead = std::min(duration, currentTime + MediaTime(3, 1)) - tolerance;
-
-    return bufferedEnd >= timeAhead;
-}
-
 void SourceBuffer::reportExtraMemoryAllocated(uint64_t extraMemory)
 {
     uint64_t extraMemoryCost = extraMemory;
@@ -1348,6 +1328,12 @@ MediaTime SourceBuffer::minimumUpcomingPresentationTimeForTrackID(TrackID trackI
 void SourceBuffer::setMaximumQueueDepthForTrackID(TrackID trackID, uint64_t maxQueueDepth)
 {
     m_private->setMaximumQueueDepthForTrackID(trackID, maxQueueDepth);
+}
+
+Ref<GenericPromise> SourceBuffer::setMaximumSourceBufferSize(uint64_t size)
+{
+    m_maximumBufferSize = size;
+    return m_private->setMaximumBufferSize(size);
 }
 
 ExceptionOr<void> SourceBuffer::setMode(AppendMode newMode)
@@ -1399,9 +1385,9 @@ void SourceBuffer::setShouldGenerateTimestamps(bool flag)
     m_private->setShouldGenerateTimestamps(flag);
 }
 
-Ref<MediaPromise> SourceBuffer::sourceBufferPrivateBufferedChanged(Vector<PlatformTimeRanges>&& trackBuffers, uint64_t extraMemory)
+Ref<MediaPromise> SourceBuffer::sourceBufferPrivateBufferedChanged(Vector<PlatformTimeRanges>&& trackBuffers)
 {
-    reportExtraMemoryAllocated(extraMemory);
+    reportExtraMemoryAllocated(m_private->totalTrackBufferSizeInBytes());
     m_trackBuffers = WTFMove(trackBuffers);
 
     updateBuffered();
@@ -1511,7 +1497,7 @@ void SourceBuffer::memoryPressure()
 {
     if (!isManaged())
         return;
-    m_private->memoryPressure(maximumBufferSize(), m_source->currentTime());
+    m_private->memoryPressure(m_source->currentTime());
 }
 
 #if !RELEASE_LOG_DISABLED

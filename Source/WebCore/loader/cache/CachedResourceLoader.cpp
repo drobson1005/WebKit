@@ -910,7 +910,7 @@ void CachedResourceLoader::prepareFetch(CachedResource::Type type, CachedResourc
             request.setSelectedServiceWorkerRegistrationIdentifierIfNeeded(activeServiceWorker->registrationIdentifier());
     }
 
-    request.setAcceptHeaderIfNone(type);
+    request.setAcceptHeaderIfNone(type, protectedFrame().get());
 
     // Accept-Language value is handled in underlying port-specific code.
     // FIXME: Decide whether to support client hints
@@ -987,14 +987,13 @@ static FetchOptions::Destination destinationForType(CachedResource::Type type, L
 static inline bool isSVGImageCachedResource(const CachedResource* resource)
 {
     auto* cachedImage = dynamicDowncast<CachedImage>(resource);
-    return cachedImage && cachedImage->hasSVGImage();
+    return cachedImage && is<SVGImage>(cachedImage->image());
 }
 
 static inline SVGImage* cachedResourceSVGImage(CachedResource* resource)
 {
-    if (!isSVGImageCachedResource(resource))
-        return nullptr;
-    return downcast<SVGImage>(downcast<CachedImage>(*resource).image());
+    auto* cachedImage = dynamicDowncast<CachedImage>(resource);
+    return cachedImage ? dynamicDowncast<SVGImage>(cachedImage->image()) : nullptr;
 }
 
 static bool computeMayAddToMemoryCache(const CachedResourceRequest& newRequest, const CachedResource* existingResource)
@@ -1392,7 +1391,7 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
         return Use;
     ASSERT(!existingResource->validationInProgress());
 
-    if (is<CachedImage>(*existingResource) && downcast<CachedImage>(*existingResource).canSkipRevalidation(*this, cachedResourceRequest))
+    if (CachedResourceHandle cachedImage = dynamicDowncast<CachedImage>(*existingResource); cachedImage && cachedImage->canSkipRevalidation(*this, cachedResourceRequest))
         return Use;
 
     auto cachePolicy = this->cachePolicy(type, request.url());

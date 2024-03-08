@@ -54,7 +54,7 @@ std::unique_ptr<GraphicsContext> ShareableBitmap::createGraphicsContext()
     auto surface = SkSurfaces::WrapPixels(m_configuration.imageInfo(), data(), bytesPerRow(), [](void*, void* context) {
         static_cast<ShareableBitmap*>(context)->deref();
     }, this);
-    return makeUnique<GraphicsContextSkia>(WTFMove(surface));
+    return makeUnique<GraphicsContextSkia>(WTFMove(surface), RenderingMode::Unaccelerated, RenderingPurpose::ShareableSnapshot);
 }
 
 void ShareableBitmap::paint(GraphicsContext& context, const IntPoint& dstPoint, const IntRect& srcRect)
@@ -69,14 +69,21 @@ void ShareableBitmap::paint(GraphicsContext&, float /*scaleFactor*/, const IntPo
 
 RefPtr<Image> ShareableBitmap::createImage()
 {
-    notImplemented();
-    return nullptr;
+    return BitmapImage::create(createPlatformImage(BackingStoreCopy::DontCopyBackingStore));
 }
 
-PlatformImagePtr ShareableBitmap::createPlatformImage(BackingStoreCopy, ShouldInterpolate)
+PlatformImagePtr ShareableBitmap::createPlatformImage(BackingStoreCopy backingStoreCopy, ShouldInterpolate)
 {
-    notImplemented();
-    return nullptr;
+    sk_sp<SkData> pixelData;
+    if (backingStoreCopy == BackingStoreCopy::CopyBackingStore)
+        pixelData = SkData::MakeWithCopy(data(), sizeInBytes());
+    else {
+        ref();
+        pixelData = SkData::MakeWithProc(data(), sizeInBytes(), [](const void*, void* bitmap) -> void {
+            static_cast<ShareableBitmap*>(bitmap)->deref();
+        }, this);
+    }
+    return SkImages::RasterFromData(m_configuration.imageInfo(), pixelData, bytesPerRow());
 }
 
 void ShareableBitmap::setOwnershipOfMemory(const ProcessIdentity&)

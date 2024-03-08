@@ -42,6 +42,7 @@
 #include "WebUserContentControllerProxy.h"
 #include <WebCore/Timer.h>
 #include <wtf/Forward.h>
+#include <wtf/Identified.h>
 #include <wtf/URLHash.h>
 #include <wtf/WeakHashSet.h>
 
@@ -68,7 +69,7 @@ struct WebExtensionControllerParameters;
 class WebInspectorUIProxy;
 #endif
 
-class WebExtensionController : public API::ObjectImpl<API::Object::Type::WebExtensionController>, public IPC::MessageReceiver {
+class WebExtensionController : public API::ObjectImpl<API::Object::Type::WebExtensionController>, public IPC::MessageReceiver, public Identified<WebExtensionControllerIdentifier> {
     WTF_MAKE_NONCOPYABLE(WebExtensionController);
 
 public:
@@ -77,6 +78,8 @@ public:
 
     explicit WebExtensionController(Ref<WebExtensionControllerConfiguration>);
     ~WebExtensionController();
+
+    using UniqueIdentifier = String;
 
     using WebExtensionContextSet = HashSet<Ref<WebExtensionContext>>;
     using WebExtensionSet = HashSet<Ref<WebExtension>>;
@@ -92,10 +95,12 @@ public:
     enum class ForPrivateBrowsing { No, Yes };
 
     WebExtensionControllerConfiguration& configuration() const { return m_configuration.get(); }
-    WebExtensionControllerIdentifier identifier() const { return m_identifier; }
     WebExtensionControllerParameters parameters() const;
 
     bool operator==(const WebExtensionController& other) const { return (this == &other); }
+
+    bool inTestingMode() const { return m_testingMode; }
+    void setTestingMode(bool testingMode) { m_testingMode = testingMode; }
 
     bool storageIsPersistent() const { return m_configuration->storageIsPersistent(); }
 
@@ -132,6 +137,7 @@ public:
     WebProcessProxySet allProcesses() const;
 
     RefPtr<WebExtensionContext> extensionContext(const WebExtension&) const;
+    RefPtr<WebExtensionContext> extensionContext(const UniqueIdentifier&) const;
     RefPtr<WebExtensionContext> extensionContext(const URL&) const;
 
     const WebExtensionContextSet& extensionContexts() const { return m_extensionContexts; }
@@ -190,6 +196,13 @@ private:
 
     void purgeOldMatchedRules();
 
+    // Test APIs
+    void testResult(bool result, String message, String sourceURL, unsigned lineNumber);
+    void testEqual(bool result, String expected, String actual, String message, String sourceURL, unsigned lineNumber);
+    void testMessage(String message, String sourceURL, unsigned lineNumber);
+    void testYielded(String message, String sourceURL, unsigned lineNumber);
+    void testFinished(bool result, String message, String sourceURL, unsigned lineNumber);
+
     class HTTPCookieStoreObserver : public API::HTTPCookieStore::Observer {
         WTF_MAKE_FAST_ALLOCATED;
 
@@ -212,7 +225,6 @@ private:
     };
 
     Ref<WebExtensionControllerConfiguration> m_configuration;
-    WebExtensionControllerIdentifier m_identifier;
 
     WebExtensionContextSet m_extensionContexts;
     WebExtensionContextBaseURLMap m_extensionContextBaseURLMap;
@@ -223,7 +235,13 @@ private:
     UserContentControllerProxySet m_allNonPrivateUserContentControllers;
     UserContentControllerProxySet m_allPrivateUserContentControllers;
     WebExtensionURLSchemeHandlerMap m_registeredSchemeHandlers;
-    bool m_freshlyCreated { true };
+
+    bool m_freshlyCreated : 1 { true };
+#ifdef NDEBUG
+    bool m_testingMode : 1 { false };
+#else
+    bool m_testingMode : 1 { true };
+#endif
 
     std::unique_ptr<WebCore::Timer> m_purgeOldMatchedRulesTimer;
     std::unique_ptr<HTTPCookieStoreObserver> m_cookieStoreObserver;
@@ -234,7 +252,7 @@ void WebExtensionController::sendToAllProcesses(const T& message, const ObjectId
 {
     for (auto& process : allProcesses()) {
         if (process.canSendMessage())
-            process.send(T(message), destinationID.toUInt64());
+            process.send(T(message), destinationID);
     }
 }
 

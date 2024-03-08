@@ -639,7 +639,11 @@ void MediaPlayer::loadWithNextMediaEngine(const MediaPlayerFactory* current)
                 m_private->startVideoFrameMetadataGathering();
             if (m_processIdentity)
                 m_private->setResourceOwner(m_processIdentity);
-            m_private->prepareForPlayback(m_privateBrowsing, m_preload, m_preservesPitch, m_shouldPrepareToRender);
+#if ENABLE(LEGACY_ENCRYPTED_MEDIA) && ENABLE(ENCRYPTED_MEDIA)
+            if (m_shouldContinueAfterKeyNeeded)
+                m_private->setShouldContinueAfterKeyNeeded(m_shouldContinueAfterKeyNeeded);
+#endif
+            m_private->prepareForPlayback(m_inPrivateBrowsingMode, m_preload, m_preservesPitch, m_shouldPrepareToRender);
         }
     }
 
@@ -764,7 +768,7 @@ void MediaPlayer::attemptToDecryptWithInstance(CDMInstance& instance)
 void MediaPlayer::setShouldContinueAfterKeyNeeded(bool should)
 {
     m_shouldContinueAfterKeyNeeded = should;
-    m_private->setShouldContinueAfterKeyNeeded(should);
+    m_private->setShouldContinueAfterKeyNeeded(m_shouldContinueAfterKeyNeeded);
 }
 #endif
 
@@ -788,9 +792,9 @@ MediaTime MediaPlayer::currentTime() const
     return m_private->currentTime();
 }
 
-bool MediaPlayer::currentTimeMayProgress() const
+bool MediaPlayer::timeIsProgressing() const
 {
-    return m_private->currentTimeMayProgress();
+    return m_private->timeIsProgressing();
 }
 
 bool MediaPlayer::setCurrentTimeDidChangeCallback(CurrentTimeDidChangeCallback&& callback)
@@ -1413,9 +1417,9 @@ bool MediaPlayer::supportsKeySystem(const String& keySystem, const String& mimeT
 
 void MediaPlayer::setPrivateBrowsingMode(bool privateBrowsingMode)
 {
-    m_privateBrowsing = privateBrowsingMode;
+    m_inPrivateBrowsingMode = privateBrowsingMode;
     if (m_private)
-        m_private->setPrivateBrowsingMode(m_privateBrowsing);
+        m_private->setPrivateBrowsingMode(m_inPrivateBrowsingMode);
 }
 
 // Client callbacks.
@@ -1930,6 +1934,16 @@ bool MediaPlayer::pauseAtHostTime(const MonotonicTime& hostTime)
 void MediaPlayer::setShouldCheckHardwareSupport(bool value)
 {
     m_private->setShouldCheckHardwareSupport(value);
+}
+
+const String& MediaPlayer::spatialTrackingLabel() const
+{
+    return m_private->spatialTrackingLabel();
+}
+
+void MediaPlayer::setSpatialTrackingLabel(String&& spatialTrackingLabel)
+{
+    m_private->setSpatialTrackingLabel(WTFMove(spatialTrackingLabel));
 }
 
 #if !RELEASE_LOG_DISABLED

@@ -21,10 +21,12 @@
 #include "CoordinatedGraphicsLayer.h"
 
 #if USE(COORDINATED_GRAPHICS) && USE(SKIA)
+#include "DisplayListDrawingContext.h"
 #include "GLContext.h"
 #include "GraphicsContextSkia.h"
 #include "NicosiaBuffer.h"
 #include "PlatformDisplay.h"
+#include "SkiaAcceleratedBufferPool.h"
 #include <skia/core/SkCanvas.h>
 #include <skia/core/SkColorSpace.h>
 #include <skia/gpu/GrBackendSurface.h>
@@ -36,137 +38,66 @@
 #include <wtf/FastMalloc.h>
 #include <wtf/RunLoop.h>
 #include <wtf/Vector.h>
+#include <wtf/WorkerPool.h>
 
 namespace WebCore {
 
-class AcceleratedBufferPool {
-    WTF_MAKE_FAST_ALLOCATED();
-public:
-    static AcceleratedBufferPool& singleton()
-    {
-        static std::unique_ptr<AcceleratedBufferPool> pool = makeUnique<AcceleratedBufferPool>();
-        return *pool;
-    }
-
-    AcceleratedBufferPool()
-        : m_releaseUnusedBuffersTimer(RunLoop::main(), this, &AcceleratedBufferPool::releaseUnusedBuffersTimerFired)
-    {
-    }
-
-    ~AcceleratedBufferPool()
-    {
-        if (m_buffers.isEmpty())
-            return;
-
-        auto* glContext = PlatformDisplay::sharedDisplayForCompositing().skiaGLContext();
-        GLContext::ScopedGLContextCurrent scopedCurrent(*glContext);
-        m_buffers.clear();
-    }
-
-    Ref<Nicosia::Buffer> acquireBuffer(const IntSize& size, bool supportsAlpha)
-    {
-        Entry* selectedEntry = std::find_if(m_buffers.begin(), m_buffers.end(), [&](Entry& entry) {
-            return entry.m_buffer->refCount() == 1 && entry.m_buffer->size() == size && entry.m_buffer->supportsAlpha() == supportsAlpha;
-        });
-
-        if (selectedEntry == m_buffers.end()) {
-            m_buffers.append(Entry(createAcceleratedBuffer(size, supportsAlpha)));
-            selectedEntry = &m_buffers.last();
-        }
-
-        scheduleReleaseUnusedBuffers();
-        selectedEntry->markIsInUse();
-        return selectedEntry->m_buffer.copyRef();
-    }
-
-private:
-    struct Entry {
-        explicit Entry(Ref<Nicosia::Buffer>&& buffer)
-            : m_buffer(WTFMove(buffer))
-        {
-        }
-
-        void markIsInUse() { m_lastUsedTime = MonotonicTime::now(); }
-        bool canBeReleased (MonotonicTime minUsedTime) const { return m_lastUsedTime < minUsedTime && m_buffer->refCount() == 1; }
-
-        Ref<Nicosia::Buffer> m_buffer;
-        MonotonicTime m_lastUsedTime;
-    };
-
-    Ref<Nicosia::Buffer> createAcceleratedBuffer(const IntSize& size, bool supportsAlpha)
-    {
-        auto* grContext = PlatformDisplay::sharedDisplayForCompositing().skiaGrContext();
-        auto imageInfo = SkImageInfo::MakeN32Premul(size.width(), size.height());
-        auto surface = SkSurfaces::RenderTarget(grContext, skgpu::Budgeted::kNo, imageInfo, 0, kTopLeft_GrSurfaceOrigin, nullptr);
-        return Nicosia::AcceleratedBuffer::create(WTFMove(surface), supportsAlpha ? Nicosia::Buffer::SupportsAlpha : Nicosia::Buffer::NoFlags);
-    }
-
-    void scheduleReleaseUnusedBuffers()
-    {
-        if (m_releaseUnusedBuffersTimer.isActive())
-            return;
-
-        static const Seconds releaseUnusedBuffersTimerInterval { 500_ms };
-        m_releaseUnusedBuffersTimer.startOneShot(releaseUnusedBuffersTimerInterval);
-    }
-
-    void releaseUnusedBuffersTimerFired()
-    {
-        if (m_buffers.isEmpty())
-            return;
-
-        // Delete entries, which have been unused in releaseUnusedSecondsTolerance.
-        static const Seconds releaseUnusedSecondsTolerance { 3_s };
-        MonotonicTime minUsedTime = MonotonicTime::now() - releaseUnusedSecondsTolerance;
-
-        {
-            auto* glContext = PlatformDisplay::sharedDisplayForCompositing().skiaGLContext();
-            GLContext::ScopedGLContextCurrent scopedCurrent(*glContext);
-            m_buffers.removeAllMatching([&minUsedTime](const Entry& entry) {
-                return entry.canBeReleased(minUsedTime);
-            });
-        }
-
-        if (!m_buffers.isEmpty())
-            scheduleReleaseUnusedBuffers();
-    }
-
-    Vector<Entry> m_buffers;
-    RunLoop::Timer m_releaseUnusedBuffersTimer;
-};
-
 Ref<Nicosia::Buffer> CoordinatedGraphicsLayer::paintTile(const IntRect& tileRect, const IntRect& mappedTileRect, float contentsScale)
 {
-    auto paintBuffer = [&](Nicosia::Buffer& buffer) {
-        buffer.beginPainting();
-
-        GraphicsContextSkia context(sk_ref_sp(buffer.surface()));
-        context.clip(IntRect { IntPoint::zero(), tileRect.size() });
+    auto paintIntoGraphicsContext = [&](GraphicsContext& context) {
+        IntRect initialClip(IntPoint::zero(), tileRect.size());
+        context.clip(initialClip);
 
         if (!contentsOpaque()) {
             context.setCompositeOperation(CompositeOperator::Copy);
-            context.fillRect(IntRect { IntPoint::zero(), tileRect.size() }, Color::transparentBlack);
+            context.fillRect(initialClip, Color::transparentBlack);
             context.setCompositeOperation(CompositeOperator::SourceOver);
         }
 
         context.translate(-tileRect.x(), -tileRect.y());
         context.scale({ contentsScale, contentsScale });
         paintGraphicsLayerContents(context, mappedTileRect);
+    };
+
+    auto paintBuffer = [&](Nicosia::Buffer& buffer) {
+        buffer.beginPainting();
+
+        GraphicsContextSkia context(sk_ref_sp(buffer.surface()), buffer.isBackedByOpenGL() ? RenderingMode::Accelerated : RenderingMode::Unaccelerated, RenderingPurpose::LayerBacking);
+        paintIntoGraphicsContext(context);
 
         buffer.completePainting();
     };
 
-    static const char* enableCPURendering = getenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING");
-    if (enableCPURendering && strcmp(enableCPURendering, "0")) {
-        auto buffer = Nicosia::UnacceleratedBuffer::create(tileRect.size(), contentsOpaque() ? Nicosia::Buffer::NoFlags : Nicosia::Buffer::SupportsAlpha);
+    // Skia/GPU - accelerated rendering.
+    if (auto* acceleratedBufferPool = m_coordinator->skiaAcceleratedBufferPool()) {
+        PlatformDisplay::sharedDisplayForCompositing().skiaGLContext()->makeContextCurrent();
+        auto buffer = acceleratedBufferPool->acquireBuffer(tileRect.size(), !contentsOpaque());
         paintBuffer(buffer.get());
         return buffer;
     }
 
-    auto* glContext = PlatformDisplay::sharedDisplayForCompositing().skiaGLContext();
-    RELEASE_ASSERT(glContext);
-    GLContext::ScopedGLContextCurrent scopedCurrent(*glContext);
-    auto buffer = AcceleratedBufferPool::singleton().acquireBuffer(tileRect.size(), !contentsOpaque());
+    // Skia/CPU - unaccelerated rendering.
+    auto buffer = Nicosia::UnacceleratedBuffer::create(tileRect.size(), contentsOpaque() ? Nicosia::Buffer::NoFlags : Nicosia::Buffer::SupportsAlpha);
+
+    // Non-blocking, multi-threaded variant.
+    if (auto* workerPool = m_coordinator->skiaUnacceleratedThreadedRenderingPool()) {
+        // Threaded rendering: record display lists, and asynchronously replay them using dedicated worker threads.
+        buffer->beginPainting();
+
+        auto recordingContext = makeUnique<DisplayList::DrawingContext>(tileRect.size());
+        paintIntoGraphicsContext(recordingContext->context());
+
+        workerPool->postTask([buffer = Ref { buffer }, recordingContext = WTFMove(recordingContext)] {
+            RELEASE_ASSERT(buffer->surface());
+            GraphicsContextSkia context(sk_ref_sp(buffer->surface()), RenderingMode::Unaccelerated, RenderingPurpose::LayerBacking);
+            recordingContext->replayDisplayList(context);
+            buffer->completePainting();
+        });
+
+        return buffer;
+    }
+
+    // Blocking, single-thread variant.
     paintBuffer(buffer.get());
     return buffer;
 }
@@ -177,7 +108,7 @@ Ref<Nicosia::Buffer> CoordinatedGraphicsLayer::paintImage(Image& image)
     // Always render unaccelerated here for now.
     auto buffer = Nicosia::UnacceleratedBuffer::create(IntSize(image.size()), !image.currentFrameKnownToBeOpaque() ? Nicosia::Buffer::SupportsAlpha : Nicosia::Buffer::NoFlags);
     buffer->beginPainting();
-    GraphicsContextSkia context(sk_ref_sp(buffer->surface()));
+    GraphicsContextSkia context(sk_ref_sp(buffer->surface()), RenderingMode::Unaccelerated, RenderingPurpose::LayerBacking);
     IntRect rect { IntPoint::zero(), IntSize { image.size() } };
     context.drawImage(image, rect, rect, ImagePaintingOptions(CompositeOperator::Copy));
     buffer->completePainting();

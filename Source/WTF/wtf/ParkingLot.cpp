@@ -46,9 +46,7 @@ template<typename... Types>
 static void dataLogForCurrentThread(const Types&... values)
 {
     StringPrintStream stream;
-IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_CALL_ARGS_BEGIN
-    stream.print(Thread::current());
-IGNORE_CLANG_STATIC_ANALYZER_UNCOUNTED_CALL_ARGS_END
+    SUPPRESS_UNCOUNTED_ARG stream.print(Thread::current());
     stream.print(values...);
     dataLog(stream.toString());
 }
@@ -232,7 +230,7 @@ struct Hashtable {
             // This is not fast and it's not data-access parallel, but that's fine, because
             // hashtable resizing is guaranteed to be rare and it will never happen in steady
             // state.
-            WordLockHolder locker(hashtablesLock);
+            Locker locker(hashtablesLock);
             if (!hashtables)
                 hashtables = new Vector<Hashtable*>();
             hashtables->append(result);
@@ -245,7 +243,7 @@ struct Hashtable {
     {
         {
             // This is not fast, but that's OK. See comment in create().
-            WordLockHolder locker(hashtablesLock);
+            Locker locker(hashtablesLock);
             hashtables->removeFirst(hashtable);
         }
         

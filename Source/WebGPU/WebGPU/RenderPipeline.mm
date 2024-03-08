@@ -811,7 +811,7 @@ NSString* Device::addPipelineLayouts(Vector<Vector<WGPUBindGroupLayoutEntry>>& p
                 auto shortName = entryName.substring(2, entryName.length() - (sizeof("_ArrayLength") + 1));
                 minBindingSize = entryMap.find(shortName)->value;
             } else
-                entryMap.set(entryName, entry.binding);
+                entryMap.set(entryName, entry.webBinding);
 
             newEntry.binding = entry.webBinding;
             newEntry.metalBinding = entry.binding;
@@ -1449,7 +1449,7 @@ Ref<RenderPipeline> Device::createRenderPipeline(const WGPURenderPipelineDescrip
             return returnInvalidRenderPipeline(*this, isAsync, "Can not use sampleMask with alphaToCoverage"_s);
         if (!descriptor.fragment)
             return returnInvalidRenderPipeline(*this, isAsync, "Using alphaToCoverage requires a fragment state"_s);
-        if (!descriptor.fragment->targetCount || !hasAlphaChannel(descriptor.fragment->targets[0].format))
+        if (!descriptor.fragment->targetCount || !hasAlphaChannel(descriptor.fragment->targets[0].format) || !Texture::supportsBlending(descriptor.fragment->targets[0].format, *this))
             return returnInvalidRenderPipeline(*this, isAsync, "Using alphaToCoverage requires a fragment state"_s);
         if (descriptor.multisample.count == 1)
             return returnInvalidRenderPipeline(*this, isAsync, "Using alphaToCoverage requires multisampling"_s);
@@ -1584,21 +1584,21 @@ RenderPipeline::RenderPipeline(Device& device)
 
 RenderPipeline::~RenderPipeline() = default;
 
-RefPtr<BindGroupLayout> RenderPipeline::getBindGroupLayout(uint32_t groupIndex)
+Ref<BindGroupLayout> RenderPipeline::getBindGroupLayout(uint32_t groupIndex)
 {
     if (!isValid()) {
         m_device->generateAValidationError("getBindGroupLayout: RenderPipeline is invalid"_s);
         m_pipelineLayout->makeInvalid();
-        return nullptr;
+        return BindGroupLayout::createInvalid(m_device);
     }
 
     if (groupIndex >= m_pipelineLayout->numberOfBindGroupLayouts()) {
         m_device->generateAValidationError("getBindGroupLayout: groupIndex is out of range"_s);
         m_pipelineLayout->makeInvalid();
-        return nullptr;
+        return BindGroupLayout::createInvalid(m_device);
     }
 
-    return &m_pipelineLayout->bindGroupLayout(groupIndex);
+    return m_pipelineLayout->bindGroupLayout(groupIndex);
 }
 
 void RenderPipeline::setLabel(String&&)
@@ -1699,18 +1699,18 @@ bool RenderPipeline::validateRenderBundle(const WGPURenderBundleEncoderDescripto
     }
 
     auto& fragment = *m_descriptor.fragment;
-    if (fragment.targetCount != descriptor.colorFormatCount) {
+    if (fragment.targetCount == descriptor.colorFormatCount) {
+        for (size_t i = 0; i < fragment.targetCount; ++i) {
+            auto colorFormat = descriptor.colorFormats[i];
+            if (m_descriptorTargets[i].format != colorFormat)
+                return false;
+        }
+    } else {
         for (size_t i = 0; i < descriptor.colorFormatCount; ++i) {
             auto colorFormat = descriptor.colorFormats[i];
             if (colorFormat != WGPUTextureFormat_Undefined)
                 return false;
         }
-    }
-
-    for (size_t i = 0; i < fragment.targetCount; ++i) {
-        auto colorFormat = descriptor.colorFormats[i];
-        if (m_descriptorTargets[i].format != colorFormat)
-            return false;
     }
 
     if (!m_descriptor.depthStencil) {

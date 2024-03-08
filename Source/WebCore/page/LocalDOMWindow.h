@@ -159,7 +159,7 @@ public:
     WEBCORE_EXPORT void setCanShowModalDialogOverride(bool);
 
     Screen& screen();
-    History& history();
+    WEBCORE_EXPORT History& history();
     Crypto& crypto() const;
     BarProp& locationbar();
     BarProp& menubar();
@@ -168,6 +168,7 @@ public:
     BarProp& statusbar();
     BarProp& toolbar();
     WEBCORE_EXPORT Navigator& navigator();
+    Ref<Navigator> protectedNavigator();
     Navigator* optionalNavigator() const { return m_navigator.get(); }
 
     WEBCORE_EXPORT static void overrideTransientActivationDurationForTesting(std::optional<Seconds>&&);
@@ -510,5 +511,5 @@ inline String LocalDOMWindow::status() const
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::LocalDOMWindow)
     static bool isType(const WebCore::DOMWindow& window) { return window.isLocalDOMWindow(); }
-    static bool isType(const WebCore::EventTarget& target) { return target.eventTargetInterface() == WebCore::LocalDOMWindowEventTargetInterfaceType; }
+    static bool isType(const WebCore::EventTarget& target) { return target.eventTargetInterface() == WebCore::EventTargetInterfaceType::LocalDOMWindow; }
 SPECIALIZE_TYPE_TRAITS_END()

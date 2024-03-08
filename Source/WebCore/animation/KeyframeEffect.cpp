@@ -73,6 +73,7 @@
 #include <wtf/text/TextStream.h>
 
 #if ENABLE(THREADED_ANIMATION_RESOLUTION)
+#include "AcceleratedEffect.h"
 #include "AcceleratedTimeline.h"
 #endif
 
@@ -1222,28 +1223,23 @@ const String KeyframeEffect::pseudoElement() const
 
     // The target pseudo-selector. null if this effect has no effect target or if the effect target is an element (i.e. not a pseudo-element).
     // When the effect target is a pseudo-element, this specifies the pseudo-element selector (e.g. ::before).
-    // FIXME: This needs proper serialization for name arguments.
     if (targetsPseudoElement())
-        return pseudoIdAsString(m_pseudoElementIdentifier->pseudoId);
+        return pseudoElementIdentifierAsString(m_pseudoElementIdentifier);
     return { };
 }
 
 ExceptionOr<void> KeyframeEffect::setPseudoElement(const String& pseudoElement)
 {
     // https://drafts.csswg.org/web-animations-1/#dom-keyframeeffect-pseudoelement
-    // FIXME: This needs proper conversion for name arguments.
-    auto pseudoId = pseudoIdFromString(pseudoElement);
-    if (!pseudoId)
+    auto [parsed, pseudoElementIdentifier] = pseudoElementIdentifierFromString(pseudoElement, document());
+    if (!parsed)
         return Exception { ExceptionCode::SyntaxError, "Parsing pseudo-element selector failed"_s };
 
-    if (!m_pseudoElementIdentifier && pseudoId == PseudoId::None)
-        return { };
-
-    if (m_pseudoElementIdentifier && *pseudoId == m_pseudoElementIdentifier->pseudoId)
+    if (m_pseudoElementIdentifier == pseudoElementIdentifier)
         return { };
 
     auto& previousTargetStyleable = targetStyleable();
-    m_pseudoElementIdentifier = pseudoId == PseudoId::None ? std::nullopt : std::optional(Style::PseudoElementIdentifier { *pseudoId });
+    m_pseudoElementIdentifier = pseudoElementIdentifier;
     didChangeTargetStyleable(previousTargetStyleable);
 
     return { };
@@ -2019,8 +2015,6 @@ void KeyframeEffect::applyPendingAcceleratedActions()
             break;
         }
     }
-
-    return;
 }
 
 Ref<const Animation> KeyframeEffect::backingAnimationForCompositedRenderer() const
@@ -2295,8 +2289,13 @@ bool KeyframeEffect::ticksContinuouslyWhileActive() const
     if (!renderer() && !targetHasDisplayContents())
         return false;
 
-    if (isCompletelyAccelerated() && isRunningAccelerated())
+    if (isCompletelyAccelerated() && isRunningAccelerated()) {
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+        if (threadedAnimationResolutionEnabled())
+            return !m_acceleratedRepresentation || !m_acceleratedRepresentation->disallowedProperties().isEmpty();
+#endif
         return false;
+    }
 
     return true;
 }
@@ -2548,6 +2547,21 @@ void KeyframeEffect::effectStackNoLongerPreventsAcceleration()
 void KeyframeEffect::effectStackNoLongerAllowsAcceleration()
 {
     addPendingAcceleratedAction(AcceleratedAction::Stop);
+}
+
+void KeyframeEffect::effectStackNoLongerAllowsAccelerationDuringAcceleratedActionApplication()
+{
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+    if (threadedAnimationResolutionEnabled()) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+#endif
+
+    m_pendingAcceleratedActions.append(AcceleratedAction::Stop);
+    m_lastRecordedAcceleratedAction = AcceleratedAction::Stop;
+    applyPendingAcceleratedActions();
+    m_pendingAcceleratedActions.clear();
 }
 
 void KeyframeEffect::abilityToBeAcceleratedDidChange()

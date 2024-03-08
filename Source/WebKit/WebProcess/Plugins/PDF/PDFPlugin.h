@@ -109,7 +109,6 @@ public:
 
     bool showContextMenuAtPoint(const WebCore::IntPoint&);
 
-    PDFPluginAnnotation* activeAnnotation() const { return m_activeAnnotation.get(); }
     WebCore::AXObjectCache* axObjectCache() const;
 
     WebCore::IntPoint convertFromPluginToPDFView(const WebCore::IntPoint&) const;
@@ -119,6 +118,7 @@ public:
     WebCore::FloatRect convertFromPDFViewToScreen(const WebCore::FloatRect&) const;
 
     CGFloat scaleFactor() const override;
+    float contentScaleFactor() const final;
     CGSize contentSizeRespectingZoom() const;
 
 private:
@@ -181,7 +181,6 @@ private:
 
     id accessibilityHitTest(const WebCore::IntPoint&) const override;
     id accessibilityObject() const override;
-    id accessibilityAssociatedPluginParentForElement(WebCore::Element*) const override;
 
     NSEvent *nsEventForWebMouseEvent(const WebMouseEvent&);
 

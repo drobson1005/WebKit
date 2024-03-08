@@ -62,6 +62,7 @@ namespace WebCore {
     WEBCORE_EXPORT String contextMenuItemTagAddHighlightToCurrentQuickNote();
     WEBCORE_EXPORT String contextMenuItemTagAddHighlightToNewQuickNote();
 #endif
+    WEBCORE_EXPORT String contextMenuItemTagCopyLinkToHighlight();
 
 #if ENABLE(CONTEXT_MENUS)
     WEBCORE_EXPORT String contextMenuItemTagOpenLinkInNewWindow();
@@ -124,7 +125,6 @@ namespace WebCore {
     WEBCORE_EXPORT String contextMenuItemTagLeftToRight();
     WEBCORE_EXPORT String contextMenuItemTagRightToLeft();
 #if PLATFORM(COCOA)
-    String contextMenuItemTagSearchInSpotlight();
     WEBCORE_EXPORT String contextMenuItemTagShowFonts();
     WEBCORE_EXPORT String contextMenuItemTagStyles();
     WEBCORE_EXPORT String contextMenuItemTagShowColors();
@@ -230,6 +230,11 @@ namespace WebCore {
     String AXDateFieldMonthText();
     String AXDateFieldDayText();
     String AXDateFieldYearText();
+    String AXTimeFieldHourText();
+    String AXTimeFieldMinuteText();
+    String AXTimeFieldSecondText();
+    String AXTimeFieldMillisecondText();
+    String AXTimeFieldMeridiemText();
     String AXDateTimeFieldText();
     String AXMonthFieldText();
     String AXNumberFieldText();
@@ -280,7 +285,7 @@ namespace WebCore {
     String AXAutoFillLoadingLabel();
     String autoFillStrongPasswordLabel();
 
-    String AXProcessingPage();
+    String AXProcessingPage(double);
 
     String missingPluginText();
     String crashedPluginText();

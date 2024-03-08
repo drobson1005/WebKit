@@ -905,8 +905,10 @@ void Options::notifyOptionsChanged()
     Options::useWebAssemblyFastMemory() = false;
 #endif
 
+#if ENABLE(UNIFIED_AND_FREEZABLE_CONFIG_RECORD)
     uint8_t* reservedConfigBytes = reinterpret_cast_ptr<uint8_t*>(WebConfig::g_config + WebConfig::reservedSlotsForExecutableAllocator);
     reservedConfigBytes[WebConfig::ReservedByteForAllocationProfiling] = Options::useAllocationProfiling() ? 1 : 0;
+#endif
 
     // Do range checks where needed and make corrections to the options:
     ASSERT(Options::thresholdForOptimizeAfterLongWarmUp() >= Options::thresholdForOptimizeAfterWarmUp());
@@ -1373,6 +1375,12 @@ SUPPRESS_ASAN bool canUseJITCage()
 {
     if (JSC_FORCE_USE_JIT_CAGE)
         return true;
+#if PLATFORM(MAC)
+    if (Options::allowJITCageExperiments()) {
+        RELEASE_ASSERT(JSC_JIT_CAGE_VERSION());
+        return true;
+    }
+#endif // PLATFORM(MAC)
     return JSC_JIT_CAGE_VERSION() && WTF::processHasEntitlement("com.apple.private.verified-jit"_s);
 }
 #else

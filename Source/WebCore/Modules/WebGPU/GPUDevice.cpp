@@ -114,18 +114,18 @@ Ref<GPUQueue> GPUDevice::queue() const
 
 void GPUDevice::addBufferToUnmap(GPUBuffer& buffer)
 {
-    m_buffersToUnmap.add(&buffer);
+    m_buffersToUnmap.add(buffer);
 }
 
 void GPUDevice::removeBufferToUnmap(GPUBuffer& buffer)
 {
-    m_buffersToUnmap.remove(&buffer);
+    m_buffersToUnmap.remove(buffer);
 }
 
 void GPUDevice::destroy(ScriptExecutionContext& scriptExecutionContext)
 {
     for (auto& buffer : m_buffersToUnmap)
-        buffer->destroy(scriptExecutionContext);
+        buffer.destroy(scriptExecutionContext);
 
     m_buffersToUnmap.clear();
 
@@ -292,31 +292,35 @@ class GPUDeviceVideoFrameRequestCallback final : public VideoFrameRequestCallbac
 public:
     CallbackResult<void> handleEvent(double, const VideoFrameMetadata&) override
     {
-        auto it = m_weakMap.find(m_videoElement);
-        if (it != m_weakMap.end() && m_externalTexture.ptr() == it->value.get())
+        if (!m_videoElement)
+            return { };
+        if (!m_gpuDevice)
+            return { };
+        auto texture = m_gpuDevice->takeExternalTextureForVideoElement(*m_videoElement);
+        if (!texture)
+            return { };
+        if (texture.get() == m_externalTexture.ptr())
             m_externalTexture->destroy();
-
-        m_weakMap.remove(m_videoElement);
-        return CallbackResult<void>();
+        return { };
     }
-    static Ref<GPUDeviceVideoFrameRequestCallback> create(GPUExternalTexture& externalTexture, HTMLVideoElement& videoElement, WeakHashMap<HTMLVideoElement, WeakPtr<GPUExternalTexture>>& weakMap, ScriptExecutionContext* scriptExecutionContext)
+    static Ref<GPUDeviceVideoFrameRequestCallback> create(GPUExternalTexture& externalTexture, HTMLVideoElement& videoElement, GPUDevice& gpuDevice, ScriptExecutionContext* scriptExecutionContext)
     {
-        return adoptRef(*new GPUDeviceVideoFrameRequestCallback(externalTexture, videoElement, weakMap, scriptExecutionContext));
+        return adoptRef(*new GPUDeviceVideoFrameRequestCallback(externalTexture, videoElement, gpuDevice, scriptExecutionContext));
     }
 
     ~GPUDeviceVideoFrameRequestCallback() final { }
 private:
-    GPUDeviceVideoFrameRequestCallback(GPUExternalTexture& externalTexture, HTMLVideoElement& videoElement, WeakHashMap<HTMLVideoElement, WeakPtr<GPUExternalTexture>>& weakMap, ScriptExecutionContext* scriptExecutionContext)
+    GPUDeviceVideoFrameRequestCallback(GPUExternalTexture& externalTexture, HTMLVideoElement& videoElement, GPUDevice& gpuDevice, ScriptExecutionContext* scriptExecutionContext)
         : VideoFrameRequestCallback(scriptExecutionContext)
         , m_externalTexture(externalTexture)
         , m_videoElement(videoElement)
-        , m_weakMap(weakMap)
+        , m_gpuDevice(gpuDevice)
     {
     }
 
     Ref<GPUExternalTexture> m_externalTexture;
-    HTMLVideoElement& m_videoElement;
-    WeakHashMap<HTMLVideoElement, WeakPtr<GPUExternalTexture>> &m_weakMap;
+    WeakPtr<HTMLVideoElement> m_videoElement;
+    WeakPtr<GPUDevice, WeakPtrImplWithEventTargetData> m_gpuDevice;
 };
 
 Ref<GPUExternalTexture> GPUDevice::importExternalTexture(const GPUExternalTextureDescriptor& externalTextureDescriptor)
@@ -338,12 +342,14 @@ Ref<GPUExternalTexture> GPUDevice::importExternalTexture(const GPUExternalTextur
 #else
     if (auto* videoElement = &externalTextureDescriptor.source; videoElement && videoElement->get()) {
 #endif
-        HTMLVideoElement* videoElementPtr = videoElement->get();
+        WeakPtr<HTMLVideoElement> videoElementPtr = videoElement->get();
         m_videoElementToExternalTextureMap.set(*videoElementPtr, externalTexture.get());
-        videoElementPtr->requestVideoFrameCallback(GPUDeviceVideoFrameRequestCallback::create(externalTexture.get(), *videoElementPtr, m_videoElementToExternalTextureMap, scriptExecutionContext()));
-        queueTaskKeepingObjectAlive(*this, TaskSource::WebGPU, [protecedThis = Ref { *this }, videoElementPtr, externalTextureRef = externalTexture]() {
-            auto it = protecedThis->m_videoElementToExternalTextureMap.find(*videoElementPtr);
-            if (it == protecedThis->m_videoElementToExternalTextureMap.end() || externalTextureRef.ptr() != it->value.get())
+        videoElementPtr->requestVideoFrameCallback(GPUDeviceVideoFrameRequestCallback::create(externalTexture.get(), *videoElementPtr, *this, scriptExecutionContext()));
+        queueTaskKeepingObjectAlive(*this, TaskSource::WebGPU, [protectedThis = Ref { *this }, videoElementPtr, externalTextureRef = externalTexture]() {
+            if (!videoElementPtr)
+                return;
+            auto it = protectedThis->m_videoElementToExternalTextureMap.find(*videoElementPtr);
+            if (it == protectedThis->m_videoElementToExternalTextureMap.end() || externalTextureRef.ptr() != it->value.get())
                 return;
 
             externalTextureRef->destroy();
@@ -530,6 +536,11 @@ bool GPUDevice::addEventListener(const AtomString& eventType, Ref<EventListener>
     }
 #endif
     return result;
+}
+
+WeakPtr<GPUExternalTexture> GPUDevice::takeExternalTextureForVideoElement(const HTMLVideoElement& element)
+{
+    return m_videoElementToExternalTextureMap.take(element);
 }
 
 }

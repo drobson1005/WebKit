@@ -401,6 +401,11 @@ String Quirks::storageAccessUserAgentStringQuirkForDomain(const URL& url)
     return iterator->value;
 }
 
+bool Quirks::isYoutubeEmbedDomain() const
+{
+    return isEmbedDomain("youtube.com"_s) || isEmbedDomain("youtube-nocookie.com"_s);
+}
+
 bool Quirks::shouldDisableElementFullscreenQuirk() const
 {
 #if PLATFORM(IOS_FAMILY)
@@ -420,8 +425,9 @@ bool Quirks::shouldDisableElementFullscreenQuirk() const
     if (!m_shouldDisableElementFullscreen) {
         m_shouldDisableElementFullscreen = isDomain("vimeo.com"_s)
             || isDomain("instagram.com"_s)
+            || (PAL::currentUserInterfaceIdiomIsSmallScreen() && isDomain("digitaltrends.com"_s))
             || isEmbedDomain("twitter.com"_s)
-            || (PAL::currentUserInterfaceIdiomIsSmallScreen() && (isDomain("youtube.com"_s) || isEmbedDomain("youtube.com"_s)));
+            || (PAL::currentUserInterfaceIdiomIsSmallScreen() && (isDomain("youtube.com"_s) || isYoutubeEmbedDomain()));
     }
 
     return m_shouldDisableElementFullscreen.value();
@@ -1486,22 +1492,10 @@ bool Quirks::allowLayeredFullscreenVideos() const
 }
 #endif
 
-// mail.google.com rdar://97351877
 bool Quirks::shouldEnableApplicationCacheQuirk() const
 {
-#if PLATFORM(IOS_FAMILY)
-    if (!needsQuirks())
-        return false;
-
-    if (!m_shouldEnableApplicationCacheQuirk) {
-        auto domain = m_document->securityOrigin().domain().convertToASCIILowercase();
-        m_shouldEnableApplicationCacheQuirk = domain.endsWith("mail.google.com"_s);
-    }
-
-    return m_shouldEnableApplicationCacheQuirk.value();
-#else
+    // FIXME: Remove this when deleting ApplicationCache APIs.
     return false;
-#endif
 }
 
 // play.hbomax.com https://bugs.webkit.org/show_bug.cgi?id=244737
@@ -1728,6 +1722,20 @@ bool Quirks::shouldDisableNavigatorStandaloneQuirk() const
     return false;
 }
 
+// booking.com https://webkit.org/b/269875
+// FIXME: booking.com https://webkit.org/b/269876 when outreach has been successful.
+bool Quirks::shouldSendLongerAcceptHeaderQuirk(const URL& url, LocalFrame* frame)
+{
+    if (frame && !frame->settings().needsSiteSpecificQuirks())
+        return false;
+
+    auto host = url.host();
+    if (host == "booking.com"_s || host.endsWith(".booking.com"_s))
+        return true;
+
+    return false;
+}
+
 // This section is dedicated to UA override for iPad. iPads (but iPad Mini) are sending a desktop user agent
 // to websites. In some cases, the website breaks in some ways, not expecting a touch interface for the website.
 // Controls not active or too small, form factor, etc. In this case it is better to send the iPad Mini UA.
@@ -1810,6 +1818,50 @@ bool Quirks::needsIpadMiniUserAgent(StringView host)
     if (equalLettersIgnoringASCIICase(host, "spotify.com"_s) || host.endsWithIgnoringASCIICase(".spotify.com"_s) || host.endsWithIgnoringASCIICase(".spotifycdn.com"_s))
         return true;
     return false;
+}
+
+
+bool Quirks::shouldIgnorePlaysInlineRequirementQuirk() const
+{
+#if PLATFORM(IOS_FAMILY)
+    if (!needsQuirks())
+        return false;
+
+    if (m_shouldIgnorePlaysInlineRequirementQuirk)
+        return *m_shouldIgnorePlaysInlineRequirementQuirk;
+
+    m_shouldIgnorePlaysInlineRequirementQuirk = isDomain("premierleague.com"_s);
+
+    return *m_shouldIgnorePlaysInlineRequirementQuirk;
+#else
+    return false;
+#endif
+}
+
+bool Quirks::shouldUseEphemeralPartitionedStorageForDOMCookies(const URL& url) const
+{
+    if (!needsQuirks())
+        return false;
+
+    auto firstPartyDomain = RegistrableDomain(m_document->firstPartyForCookies()).string();
+    auto domain = RegistrableDomain(url).string();
+
+    // rdar://113830141
+    if (firstPartyDomain == "cagreatamerica.com"_s && domain == "queue-it.net"_s)
+        return true;
+
+    return false;
+}
+
+// This quirk has intentionally limited exposure to increase the odds of being able to remove it
+// again within a reasonable timeframe as the impacted apps are being updated. <rdar://122548304>
+bool Quirks::needsGetElementsByNameQuirk() const
+{
+#if PLATFORM(IOS)
+    return needsQuirks() && !PAL::currentUserInterfaceIdiomIsSmallScreen() && !linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::NoGetElementsByNameQuirk);
+#else
+    return false;
+#endif
 }
 
 }

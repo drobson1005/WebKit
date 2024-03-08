@@ -738,6 +738,31 @@ String AXDateFieldYearText()
     return WEB_UI_STRING("year", "accessibility label for a date field year input.");
 }
 
+String AXTimeFieldHourText()
+{
+    return WEB_UI_STRING("hour", "accessibility label for hour fields.");
+}
+
+String AXTimeFieldMinuteText()
+{
+    return WEB_UI_STRING("minutes", "accessibility label for minutes fields.");
+}
+
+String AXTimeFieldSecondText()
+{
+    return WEB_UI_STRING("seconds", "accessibility label for seconds fields.");
+}
+
+String AXTimeFieldMillisecondText()
+{
+    return WEB_UI_STRING("milliseconds", "accessibility label for milliseconds fields.");
+}
+
+String AXTimeFieldMeridiemText()
+{
+    return WEB_UI_STRING("meridiem", "accessibility label for meridiem fields.");
+}
+
 String AXDateTimeFieldText()
 {
     return WEB_UI_STRING("date and time field", "accessibility role description for a date and time field.");
@@ -963,11 +988,6 @@ String AXAutoFillLoadingLabel()
 String autoFillStrongPasswordLabel()
 {
     return WEB_UI_STRING("Strong Password", "Label for strong password.");
-}
-
-String AXProcessingPage()
-{
-    return WEB_UI_STRING("Processing page", "Title for the webarea while the accessibility tree is being built.");
 }
 
 String missingPluginText()
@@ -1555,6 +1575,11 @@ String pdfPasswordFormSubtitle()
 String pdfPasswordFormInvalidPasswordSubtitle()
 {
     return WEB_UI_STRING("Invalid Password", "Message when a PDF fails to unlock with the given password");
+}
+
+String contextMenuItemTagCopyLinkToHighlight()
+{
+    return WEB_UI_STRING("Copy Link to Highlight", "Copy link to highlight context menu item");
 }
 
 } // namespace WebCore

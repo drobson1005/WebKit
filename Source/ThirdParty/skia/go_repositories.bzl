@@ -243,8 +243,8 @@ def go_repositories():
     go_repository(
         name = "com_github_danjacques_gofslock",
         importpath = "github.com/danjacques/gofslock",
-        sum = "h1:BBkZ6LZYtzMQ2Oo5LkovMmUp0gxAD+AnXzfknZlFTBo=",
-        version = "v0.0.0-20230728142113-ae8f59f9e88b",
+        sum = "h1:m+Fkk9QEMuV6Z1ithqqYogOHV7Pl6rMKe34NBTJTS/c=",
+        version = "v0.0.0-20240212154529-d899e02bfe22",
     )
 
     go_repository(
@@ -2658,8 +2658,8 @@ def go_repositories():
     go_repository(
         name = "org_skia_go_infra",
         importpath = "go.skia.org/infra",
-        sum = "h1:Ys5SHbNhp2NzKnesDK8tZCZiu5FGJd4shWe3rUZZu8I=",
-        version = "v0.0.0-20240207202144-fac5758b02f3",
+        sum = "h1:ngRtThK2CkjSWXq/kYzg22/F0ivhHaSpabauuxWGxVQ=",
+        version = "v0.0.0-20240223011140-88ef1b147e5e",
     )
     go_repository(
         name = "org_uber_go_atomic",

@@ -118,11 +118,6 @@ void WebExtensionController::getDataRecord(OptionSet<WebExtensionDataType> types
     String displayName;
     URL lastBaseURL;
 
-    auto recordHolder = WebExtensionDataRecordHolder::create();
-    auto aggregator = MainRunLoopCallbackAggregator::create([recordHolder, completionHandler = WTFMove(completionHandler)]() mutable {
-        completionHandler(recordHolder->recordsMap.takeFirst());
-    });
-
     auto uniqueIdentifiers = FileSystem::listDirectory(m_configuration->storageDirectory());
     for (auto& uniqueIdentifier : uniqueIdentifiers) {
         if (!WebExtensionContext::readDisplayNameAndLastBaseURLFromState(stateFilePath(uniqueIdentifier), displayName, lastBaseURL))
@@ -138,6 +133,11 @@ void WebExtensionController::getDataRecord(OptionSet<WebExtensionDataType> types
         completionHandler(nullptr);
         return;
     }
+
+    Ref recordHolder = WebExtensionDataRecordHolder::create();
+    Ref aggregator = MainRunLoopCallbackAggregator::create([recordHolder, completionHandler = WTFMove(completionHandler)]() mutable {
+        completionHandler(recordHolder->recordsMap.takeFirst());
+    });
 
     for (auto type : types) {
         auto *storage = sqliteStore(storageDirectory(matchingUniqueIdentifier), type, this->extensionContext(lastBaseURL));
@@ -243,7 +243,7 @@ bool WebExtensionController::load(WebExtensionContext& extensionContext, NSError
         return false;
     }
 
-    sendToAllProcesses(Messages::WebExtensionControllerProxy::Load(extensionContext.parameters()), m_identifier);
+    sendToAllProcesses(Messages::WebExtensionControllerProxy::Load(extensionContext.parameters()), identifier());
 
     return true;
 }
@@ -266,7 +266,7 @@ bool WebExtensionController::unload(WebExtensionContext& extensionContext, NSErr
     UNUSED_VARIABLE(result);
     ASSERT(result);
 
-    sendToAllProcesses(Messages::WebExtensionControllerProxy::Unload(extensionContext.identifier()), m_identifier);
+    sendToAllProcesses(Messages::WebExtensionControllerProxy::Unload(extensionContext.identifier()), identifier());
 
     for (Ref processPool : m_processPools)
         processPool->removeMessageReceiver(Messages::WebExtensionContext::messageReceiverName(), extensionContext.identifier());
@@ -315,6 +315,9 @@ void WebExtensionController::removePage(WebPageProxy& page)
 
     Ref controller = page.userContentController();
     removeUserContentController(controller);
+
+    for (Ref context : m_extensionContexts)
+        context->removePage(page);
 }
 
 void WebExtensionController::addProcessPool(WebProcessPool& processPool)
@@ -328,7 +331,7 @@ void WebExtensionController::addProcessPool(WebProcessPool& processPool)
         processPool.setDomainRelaxationForbiddenForURLScheme(urlScheme);
     }
 
-    processPool.addMessageReceiver(Messages::WebExtensionController::messageReceiverName(), m_identifier, *this);
+    processPool.addMessageReceiver(Messages::WebExtensionController::messageReceiverName(), identifier(), *this);
 
     for (Ref context : m_extensionContexts)
         processPool.addMessageReceiver(Messages::WebExtensionContext::messageReceiverName(), context->identifier(), context);
@@ -342,7 +345,7 @@ void WebExtensionController::removeProcessPool(WebProcessPool& processPool)
             return;
     }
 
-    processPool.removeMessageReceiver(Messages::WebExtensionController::messageReceiverName(), m_identifier);
+    processPool.removeMessageReceiver(Messages::WebExtensionController::messageReceiverName(), identifier());
 
     for (Ref context : m_extensionContexts)
         processPool.removeMessageReceiver(Messages::WebExtensionContext::messageReceiverName(), context->identifier());
@@ -433,6 +436,16 @@ RefPtr<WebExtensionContext> WebExtensionController::extensionContext(const WebEx
 {
     for (Ref context : m_extensionContexts) {
         if (context->extension() == extension)
+            return context.ptr();
+    }
+
+    return nullptr;
+}
+
+RefPtr<WebExtensionContext> WebExtensionController::extensionContext(const UniqueIdentifier& uniqueIdentifier) const
+{
+    for (Ref context : m_extensionContexts) {
+        if (context->uniqueIdentifier() == uniqueIdentifier)
             return context.ptr();
     }
 

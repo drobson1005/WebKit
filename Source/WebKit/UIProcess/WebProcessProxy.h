@@ -30,11 +30,11 @@
 #include "BackgroundProcessResponsivenessTimer.h"
 #include "GPUProcessPreferencesForWebProcess.h"
 #include "MessageReceiverMap.h"
+#include "NetworkProcessPreferencesForWebProcess.h"
 #include "NetworkProcessProxy.h"
 #include "ProcessLauncher.h"
 #include "ProcessTerminationReason.h"
 #include "ProcessThrottler.h"
-#include "ProcessThrottlerClient.h"
 #include "RemoteWorkerInitializationData.h"
 #include "ResponsivenessTimer.h"
 #include "SpeechRecognitionServer.h"
@@ -179,6 +179,9 @@ public:
 #if ENABLE(GPU_PROCESS)
     const std::optional<GPUProcessPreferencesForWebProcess>& preferencesForGPUProcess() const { return m_preferencesForGPUProcess; }
 #endif
+    const std::optional<NetworkProcessPreferencesForWebProcess>& preferencesForNetworkProcess() const { return m_preferencesForNetworkProcess; }
+    void initializePreferencesForNetworkProcess(const API::PageConfiguration&);
+    void initializePreferencesForNetworkProcess(const WebPreferencesStore&);
 
     bool isMatchingRegistrableDomain(const WebCore::RegistrableDomain& domain) const { return m_registrableDomain ? *m_registrableDomain == domain : false; }
     WebCore::RegistrableDomain registrableDomain() const { return valueOrDefault(m_registrableDomain); }
@@ -305,9 +308,6 @@ public:
 
     void setIsHoldingLockedFiles(bool);
 
-    ProcessThrottler& throttler() final { return m_throttler; }
-    const ProcessThrottler& throttler() const final { return m_throttler; }
-
     void isResponsive(CompletionHandler<void(bool isWebProcessResponsive)>&&);
     void isResponsiveWithLazyStop();
     void didReceiveBackgroundResponsivenessPing();
@@ -395,7 +395,7 @@ public:
     void sendAudioComponentRegistrations();
 #endif
 
-    bool hasSameGPUProcessPreferencesAs(const API::PageConfiguration&) const;
+    bool hasSameGPUAndNetworkProcessPreferencesAs(const API::PageConfiguration&) const;
 
 #if ENABLE(REMOTE_INSPECTOR) && PLATFORM(COCOA)
     void enableRemoteInspectorIfNeeded();
@@ -541,7 +541,7 @@ private:
     static WebPageProxyMap& globalPageMap();
     static Vector<Ref<WebPageProxy>> globalPages();
 
-    void initializePreferencesForGPUProcess(const WebPageProxy&);
+    void initializePreferencesForGPUAndNetworkProcesses(const WebPageProxy&);
 
     void reportProcessDisassociatedWithPageIfNecessary(WebPageProxyIdentifier);
     bool isAssociatedWithPage(WebPageProxyIdentifier) const;
@@ -615,7 +615,7 @@ private:
 
     void systemBeep();
     
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     void isAXAuthenticated(CoreIPCAuditToken&&, CompletionHandler<void(bool)>&&);
 #endif
 
@@ -680,7 +680,6 @@ private:
     WeakHashSet<WebUserContentControllerProxy> m_webUserContentControllerProxies;
 
     int m_numberOfTimesSuddenTerminationWasDisabled;
-    ProcessThrottler m_throttler;
     std::unique_ptr<ProcessThrottler::BackgroundActivity> m_activityForHoldingLockedFiles;
     ForegroundWebProcessToken m_foregroundToken;
     BackgroundWebProcessToken m_backgroundToken;
@@ -774,6 +773,7 @@ private:
 #if ENABLE(GPU_PROCESS)
     mutable std::optional<GPUProcessPreferencesForWebProcess> m_preferencesForGPUProcess;
 #endif
+    mutable std::optional<NetworkProcessPreferencesForWebProcess> m_preferencesForNetworkProcess;
 
     ProcessThrottleState m_throttleStateForStatistics { ProcessThrottleState::Suspended };
     MonotonicTime m_throttleStateForStatisticsTimestamp;

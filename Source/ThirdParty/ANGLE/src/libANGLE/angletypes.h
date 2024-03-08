@@ -9,10 +9,13 @@
 #ifndef LIBANGLE_ANGLETYPES_H_
 #define LIBANGLE_ANGLETYPES_H_
 
+#include <anglebase/sha1.h>
 #include "common/Color.h"
 #include "common/FixedVector.h"
+#include "common/MemoryBuffer.h"
 #include "common/PackedEnums.h"
 #include "common/bitset_utils.h"
+#include "common/hash_utils.h"
 #include "common/vector_utils.h"
 #include "libANGLE/Constants.h"
 #include "libANGLE/Error.h"
@@ -1010,6 +1013,9 @@ using DrawBuffersVector = angle::FixedVector<T, IMPLEMENTATION_MAX_DRAW_BUFFERS>
 template <typename T>
 using AttribArray = std::array<T, MAX_VERTEX_ATTRIBS>;
 
+template <typename T>
+using AttribVector = angle::FixedVector<T, MAX_VERTEX_ATTRIBS>;
+
 using ActiveTextureMask = angle::BitSet<IMPLEMENTATION_MAX_ACTIVE_TEXTURES>;
 
 template <typename T>
@@ -1173,6 +1179,69 @@ inline DestT *SafeGetImplAs(SrcT *src)
 }  // namespace rx
 
 #include "angletypes.inc"
+
+namespace angle
+{
+enum class NativeWindowSystem
+{
+    X11,
+    Wayland,
+    Gbm,
+    Other,
+};
+
+struct FeatureOverrides
+{
+    std::vector<std::string> enabled;
+    std::vector<std::string> disabled;
+    bool allDisabled = false;
+};
+
+// 160-bit SHA-1 hash key used for hasing a program.  BlobCache opts in using fixed keys for
+// simplicity and efficiency.
+static constexpr size_t kBlobCacheKeyLength = angle::base::kSHA1Length;
+using BlobCacheKey                          = std::array<uint8_t, kBlobCacheKeyLength>;
+class BlobCacheValue  // To be replaced with std::span when C++20 is required
+{
+  public:
+    BlobCacheValue() : mPtr(nullptr), mSize(0) {}
+    BlobCacheValue(const uint8_t *ptr, size_t size) : mPtr(ptr), mSize(size) {}
+
+    // A very basic struct to hold the pointer and size together.  The objects of this class
+    // don't own the memory.
+    const uint8_t *data() { return mPtr; }
+    size_t size() { return mSize; }
+
+    const uint8_t &operator[](size_t pos) const
+    {
+        ASSERT(pos < mSize);
+        return mPtr[pos];
+    }
+
+  private:
+    const uint8_t *mPtr;
+    size_t mSize;
+};
+
+bool CompressBlob(const size_t cacheSize, const uint8_t *cacheData, MemoryBuffer *compressedData);
+bool DecompressBlob(const uint8_t *compressedData,
+                    const size_t compressedSize,
+                    size_t maxUncompressedDataSize,
+                    MemoryBuffer *uncompressedData);
+}  // namespace angle
+
+namespace std
+{
+template <>
+struct hash<angle::BlobCacheKey>
+{
+    // Simple routine to hash four ints.
+    size_t operator()(const angle::BlobCacheKey &key) const
+    {
+        return angle::ComputeGenericHash(key.data(), key.size());
+    }
+};
+}  // namespace std
 
 namespace angle
 {
@@ -1361,6 +1430,8 @@ class FoveationState
                mFoveatedFeatureBits == other.mFoveatedFeatureBits &&
                mMinPixelDensity == other.mMinPixelDensity && mFocalPoints == other.mFocalPoints;
     }
+    bool operator!=(const FoveationState &other) const { return !(*this == other); }
+
     void setFoveatedFeatureBits(const GLuint features) { mFoveatedFeatureBits = features; }
     GLuint getFoveatedFeatureBits() const { return mFoveatedFeatureBits; }
     void setMinPixelDensity(const GLfloat density) { mMinPixelDensity = density; }

@@ -37,6 +37,7 @@
 #import "WebExtensionAPINamespace.h"
 #import "WebExtensionContextMessages.h"
 #import "WebExtensionContextProxyMessages.h"
+#import "WebExtensionControllerProxy.h"
 #import "WebProcess.h"
 #import "_WKWebExtensionLocalization.h"
 #import <wtf/HashMap.h>
@@ -70,15 +71,15 @@ WebExtensionContextProxy::~WebExtensionContextProxy()
     WebProcess::singleton().removeMessageReceiver(*this);
 }
 
-Ref<WebExtensionContextProxy> WebExtensionContextProxy::getOrCreate(const WebExtensionContextParameters& parameters, WebPage* newPage)
+Ref<WebExtensionContextProxy> WebExtensionContextProxy::getOrCreate(const WebExtensionContextParameters& parameters, WebExtensionControllerProxy& extensionControllerProxy, WebPage* newPage)
 {
     auto updateProperties = [&](WebExtensionContextProxy& context) {
+        context.m_extensionControllerProxy = extensionControllerProxy;
         context.m_baseURL = parameters.baseURL;
         context.m_uniqueIdentifier = parameters.uniqueIdentifier;
         context.m_localization = parseLocalization(parameters.localizationJSON.get(), parameters.baseURL);
         context.m_manifest = parseJSON(parameters.manifestJSON.get());
         context.m_manifestVersion = parameters.manifestVersion;
-        context.m_testingMode = parameters.testingMode;
         context.m_isSessionStorageAllowedInContentScripts = parameters.isSessionStorageAllowedInContentScripts;
 
         if (parameters.backgroundPageIdentifier) {
@@ -131,10 +132,14 @@ _WKWebExtensionLocalization *WebExtensionContextProxy::parseLocalization(API::Da
     return [[_WKWebExtensionLocalization alloc] initWithLocalizedDictionary:parseJSON(json) uniqueIdentifier:baseURL.host().toString()];
 }
 
-WebCore::DOMWrapperWorld& WebExtensionContextProxy::toDOMWorld(WebExtensionContentWorldType contentWorldType)
+WebCore::DOMWrapperWorld& WebExtensionContextProxy::toDOMWrapperWorld(WebExtensionContentWorldType contentWorldType)
 {
     switch (contentWorldType) {
     case WebExtensionContentWorldType::Main:
+    case WebExtensionContentWorldType::WebPage:
+#if ENABLE(INSPECTOR_EXTENSIONS)
+    case WebExtensionContentWorldType::Inspector:
+#endif
         return mainWorld();
     case WebExtensionContentWorldType::ContentScript:
         return contentScriptWorld();

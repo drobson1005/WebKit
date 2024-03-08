@@ -27,15 +27,10 @@
 #include "CSSSelector.h"
 
 #include "CSSMarkup.h"
-#include "CSSParserIdioms.h"
-#include "CSSParserTokenRange.h"
 #include "CSSSelectorInlines.h"
 #include "CSSSelectorList.h"
-#include "CSSSelectorParserContext.h"
-#include "CSSTokenizer.h"
 #include "CommonAtomStrings.h"
 #include "HTMLNames.h"
-#include "MutableCSSSelector.h"
 #include "SelectorPseudoTypeMap.h"
 #include <memory>
 #include <queue>
@@ -202,10 +197,22 @@ SelectorSpecificity simpleSelectorSpecificity(const CSSSelector& simpleSelector)
             return 0;
         return SelectorSpecificityIncrement::ClassC;
     case CSSSelector::Match::PseudoElement:
+        switch (simpleSelector.pseudoElement()) {
         // Slotted only competes with other slotted selectors for specificity,
         // so whether we add the ClassC specificity shouldn't be observable.
-        if (simpleSelector.pseudoElement() == CSSSelector::PseudoElement::Slotted)
+        case CSSSelector::PseudoElement::Slotted:
             return maxSpecificity(simpleSelector.selectorList());
+        case CSSSelector::PseudoElement::ViewTransitionGroup:
+        case CSSSelector::PseudoElement::ViewTransitionImagePair:
+        case CSSSelector::PseudoElement::ViewTransitionNew:
+        case CSSSelector::PseudoElement::ViewTransitionOld:
+            ASSERT(simpleSelector.argumentList() && simpleSelector.argumentList()->size());
+            if (simpleSelector.argumentList()->first().identifier == starAtom())
+                return 0;
+            break;
+        default:
+            break;
+        }
         return SelectorSpecificityIncrement::ClassC;
     case CSSSelector::Match::HasScope:
     case CSSSelector::Match::Unknown:
@@ -335,72 +342,6 @@ std::optional<CSSSelector::PseudoElement> CSSSelector::parsePseudoElementName(St
         return std::nullopt;
 
     return *type;
-}
-
-static std::optional<Style::PseudoElementIdentifier> pseudoElementIdentifierFor(CSSSelectorPseudoElement type)
-{
-    auto pseudoId = CSSSelector::pseudoId(type);
-    if (pseudoId == PseudoId::None)
-        return { };
-    return Style::PseudoElementIdentifier { pseudoId };
-}
-
-// FIXME: We should eventually deduplicate this with CSSSelectorParser::consumePseudo() somehow.
-std::pair<bool, std::optional<Style::PseudoElementIdentifier>> CSSSelector::parsePseudoElement(const String& input, const CSSSelectorParserContext& context)
-{
-    auto tokenizer = CSSTokenizer { input };
-    auto range = tokenizer.tokenRange();
-    auto token = range.consume();
-    if (token.type() != ColonToken)
-        return { };
-    token = range.consume();
-    if (token.type() == IdentToken) {
-        if (!range.atEnd())
-            return { };
-        auto pseudoClassOrElement = findPseudoClassAndCompatibilityElementName(token.value());
-        if (!pseudoClassOrElement.compatibilityPseudoElement)
-            return { };
-        ASSERT(CSSSelector::isPseudoElementEnabled(*pseudoClassOrElement.compatibilityPseudoElement, token.value(), context));
-        return { true, pseudoElementIdentifierFor(*pseudoClassOrElement.compatibilityPseudoElement) };
-    }
-    if (token.type() != ColonToken)
-        return { };
-    token = range.peek();
-    if ((token.type() != IdentToken && token.type() != FunctionToken))
-        return { };
-    auto pseudoElement = parsePseudoElementName(token.value(), context);
-    if (!pseudoElement)
-        return { };
-    if (token.type() == IdentToken) {
-        range.consume();
-        if (!range.atEnd() || CSSSelector::pseudoElementRequiresArgument(*pseudoElement))
-            return { };
-        return { true, pseudoElementIdentifierFor(*pseudoElement) };
-    }
-    ASSERT(token.type() == FunctionToken);
-    auto block = range.consumeBlock();
-    if (!range.atEnd())
-        return { };
-    block.consumeWhitespace();
-    switch (*pseudoElement) {
-    case CSSSelector::PseudoElement::Highlight: {
-        auto& ident = block.consumeIncludingWhitespace();
-        if (ident.type() != IdentToken || !block.atEnd())
-            return { };
-        return { true, Style::PseudoElementIdentifier { PseudoId::Highlight, ident.value().toAtomString() } };
-    }
-    case CSSSelector::PseudoElement::ViewTransitionGroup:
-    case CSSSelector::PseudoElement::ViewTransitionImagePair:
-    case CSSSelector::PseudoElement::ViewTransitionOld:
-    case CSSSelector::PseudoElement::ViewTransitionNew: {
-        auto& ident = block.consumeIncludingWhitespace();
-        if (ident.type() != IdentToken || !isValidCustomIdentifier(ident.id()) || !block.atEnd())
-            return { };
-        return { true, Style::PseudoElementIdentifier { pseudoId(*pseudoElement), ident.value().toAtomString() } };
-    }
-    default:
-        return { };
-    }
 }
 
 const CSSSelector* CSSSelector::firstInCompound() const

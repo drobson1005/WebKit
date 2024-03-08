@@ -426,6 +426,9 @@ NSURL *WebExtension::resourceFileURLForPath(NSString *path)
 {
     ASSERT(path);
 
+    if ([path hasPrefix:@"/"])
+        path = [path substringFromIndex:1];
+
     if (!path.length || !m_resourceBaseURL)
         return nil;
 
@@ -771,7 +774,7 @@ void WebExtension::recordError(NSError *error, SuppressNotification suppressNoti
     if (!m_errors)
         m_errors = [NSMutableArray array];
 
-    RELEASE_LOG_ERROR(Extensions, "Error recorded: %{private}@", error);
+    RELEASE_LOG_ERROR(Extensions, "Error recorded: %{public}@", privacyPreservingDescription(error));
 
     [m_errors addObject:error];
 
@@ -1615,8 +1618,11 @@ void WebExtension::populateCommandsIfNeeded()
             continue;
         }
 
-        if (isActionCommand && !description.length)
+        if (isActionCommand && !description.length) {
             description = displayActionLabel();
+            if (!description.length)
+                description = displayShortName();
+        }
 
         commandData.description = description;
 

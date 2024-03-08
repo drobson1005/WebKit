@@ -44,13 +44,12 @@ std::unique_ptr<ImageBufferSkiaUnacceleratedBackend> ImageBufferSkiaUnaccelerate
         return nullptr;
 
     auto imageInfo = SkImageInfo::MakeN32Premul(backendSize.width(), backendSize.height());
-    // FIXME: use SkSurfaces::WrapPixels() to allocate pixels with bmalloc?
     auto surface = SkSurfaces::Raster(imageInfo, nullptr);
     return std::unique_ptr<ImageBufferSkiaUnacceleratedBackend>(new ImageBufferSkiaUnacceleratedBackend(parameters, WTFMove(surface)));
 }
 
 ImageBufferSkiaUnacceleratedBackend::ImageBufferSkiaUnacceleratedBackend(const Parameters& parameters, sk_sp<SkSurface>&& surface)
-    : ImageBufferSkiaSurfaceBackend(parameters, WTFMove(surface))
+    : ImageBufferSkiaSurfaceBackend(parameters, WTFMove(surface), RenderingMode::Unaccelerated)
 {
 }
 

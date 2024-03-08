@@ -48,6 +48,7 @@
 #include "RenderListItem.h"
 #include "RenderListMarker.h"
 #include "RenderStyleInlines.h"
+#include "RenderView.h"
 #include "StyleCustomPropertyData.h"
 #include "StyleOriginatedAnimation.h"
 #include "StylePropertyShorthand.h"
@@ -245,18 +246,11 @@ bool Styleable::isRunningAcceleratedTransformAnimation() const
     return false;
 }
 
-bool Styleable::runningAnimationsAreAllAccelerated() const
+bool Styleable::hasRunningAcceleratedAnimations() const
 {
-    auto* effectStack = keyframeEffectStack();
-    if (!effectStack || !effectStack->hasEffects())
-        return false;
-
-    for (const auto& effect : effectStack->sortedEffects()) {
-        if (!effect->isRunningAccelerated())
-            return false;
-    }
-
-    return true;
+    if (auto* effectStack = keyframeEffectStack())
+        return effectStack->hasAcceleratedEffects(element.document().settings());
+    return false;
 }
 
 void Styleable::animationWasAdded(WebAnimation& animation) const

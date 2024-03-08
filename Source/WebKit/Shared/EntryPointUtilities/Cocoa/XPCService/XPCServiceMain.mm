@@ -33,6 +33,7 @@
 #import <mach/mach.h>
 #import <pal/spi/cf/CFUtilitiesSPI.h>
 #import <pal/spi/cocoa/LaunchServicesSPI.h>
+#import <pal/spi/cocoa/NotifySPI.h>
 #import <sys/sysctl.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/Language.h>
@@ -103,6 +104,25 @@ static void initializeLogd(bool disableLogging)
     RELEASE_LOG(Process, "Initialized logd %s", stringWithSpaces);
 }
 
+static void setNotifyOptions()
+{
+    static bool hasSetOptions = false;
+    if (hasSetOptions)
+        return;
+    hasSetOptions = true;
+
+    uint32_t opts = 0;
+#if ENABLE(NOTIFY_FILTERING)
+    opts |= NOTIFY_OPT_DISPATCH | NOTIFY_OPT_REGEN | NOTIFY_OPT_FILTERED;
+#endif
+#if ENABLE(NOTIFY_BLOCKING)
+    opts |= NOTIFY_OPT_LOOPBACK;
+#endif
+    if (!opts)
+        return;
+    notify_set_options(opts);
+}
+
 #if PLATFORM(MAC) || PLATFORM(MACCATALYST)
 
 NEVER_INLINE NO_RETURN_DUE_TO_CRASH static void crashDueWebKitFrameworkVersionMismatch()
@@ -111,10 +131,9 @@ NEVER_INLINE NO_RETURN_DUE_TO_CRASH static void crashDueWebKitFrameworkVersionMi
 }
 static void checkFrameworkVersion(xpc_object_t message)
 {
-    auto webKitBundleVersion = String::fromLatin1(xpc_dictionary_get_string(message, "WebKitBundleVersion"));
-    String expectedBundleVersion = [NSBundle bundleForClass:NSClassFromString(@"WKWebView")].infoDictionary[(__bridge NSString *)kCFBundleVersionKey];
-    if (!webKitBundleVersion.isNull() && !expectedBundleVersion.isNull() && webKitBundleVersion != expectedBundleVersion) {
-        auto errorMessage = makeString("WebKit framework version mismatch: ", webKitBundleVersion, " != ", expectedBundleVersion);
+    auto uiProcessWebKitBundleVersion = String::fromLatin1(xpc_dictionary_get_string(message, "WebKitBundleVersion"));
+    if (!uiProcessWebKitBundleVersion.isNull() && uiProcessWebKitBundleVersion != ASCIILiteral::fromLiteralUnsafe(WEBKIT_BUNDLE_VERSION)) {
+        auto errorMessage = makeString("WebKit framework version mismatch: ", uiProcessWebKitBundleVersion, " != ", WEBKIT_BUNDLE_VERSION);
         logAndSetCrashLogMessage(errorMessage.utf8().data());
         crashDueWebKitFrameworkVersionMismatch();
     }
@@ -148,6 +167,8 @@ void XPCServiceEventHandler(xpc_connection_t peer)
             return;
         }
         if (!strcmp(messageName, "bootstrap")) {
+            setNotifyOptions();
+
             bool disableLogging = xpc_dictionary_get_bool(event, "disable-logging");
             initializeLogd(disableLogging);
 
@@ -228,6 +249,8 @@ void XPCServiceEventHandler(xpc_connection_t peer)
 
 int XPCServiceMain(int, const char**)
 {
+    setNotifyOptions();
+
     auto bootstrap = adoptOSObject(xpc_copy_bootstrap());
 
     if (bootstrap) {

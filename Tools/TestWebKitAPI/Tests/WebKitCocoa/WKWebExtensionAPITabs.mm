@@ -454,6 +454,31 @@ TEST(WKWebExtensionAPITabs, Update)
     [manager loadAndRun];
 }
 
+TEST(WKWebExtensionAPITabs, UpdateWithoutTabId)
+{
+    auto *backgroundScript = Util::constructScript(@[
+        @"const allWindows = await browser.windows.getAll({ populate: true })",
+        @"const activeTab = allWindows[0].tabs[0]",
+
+        @"browser.test.assertFalse(activeTab.mutedInfo.muted, 'The tab should not be initially muted')",
+
+        @"const updatedTab = await browser.tabs.update({",
+        @"  muted: true,",
+        @"})",
+
+        @"browser.test.assertTrue(updatedTab.mutedInfo.muted, 'The tab should be muted after update')",
+
+        @"browser.test.notifyPass()"
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifest resources:@{ @"background.js": backgroundScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 1lu);
+
+    [manager loadAndRun];
+}
+
 TEST(WKWebExtensionAPITabs, Get)
 {
     auto *backgroundScript = Util::constructScript(@[
@@ -1176,6 +1201,98 @@ TEST(WKWebExtensionAPITabs, DetachedAndAttachedEvent)
     [manager run];
 }
 
+TEST(WKWebExtensionAPITabs, DetachAndAttachToWindowIDNone)
+{
+    auto backgroundScript = Util::constructScript(@[
+        @"let detachedTabId",
+
+        @"const currentWindow = await browser.windows.getCurrent()",
+        @"const currentWindowId = currentWindow.id",
+
+        @"browser.tabs.onDetached.addListener((tabId, detachInfo) => {",
+        @"  detachedTabId = tabId",
+        @"  browser.test.assertEq(detachInfo.oldWindowId, currentWindowId, 'Tab should have been detached from the current window')",
+        @"  browser.test.assertEq(detachInfo.oldPosition, 1, 'Tab should have been detached from index 1')",
+        @"})",
+
+        @"browser.tabs.onAttached.addListener((tabId, attachInfo) => {",
+        @"  browser.test.assertEq(detachedTabId, tabId, 'The detached and attached tab ids should match')",
+        @"  browser.test.assertEq(attachInfo.newWindowId, browser.windows.WINDOW_ID_NONE, 'Tab should have been attached to WINDOW_ID_NONE')",
+        @"  browser.test.assertTrue(isNaN(attachInfo.newPosition), 'Tab should have been attached at index NaN')",
+
+        @"  browser.test.notifyPass()",
+        @"})",
+
+        @"browser.test.yield('Detach Tab')"
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifest resources:@{ @"background.js": backgroundScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    auto *tabToMove = [manager.get().defaultWindow openNewTab];
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 2ul);
+
+    [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Detach Tab");
+
+    tabToMove.window = nil;
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 1ul);
+
+    [manager run];
+}
+
+TEST(WKWebExtensionAPITabs, DetachAndAttachFromWindowIDNone)
+{
+    auto backgroundScript = Util::constructScript(@[
+        @"let detachedTabId",
+
+        @"const currentWindow = await browser.windows.getCurrent()",
+        @"const currentWindowId = currentWindow.id",
+
+        @"browser.tabs.onDetached.addListener((tabId, detachInfo) => {",
+        @"  detachedTabId = tabId",
+        @"  browser.test.assertEq(detachInfo.oldWindowId, browser.windows.WINDOW_ID_NONE, 'Tab should have been detached from WINDOW_ID_NONE')",
+        @"  browser.test.assertTrue(isNaN(detachInfo.oldPosition), 'Tab should have been detached from index NaN')",
+        @"})",
+
+        @"browser.tabs.onAttached.addListener((tabId, attachInfo) => {",
+        @"  browser.test.assertEq(detachedTabId, tabId, 'The detached and attached tab ids should match')",
+        @"  browser.test.assertEq(attachInfo.newWindowId, currentWindowId, 'Tab should have been attached to the current window')",
+        @"  browser.test.assertEq(attachInfo.newPosition, 1, 'Tab should have been attached to index 1')",
+
+        @"  browser.test.notifyPass()",
+        @"})",
+
+        @"browser.test.yield('Attach Tab')"
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifest resources:@{ @"background.js": backgroundScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    auto *tabToMove = [manager.get().defaultWindow openNewTab];
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 2ul);
+
+    // Detach before loading the extension.
+    tabToMove.window = nil;
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 1ul);
+
+    [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Attach Tab");
+
+    tabToMove.window = manager.get().defaultWindow;
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 2ul);
+
+    [manager run];
+}
+
+
 TEST(WKWebExtensionAPITabs, ActivatedEvent)
 {
     auto *backgroundScript = Util::constructScript(@[
@@ -1856,40 +1973,44 @@ TEST(WKWebExtensionAPITabs, InsertAndRemoveCSSInMainFrame)
         @"const blueValue = 'rgb(0, 0, 255)'",
         @"const transparentValue = 'rgba(0, 0, 0, 0)'",
 
-        @"const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
-        @"const tabId = tabs[0].id",
+        @"browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {",
+        @"  if (tab.status !== 'complete')",
+        @"    return",
 
-        @"await browser.tabs.insertCSS(tabId, { allFrames: false, file: 'styles.css' })",
-        @"let result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], pinkValue)",
+        @"  await browser.tabs.insertCSS(tabId, { allFrames: false, file: 'styles.css' })",
+        @"  let result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], pinkValue)",
 
-        @"await browser.tabs.removeCSS(tabId, { allFrames: false, file: 'styles.css' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], transparentValue)",
+        @"  await browser.tabs.removeCSS(tabId, { allFrames: false, file: 'styles.css' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], transparentValue)",
 
-        @"await browser.tabs.insertCSS(tabId, { frameId: 0, file: 'styles.css' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], pinkValue)",
+        @"  await browser.tabs.insertCSS(tabId, { frameId: 0, file: 'styles.css' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], pinkValue)",
 
-        @"await browser.tabs.removeCSS(tabId, { frameId: 0, file: 'styles.css' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], transparentValue)",
+        @"  await browser.tabs.removeCSS(tabId, { frameId: 0, file: 'styles.css' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], transparentValue)",
 
-        @"await browser.tabs.insertCSS(tabId, { frameId: 0, code: 'body { background-color: blue !important }' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], blueValue)",
+        @"  await browser.tabs.insertCSS(tabId, { frameId: 0, code: 'body { background-color: blue !important }' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], blueValue)",
 
-        @"await browser.tabs.removeCSS(tabId, { frameId: 0, code: 'body { background-color: blue !important }' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], transparentValue)",
+        @"  await browser.tabs.removeCSS(tabId, { frameId: 0, code: 'body { background-color: blue !important }' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], transparentValue)",
 
         // Stylesheet being removed should match the one inserted.
-        @"await browser.tabs.insertCSS(tabId, { frameId: 0, code: 'body { background-color: blue !important }' })",
-        @"await browser.tabs.removeCSS(tabId, { allFrames: true, code: 'body { background-color: blue !important }' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
-        @"browser.test.assertEq(result[0], blueValue)",
+        @"  await browser.tabs.insertCSS(tabId, { frameId: 0, code: 'body { background-color: blue !important }' })",
+        @"  await browser.tabs.removeCSS(tabId, { allFrames: true, code: 'body { background-color: blue !important }' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: false })",
+        @"  browser.test.assertEq(result[0], blueValue)",
 
-        @"browser.test.notifyPass()"
+        @"  browser.test.notifyPass()",
+        @"})",
+
+        @"browser.test.yield('Load Tab')",
     ]);
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifestV2 resources:@{ @"background.js": backgroundScript, @"styles.css": css }]);
@@ -1899,9 +2020,14 @@ TEST(WKWebExtensionAPITabs, InsertAndRemoveCSSInMainFrame)
     auto *url = urlRequest.URL;
     auto *matchPattern = [_WKWebExtensionMatchPattern matchPatternWithScheme:url.scheme host:url.host path:@"/*"];
     [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forMatchPattern:matchPattern];
-    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
 
     [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Load Tab");
+
+    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
+
+    [manager run];
 }
 
 TEST(WKWebExtensionAPITabs, InsertAndRemoveCSSInAllFrames)
@@ -1918,23 +2044,27 @@ TEST(WKWebExtensionAPITabs, InsertAndRemoveCSSInAllFrames)
         @"const blueValue = 'rgb(0, 0, 255)'",
         @"const transparentValue = 'rgba(0, 0, 0, 0)'",
 
-        @"const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
-        @"const tabId = tabs[0].id",
+        @"browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {",
+        @"  if (tab.status !== 'complete')",
+        @"    return",
 
-        @"await browser.tabs.insertCSS(tabId, { allFrames: true, file: 'styles.css' })",
+        @"  await browser.tabs.insertCSS(tabId, { allFrames: true, file: 'styles.css' })",
 
-        @"let result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: true })",
+        @"  let result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: true })",
 
-        @"browser.test.assertEq(result[0], pinkValue)",
-        @"browser.test.assertEq(result[1], pinkValue)",
+        @"  browser.test.assertEq(result[0], pinkValue)",
+        @"  browser.test.assertEq(result[1], pinkValue)",
 
-        @"await browser.tabs.removeCSS(tabId, { allFrames: true, file: 'styles.css' })",
-        @"result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: true })",
+        @"  await browser.tabs.removeCSS(tabId, { allFrames: true, file: 'styles.css' })",
+        @"  result = await browser.tabs.executeScript(tabId, { code: \"window.getComputedStyle(document.body).getPropertyValue('background-color')\", allFrames: true })",
 
-        @"browser.test.assertEq(result[0], transparentValue)",
-        @"browser.test.assertEq(result[1], blueValue)",
+        @"  browser.test.assertEq(result[0], transparentValue)",
+        @"  browser.test.assertEq(result[1], blueValue)",
 
-        @"browser.test.notifyPass()",
+        @"  browser.test.notifyPass()",
+        @"})",
+
+        @"browser.test.yield('Load Tab')",
     ]);
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifestV2 resources:@{ @"background.js": backgroundScript, @"styles.css": css }]);
@@ -1944,9 +2074,14 @@ TEST(WKWebExtensionAPITabs, InsertAndRemoveCSSInAllFrames)
     auto *url = urlRequest.URL;
     auto *matchPattern = [_WKWebExtensionMatchPattern matchPatternWithScheme:url.scheme host:url.host path:@"/*"];
     [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forMatchPattern:matchPattern];
-    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
 
     [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Load Tab");
+
+    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
+
+    [manager run];
 }
 
 TEST(WKWebExtensionAPITabs, UnsupportedMV3APIs)
@@ -2016,8 +2151,6 @@ TEST(WKWebExtensionAPITabs, ActiveTab)
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:activeTabManifest resources:@{ @"background.js": backgroundScript }]);
     auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
-
-    [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forPermission:_WKWebExtensionPermissionActiveTab];
 
     auto *localhostRequest = server.requestWithLocalhost();
     auto *addressRequest = server.request();
@@ -2097,6 +2230,9 @@ TEST(WKWebExtensionAPITabs, UserGestureWithoutActiveTab)
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:activeTabManifest resources:@{ @"background.js": backgroundScript }]);
     auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    // Reset activeTab, WKWebExtensionAPITabs.ActiveTab tests that.
+    [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusUnknown forPermission:_WKWebExtensionPermissionActiveTab];
 
     EXPECT_FALSE([manager.get().context hasPermission:_WKWebExtensionPermissionActiveTab]);
     EXPECT_FALSE([manager.get().context hasPermission:_WKWebExtensionPermissionTabs]);

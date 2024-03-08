@@ -37,6 +37,7 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/glib/GRefPtr.h>
 #include <wtf/glib/GUniquePtr.h>
+#include <wtf/glib/GWeakPtr.h>
 #include <wtf/glib/WTFGType.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringHash.h>
@@ -79,6 +80,16 @@ static guint signals[LAST_SIGNAL] = { 0, };
  **/
 G_DEFINE_QUARK(wpe-display-error-quark, wpe_display_error)
 
+static GWeakPtr<WPEDisplay> s_primaryDisplay;
+
+static void wpeDisplayConstructed(GObject* object)
+{
+    if (!s_primaryDisplay)
+        s_primaryDisplay.reset(WPE_DISPLAY(object));
+
+    G_OBJECT_CLASS(wpe_display_parent_class)->constructed(object);
+}
+
 static void wpeDisplayDispose(GObject* object)
 {
     auto* priv = WPE_DISPLAY(object)->priv;
@@ -92,6 +103,7 @@ static void wpeDisplayDispose(GObject* object)
 static void wpe_display_class_init(WPEDisplayClass* displayClass)
 {
     GObjectClass* objectClass = G_OBJECT_CLASS(displayClass);
+    objectClass->constructed = wpeDisplayConstructed;
     objectClass->dispose = wpeDisplayDispose;
 
     /**
@@ -183,6 +195,36 @@ WPEDisplay* wpe_display_get_default(void)
         }
     });
     return s_defaultDisplay.get();
+}
+
+/**
+ * wpe_display_get_primary:
+ *
+ * Get the primary display. By default, the first #WPEDisplay that is
+ * created is set as primary display. This is the desired behavior in
+ * most of the cases, but you can set any #WPEDisplay as primary
+ * calling wpe_display_set_primary() if needed.
+ *
+ * Returns: (nullable) (transfer none): the primary display or %NULL
+ */
+WPEDisplay* wpe_display_get_primary()
+{
+    return s_primaryDisplay.get();
+}
+
+/**
+ * wpe_display_set_primary:
+ * @display: a #WPEDisplay
+ *
+ * Set @display as the primary display.
+ *
+ * In most of the cases you don't need to call this, because
+ * the first #WPEDisplay that is created is set as primary
+ * automatically.
+ */
+void wpe_display_set_primary(WPEDisplay* display)
+{
+    s_primaryDisplay.reset(display);
 }
 
 /**
@@ -436,106 +478,48 @@ static bool isSotfwareRast()
     return swrast;
 }
 
-static CString& renderNodeFile()
+/**
+ * wpe_display_get_drm_device:
+ * @display: a #WPEDisplay
+ *
+ * Get the DRM device of @display.
+ *
+ * Returns: (transfer none) (nullable): the filename of the DRM device node, or %NULL
+ */
+const char* wpe_display_get_drm_device(WPEDisplay* display)
 {
-    static NeverDestroyed<CString> renderNode;
-    return renderNode.get();
+    g_return_val_if_fail(WPE_IS_DISPLAY(display), nullptr);
+
+    if (isSotfwareRast())
+        return nullptr;
+
+    static const char* envDeviceFile = getenv("WPE_DRM_DEVICE");
+    if (envDeviceFile && *envDeviceFile)
+        return envDeviceFile;
+
+    auto* wpeDisplayClass = WPE_DISPLAY_GET_CLASS(display);
+    return wpeDisplayClass->get_drm_device ? wpeDisplayClass->get_drm_device(display) : nullptr;
 }
-
-#if USE(LIBDRM)
-static const CString wpeDRMRenderNodeFile()
-{
-    drmDevicePtr devices[64];
-    memset(devices, 0, sizeof(devices));
-
-    int numDevices = drmGetDevices2(0, devices, std::size(devices));
-    if (numDevices <= 0)
-        return { };
-
-    CString renderNodeDeviceFile;
-    for (int i = 0; i < numDevices && renderNodeDeviceFile.isNull(); ++i) {
-        drmDevice* device = devices[i];
-        if (!(device->available_nodes & (1 << DRM_NODE_RENDER)))
-            continue;
-
-        renderNodeDeviceFile = device->nodes[DRM_NODE_RENDER];
-    }
-    drmFreeDevices(devices, numDevices);
-
-    return renderNodeDeviceFile;
-}
-#endif
 
 /**
- * wpe_render_node_device:
+ * wpe_display_get_drm_render_node:
+ * @display: a #WPEDisplay
  *
- * Get the render node device to be used for rendering.
+ * Get the DRM render node of @display.
  *
- * Returns: (transfer none) (nullable): a render node device, or %NULL.
+ * Returns: (transfer none) (nullable): the filename of the DRM render node, or %NULL
  */
-const char* wpe_render_node_device()
+const char* wpe_display_get_drm_render_node(WPEDisplay* display)
 {
-    auto& renderNode = renderNodeFile();
-    if (renderNode.isNull() && !isSotfwareRast()) {
-        const char* envDeviceFile = getenv("WPE_RENDER_NODE_DEVICE");
-        if (envDeviceFile && *envDeviceFile)
-            renderNode = envDeviceFile;
-#if USE(LIBDRM)
-        else
-            renderNode = wpeDRMRenderNodeFile();
-#endif
-    }
-    return renderNode.data();
-}
+    g_return_val_if_fail(WPE_IS_DISPLAY(display), nullptr);
 
-static CString& renderDeviceFile()
-{
-    static NeverDestroyed<CString> renderDevice;
-    return renderDevice.get();
-}
+    if (isSotfwareRast())
+        return nullptr;
 
-#if USE(LIBDRM)
-static const CString wpeDRMRenderDeviceFile()
-{
-    drmDevicePtr devices[64];
-    memset(devices, 0, sizeof(devices));
+    static const char* envDeviceFile = getenv("WPE_DRM_RENDER_NODE");
+    if (envDeviceFile && *envDeviceFile)
+        return envDeviceFile;
 
-    int numDevices = drmGetDevices2(0, devices, std::size(devices));
-    if (numDevices <= 0)
-        return { };
-
-    CString renderDeviceFile;
-    for (int i = 0; i < numDevices && renderDeviceFile.isNull(); ++i) {
-        drmDevice* device = devices[i];
-        if (!(device->available_nodes & (1 << DRM_NODE_PRIMARY | 1 << DRM_NODE_RENDER)))
-            continue;
-
-        renderDeviceFile = device->nodes[DRM_NODE_PRIMARY];
-    }
-    drmFreeDevices(devices, numDevices);
-
-    return renderDeviceFile;
-}
-#endif
-
-/**
- * wpe_render_device:
- *
- * Get the render device to be used for rendering.
- *
- * Returns: (transfer none) (nullable): a render device, or %NULL.
- */
-const char* wpe_render_device()
-{
-    auto& renderDevice = renderDeviceFile();
-    if (renderDevice.isNull() && !isSotfwareRast()) {
-        const char* envDeviceFile = getenv("WPE_RENDER_DEVICE");
-        if (envDeviceFile && *envDeviceFile)
-            renderDevice = envDeviceFile;
-#if USE(LIBDRM)
-        else
-            renderDevice = wpeDRMRenderDeviceFile();
-#endif
-    }
-    return renderDevice.data();
+    auto* wpeDisplayClass = WPE_DISPLAY_GET_CLASS(display);
+    return wpeDisplayClass->get_drm_render_node ? wpeDisplayClass->get_drm_render_node(display) : nullptr;
 }

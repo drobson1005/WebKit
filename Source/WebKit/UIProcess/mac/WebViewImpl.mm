@@ -1159,7 +1159,7 @@ WebViewImpl::WebViewImpl(NSView <WebViewImplDelegate> *view, WKWebView *outerWeb
     : m_view(view)
     , m_pageClient(makeUniqueWithoutRefCountedCheck<PageClientImpl>(view, outerWebView))
     , m_page(processPool.createWebPage(*m_pageClient, WTFMove(configuration)))
-    , m_needsViewFrameInWindowCoordinates(m_page->preferences().pluginsEnabled())
+    , m_needsViewFrameInWindowCoordinates(false)
     , m_intrinsicContentSize(CGSizeMake(NSViewNoIntrinsicMetric, NSViewNoIntrinsicMetric))
     , m_layoutStrategy([WKViewLayoutStrategy layoutStrategyWithPage:m_page.get() view:view viewImpl:*this mode:kWKLayoutModeViewSize])
     , m_undoTarget(adoptNS([[WKEditorUndoTarget alloc] init]))
@@ -2730,6 +2730,14 @@ void WebViewImpl::selectionDidChange()
         updateCursorAccessoryPlacement();
 #endif
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    // FIXME: (rdar://123767495) Remove the `isEditable() && m_page->editorState().selectionIsRange` restriction when possible.
+    if (m_page->editorState().hasPostLayoutData() && isEditable() && m_page->editorState().selectionIsRange) {
+        auto selectionRect = m_page->editorState().postLayoutData->selectionBoundingRect;
+        scheduleShowSwapCharactersViewForSelectionRectOfView(selectionRect, m_view.getAutoreleased());
+    }
+#endif
+
     NSWindow *window = [m_view window];
     if (window.firstResponder == m_view.get().get()) {
         NSInspectorBar *inspectorBar = window.inspectorBar;
@@ -3210,8 +3218,6 @@ void WebViewImpl::requestCandidatesForSelectionIfNeeded()
 std::optional<EditorState::PostLayoutData> WebViewImpl::postLayoutDataForContentEditable()
 {
     const EditorState& editorState = m_page->editorState();
-    if (!editorState.isContentEditable)
-        return std::nullopt;
 
     // FIXME: It's pretty lame that we have to depend on the most recent EditorState having post layout data,
     // and that we just bail if it is missing.
@@ -3298,7 +3304,7 @@ void WebViewImpl::handleAcceptedCandidate(NSTextCheckingResult *acceptedCandidat
 
 void WebViewImpl::preferencesDidChange()
 {
-    BOOL needsViewFrameInWindowCoordinates = m_page->preferences().pluginsEnabled();
+    BOOL needsViewFrameInWindowCoordinates = false;
 
     if (!!needsViewFrameInWindowCoordinates == !!m_needsViewFrameInWindowCoordinates)
         return;
@@ -3481,10 +3487,12 @@ void WebViewImpl::setIgnoresMouseDraggedEvents(bool ignoresMouseDraggedEvents)
     m_ignoresMouseDraggedEvents = ignoresMouseDraggedEvents;
 }
 
-void WebViewImpl::setAccessibilityWebProcessToken(NSData *data)
+void WebViewImpl::setAccessibilityWebProcessToken(NSData *data, WebCore::FrameIdentifier frameID, pid_t pid)
 {
-    m_remoteAccessibilityChild = data.length ? adoptNS([[NSAccessibilityRemoteUIElement alloc] initWithRemoteToken:data]) : nil;
-    updateRemoteAccessibilityRegistration(true);
+    if (pid == m_page->process().processID()) {
+        m_remoteAccessibilityChild = data.length ? adoptNS([[NSAccessibilityRemoteUIElement alloc] initWithRemoteToken:data]) : nil;
+        updateRemoteAccessibilityRegistration(true);
+    }
 }
 
 void WebViewImpl::updateRemoteAccessibilityRegistration(bool registerProcess)
@@ -5195,6 +5203,14 @@ void WebViewImpl::setMarkedText(id string, NSRange selectedRange, NSRange replac
 #if HAVE(INLINE_PREDICTIONS)
 bool WebViewImpl::allowsInlinePredictions() const
 {
+    const EditorState& editorState = m_page->editorState();
+
+    if (editorState.hasPostLayoutData() && editorState.postLayoutData->canEnableWritingSuggestions)
+        return NSSpellChecker.isAutomaticInlineCompletionEnabled;
+
+    if (!editorState.isContentEditable)
+        return false;
+
     if (!inlinePredictionsEnabled() && !m_page->preferences().inlinePredictionsInAllEditableElementsEnabled())
         return false;
 
@@ -5303,7 +5319,7 @@ void WebViewImpl::showInlinePredictionsForCandidates(NSArray<NSTextCheckingResul
 
 NSRange WebViewImpl::selectedRange()
 {
-    ASSERT_NOT_REACHED();
+    // FIXME: (rdar://123703512) Re-add the `ASSERT_NOT_REACHED` assertion when possible.
     return NSMakeRange(NSNotFound, 0);
 }
 

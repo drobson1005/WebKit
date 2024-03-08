@@ -197,13 +197,28 @@ static bool affectsRenderedSubtree(Element& element, const RenderStyle& newStyle
     return false;
 }
 
-auto TreeResolver::computeDescendantsToResolve(Change change, Validity validity, DescendantsToResolve parentDescendantsToResolve) -> DescendantsToResolve
+auto TreeResolver::computeDescendantsToResolve(const ElementUpdate& update, const RenderStyle* existingStyle, Validity validity) const -> DescendantsToResolve
 {
-    if (parentDescendantsToResolve == DescendantsToResolve::All)
+    if (parent().descendantsToResolve == DescendantsToResolve::All)
         return DescendantsToResolve::All;
     if (validity >= Validity::SubtreeInvalid)
         return DescendantsToResolve::All;
-    switch (change) {
+
+    if (update.change != Change::None && existingStyle) {
+        auto customPropertyInStyleContainerQueryChanged = [&] {
+            auto& namesInQueries = scope().resolver->ruleSets().customPropertyNamesInStyleContainerQueries();
+            for (auto& name : namesInQueries) {
+                // Any descendant may depend on this changed custom property via a style query.
+                if (!existingStyle->customPropertyValueEqual(*update.style, name))
+                    return true;
+            }
+            return false;
+        }();
+        if (customPropertyInStyleContainerQueryChanged)
+            return DescendantsToResolve::All;
+    }
+
+    switch (update.change) {
     case Change::None:
         return DescendantsToResolve::None;
     case Change::NonInherited:
@@ -253,9 +268,9 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
         return { };
 
     auto update = createAnimatedElementUpdate(WTFMove(resolvedStyle), styleable, parent().change, resolutionContext);
-    auto descendantsToResolve = computeDescendantsToResolve(update.change, element.styleValidity(), parent().descendantsToResolve);
-
-    if (&element == m_document.documentElement()) {
+    auto descendantsToResolve = computeDescendantsToResolve(update, existingStyle, element.styleValidity());
+    bool isDocumentElement = &element == m_document.documentElement();
+    if (isDocumentElement) {
         if (styleChangeAffectsRelativeUnits(*update.style, existingStyle)) {
             // "rem" units are relative to the document element's font size so we need to recompute everything.
             scope().resolver->invalidateMatchedDeclarationsCache();
@@ -272,7 +287,7 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
     if (RefPtr input = dynamicDowncast<HTMLInputElement>(element); (input && input->isSearchField())
         || element.hasTagName(HTMLNames::meterTag)
         || is<HTMLProgressElement>(element)) {
-        if (existingStyle && update.style->effectiveAppearance() != existingStyle->effectiveAppearance()) {
+        if (existingStyle && update.style->usedAppearance() != existingStyle->usedAppearance()) {
             update.change = Change::Renderer;
             descendantsToResolve = DescendantsToResolve::All;
         }
@@ -296,8 +311,7 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
             return pseudoElementChange;
         if (pseudoElementUpdate->recompositeLayer)
             update.recompositeLayer = true;
-        if (pseudoElementIdentifier.nameArgument.isNull())
-            update.style->addCachedPseudoStyle(WTFMove(pseudoElementUpdate->style));
+        update.style->addCachedPseudoStyle(WTFMove(pseudoElementUpdate->style));
         return pseudoElementUpdate->change;
     };
     
@@ -312,9 +326,10 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
     resolveAndAddPseudoElementStyle({ PseudoId::Before });
     resolveAndAddPseudoElementStyle({ PseudoId::After });
     resolveAndAddPseudoElementStyle({ PseudoId::Backdrop });
-    resolveAndAddPseudoElementStyle({ PseudoId::ViewTransition });
 
-    if (m_document.hasViewTransitionPseudoElementTree() && &element == m_document.documentElement()) {
+    if (isDocumentElement && m_document.hasViewTransitionPseudoElementTree()) {
+        resolveAndAddPseudoElementStyle({ PseudoId::ViewTransition });
+
         RefPtr activeViewTransition = m_document.activeViewTransition();
         ASSERT(activeViewTransition);
         for (auto& name : activeViewTransition->namedElements().keys()) {
@@ -331,7 +346,7 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
         m_document.setMayHaveElementsWithNonAutoTouchAction();
 #endif
 #if ENABLE(EDITABLE_REGION)
-    if (update.style->effectiveUserModify() != UserModify::ReadOnly)
+    if (update.style->usedUserModify() != UserModify::ReadOnly)
         m_document.setMayHaveEditableElements();
 #endif
 
@@ -368,8 +383,8 @@ std::optional<ElementUpdate> TreeResolver::resolvePseudoElement(Element& element
         || pseudoElementIdentifier.pseudoId == PseudoId::ViewTransitionImagePair
         || pseudoElementIdentifier.pseudoId == PseudoId::ViewTransitionNew
         || pseudoElementIdentifier.pseudoId == PseudoId::ViewTransitionOld;
-    if (isViewTransitionPseudoElement && (!element.document().hasViewTransitionPseudoElementTree() || &element != element.document().documentElement()))
-        return { };
+    if (isViewTransitionPseudoElement)
+        ASSERT(m_document.hasViewTransitionPseudoElementTree() && &element == m_document.documentElement());
 
     if (!elementUpdate.style->hasPseudoStyle(pseudoElementIdentifier.pseudoId))
         return resolveAncestorPseudoElement(element, pseudoElementIdentifier, elementUpdate);
@@ -546,9 +561,26 @@ ResolutionContext TreeResolver::makeResolutionContext()
 ResolutionContext TreeResolver::makeResolutionContextForPseudoElement(const ElementUpdate& elementUpdate, const PseudoElementIdentifier& pseudoElementIdentifier)
 {
     auto parentStyle = [&]() -> const RenderStyle* {
-        if (pseudoElementIdentifier.pseudoId == PseudoId::FirstLetter) {
+        switch (pseudoElementIdentifier.pseudoId) {
+        case PseudoId::FirstLetter:
             if (auto* firstLineStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::FirstLine }))
                 return firstLineStyle;
+            break;
+        case PseudoId::ViewTransitionGroup:
+            if (auto* viewTransitionStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::ViewTransition }))
+                return viewTransitionStyle;
+            break;
+        case PseudoId::ViewTransitionImagePair:
+            if (auto* groupStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::ViewTransitionGroup, pseudoElementIdentifier.nameArgument }))
+                return groupStyle;
+            break;
+        case PseudoId::ViewTransitionOld:
+        case PseudoId::ViewTransitionNew:
+            if (auto* imagePairStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::ViewTransitionImagePair, pseudoElementIdentifier.nameArgument }))
+                return imagePairStyle;
+            break;
+        default:
+            break;
         }
         return elementUpdate.style.get();
     };
@@ -705,11 +737,25 @@ std::unique_ptr<RenderStyle> TreeResolver::resolveStartingStyle(const ResolvedSt
     // We now resolve the starting style by applying all rules (including @starting-style ones) again.
     // We could compute it along with the primary style and include it in MatchedPropertiesCache but it is not
     // clear this would be benefitial as it is typically only used once.
-    auto startingStyle = RenderStyle::clonePtr(*resolvedStyle.style);
+
+    auto& parentAfterChangeStyle = [&]() -> const RenderStyle& {
+        if (auto* parentElement = !styleable.pseudoElementIdentifier ? parent().element : &styleable.element) {
+            // "Starting style inherits from the parent’s after-change style just like after-change style does."
+            if (auto* afterChangeStyle = parentElement->lastStyleChangeEventStyle(styleable.pseudoElementIdentifier))
+                return *afterChangeStyle;
+        }
+        return *resolutionContext.parentStyle;
+    }();
+
+    auto startingStyle = RenderStyle::createPtr();
+    startingStyle->inheritFrom(parentAfterChangeStyle);
+
+    if (styleable.pseudoElementIdentifier)
+        startingStyle->setPseudoElementType(styleable.pseudoElementIdentifier->pseudoId);
 
     auto builderContext = BuilderContext {
         m_document,
-        *resolutionContext.parentStyle,
+        parentAfterChangeStyle,
         resolutionContext.documentElementStyle,
         &styleable.element
     };
@@ -727,7 +773,7 @@ std::unique_ptr<RenderStyle> TreeResolver::resolveStartingStyle(const ResolvedSt
     if (startingStyle->display() == DisplayType::None)
         return nullptr;
 
-    Adjuster adjuster(m_document, *resolutionContext.parentStyle, resolutionContext.parentBoxStyle, !styleable.pseudoElementIdentifier ? &styleable.element : nullptr);
+    Adjuster adjuster(m_document, parentAfterChangeStyle, resolutionContext.parentBoxStyle, styleable.pseudoElementIdentifier ? &styleable.element : nullptr);
     adjuster.adjust(*startingStyle, nullptr);
 
     return startingStyle;
@@ -953,7 +999,9 @@ void TreeResolver::resolveComposedTree()
         auto resolutionType = determineResolutionType(element, style, parent.descendantsToResolve, parent.change);
         if (resolutionType) {
             element.resetComputedStyle();
-            element.resetStyleRelations();
+
+            if (*resolutionType != ResolutionType::AnimationOnly)
+                element.resetStyleRelations();
 
             if (element.hasCustomStyleResolveCallbacks())
                 element.willRecalcStyle(parent.change);

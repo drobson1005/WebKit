@@ -139,11 +139,6 @@ void WebPageProxy::stopSpeaking()
     notImplemented();
 }
 
-void WebPageProxy::searchWithSpotlight(const String&)
-{
-    notImplemented();
-}
-
 void WebPageProxy::searchTheWeb(const String&)
 {
     notImplemented();
@@ -763,11 +758,10 @@ void WebPageProxy::setSmartInsertDeleteEnabled(bool)
     notImplemented();
 }
 
-void WebPageProxy::registerWebProcessAccessibilityToken(std::span<const uint8_t> data)
+void WebPageProxy::registerWebProcessAccessibilityToken(std::span<const uint8_t> data, FrameIdentifier frameID)
 {
-    protectedPageClient()->accessibilityWebProcessTokenReceived(data);
-}    
-
+    pageClient().accessibilityWebProcessTokenReceived(data, frameID, messageSenderConnection()->remoteProcessID());
+}
 
 void WebPageProxy::relayAccessibilityNotification(const String& notificationName, std::span<const uint8_t> data)
 {

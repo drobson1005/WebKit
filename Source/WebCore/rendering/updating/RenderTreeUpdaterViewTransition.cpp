@@ -81,7 +81,7 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementTree(RenderElement& d
         newViewTransitionRoot->initializeStyle();
         documentElementRenderer.view().setViewTransitionRoot(*newViewTransitionRoot.get());
         viewTransitionRoot = newViewTransitionRoot.get();
-        m_updater.m_builder.attach(documentElementRenderer, WTFMove(newViewTransitionRoot));
+        m_updater.m_builder.attach(*documentElementRenderer.parent(), WTFMove(newViewTransitionRoot));
     }
 
     // No groups. The map is constant during the duration of the transition, so we don't need to handle deletions.
@@ -101,8 +101,9 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementTree(RenderElement& d
                 updatePseudoElementGroup(*style, downcast<RenderElement>(*currentGroup), documentElementRenderer);
         } else {
             buildPseudoElementGroup(name, documentElementRenderer, currentGroup);
-            currentGroup = currentGroup ? currentGroup->previousSibling() : documentElementRenderer.view().viewTransitionRoot()->firstChild();
+            currentGroup = currentGroup ? currentGroup->previousSibling() : nullptr;
         }
+
         currentGroup = currentGroup ? currentGroup->nextSibling() : nullptr;
     }
 
@@ -112,34 +113,40 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementTree(RenderElement& d
     }
 }
 
+static RenderPtr<RenderBox> createRendererIfNeeded(RenderElement& documentElementRenderer, const AtomString& name, PseudoId pseudoId)
+{
+    auto& documentElementStyle = documentElementRenderer.style();
+    auto style = documentElementRenderer.getCachedPseudoStyle({ pseudoId, name }, &documentElementStyle);
+    if (!style || style->display() == DisplayType::None)
+        return nullptr;
+
+    Ref document = documentElementRenderer.document();
+    RenderPtr<RenderBox> renderer;
+    if (pseudoId == PseudoId::ViewTransitionOld || pseudoId == PseudoId::ViewTransitionNew) {
+        const auto* capturedElement = document->activeViewTransition()->namedElements().find(name);
+        ASSERT(capturedElement);
+        if (pseudoId == PseudoId::ViewTransitionOld && !capturedElement->oldImage)
+            return nullptr;
+        if (pseudoId == PseudoId::ViewTransitionNew && !capturedElement->newElement)
+            return nullptr;
+
+        RenderPtr<RenderViewTransitionCapture> rendererViewTransition = WebCore::createRenderer<RenderViewTransitionCapture>(RenderObject::Type::ViewTransitionCapture, document, RenderStyle::clone(*style));
+        rendererViewTransition->setImage(pseudoId == PseudoId::ViewTransitionOld ? capturedElement->oldImage.value_or(nullptr) : nullptr, capturedElement->oldSize, capturedElement->oldOverflowRect);
+        renderer = WTFMove(rendererViewTransition);
+    } else
+        renderer = WebCore::createRenderer<RenderBlockFlow>(RenderObject::Type::BlockFlow, document, RenderStyle::clone(*style));
+
+    renderer->initializeStyle();
+    return renderer;
+}
+
+
 void RenderTreeUpdater::ViewTransition::buildPseudoElementGroup(const AtomString& name, RenderElement& documentElementRenderer, RenderObject* beforeChild)
 {
-    Ref document = documentElementRenderer.document();
-    auto& documentElementStyle = documentElementRenderer.style();
-    auto createRendererIfNeeded = [&](const AtomString& name, PseudoId pseudoId) -> RenderPtr<RenderBox> {
-        auto style = documentElementRenderer.getCachedPseudoStyle({ pseudoId, name }, &documentElementStyle);
-        if (!style || style->display() == DisplayType::None)
-            return nullptr;
-        auto newStyle = RenderStyle::clone(*style);
-        RenderPtr<RenderBox> renderer;
-        if (pseudoId == PseudoId::ViewTransitionOld || pseudoId == PseudoId::ViewTransitionNew) {
-            RenderPtr<RenderViewTransitionCapture> rendererViewTransition = WebCore::createRenderer<RenderViewTransitionCapture>(RenderObject::Type::ViewTransitionCapture, document, WTFMove(newStyle));
-
-            if (const auto* capturedElement = document->activeViewTransition()->namedElements().find(name))
-                rendererViewTransition->setImage(capturedElement->oldSize);
-
-            renderer = WTFMove(rendererViewTransition);
-        } else
-            renderer = WebCore::createRenderer<RenderBlockFlow>(RenderObject::Type::BlockFlow, document, WTFMove(newStyle));
-
-        renderer->initializeStyle();
-        return renderer;
-    };
-
-    auto viewTransitionGroup = createRendererIfNeeded(name, PseudoId::ViewTransitionGroup);
-    auto viewTransitionImagePair = viewTransitionGroup ? createRendererIfNeeded(name, PseudoId::ViewTransitionImagePair) : nullptr;
-    auto viewTransitionOld = viewTransitionImagePair ? createRendererIfNeeded(name, PseudoId::ViewTransitionOld) : nullptr;
-    auto viewTransitionNew = viewTransitionImagePair ? createRendererIfNeeded(name, PseudoId::ViewTransitionNew) : nullptr;
+    auto viewTransitionGroup = createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionGroup);
+    auto viewTransitionImagePair = viewTransitionGroup ? createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionImagePair) : nullptr;
+    auto viewTransitionOld = viewTransitionImagePair ? createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionOld) : nullptr;
+    auto viewTransitionNew = viewTransitionImagePair ? createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionNew) : nullptr;
 
     if (viewTransitionOld)
         m_updater.m_builder.attach(*viewTransitionImagePair, WTFMove(viewTransitionOld));
@@ -162,26 +169,6 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementGroup(const RenderSty
     auto newGroupStyle = RenderStyle::clone(groupStyle);
     group.setStyle(WTFMove(newGroupStyle));
 
-    auto createRendererIfNeeded = [&](PseudoId pseudoId) -> RenderPtr<RenderBox> {
-        auto style = documentElementRenderer.getCachedPseudoStyle({ pseudoId, name }, &documentElementStyle);
-        if (!style || style->display() == DisplayType::None)
-            return nullptr;
-        auto newStyle = RenderStyle::clone(*style);
-        RenderPtr<RenderBox> renderer;
-        if (pseudoId == PseudoId::ViewTransitionOld || pseudoId == PseudoId::ViewTransitionNew) {
-            RenderPtr<RenderViewTransitionCapture> rendererViewTransition = WebCore::createRenderer<RenderViewTransitionCapture>(RenderObject::Type::ViewTransitionCapture, documentElementRenderer.document(), WTFMove(newStyle));
-
-            if (const auto* capturedElement = documentElementRenderer.document().activeViewTransition()->namedElements().find(name))
-                rendererViewTransition->setImage(capturedElement->oldSize);
-
-            renderer = WTFMove(rendererViewTransition);
-        } else
-            renderer = WebCore::createRenderer<RenderBlockFlow>(RenderObject::Type::BlockFlow, documentElementRenderer.document(), WTFMove(newStyle));
-
-        renderer->initializeStyle();
-        return renderer;
-    };
-
     enum class ShouldDeleteRenderer : bool { No, Yes };
     auto updateRenderer = [&](RenderObject& renderer) -> ShouldDeleteRenderer {
         auto style = documentElementRenderer.getCachedPseudoStyle({ renderer.style().pseudoElementType(), name }, &documentElementStyle);
@@ -202,7 +189,7 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementGroup(const RenderSty
             m_updater.m_builder.destroy(*imagePair);
             return;
         }
-    } else if (auto newImagePair = createRendererIfNeeded(PseudoId::ViewTransitionImagePair)) {
+    } else if (auto newImagePair = createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionImagePair)) {
         imagePair = newImagePair.get();
         m_updater.m_builder.attach(group, WTFMove(newImagePair));
     } else
@@ -211,9 +198,9 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementGroup(const RenderSty
     auto* imagePairFirstChild = imagePair->firstChild();
     // Build the ::view-transition-image-pair children if needed.
     if (!imagePairFirstChild) {
-        if (auto viewTransitionOld = createRendererIfNeeded(PseudoId::ViewTransitionOld))
+        if (auto viewTransitionOld = createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionOld))
             m_updater.m_builder.attach(*imagePair, WTFMove(viewTransitionOld));
-        if (auto viewTransitionNew = createRendererIfNeeded(PseudoId::ViewTransitionNew))
+        if (auto viewTransitionNew = createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionNew))
             m_updater.m_builder.attach(*imagePair, WTFMove(viewTransitionNew));
         return;
     }
@@ -234,12 +221,12 @@ void RenderTreeUpdater::ViewTransition::updatePseudoElementGroup(const RenderSty
     } else {
         ASSERT(imagePairFirstChild->style().pseudoElementType() == PseudoId::ViewTransitionNew);
         viewTransitionNew = imagePairFirstChild;
-        newViewTransitionOld = createRendererIfNeeded(PseudoId::ViewTransitionOld);
+        newViewTransitionOld = createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionOld);
     }
 
     auto shouldDeleteViewTransitionNew = ShouldDeleteRenderer::No;
     if (!viewTransitionNew)
-        newViewTransitionNew = createRendererIfNeeded(PseudoId::ViewTransitionNew);
+        newViewTransitionNew = createRendererIfNeeded(documentElementRenderer, name, PseudoId::ViewTransitionNew);
     else
         shouldDeleteViewTransitionNew = updateRenderer(*viewTransitionNew);
 

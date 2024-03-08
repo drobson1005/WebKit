@@ -26,7 +26,11 @@
 #include "config.h"
 #include "RenderViewTransitionCapture.h"
 
+#include "ImageOverlayController.h"
+#include "ImageQualityController.h"
+#include "PaintInfo.h"
 #include "RenderBoxModelObjectInlines.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
@@ -36,9 +40,35 @@ RenderViewTransitionCapture::RenderViewTransitionCapture(Type type, Document& do
     : RenderReplaced(type, document, WTFMove(style), { }, ReplacedFlag::IsViewTransitionCapture)
 { }
 
-void RenderViewTransitionCapture::setImage(const LayoutSize& size)
+void RenderViewTransitionCapture::setImage(RefPtr<ImageBuffer> oldImage, const LayoutSize& size, const LayoutRect& overflowRect)
 {
     setIntrinsicSize(size);
+    m_oldImage = oldImage;
+    m_overflowRect = overflowRect;
+}
+
+void RenderViewTransitionCapture::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    auto& context = paintInfo.context();
+    if (context.detectingContentfulPaint())
+        return;
+
+    LayoutRect replacedContentRect = this->replacedContentRect();
+    replacedContentRect.moveBy(paintOffset);
+
+    IntPoint position = snappedIntRect(replacedContentRect).location();
+    position.moveBy(roundedIntPoint(m_overflowRect.location()));
+
+    InterpolationQualityMaintainer interpolationMaintainer(context, ImageQualityController::interpolationQualityFromStyle(style()));
+    if (m_oldImage)
+        context.drawImageBuffer(*m_oldImage, position, { context.compositeOperation() });
+
+}
+
+void RenderViewTransitionCapture::layout()
+{
+    RenderReplaced::layout();
+    addVisualOverflow(m_overflowRect);
 }
 
 } // namespace WebCore

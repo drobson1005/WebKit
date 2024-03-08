@@ -38,7 +38,6 @@ Path Font::platformPathForGlyph(Glyph glyph) const
     auto path = PathSkia::create();
     const auto& font = m_platformData.skFont();
     font.getPath(glyph, path->platformPath());
-    // FIXME: syntetic bold offset.
     return { path };
 }
 
@@ -109,9 +108,10 @@ void Font::platformInit()
 
     m_fontMetrics.setUnitsPerEm(font.getTypeface()->getUnitsPerEm());
 
-    m_syntheticBoldOffset = m_platformData.syntheticBold() ? 1.0f : 0.f;
-
-    // FIXME: Disable antialiasing for the Ahem font because many tests require this.
+    SkString familyName;
+    font.getTypeface()->getFamilyName(&familyName);
+    if (equalIgnoringASCIICase(familyName.c_str(), "Ahem"_s))
+        m_allowsAntialiasing = false;
 }
 
 void Font::platformCharWidthInit()

@@ -33,6 +33,7 @@
 #include "HandleMessage.h"
 #include "NativeWebMouseEvent.h"
 #include "NavigationActionData.h"
+#include "PageLoadState.h"
 #include "RemotePageDrawingAreaProxy.h"
 #include "RemotePageVisitedLinkStoreRegistration.h"
 #include "WebFrameProxy.h"
@@ -57,8 +58,6 @@ RemotePageProxy::RemotePageProxy(WebPageProxy& page, WebProcessProxy& process, c
         m_messageReceiverRegistration.startReceivingMessages(m_process, m_webPageID, *this);
 
     m_process->addRemotePageProxy(*this);
-
-    page.addRemotePageProxy(domain, *this);
 }
 
 void RemotePageProxy::injectPageIntoNewProcess()
@@ -79,40 +78,30 @@ void RemotePageProxy::injectPageIntoNewProcess()
     m_drawingArea = makeUnique<RemotePageDrawingAreaProxy>(*drawingArea, m_process);
     m_visitedLinkStoreRegistration = makeUnique<RemotePageVisitedLinkStoreRegistration>(*page, m_process);
 
-    auto parameters = page->creationParameters(m_process, *drawingArea);
-    parameters.subframeProcessPageParameters = WebPageCreationParameters::SubframeProcessPageParameters {
-        URL(page->currentURL()),
-        page->mainFrame()->frameTreeCreationParameters(),
-        page->mainFrameWebsitePoliciesData() ? std::make_optional(*page->mainFrameWebsitePoliciesData()) : std::nullopt
-    };
-    parameters.isProcessSwap = true; // FIXME: This should be a parameter to creationParameters rather than doctoring up the parameters afterwards. <rdar://116201784>
-    parameters.topContentInset = 0;
-    m_process->send(Messages::WebProcess::CreateWebPage(m_webPageID, WTFMove(parameters)), 0);
+    m_process->send(
+        Messages::WebProcess::CreateWebPage(
+            m_webPageID,
+            page->creationParametersForRemotePage(m_process, *drawingArea, SubframeProcessPageParameters {
+                URL(page->pageLoadState().url()),
+                page->mainFrame()->frameTreeCreationParameters(),
+                page->mainFrameWebsitePoliciesData() ? std::make_optional(*page->mainFrameWebsitePoliciesData()) : std::nullopt
+            })),
+        0);
 }
 
 void RemotePageProxy::processDidTerminate(WebCore::ProcessIdentifier processIdentifier)
 {
-    if (m_page && m_page->drawingArea())
-        m_page->drawingArea()->remotePageProcessCrashed(processIdentifier);
-    for (auto& frame : m_frames)
-        frame.remoteProcessDidTerminate();
-}
-
-void RemotePageProxy::addFrame(WebFrameProxy& frame)
-{
-    m_frames.add(frame);
-}
-
-void RemotePageProxy::removeFrame(WebFrameProxy& frame)
-{
-    m_frames.remove(frame);
+    if (!m_page)
+        return;
+    if (auto* drawingArea = m_page->drawingArea())
+        drawingArea->remotePageProcessCrashed(processIdentifier);
+    if (RefPtr mainFrame = m_page->mainFrame())
+        mainFrame->remoteProcessDidTerminate(process());
 }
 
 RemotePageProxy::~RemotePageProxy()
 {
     m_process->removeRemotePageProxy(*this);
-    if (m_page)
-        m_page->removeRemotePageProxy(m_domain);
 }
 
 void RemotePageProxy::didReceiveMessage(IPC::Connection& connection, IPC::Decoder& decoder)

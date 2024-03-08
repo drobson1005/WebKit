@@ -135,8 +135,6 @@ public:
     {
     }
 
-    void runMainThreadFinalizationTasks();
-    
     bool didFailToAllocate() const
     {
         return !m_didAllocate;
@@ -323,12 +321,6 @@ ALLOW_NONLITERAL_FORMAT_END
     JS_EXPORT_PRIVATE static void clearProfileStatistics();
     JS_EXPORT_PRIVATE static void dumpProfileStatistics(std::optional<PrintStream*> = std::nullopt);
 
-    template<typename Functor>
-    void addMainThreadFinalizationTask(const Functor& functor)
-    {
-        m_mainThreadFinalizationTasks.append(createSharedTask<void()>(functor));
-    }
-
     void setIsThunk() { m_isThunk = true; }
 
 private:
@@ -399,7 +391,7 @@ private:
 #if ENABLE(BRANCH_COMPACTION)
     AssemblerData m_assemblerStorage;
 #if CPU(ARM64E)
-    AssemblerData m_assemblerHashesStorage;
+    AssemblerHashes m_assemblerHashesStorage;
 #endif
     bool m_shouldPerformBranchCompaction { true };
 #endif
@@ -416,7 +408,6 @@ private:
     CodePtr<LinkBufferPtrTag> m_code;
     Vector<RefPtr<SharedTask<void(LinkBuffer&)>>> m_linkTasks;
     Vector<RefPtr<SharedTask<void(LinkBuffer&)>>> m_lateLinkTasks;
-    Vector<RefPtr<SharedTask<void()>>> m_mainThreadFinalizationTasks;
 
     static size_t s_profileCummulativeLinkedSizes[numberOfProfiles];
     static size_t s_profileCummulativeLinkedCounts[numberOfProfiles];

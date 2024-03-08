@@ -412,6 +412,12 @@ TextStream& operator<<(TextStream& stream, const AccessibilitySearchCriteria& cr
     return stream;
 }
 
+TextStream& operator<<(TextStream& stream, AccessibilityText text)
+{
+    stream << text.textSource << ": " << text.text;
+    return stream;
+}
+
 TextStream& operator<<(TextStream& stream, AccessibilityTextSource source)
 {
     switch (source) {
@@ -551,6 +557,18 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
         break;
     case AXObjectCache::AXNotification::AXAutofillTypeChanged:
         stream << "AXAutofillTypeChanged";
+        break;
+    case AXObjectCache::AXNotification::AXARIAColumnIndexChanged:
+        stream << "AXARIAColumnIndexChanged";
+        break;
+    case AXObjectCache::AXNotification::AXARIARowIndexChanged:
+        stream << "AXARIARowIndexChanged";
+        break;
+    case AXObjectCache::AXNotification::AXBrailleLabelChanged:
+        stream << "AXBrailleLabelChanged";
+        break;
+    case AXObjectCache::AXNotification::AXBrailleRoleDescriptionChanged:
+        stream << "AXBrailleRoleDescriptionChanged";
         break;
     case AXObjectCache::AXNotification::AXCellSlotsChanged:
         stream << "AXCellSlotsChanged";
@@ -774,6 +792,14 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
     case AXObjectCache::AXNotification::AXTextCompositionChanged:
         stream << "AXTextCompositionChanged";
         break;
+    case AXObjectCache::AXNotification::AXTextUnderElementChanged:
+        stream << "AXTextUnderElementChanged";
+        break;
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    case AXObjectCache::AXNotification::AXTextRunsChanged:
+        stream << "AXTextRunsChanged";
+        break;
+#endif
     case AXObjectCache::AXNotification::AXTextSecurityChanged:
         stream << "AXTextSecurityChanged";
         break;
@@ -882,6 +908,9 @@ void streamAXCoreObject(TextStream& stream, const AXCoreObject& object, const Op
 
     if (options & AXStreamOptions::Role)
         stream.dumpProperty("role", object.roleValue());
+
+    if (auto* axObject = dynamicDowncast<AccessibilityObject>(object); axObject && axObject->renderer())
+        stream.dumpProperty("renderName", axObject->renderer()->renderName());
 
     if (options & AXStreamOptions::ParentID) {
         auto* parent = object.parentObjectUnignored();

@@ -51,6 +51,10 @@ class FilterOperations;
 class MutableStyleProperties;
 class RenderStyle;
 
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+class AcceleratedEffect;
+#endif
+
 namespace Style {
 struct ResolutionContext;
 }
@@ -171,9 +175,11 @@ public:
     void customPropertyRegistrationDidChange(const AtomString&);
 
     bool canBeAccelerated() const;
+    bool accelerationWasPrevented() const { return m_runningAccelerated == RunningAccelerated::Prevented; }
     bool preventsAcceleration() const;
     void effectStackNoLongerPreventsAcceleration();
     void effectStackNoLongerAllowsAcceleration();
+    void effectStackNoLongerAllowsAccelerationDuringAcceleratedActionApplication();
     void wasAddedToEffectStack();
     void wasRemovedFromEffectStack();
 
@@ -183,6 +189,11 @@ public:
     static String CSSPropertyIDToIDLAttributeName(CSSPropertyID);
 
     WebAnimationType animationType() const { return m_animationType; }
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+    const AcceleratedEffect* acceleratedRepresentation() const { return m_acceleratedRepresentation.get(); }
+    void setAcceleratedRepresentation(const AcceleratedEffect* acceleratedRepresentation) { m_acceleratedRepresentation = acceleratedRepresentation; }
+#endif
 
 private:
     KeyframeEffect(Element*, const std::optional<Style::PseudoElementIdentifier>&);
@@ -283,6 +294,10 @@ private:
     Vector<AcceleratedAction> m_pendingAcceleratedActions;
     RefPtr<Element> m_target;
     std::optional<Style::PseudoElementIdentifier> m_pseudoElementIdentifier { };
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+    WeakPtr<AcceleratedEffect> m_acceleratedRepresentation;
+#endif
 
     AcceleratedAction m_lastRecordedAcceleratedAction { AcceleratedAction::Stop };
     WebAnimationType m_animationType { WebAnimationType::WebAnimation };

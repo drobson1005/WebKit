@@ -218,7 +218,10 @@ void ImageLoader::updateFromElement(RelevantMutation relevantMutation)
         if (m_image && attr == m_pendingURL)
             imageURL = m_image->url();
         else {
-            imageURL = document->completeURL(attr);
+            if (RefPtr imageElement = dynamicDowncast<HTMLImageElement>(element()))
+                imageURL = imageElement->currentURL();
+            else
+                imageURL = document->completeURL(attr);
             m_pendingURL = attr;
         }
         ResourceRequest resourceRequest(imageURL);
@@ -548,13 +551,8 @@ void ImageLoader::decode()
         resolveDecodePromises();
         return;
     }
-
-    bitmapImage->decode([promises = WTFMove(m_decodingPromises)](DecodingStatus decodingStatus) mutable {
-        ASSERT(decodingStatus != DecodingStatus::Decoding);
-        if (decodingStatus == DecodingStatus::Invalid)
-            rejectPromises(promises, "Decoding error."_s);
-        else
-            resolvePromises(promises);
+    bitmapImage->decode([promises = WTFMove(m_decodingPromises)]() mutable {
+        resolvePromises(promises);
     });
 }
 

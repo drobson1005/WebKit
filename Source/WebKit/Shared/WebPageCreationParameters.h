@@ -32,6 +32,7 @@
 #include "SessionState.h"
 #include "UserContentControllerParameters.h"
 #include "ViewWindowCoordinates.h"
+#include "VisitedLinkTableIdentifier.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebPageGroupData.h"
 #include "WebPageProxyIdentifier.h"
@@ -82,6 +83,12 @@ class Encoder;
 
 namespace WebKit {
 
+struct SubframeProcessPageParameters {
+    URL initialMainDocumentURL;
+    FrameTreeCreationParameters frameTreeParameters;
+    std::optional<WebsitePoliciesData> websitePoliciesData;
+};
+
 struct WebPageCreationParameters {
     WebCore::IntSize viewSize;
 
@@ -124,7 +131,7 @@ struct WebPageCreationParameters {
     bool itemStatesWereRestoredByAPIRequest { false };
     Vector<BackForwardListItemState> itemStates;
 
-    uint64_t visitedLinkTableID;
+    VisitedLinkTableIdentifier visitedLinkTableID;
     bool canRunBeforeUnloadConfirmPanel;
     bool canRunModal;
 
@@ -304,11 +311,6 @@ struct WebPageCreationParameters {
 
     WebCore::ContentSecurityPolicyModeForExtension contentSecurityPolicyModeForExtension { WebCore::ContentSecurityPolicyModeForExtension::None };
 
-    struct SubframeProcessPageParameters {
-        URL initialMainDocumentURL;
-        FrameTreeCreationParameters frameTreeParameters;
-        std::optional<WebsitePoliciesData> websitePoliciesData;
-    };
     std::optional<SubframeProcessPageParameters> subframeProcessPageParameters;
     std::optional<WebCore::FrameIdentifier> openerFrameIdentifier;
     std::optional<WebCore::FrameIdentifier> mainFrameIdentifier;

@@ -290,9 +290,9 @@ struct Connection::PendingSyncReply {
     }
 };
 
-Ref<Connection> Connection::createServerConnection(Identifier identifier)
+Ref<Connection> Connection::createServerConnection(Identifier identifier, Thread::QOS receiveQueueQOS)
 {
-    return adoptRef(*new Connection(identifier, true));
+    return adoptRef(*new Connection(identifier, true, receiveQueueQOS));
 }
 
 Ref<Connection> Connection::createClientConnection(Identifier identifier)
@@ -306,10 +306,10 @@ HashMap<IPC::Connection::UniqueID, ThreadSafeWeakPtr<Connection>>& Connection::c
     return map;
 }
 
-Connection::Connection(Identifier identifier, bool isServer)
+Connection::Connection(Identifier identifier, bool isServer, Thread::QOS receiveQueueQOS)
     : m_uniqueID(UniqueID::generate())
     , m_isServer(isServer)
-    , m_connectionQueue(WorkQueue::create("com.apple.IPC.ReceiveQueue"))
+    , m_connectionQueue(WorkQueue::create("com.apple.IPC.ReceiveQueue", receiveQueueQOS))
 {
     {
         Locker locker { s_connectionMapLock };
@@ -632,6 +632,22 @@ Error Connection::sendMessageWithAsyncReply(UniqueRef<Encoder>&& encoder, AsyncR
     return error;
 }
 
+Error Connection::sendMessageWithAsyncReplyWithDispatcher(UniqueRef<Encoder>&& encoder, AsyncReplyHandlerWithDispatcher&& replyHandler, OptionSet<SendOption> sendOptions, std::optional<Thread::QOS> qos)
+{
+    ASSERT(replyHandler.replyID);
+    ASSERT(replyHandler.completionHandler);
+    auto replyID = replyHandler.replyID;
+    encoder.get() << replyID;
+    addAsyncReplyHandlerWithDispatcher(WTFMove(replyHandler));
+    auto error = sendMessage(WTFMove(encoder), sendOptions, qos);
+    if (error == Error::NoError)
+        return Error::NoError;
+
+    if (auto replyHandlerToCancel = takeAsyncReplyHandlerWithDispatcher(replyID))
+        replyHandlerToCancel(nullptr);
+    return error;
+}
+
 Error Connection::sendSyncReply(UniqueRef<Encoder>&& encoder)
 {
     return sendMessage(WTFMove(encoder), { });
@@ -905,6 +921,14 @@ void Connection::processIncomingMessage(UniqueRef<Decoder> message)
     Locker incomingMessagesLocker { m_incomingMessagesLock };
     if (!m_syncState)
         return;
+
+    if (message->messageReceiverName() == ReceiverName::AsyncReply) {
+        if (auto replyHandlerWithDispatcher = takeAsyncReplyHandlerWithDispatcherWithLockHeld(AtomicObjectIdentifier<AsyncReplyIDType>(message->destinationID()))) {
+            replyHandlerWithDispatcher(message.moveToUniquePtr());
+            return;
+        }
+        // Fallback to default case, error handling will be performed in sendMessage().
+    }
 
     if (auto* receiveQueue = m_receiveQueues.get(message.get())) {
         receiveQueue->enqueueMessage(*this, WTFMove(message));
@@ -1420,17 +1444,31 @@ void Connection::addAsyncReplyHandler(AsyncReplyHandler&& handler)
     ASSERT_UNUSED(result, result.isNewEntry);
 }
 
+void Connection::addAsyncReplyHandlerWithDispatcher(AsyncReplyHandlerWithDispatcher&& handler)
+{
+    Locker locker { m_incomingMessagesLock };
+    auto result = m_asyncReplyHandlerWithDispatchers.add(handler.replyID, WTFMove(handler.completionHandler));
+    ASSERT_UNUSED(result, result.isNewEntry);
+}
+
 void Connection::cancelAsyncReplyHandlers()
 {
     AsyncReplyHandlerMap map;
+    AsyncReplyHandlerWithDispatcherMap mapDispatcher;
     {
         Locker locker { m_incomingMessagesLock };
         map.swap(m_asyncReplyHandlers);
+        mapDispatcher.swap(m_asyncReplyHandlerWithDispatchers);
     }
 
     for (auto& handler : map.values()) {
         if (handler)
             handler(nullptr);
+    }
+
+    for (auto& handlerWithDispatcher : mapDispatcher.values()) {
+        if (handlerWithDispatcher)
+            handlerWithDispatcher(nullptr);
     }
 }
 
@@ -1440,6 +1478,26 @@ CompletionHandler<void(Decoder*)> Connection::takeAsyncReplyHandler(AsyncReplyID
     if (!m_asyncReplyHandlers.isValidKey(replyID))
         return nullptr;
     return m_asyncReplyHandlers.take(replyID);
+}
+
+bool Connection::isAsyncReplyHandlerWithDispatcher(AsyncReplyID replyID)
+{
+    Locker locker { m_incomingMessagesLock };
+    return m_asyncReplyHandlerWithDispatchers.isValidKey(replyID) && m_asyncReplyHandlerWithDispatchers.contains(replyID);
+}
+
+CompletionHandler<void(std::unique_ptr<Decoder>&&)> Connection::takeAsyncReplyHandlerWithDispatcher(AsyncReplyID replyID)
+{
+    Locker locker { m_incomingMessagesLock };
+    return takeAsyncReplyHandlerWithDispatcherWithLockHeld(replyID);
+}
+
+CompletionHandler<void(std::unique_ptr<Decoder>&&)> Connection::takeAsyncReplyHandlerWithDispatcherWithLockHeld(AsyncReplyID replyID)
+{
+    assertIsHeld(m_incomingMessagesLock);
+    if (!m_asyncReplyHandlerWithDispatchers.isValidKey(replyID))
+        return { };
+    return m_asyncReplyHandlerWithDispatchers.take(replyID);
 }
 
 void Connection::wakeUpRunLoop()

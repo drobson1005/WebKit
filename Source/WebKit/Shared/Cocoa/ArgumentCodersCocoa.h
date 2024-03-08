@@ -31,6 +31,7 @@
 #if PLATFORM(COCOA)
 
 #import "WKKeyedCoder.h"
+#import <WebCore/AttributedString.h>
 #import <wtf/RetainPtr.h>
 
 #if ENABLE(DATA_DETECTION)
@@ -63,36 +64,16 @@ OBJC_CLASS PKPaymentToken;
 OBJC_CLASS PKShippingMethod;
 #endif
 
+OBJC_CLASS PlatformColor;
+OBJC_CLASS NSShadow;
+
 namespace IPC {
 
 #ifdef __OBJC__
 
 enum class NSType : uint8_t {
-#if USE(AVFOUNDATION)
-    AVOutputContext,
-#endif
     Array,
-#if USE(PASSKIT)
-    CNContact,
-    CNPhoneNumber,
-    CNPostalAddress,
-    NSDateComponents,
-    PKContact,
-    PKPaymentMerchantSession,
-    PKPayment,
-    PKPaymentToken,
-    PKSecureElementPass,
-    PKShippingMethod,
-    PKDateComponentsRange,
-    PKPaymentMethod,
-#endif
     Color,
-#if ENABLE(DATA_DETECTION)
-#if PLATFORM(MAC)
-    DDActionContext,
-#endif
-    DDScannerResult,
-#endif
     Data,
     Date,
     Error,
@@ -101,12 +82,9 @@ enum class NSType : uint8_t {
     Locale,
     Number,
     Null,
-    PersonNameComponents,
-    PresentationIntent,
     SecureCoding,
     String,
     URL,
-    NSURLProtectionSpace,
     NSValue,
     CF,
     Unknown,
@@ -163,8 +141,8 @@ template<> Class getClass<PKPaymentMethod>();
 template<> Class getClass<PKSecureElementPass>();
 #endif
 
-void encodeObjectWithWrapper(Encoder&, id);
-std::optional<RetainPtr<id>> decodeObjectFromWrapper(Decoder&, const HashSet<Class>& allowedClasses);
+template<> Class getClass<PlatformColor>();
+template<> Class getClass<NSShadow>();
 
 template<typename T> void encodeObjectDirectly(Encoder&, T *);
 template<typename T> void encodeObjectDirectly(Encoder&, T);
@@ -193,7 +171,7 @@ std::optional<RetainPtr<T>> decodeRequiringAllowedClasses(Decoder& decoder)
 #if ASSERT_ENABLED
     auto allowedClasses = decoder.allowedClasses();
 #endif
-    auto result = decodeObjectFromWrapper(decoder, decoder.allowedClasses());
+    auto result = decodeObjectDirectlyRequiringAllowedClasses<T>(decoder);
     if (!result)
         return std::nullopt;
     ASSERT(!*result || isObjectClassAllowed((*result).get(), allowedClasses));
@@ -203,7 +181,7 @@ std::optional<RetainPtr<T>> decodeRequiringAllowedClasses(Decoder& decoder)
 template<typename T, typename>
 std::optional<T> decodeRequiringAllowedClasses(Decoder& decoder)
 {
-    auto result = decodeObjectFromWrapper(decoder, decoder.allowedClasses());
+    auto result = decodeObjectDirectlyRequiringAllowedClasses<T>(decoder);
     if (!result)
         return std::nullopt;
     ASSERT(!*result || isObjectClassAllowed((*result).get(), decoder.allowedClasses()));
@@ -214,7 +192,7 @@ template<typename T> struct ArgumentCoder<T *> {
     template<typename U = T, typename = IsObjCObject<U>>
     static void encode(Encoder& encoder, U *object)
     {
-        encodeObjectWithWrapper(encoder, object);
+        encodeObjectDirectly<U>(encoder, object);
     }
 };
 

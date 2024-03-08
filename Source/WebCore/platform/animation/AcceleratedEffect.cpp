@@ -215,8 +215,8 @@ AcceleratedEffect::AcceleratedEffect(const KeyframeEffect& effect, const IntRect
         ASSERT(animation->holdTime() || animation->startTime());
         m_holdTime = animation->holdTime();
         m_startTime = animation->startTime();
-        if (is<StyleOriginatedAnimation>(animation)) {
-            if (auto* defaultKeyframeTimingFunction = downcast<StyleOriginatedAnimation>(*animation).backingAnimation().timingFunction())
+        if (auto* styleAnimation = dynamicDowncast<StyleOriginatedAnimation>(*animation)) {
+            if (auto* defaultKeyframeTimingFunction = styleAnimation->backingAnimation().timingFunction())
                 m_defaultKeyframeTimingFunction = defaultKeyframeTimingFunction;
         }
     }
@@ -307,15 +307,15 @@ static void blend(AcceleratedEffectProperty property, AcceleratedEffectValues& o
         break;
     }
     case AcceleratedEffectProperty::Translate:
-        if (auto toTranslate = to.translate)
+        if (auto& toTranslate = to.translate)
             output.translate = toTranslate->blend(from.translate.get(), blendingContext);
         break;
     case AcceleratedEffectProperty::Rotate:
-        if (auto toRotate = to.rotate)
+        if (auto& toRotate = to.rotate)
             output.rotate = toRotate->blend(from.rotate.get(), blendingContext);
         break;
     case AcceleratedEffectProperty::Scale:
-        if (auto toScale = to.scale)
+        if (auto& toScale = to.scale)
             output.scale = toScale->blend(from.scale.get(), blendingContext);
         break;
     case AcceleratedEffectProperty::OffsetAnchor:
@@ -385,12 +385,10 @@ void AcceleratedEffect::apply(Seconds currentTime, AcceleratedEffectValues& valu
         auto* startKeyframe = interval.endpoints.first();
         auto* endKeyframe = interval.endpoints.last();
 
-        ASSERT(is<AcceleratedEffect::Keyframe>(startKeyframe) && is<AcceleratedEffect::Keyframe>(endKeyframe));
         auto startKeyframeValues = downcast<AcceleratedEffect::Keyframe>(startKeyframe)->values();
         auto endKeyframeValues = downcast<AcceleratedEffect::Keyframe>(endKeyframe)->values();
 
         KeyframeInterpolation::CompositionCallback composeProperty = [&](const KeyframeInterpolation::Keyframe& keyframe, CompositeOperation compositeOperation) {
-            ASSERT(is<AcceleratedEffect::Keyframe>(keyframe));
             auto& acceleratedKeyframe = downcast<AcceleratedEffect::Keyframe>(keyframe);
             BlendingContext context { 1, false, compositeOperation };
             if (acceleratedKeyframe.offset() == startKeyframe->offset())
@@ -418,45 +416,9 @@ void AcceleratedEffect::apply(Seconds currentTime, AcceleratedEffectValues& valu
     }
 }
 
-using OptionalKeyframeIndex = std::optional<size_t>;
-
 void AcceleratedEffect::validateFilters(const AcceleratedEffectValues& baseValues, OptionSet<AcceleratedEffectProperty>& disallowedProperties)
 {
-    auto numberOfKeyframes = m_keyframes.size();
-
-    auto findKeyframePair = [&](size_t startingIndex, AcceleratedEffectProperty property) -> std::pair<OptionalKeyframeIndex, OptionalKeyframeIndex> {
-        OptionalKeyframeIndex firstKeyframeIndex;
-        for (size_t i = startingIndex; i < numberOfKeyframes; ++i) {
-            auto& keyframe = m_keyframes[i];
-            // Nothing to do for a keyframe that doesn't contain this property.
-            if (!keyframe.animatesProperty(property))
-                continue;
-
-            // If we're dealing with a keyframe with offset = 1, this can only be our last keyframe,
-            // so there will not be another keyframe pair with the provided starting index.
-            if (keyframe.offset() == 1 && !firstKeyframeIndex)
-                return { };
-
-            if (firstKeyframeIndex)
-                return { *firstKeyframeIndex, i };
-            firstKeyframeIndex = i;
-        }
-
-        if (!firstKeyframeIndex)
-            return { };
-
-        // If we get here this means we have a first keyframe but no last keyframe. Thus we
-        // create a pair with an implicit keyframe. If the starting index is 0, this means
-        // we were looking for our very first pair and the implicit keyframe is the first
-        // keyframe.
-        if (!startingIndex)
-            return { std::nullopt, *firstKeyframeIndex };
-        return { *firstKeyframeIndex, std::nullopt };
-    };
-
-    auto filterOperations = [&](OptionalKeyframeIndex index, AcceleratedEffectProperty property) -> const FilterOperations& {
-        ASSERT(!index || *index < numberOfKeyframes);
-        auto& values = index ? m_keyframes[*index].values() : baseValues;
+    auto filterOperations = [&](const AcceleratedEffectValues& values, AcceleratedEffectProperty property) -> const FilterOperations& {
         switch (property) {
         case AcceleratedEffectProperty::Filter:
             return values.filter;
@@ -468,31 +430,60 @@ void AcceleratedEffect::validateFilters(const AcceleratedEffectValues& baseValue
         }
     };
 
-    auto clearProperty = [&](AcceleratedEffectProperty property) {
-        disallowedProperties.add({ property });
-        m_animatedProperties.remove({ property });
-        for (auto& keyframe : m_keyframes)
-            keyframe.clearProperty(property);
+    auto isValidProperty = [&](AcceleratedEffectProperty property) {
+        // First, let's assemble the matching values.
+        Vector<const AcceleratedEffectValues*> values;
+        for (auto& keyframe : m_keyframes) {
+            if (keyframe.animatesProperty(property)) {
+                // If this is the first value we're processing and it's not the
+                // keyframe with offset 0, then we need to add the implicit 0% values.
+                if (values.isEmpty() && keyframe.offset())
+                    values.append(&baseValues);
+                values.append(&keyframe.values());
+            } else {
+                // If this is the last keyframe we'll be processing and it's not the
+                // keyframe with offset 1, then we need to add the implicit 100% values.
+                if (&keyframe == &m_keyframes.last() && keyframe.offset() == 1)
+                    values.append(&baseValues);
+            }
+        }
+
+        ASSERT(values.size() > 1);
+
+        const FilterOperations* longestFilterList = nullptr;
+        for (size_t i = 1; i < values.size(); ++i) {
+            auto& fromFilters = filterOperations(*values[i - 1], property);
+            auto& toFilters = filterOperations(*values[i], property);
+            // FIXME: we should provide the actual composite operation here.
+            if (!fromFilters.canInterpolate(toFilters, CompositeOperation::Replace))
+                return false;
+            if (!longestFilterList || fromFilters.size() > longestFilterList->size())
+                longestFilterList = &fromFilters;
+            if (!longestFilterList || toFilters.size() > longestFilterList->size())
+                longestFilterList = &toFilters;
+        }
+
+        // We need to make sure that the longest filter, if it contains a drop-shadow() operation,
+        // has it as its final operation since it will be applied by a separate CALayer property
+        // from the other filter operations and it will be applied to the layer as the last filer.
+        ASSERT(longestFilterList);
+        auto& longestFilterOperations = longestFilterList->operations();
+        for (auto& operation : longestFilterOperations) {
+            if (operation->type() == FilterOperation::Type::DropShadow && operation != longestFilterOperations.last())
+                return false;
+        }
+
+        return true;
     };
 
     auto validateProperty = [&](AcceleratedEffectProperty property) {
-        for (size_t i = 0; i < numberOfKeyframes;) {
-            auto indexes = findKeyframePair(i, property);
-            if (!indexes.first && !indexes.second)
-                return;
-
-            auto& fromFilters = filterOperations(indexes.first, property);
-            auto& toFilters = filterOperations(indexes.second, property);
-            // FIXME: we should provide the actual composite operation here.
-            if (!fromFilters.canInterpolate(toFilters, CompositeOperation::Replace)) {
-                clearProperty(property);
-                return;
-            }
-
-            if (!indexes.second)
-                return;
-            i = *indexes.second;
-        }
+        if (isValidProperty(property))
+            return;
+        disallowedProperties.add({ property });
+        m_animatedProperties.remove({ property });
+        m_disallowedProperties.add({ property });
+        for (auto& keyframe : m_keyframes)
+            keyframe.clearProperty(property);
     };
 
     if (m_animatedProperties.contains(AcceleratedEffectProperty::Filter))
@@ -514,16 +505,15 @@ const KeyframeInterpolation::Keyframe& AcceleratedEffect::keyframeAtIndex(size_t
 
 const TimingFunction* AcceleratedEffect::timingFunctionForKeyframe(const KeyframeInterpolation::Keyframe& keyframe) const
 {
-    if (!is<Keyframe>(keyframe)) {
-        ASSERT_NOT_REACHED();
+    auto* acceleratedEffectKeyframe = dynamicDowncast<Keyframe>(keyframe);
+    ASSERT(acceleratedEffectKeyframe);
+    if (!acceleratedEffectKeyframe)
         return nullptr;
-    }
 
-    auto& acceleratedEffectKeyframe = downcast<Keyframe>(keyframe);
     if (m_animationType == WebAnimationType::CSSAnimation || m_animationType == WebAnimationType::CSSTransition) {
         // If we're dealing with a CSS Animation, the timing function may be specified on the keyframe.
         if (m_animationType == WebAnimationType::CSSAnimation) {
-            if (auto& timingFunction = acceleratedEffectKeyframe.timingFunction())
+            if (auto& timingFunction = acceleratedEffectKeyframe->timingFunction())
                 return timingFunction.get();
         }
 
@@ -531,7 +521,7 @@ const TimingFunction* AcceleratedEffect::timingFunctionForKeyframe(const Keyfram
         return m_defaultKeyframeTimingFunction.get();
     }
 
-    return acceleratedEffectKeyframe.timingFunction().get();
+    return acceleratedEffectKeyframe->timingFunction().get();
 }
 
 bool AcceleratedEffect::isPropertyAdditiveOrCumulative(KeyframeInterpolation::Property property) const

@@ -26,6 +26,7 @@
 #include "config.h"
 #include "StyleOriginatedAnimationEvent.h"
 
+#include "Node.h"
 #include "WebAnimationUtilities.h"
 
 #include <wtf/IsoMallocInlines.h>
@@ -34,31 +35,29 @@ namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(StyleOriginatedAnimationEvent);
 
-StyleOriginatedAnimationEvent::StyleOriginatedAnimationEvent(const AtomString& type, WebAnimation* animation, std::optional<Seconds> scheduledTime, double elapsedTime, const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier)
-    : AnimationEventBase(type, animation, scheduledTime)
+StyleOriginatedAnimationEvent::StyleOriginatedAnimationEvent(enum EventInterfaceType eventInterface, const AtomString& type, WebAnimation* animation, std::optional<Seconds> scheduledTime, double elapsedTime, const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier)
+    : AnimationEventBase(eventInterface, type, animation, scheduledTime)
     , m_elapsedTime(elapsedTime)
     , m_pseudoElementIdentifier(pseudoElementIdentifier)
 {
 }
 
-StyleOriginatedAnimationEvent::StyleOriginatedAnimationEvent(const AtomString& type, const EventInit& init, IsTrusted isTrusted, double elapsedTime, const String& pseudoElement)
-    : AnimationEventBase(type, init, isTrusted)
+StyleOriginatedAnimationEvent::StyleOriginatedAnimationEvent(enum EventInterfaceType eventInterface, const AtomString& type, const EventInit& init, IsTrusted isTrusted, double elapsedTime, const String& pseudoElement)
+    : AnimationEventBase(eventInterface, type, init, isTrusted)
     , m_elapsedTime(elapsedTime)
     , m_pseudoElement(pseudoElement)
 {
-    // FIXME: This should work with the pseudo-element name argument.
-    auto pseudoId = pseudoIdFromString(m_pseudoElement);
-    if (pseudoId && *pseudoId != PseudoId::None)
-        m_pseudoElementIdentifier = { *pseudoId };
+    auto* node = dynamicDowncast<Node>(target());
+    auto [parsed, pseudoElementIdentifier] = pseudoElementIdentifierFromString(m_pseudoElement, node ? &node->document() : nullptr);
+    m_pseudoElementIdentifier = parsed ? pseudoElementIdentifier : std::nullopt;
 }
 
 StyleOriginatedAnimationEvent::~StyleOriginatedAnimationEvent() = default;
 
 const String& StyleOriginatedAnimationEvent::pseudoElement()
 {
-    // FIXME: This doesn't work with the pseudo-element name argument.
     if (m_pseudoElementIdentifier && m_pseudoElement.isNull())
-        m_pseudoElement = pseudoIdAsString(m_pseudoElementIdentifier->pseudoId);
+        m_pseudoElement = pseudoElementIdentifierAsString(m_pseudoElementIdentifier);
     return m_pseudoElement;
 }
 

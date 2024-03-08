@@ -446,6 +446,7 @@ MediaPlayerPrivateAVFoundationObjC::MediaPlayerPrivateAVFoundationObjC(MediaPlay
     , m_loaderDelegate(adoptNS([[WebCoreAVFLoaderDelegate alloc] initWithPlayer:*this]))
     , m_cachedItemStatus(MediaPlayerAVPlayerItemStatusDoesNotExist)
 {
+    ALWAYS_LOG(LOGIDENTIFIER);
     m_muted = player->muted();
 }
 
@@ -932,6 +933,9 @@ void MediaPlayerPrivateAVFoundationObjC::createAVAssetForURL(const URL& url, Ret
     if (player->prefersSandboxedParsing() && PAL::canLoad_AVFoundation_AVAssetPrefersSandboxedParsingOptionKey())
         [options setObject:@YES forKey:AVAssetPrefersSandboxedParsingOptionKey];
 
+    if (player->inPrivateBrowsingMode() && PAL::canLoad_AVFoundation_AVURLAssetDoNotLogURLsKey())
+        [options setObject:@YES forKey:AVURLAssetDoNotLogURLsKey];
+
     auto type = player->contentMIMEType();
 
     // Don't advertise WebM MIME types or the format reader won't be loaded until rdar://72405127 is fixed.
@@ -1148,6 +1152,10 @@ void MediaPlayerPrivateAVFoundationObjC::createAVPlayer()
             m_avPlayer.get().suppressesAudioRendering = YES;
 #endif
     }
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    [m_avPlayer _setSTSLabel:m_spatialTrackingLabel];
+#endif
 
     if (m_avPlayerItem)
         setAVPlayerItem(m_avPlayerItem.get());
@@ -2145,7 +2153,7 @@ bool MediaPlayerPrivateAVFoundationObjC::shouldWaitForLoadingOfResource(AVAssetR
         auto initData = SharedBuffer::create(Vector<uint8_t> { static_cast<uint8_t*>(initDataBuffer->data()), byteLength });
         player->keyNeeded(initData);
 #if ENABLE(ENCRYPTED_MEDIA)
-        if (!player->shouldContinueAfterKeyNeeded())
+        if (!m_shouldContinueAfterKeyNeeded)
             return true;
 #endif
 #endif
@@ -2162,6 +2170,7 @@ bool MediaPlayerPrivateAVFoundationObjC::shouldWaitForLoadingOfResource(AVAssetR
         player->initializationDataEncountered("skd"_s, m_keyID->tryCreateArrayBuffer());
         setWaitingForKey(true);
 #endif
+
         m_keyURIToRequestMap.set(keyURI, avRequest);
 
         return true;
@@ -2181,7 +2190,7 @@ bool MediaPlayerPrivateAVFoundationObjC::shouldWaitForLoadingOfResource(AVAssetR
 
         player->keyNeeded(initData);
 
-        if (!player->shouldContinueAfterKeyNeeded())
+        if (!m_shouldContinueAfterKeyNeeded)
             return false;
 
         m_keyURIToRequestMap.set(keyID, avRequest);
@@ -2200,6 +2209,8 @@ bool MediaPlayerPrivateAVFoundationObjC::shouldWaitForLoadingOfResource(AVAssetR
 void MediaPlayerPrivateAVFoundationObjC::didCancelLoadingRequest(AVAssetResourceLoadingRequest* avRequest)
 {
     ASSERT(isMainThread());
+
+    ALWAYS_LOG(LOGIDENTIFIER);
     if (RefPtr resourceLoader = m_resourceLoaderMap.get((__bridge CFTypeRef)avRequest)) {
         m_targetQueue->dispatch([resourceLoader = WTFMove(resourceLoader)] { resourceLoader->stopLoading();
         });
@@ -2209,6 +2220,8 @@ void MediaPlayerPrivateAVFoundationObjC::didCancelLoadingRequest(AVAssetResource
 void MediaPlayerPrivateAVFoundationObjC::didStopLoadingRequest(AVAssetResourceLoadingRequest *avRequest)
 {
     ASSERT(isMainThread());
+
+    ALWAYS_LOG(LOGIDENTIFIER);
     if (RefPtr resourceLoader = m_resourceLoaderMap.take((__bridge CFTypeRef)avRequest))
         m_targetQueue->dispatch([resourceLoader = WTFMove(resourceLoader)] { });
 }
@@ -2888,6 +2901,12 @@ void MediaPlayerPrivateAVFoundationObjC::outputMediaDataWillChange()
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 
+void MediaPlayerPrivateAVFoundationObjC::setShouldContinueAfterKeyNeeded(bool shouldContinue)
+{
+    ALWAYS_LOG(LOGIDENTIFIER, shouldContinue);
+    m_shouldContinueAfterKeyNeeded = shouldContinue;
+}
+
 RetainPtr<AVAssetResourceLoadingRequest> MediaPlayerPrivateAVFoundationObjC::takeRequestForKeyURI(const String& keyURI)
 {
     return m_keyURIToRequestMap.take(keyURI);
@@ -2901,6 +2920,7 @@ void MediaPlayerPrivateAVFoundationObjC::keyAdded()
 
     Vector<String> fulfilledKeyIds;
 
+    ALWAYS_LOG(LOGIDENTIFIER);
     for (auto& pair : m_keyURIToRequestMap) {
         const String& keyId = pair.key;
         const RetainPtr<AVAssetResourceLoadingRequest>& request = pair.value;
@@ -2947,17 +2967,17 @@ void MediaPlayerPrivateAVFoundationObjC::outputObscuredDueToInsufficientExternal
 void MediaPlayerPrivateAVFoundationObjC::cdmInstanceAttached(CDMInstance& instance)
 {
 #if HAVE(AVCONTENTKEYSESSION)
-    if (!is<CDMInstanceFairPlayStreamingAVFObjC>(instance))
+    auto* fpsInstance = dynamicDowncast<CDMInstanceFairPlayStreamingAVFObjC>(instance);
+    if (!fpsInstance)
         return;
 
-    auto& fpsInstance = downcast<CDMInstanceFairPlayStreamingAVFObjC>(instance);
-    if (&fpsInstance == m_cdmInstance)
+    if (fpsInstance == m_cdmInstance)
         return;
 
     if (m_cdmInstance)
         cdmInstanceDetached(*m_cdmInstance);
 
-    m_cdmInstance = &fpsInstance;
+    m_cdmInstance = fpsInstance;
 #else
     UNUSED_PARAM(instance);
 #endif
@@ -3130,13 +3150,13 @@ void MediaPlayerPrivateAVFoundationObjC::processMediaSelectionOptions()
 
 #if ENABLE(AVF_CAPTIONS)
         if ([option outOfBandSource]) {
-            m_textTracks.append(OutOfBandTextTrackPrivateAVF::create(this, option));
+            m_textTracks.append(OutOfBandTextTrackPrivateAVF::create(this, option, m_currentTextTrackID++));
             m_textTracks.last()->setHasBeenReported(true); // Ignore out-of-band tracks that we passed to AVFoundation so we do not double-count them
             continue;
         }
 #endif
 
-        m_textTracks.append(InbandTextTrackPrivateAVFObjC::create(this, legibleGroup, option, InbandTextTrackPrivate::CueFormat::Generic));
+        m_textTracks.append(InbandTextTrackPrivateAVFObjC::create(this, legibleGroup, option, m_currentTextTrackID++, InbandTextTrackPrivate::CueFormat::Generic));
     }
 
     processNewAndRemovedTextTracks(removedTextTracks);
@@ -3147,7 +3167,7 @@ void MediaPlayerPrivateAVFoundationObjC::processMetadataTrack()
     if (m_metadataTrack)
         return;
 
-    m_metadataTrack = InbandMetadataTextTrackPrivateAVF::create(InbandTextTrackPrivate::Kind::Metadata, InbandTextTrackPrivate::CueFormat::Data);
+    m_metadataTrack = InbandMetadataTextTrackPrivateAVF::create(InbandTextTrackPrivate::Kind::Metadata, m_currentTextTrackID++, InbandTextTrackPrivate::CueFormat::Data);
     m_metadataTrack->setInBandMetadataTrackDispatchType("com.apple.streaming"_s);
     if (auto player = this->player())
         player->addTextTrack(*m_metadataTrack);
@@ -3413,7 +3433,7 @@ void MediaPlayerPrivateAVFoundationObjC::setWirelessPlaybackTarget(Ref<MediaPlay
 {
     m_playbackTarget = WTFMove(target);
 
-    m_outputContext = m_playbackTarget->targetType() == MediaPlaybackTarget::TargetType::AVFoundation ? toMediaPlaybackTargetCocoa(m_playbackTarget.get())->targetContext().outputContext() : nullptr;
+    m_outputContext = is<MediaPlaybackTargetCocoa>(m_playbackTarget) ? downcast<MediaPlaybackTargetCocoa>(m_playbackTarget)->outputContext() : nullptr;
 
     INFO_LOG(LOGIDENTIFIER);
 
@@ -3978,6 +3998,59 @@ void MediaPlayerPrivateAVFoundationObjC::audioOutputDeviceChanged()
         m_avPlayer.get().audioOutputDeviceUniqueID = nil;
     else
         m_avPlayer.get().audioOutputDeviceUniqueID = deviceId;
+#endif
+}
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+const String& MediaPlayerPrivateAVFoundationObjC::spatialTrackingLabel() const
+{
+    return m_spatialTrackingLabel;
+}
+
+void MediaPlayerPrivateAVFoundationObjC::setSpatialTrackingLabel(String&& spatialTrackingLabel)
+{
+    if (m_spatialTrackingLabel == spatialTrackingLabel)
+        return;
+    m_spatialTrackingLabel = spatialTrackingLabel;
+    if (m_avPlayer)
+        [m_avPlayer _setSTSLabel:spatialTrackingLabel];
+}
+#endif
+
+void MediaPlayerPrivateAVFoundationObjC::setVideoReceiverEndpoint(const VideoReceiverEndpoint& endpoint)
+{
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+    assertIsMainThread();
+
+    if (!endpoint) {
+        clearVideoReceiverEndpoint();
+        return;
+    }
+
+    FigVideoTargetRef videoTarget;
+    OSStatus status = FigVideoTargetCreateWithVideoReceiverEndpointID(kCFAllocatorDefault, endpoint.get(), nullptr, &videoTarget);
+    if (status != noErr)
+        return;
+
+    m_videoTarget = adoptCF(videoTarget);
+    [m_avPlayer addVideoTarget:m_videoTarget.get()];
+    [m_videoLayer setPlayer:nil];
+#else
+    UNUSED_PARAM(endpoint);
+#endif
+}
+
+void MediaPlayerPrivateAVFoundationObjC::clearVideoReceiverEndpoint()
+{
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+    assertIsMainThread();
+
+    RetainPtr videoTarget = std::exchange(m_videoTarget, nullptr);
+    if (!videoTarget)
+        return;
+
+    [m_videoLayer setPlayer:m_avPlayer.get()];
+    [m_avPlayer removeVideoTarget:videoTarget.get()];
 #endif
 }
 

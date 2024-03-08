@@ -150,13 +150,23 @@ void TileController::setContentsScale(float contentsScale)
         tileGridsChanged();
     }
 
+    auto oldScale = tileGrid().scale();
     tileGrid().setScale(scale);
+
+    if (m_client && scale != oldScale)
+        m_client->tilingScaleFactorDidChange(scale);
+
     tileGrid().setNeedsDisplay();
 }
 
 float TileController::contentsScale() const
 {
     return tileGrid().scale() * m_deviceScaleFactor;
+}
+
+float TileController::tilingScaleFactor() const
+{
+    return tileGrid().scale();
 }
 
 float TileController::zoomedOutContentsScale() const
@@ -233,6 +243,11 @@ void TileController::setCoverageRect(const FloatRect& rect)
 
     m_coverageRect = rect;
     setNeedsRevalidateTiles();
+
+    if (!m_client)
+        return;
+
+    m_client->coverageRectDidChange(m_coverageRect);
 }
 
 bool TileController::tilesWouldChangeForCoverageRect(const FloatRect& rect) const

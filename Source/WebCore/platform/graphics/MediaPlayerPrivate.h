@@ -125,7 +125,7 @@ public:
 
     WEBCORE_EXPORT virtual MediaTime currentOrPendingSeekTime() const;
     virtual MediaTime currentTime() const { return MediaTime::zeroTime(); }
-    virtual bool currentTimeMayProgress() const { return readyState() >= MediaPlayer::ReadyState::HaveFutureData; }
+    virtual bool timeIsProgressing() const { return !paused(); }
 
     virtual bool setCurrentTimeDidChangeCallback(MediaPlayer::CurrentTimeDidChangeCallback&&) { return false; }
 
@@ -147,6 +147,9 @@ public:
     virtual void setPreservesPitch(bool) { }
     virtual void setPitchCorrectionAlgorithm(MediaPlayer::PitchCorrectionAlgorithm) { }
 
+    // Indicates whether playback is currently paused indefinitely: such as having been paused
+    // explictly by the HTMLMediaElement or through remote media playback control.
+    // This excludes video potentially playing but having stalled.
     virtual bool paused() const = 0;
 
     virtual void setVolume(float) { }
@@ -354,6 +357,9 @@ public:
     bool shouldCheckHardwareSupport() const { return m_shouldCheckHardwareSupport; }
 
     virtual void setVideoReceiverEndpoint(const VideoReceiverEndpoint&) { }
+
+    virtual const String& spatialTrackingLabel() const { return emptyString(); }
+    virtual void setSpatialTrackingLabel(String&&) { }
 
 protected:
     mutable PlatformTimeRanges m_seekable;

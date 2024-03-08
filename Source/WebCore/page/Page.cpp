@@ -70,6 +70,7 @@
 #include "FilterRenderingMode.h"
 #include "FocusController.h"
 #include "FontCache.h"
+#include "FragmentDirectiveGenerator.h"
 #include "FrameLoader.h"
 #include "FrameSelection.h"
 #include "FrameTree.h"
@@ -329,7 +330,7 @@ Page::Page(PageConfiguration&& pageConfiguration)
 #endif
     , m_socketProvider(WTFMove(pageConfiguration.socketProvider))
     , m_cookieJar(WTFMove(pageConfiguration.cookieJar))
-    , m_applicationCacheStorage(*WTFMove(pageConfiguration.applicationCacheStorage))
+    , m_applicationCacheStorage(WTFMove(pageConfiguration.applicationCacheStorage))
     , m_cacheStorageProvider(WTFMove(pageConfiguration.cacheStorageProvider))
     , m_databaseProvider(*WTFMove(pageConfiguration.databaseProvider))
     , m_pluginInfoProvider(*WTFMove(pageConfiguration.pluginInfoProvider))
@@ -1149,7 +1150,10 @@ uint32_t Page::replaceRangesWithText(const Vector<SimpleRange>& rangesToReplace,
 
 uint32_t Page::replaceSelectionWithText(const String& replacementText)
 {
-    Ref frame = checkedFocusController()->focusedOrMainFrame();
+    RefPtr frame = checkedFocusController()->focusedOrMainFrame();
+    if (!frame)
+        return 0;
+
     auto selection = frame->selection().selection();
     if (!selection.isContentEditable())
         return 0;
@@ -1233,7 +1237,8 @@ Vector<Ref<Element>> Page::editableElementsInRect(const FloatRect& searchRectInR
     // tries to avoid creating line boxes, which are things it hit tests, for them to reduce memory. If the
     // focused element is inside the search rect it's the most likely target for future editing operations,
     // even if it's empty. So, we special case it here.
-    if (RefPtr focusedElement = checkedFocusController()->focusedOrMainFrame().document()->focusedElement()) {
+    RefPtr focusedOrMainFrame = checkedFocusController()->focusedOrMainFrame();
+    if (RefPtr focusedElement = focusedOrMainFrame ? focusedOrMainFrame->document()->focusedElement() : nullptr) {
         if (searchRectInRootViewCoordinates.inclusivelyIntersects(focusedElement->boundingBoxInRootViewCoordinates())) {
             if (auto* editableElement = rootEditableElement(*focusedElement))
                 rootEditableElements.add(*editableElement);
@@ -1266,7 +1271,10 @@ void Page::setInteractionRegionsEnabled(bool enable)
 
 const VisibleSelection& Page::selection() const
 {
-    return checkedFocusController()->focusedOrMainFrame().selection().selection();
+    RefPtr focusedOrMainFrame = checkedFocusController()->focusedOrMainFrame();
+    if (!focusedOrMainFrame)
+        return VisibleSelection::emptySelection();
+    return focusedOrMainFrame->selection().selection();
 }
 
 void Page::setDefersLoading(bool defers)
@@ -2208,11 +2216,18 @@ bool Page::shouldUpdateAccessibilityRegions() const
     ASSERT(m_lastRenderingUpdateTimestamp >= m_lastAccessibilityObjectRegionsUpdate);
     if ((m_lastRenderingUpdateTimestamp - m_lastAccessibilityObjectRegionsUpdate) < updateInterval) {
         // We've already updated accessibility object rects recently, so skip this update and schedule another for later.
-        auto* localMainFrame = dynamicDowncast<LocalFrame>(mainFrame());
-        RefPtr mainDocument = localMainFrame ? localMainFrame->document() : nullptr;
+
+        RefPtr<Document> protectedMainDocument;
+        if (auto* localMainFrame = dynamicDowncast<LocalFrame>(mainFrame()))
+            protectedMainDocument = localMainFrame ? localMainFrame->document() : nullptr;
+        else if (auto* remoteFrame = dynamicDowncast<RemoteFrame>(mainFrame())) {
+            if (auto* owner = remoteFrame->ownerElement())
+                protectedMainDocument = &(owner->document());
+        }
+
         // If accessibility is enabled and we have a main document, that document should have an AX object cache.
-        ASSERT(!mainDocument || mainDocument->existingAXObjectCache());
-        if (CheckedPtr topAxObjectCache = mainDocument ? mainDocument->existingAXObjectCache() : nullptr)
+        ASSERT(!protectedMainDocument || protectedMainDocument->existingAXObjectCache());
+        if (CheckedPtr topAxObjectCache = protectedMainDocument ? protectedMainDocument->existingAXObjectCache() : nullptr)
             topAxObjectCache->scheduleObjectRegionsUpdate();
         return false;
     }
@@ -2231,11 +2246,6 @@ void Page::setImageAnimationEnabled(bool enabled)
     m_imageAnimationEnabled = enabled;
     updatePlayStateForAllAnimations();
     chrome().client().isAnyAnimationAllowedToPlayDidChange(enabled);
-}
-
-void Page::setSystemAllowsAnimationControls(bool isAllowed)
-{
-    m_systemAllowsAnimationControls = isAllowed;
 }
 #endif // ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
 
@@ -2668,6 +2678,20 @@ void Page::setMuted(MediaProducerMutedStateFlags muted)
     forEachDocument([] (Document& document) {
         document.pageMutedStateDidChange();
     });
+}
+
+bool Page::shouldBlockLayerTreeFreezingForVideo()
+{
+    bool shouldBlockLayerTreeFreezingForVideo = false;
+    forEachMediaElement([&shouldBlockLayerTreeFreezingForVideo] (HTMLMediaElement& element) {
+        // FIXME: Consider only returning true when `element.readyState >=
+        // HTMLMediaElementEnums::HAVE_METADATA` and forcing an update to the layer tree
+        // freeze state when an element's readyState gets to HAVE_METADATA in
+        // `HTMLMediaElement::setReadyState`
+        if (element.isVideo())
+            shouldBlockLayerTreeFreezingForVideo = true;
+    });
+    return shouldBlockLayerTreeFreezingForVideo;
 }
 
 void Page::stopMediaCapture(MediaProducerMediaCaptureKind kind)
@@ -4231,9 +4255,25 @@ bool Page::shouldDisableCorsForRequestTo(const URL& url) const
     });
 }
 
+const URL Page::fragmentDirectiveURLForSelectedText()
+{
+    RefPtr focusedOrMainFrame = checkedFocusController()->focusedOrMainFrame();
+    if (!focusedOrMainFrame)
+        return { };
+
+    if (auto range = focusedOrMainFrame->selection().selection().range()) {
+        FragmentDirectiveGenerator fragmentDirectiveGenerator(range.value());
+        return fragmentDirectiveGenerator.urlWithFragment();
+    }
+    return { };
+}
+
 void Page::revealCurrentSelection()
 {
-    checkedFocusController()->focusedOrMainFrame().checkedSelection()->revealSelection(SelectionRevealMode::Reveal, ScrollAlignment::alignCenterIfNeeded);
+    RefPtr focusedOrMainFrame = checkedFocusController()->focusedOrMainFrame();
+    if (!focusedOrMainFrame)
+        return;
+    focusedOrMainFrame->checkedSelection()->revealSelection(SelectionRevealMode::Reveal, ScrollAlignment::alignCenterIfNeeded);
 }
 
 void Page::injectUserStyleSheet(UserStyleSheet& userStyleSheet)

@@ -177,6 +177,7 @@ protected:
     bool hasBufferedTime(const MediaTime&);
     bool hasCurrentTime();
     bool hasFutureTime();
+    bool isBuffered(const PlatformTimeRanges&) const;
 
     void scheduleEvent(const AtomString& eventName);
     void notifyElementUpdateMediaState() const;
@@ -204,7 +205,7 @@ private:
 
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
-    EventTargetInterface eventTargetInterface() const final;
+    enum EventTargetInterfaceType eventTargetInterface() const final;
 
     URLRegistry& registry() const final;
 

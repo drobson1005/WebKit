@@ -286,6 +286,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
         RefPtr<AccessCase> newCase;
 
         if (propertyName == vm.propertyNames->length) {
+            auto lengthPropertyName = CacheableIdentifier::createFromImmortalIdentifier(vm.propertyNames->length.impl());
             if (isJSArray(baseCell)) {
                 if (stubInfo.cacheType() == CacheType::Unset
                     && slot.slotBase() == baseCell
@@ -299,7 +300,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                     }
                 }
 
-                newCase = AccessCase::create(vm, codeBlock, AccessCase::ArrayLength, propertyName);
+                newCase = AccessCase::create(vm, codeBlock, AccessCase::ArrayLength, lengthPropertyName);
             } else if (isJSString(baseCell)) {
                 if (stubInfo.cacheType() == CacheType::Unset
                     && InlineAccess::isCacheableStringLength(codeBlock, stubInfo)) {
@@ -311,16 +312,16 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                     }
                 }
 
-                newCase = AccessCase::create(vm, codeBlock, AccessCase::StringLength, propertyName);
+                newCase = AccessCase::create(vm, codeBlock, AccessCase::StringLength, lengthPropertyName);
             } else if (DirectArguments* arguments = jsDynamicCast<DirectArguments*>(baseCell)) {
                 // If there were overrides, then we can handle this as a normal property load! Guarding
                 // this with such a check enables us to add an IC case for that load if needed.
                 if (!arguments->overrodeThings())
-                    newCase = AccessCase::create(vm, codeBlock, AccessCase::DirectArgumentsLength, propertyName);
+                    newCase = AccessCase::create(vm, codeBlock, AccessCase::DirectArgumentsLength, lengthPropertyName);
             } else if (ScopedArguments* arguments = jsDynamicCast<ScopedArguments*>(baseCell)) {
                 // Ditto.
                 if (!arguments->overrodeThings())
-                    newCase = AccessCase::create(vm, codeBlock, AccessCase::ScopedArgumentsLength, propertyName);
+                    newCase = AccessCase::create(vm, codeBlock, AccessCase::ScopedArgumentsLength, lengthPropertyName);
             }
         }
 
@@ -1617,7 +1618,7 @@ static InlineCacheAction tryCacheInstanceOf(
         }
         
         if (!newCase)
-            newCase = AccessCase::create(vm, codeBlock, AccessCase::InstanceOfGeneric, CacheableIdentifier());
+            newCase = AccessCase::create(vm, codeBlock, AccessCase::InstanceOfGeneric, nullptr);
         
         LOG_IC((ICEvent::InstanceOfAddAccessCase, structure->classInfoForCells(), Identifier()));
         
@@ -1924,12 +1925,6 @@ void linkPolymorphicCall(VM& vm, JSCell* owner, CallFrame* callFrame, CallLinkIn
         // If there had been a previous stub routine, that one will die as soon as the GC runs and sees
         // that it's no longer on stack.
         callLinkInfo.setStub(WTFMove(stubRoutine));
-
-        // The call link info no longer has a call cache apart from the jump to the polymorphic call
-        // stub.
-        if (callLinkInfo.isOnList())
-            callLinkInfo.remove();
-
         return;
     }
 
@@ -2050,11 +2045,6 @@ void linkPolymorphicCall(VM& vm, JSCell* owner, CallFrame* callFrame, CallLinkIn
     // If there had been a previous stub routine, that one will die as soon as the GC runs and sees
     // that it's no longer on stack.
     callLinkInfo.setStub(WTFMove(stubRoutine));
-    
-    // The call link info no longer has a call cache apart from the jump to the polymorphic call
-    // stub.
-    if (callLinkInfo.isOnList())
-        callLinkInfo.remove();
 }
 
 void resetGetBy(CodeBlock* codeBlock, StructureStubInfo& stubInfo, GetByKind kind)

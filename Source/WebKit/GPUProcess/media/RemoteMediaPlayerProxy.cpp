@@ -31,6 +31,7 @@
 #include "GPUConnectionToWebProcess.h"
 #include "LayerHostingContext.h"
 #include "Logging.h"
+#include "MediaPlayerPrivateRemote.h"
 #include "MediaPlayerPrivateRemoteMessages.h"
 #include "RemoteAudioSourceProviderProxy.h"
 #include "RemoteAudioTrackProxy.h"
@@ -61,9 +62,7 @@
 #endif
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
-#include <WebCore/MediaPlaybackTargetCocoa.h>
-#include <WebCore/MediaPlaybackTargetContext.h>
-#include <WebCore/MediaPlaybackTargetMock.h>
+#include "MediaPlaybackTargetContextSerialized.h"
 #endif
 
 #if PLATFORM(COCOA)
@@ -110,7 +109,7 @@ RemoteMediaPlayerProxy::~RemoteMediaPlayerProxy()
         m_mediaSourceProxy->shutdown();
 #endif
     if (m_performTaskAtTimeCompletionHandler)
-        m_performTaskAtTimeCompletionHandler(std::nullopt, std::nullopt);
+        m_performTaskAtTimeCompletionHandler(std::nullopt);
     setShouldEnableAudioSourceProvider(false);
 
     for (auto& request : std::exchange(m_layerHostingContextIDRequests, { }))
@@ -448,17 +447,26 @@ void RemoteMediaPlayerProxy::mediaPlayerMuteChanged()
     m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::MuteChanged(m_player->muted()), m_id);
 }
 
+static MediaTimeUpdateData timeUpdateData(const MediaPlayer& player, MediaTime time)
+{
+    return {
+        time,
+        player.timeIsProgressing(),
+        MonotonicTime::now()
+    };
+}
+
 void RemoteMediaPlayerProxy::mediaPlayerSeeked(const MediaTime& time)
 {
     ALWAYS_LOG(LOGIDENTIFIER, time);
-    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::Seeked(time), m_id);
+    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::Seeked(timeUpdateData(*m_player, time)), m_id);
 }
 
 void RemoteMediaPlayerProxy::mediaPlayerTimeChanged()
 {
     updateCachedState(true);
     m_cachedState.duration = m_player->duration();
-    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::TimeChanged(m_cachedState), m_id);
+    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::TimeChanged(m_cachedState, timeUpdateData(*m_player, m_player->currentTime())), m_id);
 }
 
 void RemoteMediaPlayerProxy::mediaPlayerDurationChanged()
@@ -472,7 +480,7 @@ void RemoteMediaPlayerProxy::mediaPlayerRateChanged()
 {
     updateCachedVideoMetrics();
     sendCachedState();
-    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::RateChanged(m_player->effectiveRate()), m_id);
+    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::RateChanged(m_player->effectiveRate(), timeUpdateData(*m_player, m_player->currentTime())), m_id);
 }
 
 void RemoteMediaPlayerProxy::mediaPlayerEngineFailedToLoad() const
@@ -555,7 +563,7 @@ bool RemoteMediaPlayerProxy::mediaPlayerIsVideo() const
 void RemoteMediaPlayerProxy::mediaPlayerPlaybackStateChanged()
 {
     m_cachedState.paused = m_player->paused();
-    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::PlaybackStateChanged(m_cachedState.paused, m_player->currentTime(), MonotonicTime::now()), m_id);
+    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::PlaybackStateChanged(m_cachedState.paused, timeUpdateData(*m_player, m_player->currentTime())), m_id);
 }
 
 void RemoteMediaPlayerProxy::mediaPlayerBufferedTimeRangesChanged()
@@ -814,26 +822,14 @@ void RemoteMediaPlayerProxy::setShouldPlayToPlaybackTarget(bool shouldPlay)
     m_player->setShouldPlayToPlaybackTarget(shouldPlay);
 }
 
-#if PLATFORM(MAC)
-void RemoteMediaPlayerProxy::setWirelessPlaybackTarget(MediaPlaybackTargetContext&& targetContext)
+void RemoteMediaPlayerProxy::setWirelessPlaybackTarget(MediaPlaybackTargetContextSerialized&& targetContext)
 {
-    switch (targetContext.type()) {
-    case MediaPlaybackTargetContext::Type::Mock:
-        m_player->setWirelessPlaybackTarget(MediaPlaybackTargetMock::create(targetContext.deviceName(), targetContext.mockState()));
-        break;
-    case MediaPlaybackTargetContext::Type::AVOutputContext:
-    case MediaPlaybackTargetContext::Type::None:
-        ASSERT_NOT_REACHED();
-        break;
-    }
+    WTF::switchOn(targetContext.platformContext(), [&](WebCore::MediaPlaybackTargetContextMock&& context) {
+        m_player->setWirelessPlaybackTarget(MediaPlaybackTargetMock::create(WTFMove(context)));
+    }, [&](WebCore::MediaPlaybackTargetContextCocoa&& context) {
+        m_player->setWirelessPlaybackTarget(MediaPlaybackTargetCocoa::create(WTFMove(context)));
+    });
 }
-#else
-NO_RETURN_DUE_TO_ASSERT void RemoteMediaPlayerProxy::setWirelessPlaybackTarget(MediaPlaybackTargetContext&&)
-{
-    ASSERT_NOT_REACHED();
-}
-#endif // PLATFORM(MAC)
-
 #endif // ENABLE(WIRELESS_PLAYBACK_TARGET)
 
 bool RemoteMediaPlayerProxy::mediaPlayerIsFullscreen() const
@@ -931,14 +927,9 @@ void RemoteMediaPlayerProxy::timerFired()
     sendCachedState();
 }
 
-bool RemoteMediaPlayerProxy::mediaPlayerPausedOrStalled() const
-{
-    return m_player->paused() || !m_player->currentTimeMayProgress();
-}
-
 void RemoteMediaPlayerProxy::currentTimeChanged(const MediaTime& mediaTime)
 {
-    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::CurrentTimeChanged(mediaTime, MonotonicTime::now(), !mediaPlayerPausedOrStalled()), m_id);
+    m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::CurrentTimeChanged(timeUpdateData(*m_player, mediaTime)), m_id);
 }
 
 void RemoteMediaPlayerProxy::videoFrameForCurrentTimeIfChanged(CompletionHandler<void(std::optional<RemoteVideoFrameProxy::Properties>&&, bool)>&& completionHandler)
@@ -1101,22 +1092,19 @@ void RemoteMediaPlayerProxy::tracksChanged()
     m_player->tracksChanged();
 }
 
-void RemoteMediaPlayerProxy::performTaskAtTime(const MediaTime& taskTime, MonotonicTime messageTime, PerformTaskAtTimeCompletionHandler&& completionHandler)
+void RemoteMediaPlayerProxy::performTaskAtTime(const MediaTime& taskTime, PerformTaskAtTimeCompletionHandler&& completionHandler)
 {
     if (m_performTaskAtTimeCompletionHandler) {
         // A media player is only expected to track one pending task-at-time at once (e.g. see
         // MediaPlayerPrivateAVFoundationObjC::performTaskAtMediaTime), so cancel the existing
         // CompletionHandler.
         auto handler = WTFMove(m_performTaskAtTimeCompletionHandler);
-        handler(std::nullopt, std::nullopt);
+        handler(std::nullopt);
     }
 
-    auto now = MonotonicTime::now();
-    auto transmissionTime = MediaTime::createWithDouble((now - messageTime).value(), 1);
-    auto adjustedTaskTime = taskTime - transmissionTime;
     auto currentTime = m_player->currentTime();
-    if (adjustedTaskTime <= currentTime) {
-        completionHandler(currentTime, now);
+    if (taskTime <= currentTime) {
+        completionHandler(currentTime);
         return;
     }
 
@@ -1126,8 +1114,8 @@ void RemoteMediaPlayerProxy::performTaskAtTime(const MediaTime& taskTime, Monoto
             return;
 
         auto completionHandler = WTFMove(m_performTaskAtTimeCompletionHandler);
-        completionHandler(m_player->currentTime(), MonotonicTime::now());
-    }, adjustedTaskTime);
+        completionHandler(m_player->currentTime());
+    }, taskTime);
 }
 
 void RemoteMediaPlayerProxy::isCrossOrigin(WebCore::SecurityOriginData originData, CompletionHandler<void(std::optional<bool>)>&& completionHandler)
@@ -1184,11 +1172,11 @@ void RemoteMediaPlayerProxy::createAudioSourceProvider()
     if (!m_player)
         return;
 
-    auto* provider = m_player->audioSourceProvider();
-    if (!provider || !is<AudioSourceProviderAVFObjC>(provider))
+    auto* provider = dynamicDowncast<AudioSourceProviderAVFObjC>(m_player->audioSourceProvider());
+    if (!provider)
         return;
 
-    m_remoteAudioSourceProvider = RemoteAudioSourceProviderProxy::create(m_id, m_webProcessConnection.copyRef(), downcast<AudioSourceProviderAVFObjC>(*provider));
+    m_remoteAudioSourceProvider = RemoteAudioSourceProviderProxy::create(m_id, m_webProcessConnection.copyRef(), *provider);
 #endif
 }
 
@@ -1239,6 +1227,11 @@ void RemoteMediaPlayerProxy::setShouldCheckHardwareSupport(bool value)
 {
     m_player->setShouldCheckHardwareSupport(value);
     m_shouldCheckHardwareSupport = value;
+}
+
+void RemoteMediaPlayerProxy::setSpatialTrackingLabel(String&& spatialTrackingLabel)
+{
+    m_player->setSpatialTrackingLabel(WTFMove(spatialTrackingLabel));
 }
 
 #if !RELEASE_LOG_DISABLED

@@ -31,6 +31,7 @@
 #import "TestNavigationDelegate.h"
 #import "TestUIDelegate.h"
 #import "Utilities.h"
+#import "WKWebViewFindStringFindDelegate.h"
 #import <WebKit/WKFrameInfoPrivate.h>
 #import <WebKit/WKNavigationDelegatePrivate.h>
 #import <WebKit/WKNavigationPrivate.h>
@@ -122,9 +123,48 @@ static RetainPtr<NSSet> frameTrees(WKWebView *webView)
     return result;
 }
 
+static Vector<char> indentation(size_t count)
+{
+    Vector<char> result;
+    for (size_t i = 0; i < count; i++)
+        result.append(' ');
+    result.append(0);
+    return result;
+}
+
+static void printTree(_WKFrameTreeNode *n, size_t indent = 0)
+{
+    if (n.info._isLocalFrame)
+        WTFLogAlways("%s%@://%@ (pid %d)", indentation(indent).data(), n.info.securityOrigin.protocol, n.info.securityOrigin.host, n.info._processIdentifier);
+    else
+        WTFLogAlways("%s(remote) (pid %d)", indentation(indent).data(), n.info._processIdentifier);
+    for (_WKFrameTreeNode *c in n.childFrames)
+        printTree(c, indent + 1);
+}
+
+static void printTree(const ExpectedFrameTree& n, size_t indent = 0)
+{
+    if (auto* s = std::get_if<String>(&n.remoteOrOrigin))
+        WTFLogAlways("%s%s", indentation(indent).data(), s->utf8().data());
+    else
+        WTFLogAlways("%s(remote)", indentation(indent).data());
+    for (const auto& c : n.children)
+        printTree(c, indent + 1);
+}
+
 static void checkFrameTreesInProcesses(NSSet<_WKFrameTreeNode *> *actualTrees, Vector<ExpectedFrameTree>&& expectedFrameTrees)
 {
-    EXPECT_TRUE(frameTreesMatch(actualTrees, WTFMove(expectedFrameTrees)));
+    bool result = frameTreesMatch(actualTrees, WTFMove(expectedFrameTrees));
+    if (!result) {
+        WTFLogAlways("ACTUAL");
+        for (_WKFrameTreeNode *n in actualTrees)
+            printTree(n);
+        WTFLogAlways("EXPECTED");
+        for (const auto& e : expectedFrameTrees)
+            printTree(e);
+        WTFLogAlways("END");
+    }
+    EXPECT_TRUE(result);
 }
 
 void checkFrameTreesInProcesses(WKWebView *webView, Vector<ExpectedFrameTree>&& expectedFrameTrees)
@@ -139,7 +179,7 @@ static pid_t findFramePID(NSSet<_WKFrameTreeNode *> *set, FrameType local)
         if (node.info._isLocalFrame == (local == FrameType::Local))
             return node.info._processIdentifier;
     }
-    ASSERT_NOT_REACHED();
+    EXPECT_FALSE(true);
     return 0;
 }
 
@@ -410,9 +450,7 @@ TEST(SiteIsolation, ParentOpener)
     EXPECT_WK_STREQ([opened.uiDelegate waitForAlert], "posted message 1");
 
     [opened.webView evaluateJavaScript:@"try { top.opener.postMessage('test2', '*'); alert('posted message 2') } catch(e) { alert(e) }" inFrame:childFrame.get() inContentWorld:WKContentWorld.pageWorld completionHandler:nil];
-    // FIXME: This should say "posted message 2" like it does without site isolation on.
-    // It currently does not because when we make a new process for an iframe, we don't inject the opener remote page into it.
-    EXPECT_WK_STREQ([opened.uiDelegate waitForAlert], "TypeError: null is not an object (evaluating 'top.opener.postMessage')");
+    EXPECT_WK_STREQ([opened.uiDelegate waitForAlert], "posted message 2");
 }
 
 TEST(SiteIsolation, WindowOpenRedirect)
@@ -996,7 +1034,7 @@ TEST(SiteIsolation, ChildNavigatingToDomainLoadedOnADifferentPage)
         EXPECT_NE(mainFramePid, 0);
         EXPECT_NE(childFramePid, 0);
         EXPECT_NE(mainFramePid, childFramePid);
-        EXPECT_NE(firstFramePID, childFramePid);
+        EXPECT_EQ(firstFramePID, childFramePid);
         EXPECT_WK_STREQ(mainFrame.info.securityOrigin.host, "example.com");
         EXPECT_WK_STREQ(childFrame.info.securityOrigin.host, "webkit.org");
         done = true;
@@ -2263,6 +2301,33 @@ TEST(SiteIsolation, FindStringSelectionSameOriginFrameBeforeWrap)
         findStringAndValidateResults(webView.get(), *it);
 }
 
+TEST(SiteIsolation, FindStringMatchCount)
+{
+    auto mainframeHTML = "<p>Hello world</p>"
+        "<iframe src='https://domain2.com/subframe'></iframe>"
+        "<iframe src='https://domain3.com/subframe'></iframe>"_s;
+    HTTPServer server({
+        { "/mainframe"_s, { mainframeHTML } },
+        { "/subframe"_s, { "<p>Hello world</p>"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+    auto [webView, navigationDelegate] = siteIsolatedViewAndDelegate(server);
+    auto findConfiguration = adoptNS([[WKFindConfiguration alloc] init]);
+    auto findDelegate = adoptNS([[WKWebViewFindStringFindDelegate alloc] init]);
+    [webView _setFindDelegate:findDelegate.get()];
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://domain1.com/mainframe"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    __block bool done = false;
+    [webView findString:@"Hello world" withConfiguration:findConfiguration.get() completionHandler:^(WKFindResult *result) {
+        EXPECT_TRUE(result.matchFound);
+        done = true;
+    }];
+    Util::run(&done);
+
+    EXPECT_EQ(3ul, [findDelegate matchesCount]);
+}
+
 #if PLATFORM(MAC)
 TEST(SiteIsolation, ProcessDisplayNames)
 {
@@ -2568,6 +2633,34 @@ TEST(SiteIsolation, WebsitePoliciesCustomUserAgentDuringCrossSiteProvisionalNavi
     };
     [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://domain3.com/missing"]]];
     Util::run(&receivedRequestFromSubframe);
+}
+
+TEST(SiteIsolation, LoadHTMLString)
+{
+    HTTPServer server({
+        { "/webkit"_s, { "hi"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    NSString *html = @"<iframe src='https://webkit.org/webkit'></iframe>";
+    auto [webView, navigationDelegate] = siteIsolatedViewAndDelegate(server);
+
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://example.com"]];
+    [navigationDelegate waitForDidFinishNavigation];
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://example.com"_s,
+            { { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://webkit.org"_s } }
+        },
+    });
+
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://webkit.org"]];
+    [navigationDelegate waitForDidFinishNavigation];
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://webkit.org"_s,
+            { { "https://webkit.org"_s } }
+        },
+    });
 }
 
 TEST(SiteIsolation, WebsitePoliciesCustomUserAgentDuringSameSiteProvisionalNavigation)

@@ -899,7 +899,7 @@ std::optional<SimpleRange> LocalFrame::rangeForPoint(const IntPoint& framePoint)
     auto position = visiblePositionForPoint(framePoint);
 
     auto containerText = position.deepEquivalent().containerText();
-    if (!containerText || !containerText->renderer() || containerText->renderer()->style().effectiveUserSelect() == UserSelect::None)
+    if (!containerText || !containerText->renderer() || containerText->renderer()->style().usedUserSelect() == UserSelect::None)
         return std::nullopt;
 
     if (auto previousCharacterRange = makeSimpleRange(position.previous(), position)) {
@@ -1288,6 +1288,22 @@ void LocalFrame::frameWasDisconnectedFromOwner() const
 CheckedRef<FrameSelection> LocalFrame::checkedSelection() const
 {
     return document()->selection();
+}
+
+void LocalFrame::storageAccessExceptionReceivedForDomain(const RegistrableDomain& domain)
+{
+    m_storageAccessExceptionDomains.add(domain);
+}
+
+bool LocalFrame::requestSkipUserActivationCheckForStorageAccess(const RegistrableDomain& domain)
+{
+    auto iter = m_storageAccessExceptionDomains.find(domain);
+    if (iter == m_storageAccessExceptionDomains.end())
+        return false;
+
+    // We only allow the domain to skip check once.
+    m_storageAccessExceptionDomains.remove(iter);
+    return true;
 }
 
 #if ENABLE(WINDOW_PROXY_PROPERTY_ACCESS_NOTIFICATION)

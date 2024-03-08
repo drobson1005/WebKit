@@ -272,6 +272,7 @@
 #include "TouchAction.h"
 #include "TransformSource.h"
 #include "TreeWalker.h"
+#include "TrustedType.h"
 #include "TypedElementDescendantIteratorInlines.h"
 #include "UndoManager.h"
 #include "UserGestureIndicator.h"
@@ -656,7 +657,9 @@ Document::Document(LocalFrame* frame, const Settings& settings, const URL& url, 
     ASSERT(!m_markers);
     ASSERT(!m_scriptRunner);
     ASSERT(!m_moduleLoader);
+#if ENABLE(FULLSCREEN_API)
     ASSERT(!m_fullscreenManager);
+#endif
     ASSERT(!m_fontSelector);
     ASSERT(!m_fontLoader);
     ASSERT(!m_undoManager);
@@ -4268,6 +4271,18 @@ void Document::setRTCNetworkManager(Ref<RTCNetworkManager>&& rtcNetworkManager)
 {
     m_rtcNetworkManager = WTFMove(rtcNetworkManager);
 }
+
+void Document::startGatheringRTCLogs(RTCController::LogCallback&& callback)
+{
+    if (RefPtr page = this->page())
+        page->rtcController().startGatheringLogs(*this, WTFMove(callback));
+}
+
+void Document::stopGatheringRTCLogs()
+{
+    if (RefPtr page = this->page())
+        page->rtcController().stopGatheringLogs();
+}
 #endif
 
 bool Document::canNavigate(Frame* targetFrame, const URL& destinationURL)
@@ -5008,12 +5023,26 @@ void Document::updateViewportUnitsOnResize()
 
 void Document::setNeedsDOMWindowResizeEvent()
 {
+#if ENABLE(FULLSCREEN_API)
+    if (CheckedPtr fullscreenManager = fullscreenManagerIfExists(); fullscreenManager && fullscreenManager->isAnimatingFullscreen()) {
+        fullscreenManager->addPendingScheduledResize(FullscreenManager::ResizeType::DOMWindow);
+        return;
+    }
+#endif
+
     m_needsDOMWindowResizeEvent = true;
     scheduleRenderingUpdate(RenderingUpdateStep::Resize);
 }
 
 void Document::setNeedsVisualViewportResize()
 {
+#if ENABLE(FULLSCREEN_API)
+    if (CheckedPtr fullscreenManager = fullscreenManagerIfExists(); fullscreenManager && fullscreenManager->isAnimatingFullscreen()) {
+        fullscreenManager->addPendingScheduledResize(FullscreenManager::ResizeType::VisualViewport);
+        return;
+    }
+#endif
+
     m_needsVisualViewportResizeEvent = true;
     scheduleRenderingUpdate(RenderingUpdateStep::Resize);
 }
@@ -6867,13 +6896,27 @@ static Editor::Command command(Document* document, const String& commandName, bo
         userInterface ? EditorCommandSource::DOMWithUserInterface : EditorCommandSource::DOM);
 }
 
-ExceptionOr<bool> Document::execCommand(const String& commandName, bool userInterface, const String& value)
+ExceptionOr<bool> Document::execCommand(const String& commandName, bool userInterface, const std::variant<String, RefPtr<TrustedHTML>>& value)
 {
     if (UNLIKELY(!isHTMLDocument() && !isXHTMLDocument()))
         return Exception { ExceptionCode::InvalidStateError, "execCommand is only supported on HTML documents."_s };
 
+    auto stringValueHolder = WTF::switchOn(value,
+        [&commandName, this](const String& str) -> ExceptionOr<String> {
+            if (commandName != "insertHTML"_s)
+                return String(str);
+            return trustedTypeCompliantString(TrustedType::TrustedHTML, *scriptExecutionContext(), str, "Document execCommand"_s);
+        },
+        [](const RefPtr<TrustedHTML>& trustedHtml) -> ExceptionOr<String> {
+            return trustedHtml->toString();
+        }
+    );
+
+    if (stringValueHolder.hasException())
+        return stringValueHolder.releaseException();
+
     EventQueueScope eventQueueScope;
-    return command(this, commandName, userInterface).execute(value);
+    return command(this, commandName, userInterface).execute(stringValueHolder.releaseReturnValue());
 }
 
 ExceptionOr<bool> Document::queryCommandEnabled(const String& commandName)
@@ -7877,7 +7920,9 @@ void Document::enqueueHashchangeEvent(const String& oldURL, const String& newURL
 
 void Document::dispatchPopstateEvent(RefPtr<SerializedScriptValue>&& stateObject)
 {
-    dispatchWindowEvent(PopStateEvent::create(WTFMove(stateObject), m_domWindow ? &m_domWindow->history() : nullptr));
+    auto event = PopStateEvent::create(WTFMove(stateObject), m_domWindow ? &m_domWindow->history() : nullptr);
+    event->setHasUAVisualTransition(page() && page()->isInSwipeAnimation());
+    dispatchWindowEvent(event);
 }
 
 void Document::addMediaCanStartListener(MediaCanStartListener& listener)
@@ -10153,6 +10198,9 @@ void Document::prepareCanvasesForDisplayOrFlushIfNeeded()
         auto* context = weakContext.get();
         if (!context)
             continue;
+
+        context->setIsInPreparationForDisplayOrFlush(false);
+
         // Some canvas contexts hold memory that should be periodically freed.
         if (context->hasDeferredOperations())
             context->flushDeferredOperations();
@@ -10165,25 +10213,21 @@ void Document::prepareCanvasesForDisplayOrFlushIfNeeded()
     }
 }
 
-void Document::addCanvasNeedingPreparationForDisplayOrFlush(CanvasBase& canvas)
+void Document::addCanvasNeedingPreparationForDisplayOrFlush(CanvasRenderingContext& context)
 {
-    auto* context = canvas.renderingContext();
-    if (!context)
-        return;
-    if (context->hasDeferredOperations() || context->needsPreparationForDisplay()) {
+    if (context.hasDeferredOperations() || context.needsPreparationForDisplay()) {
         bool shouldSchedule = m_canvasContextsToPrepare.isEmptyIgnoringNullReferences();
-        m_canvasContextsToPrepare.add(*context);
+        m_canvasContextsToPrepare.add(context);
+        context.setIsInPreparationForDisplayOrFlush(true);
         if (shouldSchedule)
             scheduleRenderingUpdate(RenderingUpdateStep::PrepareCanvasesForDisplayOrFlush);
     }
 }
 
-void Document::removeCanvasNeedingPreparationForDisplayOrFlush(CanvasBase& canvas)
+void Document::removeCanvasNeedingPreparationForDisplayOrFlush(CanvasRenderingContext& context)
 {
-    auto* context = canvas.renderingContext();
-    if (!context)
-        return;
-    m_canvasContextsToPrepare.remove(*context);
+    m_canvasContextsToPrepare.remove(context);
+    context.setIsInPreparationForDisplayOrFlush(false);
 }
 
 void Document::updateSleepDisablerIfNeeded()

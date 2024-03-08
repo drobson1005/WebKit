@@ -123,6 +123,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayDeferredPaymentRequest.cp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayDeferredPaymentRequest.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayDetailsUpdateBase.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayDetailsUpdateBase.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayDisbursementPaymentRequest.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayDisbursementPaymentRequest.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayError.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayError.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSApplePayErrorCode.cpp
@@ -839,10 +841,10 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDeviceOrientationEvent.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDeviceOrientationEvent.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDeviceOrientationOrMotionPermissionState.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDeviceOrientationOrMotionPermissionState.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDigitalCredential.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDigitalCredential.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDigitalCredentialRequestOptions.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDigitalCredentialRequestOptions.h
-$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDigitalIdentity.cpp
-$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDigitalIdentity.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDistanceModelType.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDistanceModelType.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+CSSOMView.cpp
@@ -2350,6 +2352,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCIceTransportState.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCIceTransportState.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCLocalSessionDescriptionInit.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCLocalSessionDescriptionInit.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCLogsCallback.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCLogsCallback.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCOfferAnswerOptions.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCOfferAnswerOptions.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSRTCOfferOptions.cpp
@@ -3048,6 +3052,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVisualViewport.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVisualViewport.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVoidCallback.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVoidCallback.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSWGSLLanguageFeatures.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSWGSLLanguageFeatures.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSWakeLock.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSWakeLock.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSWakeLockSentinel.cpp

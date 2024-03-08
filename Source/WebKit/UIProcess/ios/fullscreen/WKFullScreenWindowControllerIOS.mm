@@ -62,7 +62,6 @@
 #if PLATFORM(VISION)
 #import "MRUIKitSPI.h"
 #if ENABLE(QUICKLOOK_FULLSCREEN)
-#import "MediaPermissionUtilities.h"
 #import "WKSPreviewWindowController.h"
 #import <pal/ios/QuickLookSoftLink.h>
 #import "WebKitSwiftSoftLink.h"
@@ -701,13 +700,9 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
 - (void)placeholderWillMoveToSuperview:(UIView *)superview;
 @end
 
-#if PLATFORM(VISION) && ENABLE(QUICKLOOK_FULLSCREEN)
+#if ENABLE(QUICKLOOK_FULLSCREEN)
 @interface WKFullScreenWindowController (WKSPreviewWindowControllerDelegate) <WKSPreviewWindowControllerDelegate>
-- (void)previewWindowControllerDidClose;
-@end
-
-@interface WKFullScreenWindowController (QLPreviewItemDataProvider) <QLPreviewItemDataProvider>
-- (NSData *)provideDataForItem:(QLItem *)item;
+- (void)previewWindowControllerDidClose:(id)previewWindowController;
 @end
 #endif
 
@@ -756,7 +751,6 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
 #if ENABLE(FULLSCREEN_DISMISSAL_GESTURES)
     RetainPtr<UISwipeGestureRecognizer> _startDismissGestureRecognizer;
     RetainPtr<UIPanGestureRecognizer> _interactivePanDismissGestureRecognizer;
-    RetainPtr<UIPinchGestureRecognizer> _interactivePinchDismissGestureRecognizer;
     RetainPtr<WKFullScreenInteractiveTransition> _interactiveDismissTransitionCoordinator;
 #endif
 #if PLATFORM(VISION)
@@ -826,7 +820,9 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
 {
     return _fullScreenState == WebKit::WaitingToEnterFullScreen
         || _fullScreenState == WebKit::EnteringFullScreen
-        || _fullScreenState == WebKit::InFullScreen;
+        || _fullScreenState == WebKit::InFullScreen
+        || _fullScreenState == WebKit::WaitingToExitFullScreen
+        || _fullScreenState == WebKit::ExitingFullScreen;
 }
 
 - (UIView *)webViewPlaceholder
@@ -933,11 +929,6 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     [_interactivePanDismissGestureRecognizer setDelegate:self];
     [_interactivePanDismissGestureRecognizer setCancelsTouchesInView:NO];
     [_fullscreenViewController.get().view addGestureRecognizer:_interactivePanDismissGestureRecognizer.get()];
-
-    _interactivePinchDismissGestureRecognizer = adoptNS([[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(_interactivePinchDismissChanged:)]);
-    [_interactivePinchDismissGestureRecognizer setDelegate:self];
-    [_interactivePinchDismissGestureRecognizer setCancelsTouchesInView:NO];
-    [_fullscreenViewController.get().view addGestureRecognizer:_interactivePinchDismissGestureRecognizer.get()];
 #endif // ENABLE(FULLSCREEN_DISMISSAL_GESTURES)
 
     manager->saveScrollPosition();
@@ -1177,6 +1168,14 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     _fullScreenState = WebKit::WaitingToExitFullScreen;
     _exitingFullScreen = YES;
 
+#if ENABLE(QUICKLOOK_FULLSCREEN)
+    if (_previewWindowController) {
+        [_previewWindowController dismissWindow];
+        [_previewWindowController setDelegate:nil];
+        _previewWindowController = nil;
+    }
+#endif
+
     if (auto* manager = self._manager) {
         OBJC_ALWAYS_LOG(OBJC_LOGIDENTIFIER);
         manager->setAnimatingFullScreen(true);
@@ -1236,7 +1235,6 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     [webView setFrame:[_webViewPlaceholder frame]];
     [webView setAutoresizingMask:[_webViewPlaceholder autoresizingMask]];
 
-    [[webView window] makeKeyAndVisible];
     [webView becomeFirstResponder];
 
     [webView _clearOverrideZoomScaleParameters];
@@ -1261,6 +1259,11 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     _fullScreenState = WebKit::NotInFullScreen;
     OBJC_ALWAYS_LOG(OBJC_LOGIDENTIFIER);
 
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    bool windowWasKey = [_window isKeyWindow];
+
     [self _reinsertWebViewUnderPlaceholder];
 
     if (auto* manager = self._manager) {
@@ -1280,7 +1283,7 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     _parentWindowState = nil;
 #endif
 
-    CompletionHandler<void()> completionHandler([protectedSelf = retainPtr(self), self, logIdentifier = OBJC_LOGIDENTIFIER] {
+    CompletionHandler<void()> completionHandler([protectedSelf = retainPtr(self), self, windowWasKey, logIdentifier = OBJC_LOGIDENTIFIER] {
         _webViewPlaceholder.get().parent = nil;
         [_webViewPlaceholder removeFromSuperview];
 
@@ -1297,6 +1300,10 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
             [self requestRestoreFullScreen];
         } else
             OBJC_ALWAYS_LOG(logIdentifier, "repaint completed");
+
+        if (windowWasKey)
+            [self._webView.window makeKeyWindow];
+        [CATransaction commit];
     });
 
     auto* page = [self._webView _page].get();
@@ -1425,8 +1432,6 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
         CGPoint anchor = CGPointZero;
         if (_interactivePanDismissGestureRecognizer.get().state == UIGestureRecognizerStateBegan)
             anchor = [_interactivePanDismissGestureRecognizer locationInView:_fullscreenViewController.get().view];
-        else if (_interactivePinchDismissGestureRecognizer.get().state == UIGestureRecognizerStateBegan)
-            anchor = [_interactivePinchDismissGestureRecognizer locationInView:_fullscreenViewController.get().view];
         _interactiveDismissTransitionCoordinator = adoptNS([[WKFullScreenInteractiveTransition alloc] initWithAnimator:(WKFullscreenAnimationController *)animator anchor:anchor]);
     }
 
@@ -1650,12 +1655,6 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     if (!_inInteractiveDismiss)
         return;
 
-    auto pinchState = [_interactivePinchDismissGestureRecognizer state];
-    if (pinchState > UIGestureRecognizerStatePossible && pinchState <= UIGestureRecognizerStateEnded) {
-        OBJC_ALWAYS_LOG(OBJC_LOGIDENTIFIER, "pinch state: ", pinchState, ", dropping");
-        return;
-    }
-
     CGPoint translation = [_interactivePanDismissGestureRecognizer translationInView:_fullscreenViewController.get().view];
     CGPoint velocity = [_interactivePanDismissGestureRecognizer velocityInView:_fullscreenViewController.get().view];
     CGFloat progress = translation.y / (_fullscreenViewController.get().view.bounds.size.height / 2);
@@ -1673,30 +1672,6 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     }
 
     [_interactiveDismissTransitionCoordinator updateInteractiveTransition:progress withTranslation:CGSizeMake(translation.x, translation.y)];
-}
-
-- (void)_interactivePinchDismissChanged:(id)sender
-{
-    CGFloat scale = [_interactivePinchDismissGestureRecognizer scale];
-    CGFloat velocity = [_interactivePinchDismissGestureRecognizer velocity];
-    CGFloat progress = std::min(1., std::max(0., 1 - scale));
-
-    CGPoint translation = CGPointZero;
-    auto panState = [_interactivePanDismissGestureRecognizer state];
-    if (panState > UIGestureRecognizerStatePossible && panState <= UIGestureRecognizerStateEnded)
-        translation = [_interactivePanDismissGestureRecognizer translationInView:_fullscreenViewController.get().view];
-
-    if (_interactivePinchDismissGestureRecognizer.get().state == UIGestureRecognizerStateEnded) {
-        OBJC_ALWAYS_LOG(OBJC_LOGIDENTIFIER, "ended");
-        _inInteractiveDismiss = false;
-        if ((progress > 0.05 && velocity < 0.) || velocity < -2.5)
-            [self requestExitFullScreen];
-        else
-            [_interactiveDismissTransitionCoordinator cancelInteractiveTransition];
-        return;
-    }
-
-    [_interactiveDismissTransitionCoordinator updateInteractiveTransition:progress withScale:scale andTranslation:CGSizeMake(translation.x, translation.y)];
 }
 #endif // ENABLE(FULLSCREEN_DISMISSAL_GESTURES)
 
@@ -1889,18 +1864,17 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
     });
 
     CGFloat inWindowAlpha = 1;
-#if PLATFORM(VISION) && ENABLE(QUICKLOOK_FULLSCREEN)
+#if ENABLE(QUICKLOOK_FULLSCREEN)
     auto* manager = self._manager;
     if (manager && manager->isImageElement()) {
         if (enter) {
             inWindowAlpha = 0;
-            auto item = adoptNS([PAL::allocQLItemInstance() initWithDataProvider:self contentType:[UTType typeWithMIMEType:manager->imageMIMEType()].identifier previewTitle:WebKit::applicationVisibleName()]);
-            _previewWindowController = [WebKit::allocWKSPreviewWindowControllerInstance() initWithItem:item.get()];
-            [_previewWindowController setDelegate:self];
-            [_previewWindowController presentWindow];
-        } else if (_previewWindowController) {
-            [_previewWindowController setDelegate:nil];
-            _previewWindowController = nil;
+            manager->prepareQuickLookImageURL([strongSelf = retainPtr(self), self] (URL&& url) mutable {
+                auto item = adoptNS([PAL::allocQLItemInstance() initWithURL:url]);
+                _previewWindowController = adoptNS([WebKit::allocWKSPreviewWindowControllerInstance() initWithItem:item.get()]);
+                [_previewWindowController setDelegate:self];
+                [_previewWindowController presentWindow];
+            });
         }
     }
 #endif
@@ -1953,21 +1927,12 @@ static constexpr NSString *kPrefersFullScreenDimmingKey = @"WebKitPrefersFullScr
 #if PLATFORM(VISION) && ENABLE(QUICKLOOK_FULLSCREEN)
 
 @implementation WKFullScreenWindowController (WKSPreviewWindowControllerDelegate)
-- (void)previewWindowControllerDidClose
+- (void)previewWindowControllerDidClose:(id)previewWindowController
 {
+    if (previewWindowController != _previewWindowController)
+        return;
+
     [self requestExitFullScreen];
-}
-@end
-
-@implementation WKFullScreenWindowController (QLPreviewItemDataProvider)
-- (NSData *)provideDataForItem:(QLItem *)item
-{
-    if (auto* manager = self._manager) {
-        if (manager->imageBuffer().has_value())
-            return manager->imageBuffer().value()->createNSData().autorelease();
-    }
-
-    return nil;
 }
 @end
 

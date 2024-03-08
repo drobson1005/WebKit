@@ -114,6 +114,7 @@ public:
     void alternativeText(Vector<AccessibilityText>&) const;
     void helpText(Vector<AccessibilityText>&) const;
     String stringValue() const override;
+    WallTime dateTimeValue() const final;
     SRGBA<uint8_t> colorValue() const override;
     String ariaLabeledByAttribute() const override;
     bool hasAttributesRequiredForInclusion() const final;
@@ -197,7 +198,7 @@ protected:
     String accessKey() const final;
     bool isLabelable() const;
     AccessibilityObject* controlForLabelElement() const final;
-    String textAsLabel() const;
+    String textAsLabelFor(const AccessibilityObject&) const;
     String textForLabelElements(Vector<Ref<HTMLElement>>&&) const;
     HTMLLabelElement* labelElementContainer() const;
 

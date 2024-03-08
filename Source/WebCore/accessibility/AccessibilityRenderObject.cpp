@@ -37,6 +37,7 @@
 #include "AccessibilitySpinButton.h"
 #include "AccessibilityTable.h"
 #include "CachedImage.h"
+#include "ComposedTreeIterator.h"
 #include "DocumentSVG.h"
 #include "Editing.h"
 #include "Editor.h"
@@ -766,8 +767,12 @@ String AccessibilityRenderObject::stringValue() const
     if (!m_renderer)
         return AccessibilityNodeObject::stringValue();
 
-    if (isStaticText() || isTextControl() || isSecureField())
+    if (isStaticText() || isTextControl() || isSecureField()) {
+        // A combobox is considered a text control, and its value is handled in AXNodeObject.
+        if (isComboBox())
+            return AccessibilityNodeObject::stringValue();
         return text();
+    }
 
     if (is<RenderText>(m_renderer.get()))
         return textUnderElement();
@@ -788,6 +793,11 @@ String AccessibilityRenderObject::stringValue() const
         return renderMenuList->text();
     }
 
+#if PLATFORM(COCOA)
+    if (is<RenderListItem>(m_renderer.get()))
+        return textUnderElement();
+#endif
+
     if (auto* renderListMarker = dynamicDowncast<RenderListMarker>(m_renderer.get())) {
 #if USE(ATSPI)
         return renderListMarker->textWithSuffix().toString();
@@ -800,6 +810,10 @@ String AccessibilityRenderObject::stringValue() const
         return { };
 
     if (isDateTime()) {
+        if (RefPtr input = dynamicDowncast<HTMLInputElement>(node()))
+            return input->visibleValue();
+
+        // As fallback, gather the static text under this.
         String value;
         Accessibility::enumerateDescendants(*const_cast<AccessibilityRenderObject*>(this), false, [&value] (const auto& object) {
             if (object.isStaticText())
@@ -1431,6 +1445,18 @@ AXTextRuns AccessibilityRenderObject::textRuns()
     if (auto* renderLineBreak = dynamicDowncast<RenderLineBreak>(renderer())) {
         auto box = InlineIterator::boxFor(*renderLineBreak);
         return { renderLineBreak->containingBlock(), { AXTextRun(box->lineIndex(), makeString('\n').isolatedCopy()) } };
+    }
+
+    if (RefPtr inputElement = dynamicDowncast<HTMLInputElement>(node())) {
+        // The text within input elements is not actually part of the accessibility tree, meaning we need to do a bit of extra work to expose that text here.
+        for (const auto& node : composedTreeDescendants(*inputElement)) {
+            if (!node.isTextNode())
+                continue;
+            auto* renderer = node.renderer();
+            auto* containingBlock = renderer ? renderer->containingBlock() : nullptr;
+            return containingBlock ? AXTextRuns(containingBlock, { AXTextRun(0, inputElement->value().isolatedCopy()) }) : AXTextRuns();
+        }
+        return { };
     }
 
     WeakPtr renderText = dynamicDowncast<RenderText>(renderer());
@@ -2413,7 +2439,7 @@ void AccessibilityRenderObject::addAttachmentChildren()
 
     // LocalFrameView's need to be inserted into the AX hierarchy when encountered.
     Widget* widget = widgetForAttachmentView();
-    if (!widget || !widget->isLocalFrameView())
+    if (!widget || !(widget->isLocalFrameView() || widget->isRemoteFrameView()))
         return;
     
     addChild(axObjectCache()->getOrCreate(widget));
@@ -2538,7 +2564,7 @@ void AccessibilityRenderObject::updateRoleAfterChildrenCreation()
 
     if (role != m_role) {
         if (auto* cache = axObjectCache())
-            cache->handleRoleChanged(this);
+            cache->handleRoleChanged(*this);
     }
 }
     
@@ -2568,7 +2594,7 @@ void AccessibilityRenderObject::addChildren()
         auto owners = object.owners();
         if (owners.size() && !owners.contains(this))
             return;
-        
+
         addChild(&object);
     };
 
@@ -2654,7 +2680,7 @@ bool AccessibilityRenderObject::isApplePayButton() const
 {
     if (!m_renderer)
         return false;
-    return m_renderer->style().effectiveAppearance() == StyleAppearance::ApplePayButton;
+    return m_renderer->style().usedAppearance() == StyleAppearance::ApplePayButton;
 }
 
 ApplePayButtonType AccessibilityRenderObject::applePayButtonType() const

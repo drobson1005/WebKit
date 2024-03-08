@@ -438,7 +438,6 @@ static WebCore::Cursor::Type toWebCoreCursorType(PDFLayerControllerCursorType cu
 
 - (void)performSpotlightSearch:(NSString *)string
 {
-    _pdfPlugin->performSpotlightSearch({ string });
 }
 
 - (void)openWithNativeApplication
@@ -1115,7 +1114,7 @@ bool PDFPlugin::handleContextMenuEvent(const WebMouseEvent& event)
     }
     PDFContextMenu contextMenu { point, WTFMove(items), WTFMove(openInPreviewTag) };
 
-    webPage->sendWithAsyncReply(Messages::WebPageProxy::ShowPDFContextMenu { contextMenu, m_identifier }, [itemCount, nsMenu = WTFMove(nsMenu), weakThis = WeakPtr { *this }](std::optional<int32_t>&& selectedIndex) {
+    webPage->sendWithAsyncReply(Messages::WebPageProxy::ShowPDFContextMenu { contextMenu, identifier() }, [itemCount, nsMenu = WTFMove(nsMenu), weakThis = WeakPtr { *this }](std::optional<int32_t>&& selectedIndex) {
         if (RefPtr protectedThis = weakThis.get()) {
             if (selectedIndex && selectedIndex.value() >= 0 && selectedIndex.value() < itemCount)
                 [nsMenu performActionForItemAtIndex:*selectedIndex];
@@ -1540,6 +1539,11 @@ CGFloat PDFPlugin::scaleFactor() const
     return [m_pdfLayerController contentScaleFactor];
 }
 
+float PDFPlugin::contentScaleFactor() const
+{
+    return scaleFactor();
+}
+
 bool PDFPlugin::handleWheelEvent(const WebWheelEvent& event)
 {
     PDFDisplayMode displayMode = [m_pdfLayerController displayMode];
@@ -1592,17 +1596,6 @@ NSData *PDFPlugin::liveData() const
         return [m_pdfDocument dataRepresentation];
 
     return originalData();
-}
-
-id PDFPlugin::accessibilityAssociatedPluginParentForElement(WebCore::Element* element) const
-{
-    if (!m_activeAnnotation)
-        return nil;
-
-    if (m_activeAnnotation->element() != element)
-        return nil;
-
-    return [m_activeAnnotation->annotation() accessibilityNode];
 }
 
 id PDFPlugin::accessibilityHitTest(const WebCore::IntPoint& point) const

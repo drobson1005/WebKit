@@ -67,8 +67,6 @@ public:
 
     constexpr WebCore::MediaPlatformType platformType() const final { return WebCore::MediaPlatformType::Remote; }
 
-    void disconnect() { m_disconnected = true; }
-
     static WorkQueue& queue();
 
     class MessageReceiver : public IPC::WorkQueueMessageReceiver {
@@ -84,10 +82,12 @@ public:
         void sourceBufferPrivateDidReceiveInitializationSegment(InitializationSegmentInfo&&, CompletionHandler<void(WebCore::MediaPromise::Result&&)>&&);
         void takeOwnershipOfMemory(WebCore::SharedMemory::Handle&&);
         void sourceBufferPrivateHighestPresentationTimestampChanged(const MediaTime&);
-        void sourceBufferPrivateBufferedChanged(Vector<WebCore::PlatformTimeRanges>&&, uint64_t, CompletionHandler<void()>&&);
+        void sourceBufferPrivateBufferedChanged(Vector<WebCore::PlatformTimeRanges>&&, CompletionHandler<void()>&&);
         void sourceBufferPrivateDurationChanged(const MediaTime&, CompletionHandler<void()>&&);
         void sourceBufferPrivateDidDropSample();
         void sourceBufferPrivateDidReceiveRenderingError(int64_t errorCode);
+        void sourceBufferPrivateEvictionDataChanged(WebCore::SourceBufferEvictionData&&);
+        void sourceBufferPrivateShuttingDown(CompletionHandler<void()>&&);
         RefPtr<WebCore::SourceBufferPrivateClient> client() const;
         ThreadSafeWeakPtr<SourceBufferPrivateRemote> m_parent;
     };
@@ -116,13 +116,16 @@ private:
     void setGroupStartTimestampToEndTimestamp() final;
     void setShouldGenerateTimestamps(bool) final;
     Ref<WebCore::MediaPromise> removeCodedFrames(const MediaTime& start, const MediaTime& end, const MediaTime& currentMediaTime) final;
-    void evictCodedFrames(uint64_t newDataSize, uint64_t maximumBufferSize, const MediaTime& currentTime) final;
+    bool evictCodedFrames(uint64_t newDataSize, const MediaTime& currentTime) final;
     void resetTimestampOffsetInTrackBuffers() final;
     void startChangingType() final;
     void setTimestampOffset(const MediaTime&) final;
     MediaTime timestampOffset() const final;
     void setAppendWindowStart(const MediaTime&) final;
     void setAppendWindowEnd(const MediaTime&) final;
+    Ref<GenericPromise> setMaximumBufferSize(size_t) final;
+    bool isBufferFullFor(uint64_t requiredSize) const final;
+    bool canAppend(uint64_t requiredSize) const final;
 
     Ref<ComputeSeekPromise> computeSeekTime(const WebCore::SeekTarget&) final;
     void seekToTime(const MediaTime&) final;
@@ -130,7 +133,7 @@ private:
     void updateTrackIds(Vector<std::pair<TrackID, TrackID>>&&) final;
     uint64_t totalTrackBufferSizeInBytes() const final;
 
-    void memoryPressure(uint64_t maximumBufferSize, const MediaTime& currentTime) final;
+    void memoryPressure(const MediaTime& currentTime) final;
 
     // Internals Utility methods
     Ref<SamplesPromise> bufferedSamplesForTrackId(TrackID) final;
@@ -140,6 +143,10 @@ private:
 
     void ensureOnDispatcherSync(Function<void()>&&);
     void ensureWeakOnDispatcher(Function<void()>&&);
+    template<typename T> Ref<typename T::Promise> sendWithPromisedReply(T&& message)
+    {
+        return m_gpuProcessConnection.get()->connection().sendWithPromisedReply(std::forward<T>(message), m_remoteSourceBufferIdentifier);
+    }
 
     friend class MessageReceiver;
     ThreadSafeWeakPtr<GPUProcessConnection> m_gpuProcessConnection;
@@ -149,8 +156,9 @@ private:
 
     std::atomic<uint64_t> m_totalTrackBufferSizeInBytes = { 0 };
 
-    bool isGPURunning() const { return !m_disconnected; }
-    bool m_disconnected { false };
+    bool isGPURunning() const { return !m_shutdown && !m_removed; }
+    std::atomic<bool> m_shutdown { false };
+    std::atomic<bool> m_removed { false };
 
     mutable Lock m_lock;
     // We mirror some members from the base class, as we require them to be atomic.

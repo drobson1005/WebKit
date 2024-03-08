@@ -663,8 +663,10 @@ void PlatformMediaSessionManager::maybeDeactivateAudioSession()
 bool PlatformMediaSessionManager::maybeActivateAudioSession()
 {
 #if USE(AUDIO_SESSION)
-    if (!activeAudioSessionRequired())
+    if (!activeAudioSessionRequired()) {
+        ALWAYS_LOG(LOGIDENTIFIER, "active audio session not required");
         return true;
+    }
 
     m_becameActive = AudioSession::sharedSession().tryToSetActive(true);
     ALWAYS_LOG(LOGIDENTIFIER, m_becameActive ? "successfully activated" : "failed to activate", " AudioSession");
@@ -831,6 +833,27 @@ void PlatformMediaSessionManager::setMediaCapabilityGrantsEnabled(bool mediaCapa
     s_mediaCapabilityGrantsEnabled = mediaCapabilityGrantsEnabled;
 }
 #endif
+
+WeakPtr<PlatformMediaSession> PlatformMediaSessionManager::bestEligibleSessionForRemoteControls(const Function<bool(const PlatformMediaSession&)>& filterFunction, PlatformMediaSession::PlaybackControlsPurpose purpose)
+{
+    Vector<WeakPtr<PlatformMediaSession>> eligibleAudioVideoSessions;
+    Vector<WeakPtr<PlatformMediaSession>> eligibleWebAudioSessions;
+    forEachMatchingSession(filterFunction, [&](auto& session) {
+        if (session.presentationType() == PlatformMediaSession::MediaType::WebAudio) {
+            if (eligibleAudioVideoSessions.isEmpty())
+                eligibleWebAudioSessions.append(session);
+        } else
+            eligibleAudioVideoSessions.append(session);
+    });
+
+    if (eligibleAudioVideoSessions.isEmpty()) {
+        if (eligibleWebAudioSessions.isEmpty())
+            return nullptr;
+        return eligibleWebAudioSessions[0]->selectBestMediaSession(eligibleWebAudioSessions, purpose);
+    }
+
+    return eligibleAudioVideoSessions[0]->selectBestMediaSession(eligibleAudioVideoSessions, purpose);
+}
 
 #if !RELEASE_LOG_DISABLED
 WTFLogChannel& PlatformMediaSessionManager::logChannel() const

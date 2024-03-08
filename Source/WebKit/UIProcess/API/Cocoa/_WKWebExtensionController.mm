@@ -46,6 +46,8 @@
 
 #if ENABLE(WK_WEB_EXTENSIONS)
 
+WK_OBJECT_DEALLOC_IMPL_ON_MAIN_THREAD(_WKWebExtensionController, WebExtensionController, _webExtensionController);
+
 - (instancetype)init
 {
     if (!(self = [super init]))
@@ -66,13 +68,6 @@
     API::Object::constructInWrapper<WebKit::WebExtensionController>(self, configuration._webExtensionControllerConfiguration.copy());
 
     return self;
-}
-
-- (void)dealloc
-{
-    ASSERT(isMainRunLoop());
-
-    _webExtensionController->~WebExtensionController();
 }
 
 - (_WKWebExtensionControllerConfiguration *)configuration
@@ -270,6 +265,16 @@ static inline NSSet *toAPI(const HashSet<Ref<T>>& inputSet)
         [context->wrapper() didChangeTabProperties:properties forTab:changedTab];
 }
 
+- (BOOL)_inTestingMode
+{
+    return _webExtensionController->inTestingMode();
+}
+
+- (void)_setTestingMode:(BOOL)testingMode
+{
+    _webExtensionController->setTestingMode(testingMode);
+}
+
 #pragma mark WKObject protocol implementation
 
 - (API::Object&)_apiObject
@@ -387,6 +392,15 @@ static inline NSSet *toAPI(const HashSet<Ref<T>>& inputSet)
 }
 
 - (void)didChangeTabProperties:(_WKWebExtensionTabChangedProperties)properties forTab:(id<_WKWebExtensionTab>)changedTab
+{
+}
+
+- (BOOL)_inTestingMode
+{
+    return NO;
+}
+
+- (void)_setTestingMode:(BOOL)testingMode
 {
 }
 

@@ -29,6 +29,7 @@
 
 #include "JITMathICForwards.h"
 #include "JITOperationValidation.h"
+#include "MegamorphicCache.h"
 #include "PrivateFieldPutKind.h"
 #include "UGPRPair.h"
 #include <wtf/Platform.h>
@@ -45,7 +46,9 @@ class BinaryArithProfile;
 class Butterfly;
 class CallFrame;
 class CallLinkInfo;
+class ClonedArguments;
 class CodeBlock;
+class DirectArguments;
 class JSArray;
 class JSBoundFunction;
 class JSCell;
@@ -60,6 +63,7 @@ class JSValue;
 class RegExp;
 class RegExpObject;
 class Register;
+class ScopedArguments;
 class Structure;
 class StructureStubInfo;
 class Symbol;
@@ -219,6 +223,8 @@ JSC_DECLARE_JIT_OPERATION(operationPutByIdSloppyMegamorphic, void, (EncodedJSVal
 JSC_DECLARE_JIT_OPERATION(operationPutByIdSloppyGaveUp, void, (EncodedJSValue encodedValue, EncodedJSValue encodedBase, JSGlobalObject*, StructureStubInfo*));
 JSC_DECLARE_JIT_OPERATION(operationPutByIdSloppyMegamorphicGeneric, void, (JSGlobalObject*, EncodedJSValue encodedValue, EncodedJSValue encodedBase, uintptr_t));
 
+JSC_DECLARE_JIT_OPERATION(operationPutByMegamorphicReallocating, void, (VM*, JSObject*, EncodedJSValue encodedValue, const MegamorphicCache::StoreEntry*));
+
 JSC_DECLARE_JIT_OPERATION(operationPutByIdDirectStrictOptimize, void, (EncodedJSValue encodedValue, EncodedJSValue encodedBase, JSGlobalObject*, StructureStubInfo*));
 JSC_DECLARE_JIT_OPERATION(operationPutByIdDirectStrictGaveUp, void, (EncodedJSValue encodedValue, EncodedJSValue encodedBase, JSGlobalObject*, StructureStubInfo*));
 
@@ -327,6 +333,11 @@ JSC_DECLARE_JIT_OPERATION(operationCompareStringEq, size_t, (JSGlobalObject*, JS
 #endif
 JSC_DECLARE_JIT_OPERATION(operationNewArrayWithProfile, EncodedJSValue, (JSGlobalObject*, ArrayAllocationProfile*, const JSValue* values, int32_t size));
 JSC_DECLARE_JIT_OPERATION(operationNewArrayWithSizeAndProfile, EncodedJSValue, (JSGlobalObject*, ArrayAllocationProfile*, EncodedJSValue size));
+JSC_DECLARE_JIT_OPERATION(operationCreateLexicalEnvironmentTDZ, EncodedJSValue, (JSGlobalObject*, JSScope*, SymbolTable*));
+JSC_DECLARE_JIT_OPERATION(operationCreateLexicalEnvironmentUndefined, EncodedJSValue, (JSGlobalObject*, JSScope*, SymbolTable*));
+JSC_DECLARE_JIT_OPERATION(operationCreateDirectArgumentsBaseline, EncodedJSValue, (JSGlobalObject*));
+JSC_DECLARE_JIT_OPERATION(operationCreateScopedArgumentsBaseline, EncodedJSValue, (JSGlobalObject*, JSLexicalEnvironment*));
+JSC_DECLARE_JIT_OPERATION(operationCreateClonedArgumentsBaseline, EncodedJSValue, (JSGlobalObject*));
 JSC_DECLARE_JIT_OPERATION(operationNewFunction, EncodedJSValue, (VM*, JSScope*, JSCell*));
 JSC_DECLARE_JIT_OPERATION(operationNewFunctionWithInvalidatedReallocationWatchpoint, EncodedJSValue, (VM*, JSScope*, JSCell*));
 JSC_DECLARE_JIT_OPERATION(operationNewGeneratorFunction, EncodedJSValue, (VM*, JSScope*, JSCell*));

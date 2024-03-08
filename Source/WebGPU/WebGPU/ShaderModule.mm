@@ -27,6 +27,7 @@
 #import "ShaderModule.h"
 
 #import "APIConversions.h"
+#import "ASTBuiltinAttribute.h"
 #import "ASTFunction.h"
 #import "ASTStructure.h"
 #import "ASTStructureMember.h"
@@ -106,12 +107,13 @@ static RefPtr<ShaderModule> earlyCompileShaderModule(Device& device, std::varian
         wgslHints.add(hintKey, WTFMove(convertedPipelineLayout));
     }
 
-    auto prepareResult = WGSL::prepare(std::get<WGSL::SuccessfulCheck>(checkResult).ast, wgslHints);
+    auto& shaderModule = std::get<WGSL::SuccessfulCheck>(checkResult).ast;
+    auto prepareResult = WGSL::prepare(shaderModule, wgslHints);
     if (std::holds_alternative<WGSL::Error>(prepareResult))
         return nullptr;
     auto& result = std::get<WGSL::PrepareResult>(prepareResult);
     HashMap<String, WGSL::ConstantValue> wgslConstantValues;
-    auto msl = WGSL::generate(result.callGraph, wgslConstantValues);
+    auto msl = WGSL::generate(shaderModule, result, wgslConstantValues);
     auto library = ShaderModule::createLibrary(device.device(), msl, WTFMove(label));
     if (!library)
         return nullptr;
@@ -429,6 +431,20 @@ static WGPUVertexFormat vertexFormatTypeForStructMember(const WGSL::Type* type)
     return vertexFormatTypeFromPrimitive(primitiveType, vectorSize);
 }
 
+void ShaderModule::populateOutputState(const String& entryPoint, WGSL::Builtin builtIn)
+{
+    switch (builtIn) {
+    case WGSL::Builtin::SampleMask:
+        populateShaderModuleState(entryPoint).usesSampleMaskInOutput = true;
+        break;
+    case WGSL::Builtin::FragDepth:
+        populateShaderModuleState(entryPoint).usesFragDepth = true;
+        break;
+    default:
+        break;
+    }
+}
+
 ShaderModule::FragmentOutputs ShaderModule::parseFragmentReturnType(const WGSL::Type& type, const String& entryPoint)
 {
     ShaderModule::FragmentOutputs fragmentOutputs;
@@ -445,18 +461,16 @@ ShaderModule::FragmentOutputs ShaderModule::parseFragmentReturnType(const WGSL::
         return fragmentOutputs;
 
     for (auto& member : returnStruct->structure.members()) {
-        if (member.builtin()) {
-            switch (*member.builtin()) {
-            case WGSL::Builtin::SampleMask:
-                populateShaderModuleState(entryPoint).usesSampleMaskInOutput = true;
-                break;
-            case WGSL::Builtin::FragDepth:
-                populateShaderModuleState(entryPoint).usesFragDepth = true;
-                break;
-            default:
-                break;
-            }
+        if (member.builtin())
+            populateOutputState(entryPoint, *member.builtin());
+
+        for (auto& attribute : member.attributes()) {
+            auto* builtinAttribute = dynamicDowncast<WGSL::AST::BuiltinAttribute>(attribute);
+            if (!builtinAttribute)
+                continue;
+            populateOutputState(entryPoint, builtinAttribute->builtin());
         }
+
         if (!member.location() || member.builtin())
             continue;
 
@@ -658,37 +672,35 @@ ShaderModule::ShaderModule(std::variant<WGSL::SuccessfulCheck, WGSL::FailedCheck
     if (std::holds_alternative<WGSL::SuccessfulCheck>(m_checkResult)) {
         auto& check = std::get<WGSL::SuccessfulCheck>(m_checkResult);
         for (auto& declaration : check.ast->declarations()) {
-            if (!is<WGSL::AST::Function>(declaration))
+            auto* function = dynamicDowncast<WGSL::AST::Function>(declaration);
+            if (!function || !function->stage())
                 continue;
-            auto& function = downcast<WGSL::AST::Function>(declaration);
-            if (!function.stage())
-                continue;
-            switch (*function.stage()) {
+            switch (*function->stage()) {
             case WGSL::ShaderStage::Vertex: {
-                m_stageInTypesForEntryPoint.add(function.name(), parseStageIn(function));
-                if (auto expression = function.maybeReturnType()) {
+                m_stageInTypesForEntryPoint.add(function->name(), parseStageIn(*function));
+                if (auto expression = function->maybeReturnType()) {
                     if (auto* inferredType = expression->inferredType())
-                        m_vertexReturnTypeForEntryPoint.add(function.name(), parseVertexReturnType(*inferredType));
+                        m_vertexReturnTypeForEntryPoint.add(function->name(), parseVertexReturnType(*inferredType));
                 }
                 if (!allowVertexDefault || m_defaultVertexEntryPoint.length()) {
                     allowVertexDefault = false;
                     m_defaultVertexEntryPoint = emptyString();
                     continue;
                 }
-                m_defaultVertexEntryPoint = function.name();
+                m_defaultVertexEntryPoint = function->name();
             } break;
             case WGSL::ShaderStage::Fragment: {
-                m_fragmentInputsForEntryPoint.add(function.name(), parseFragmentInputs(function));
-                if (auto expression = function.maybeReturnType()) {
+                m_fragmentInputsForEntryPoint.add(function->name(), parseFragmentInputs(*function));
+                if (auto expression = function->maybeReturnType()) {
                     if (auto* inferredType = expression->inferredType())
-                        m_fragmentReturnTypeForEntryPoint.add(function.name(), parseFragmentReturnType(*inferredType, function.name()));
+                        m_fragmentReturnTypeForEntryPoint.add(function->name(), parseFragmentReturnType(*inferredType, function->name()));
                 }
                 if (!allowFragmentDefault || m_defaultFragmentEntryPoint.length()) {
                     allowFragmentDefault = false;
                     m_defaultFragmentEntryPoint = emptyString();
                     continue;
                 }
-                m_defaultFragmentEntryPoint = function.name();
+                m_defaultFragmentEntryPoint = function->name();
             } break;
             case WGSL::ShaderStage::Compute: {
                 if (!allowComputeDefault || m_defaultComputeEntryPoint.length()) {
@@ -696,7 +708,7 @@ ShaderModule::ShaderModule(std::variant<WGSL::SuccessfulCheck, WGSL::FailedCheck
                     m_defaultComputeEntryPoint = emptyString();
                     continue;
                 }
-                m_defaultComputeEntryPoint = function.name();
+                m_defaultComputeEntryPoint = function->name();
             } break;
             default:
                 ASSERT_NOT_REACHED();

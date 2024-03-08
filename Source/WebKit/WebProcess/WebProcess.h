@@ -66,6 +66,9 @@
 #include <WebCore/ScreenProperties.h>
 #include <dispatch/dispatch.h>
 #include <wtf/MachSendRight.h>
+
+OBJC_CLASS NSMutableDictionary;
+
 #endif
 
 #if PLATFORM(GTK)
@@ -88,6 +91,7 @@
 #include "WebSQLiteDatabaseTracker.h"
 #endif
 
+
 namespace API {
 class Object;
 }
@@ -98,7 +102,6 @@ enum class UserInterfaceIdiom : uint8_t;
 }
 
 namespace WebCore {
-class ApplicationCacheStorage;
 class CPUMonitor;
 class PageGroup;
 class SecurityOriginData;
@@ -125,6 +128,7 @@ class InjectedBundle;
 class LibWebRTCCodecs;
 class LibWebRTCNetwork;
 class ModelProcessConnection;
+class ModelProcessModelPlayerManager;
 class NetworkProcessConnection;
 class ObjCObjectGraph;
 class RemoteCDMFactory;
@@ -202,6 +206,7 @@ public:
     void removeWebPage(WebCore::PageIdentifier);
     WebPage* focusedWebPage() const;
     bool hasEverHadAnyWebPages() const { return m_hasEverHadAnyWebPages; }
+    bool isWebTransportEnabled() const { return m_isWebTransportEnabled; }
 
     InjectedBundle* injectedBundle() const { return m_injectedBundle.get(); }
     
@@ -314,7 +319,7 @@ public:
     void getActivePagesOriginsForTesting(CompletionHandler<void(Vector<String>&&)>&&);
     void pageActivityStateDidChange(WebCore::PageIdentifier, OptionSet<WebCore::ActivityState> changed);
 
-    void setHiddenPageDOMTimerThrottlingIncreaseLimit(int milliseconds);
+    void setHiddenPageDOMTimerThrottlingIncreaseLimit(Seconds);
 
     void releaseMemory(CompletionHandler<void()>&&);
     void prepareToSuspend(bool isSuspensionImminent, MonotonicTime estimatedSuspendTime, CompletionHandler<void()>&&);
@@ -338,12 +343,12 @@ public:
     bool hasRichContentServices() const { return m_hasRichContentServices; }
 #endif
 
-    WebCore::ApplicationCacheStorage& applicationCacheStorage() { return *m_applicationCacheStorage; }
-
     void prefetchDNS(const String&);
 
     WebAutomationSessionProxy* automationSessionProxy() { return m_automationSessionProxy.get(); }
-
+#if ENABLE(MODEL_PROCESS)
+    ModelProcessModelPlayerManager& modelProcessModelPlayerManager() { return m_modelProcessModelPlayerManager.get(); }
+#endif
     WebCacheStorageProvider& cacheStorageProvider() { return m_cacheStorageProvider.get(); }
     WebBadgeClient& badgeClient() { return m_badgeClient.get(); }
 #if ENABLE(GPU_PROCESS) && ENABLE(VIDEO)
@@ -377,8 +382,8 @@ public:
     void openDirectoryCacheInvalidated(SandboxExtension::Handle&&, SandboxExtension::Handle&&);
 #endif
 
-#if ENABLE(NOTIFYD_BLOCKING_IN_WEBCONTENT)
-    void postNotification(const String& message);
+#if ENABLE(NOTIFY_BLOCKING)
+    void postNotification(const String& message, std::optional<uint64_t> state);
     void postObserverNotification(const String& message);
 #endif
 
@@ -515,6 +520,7 @@ private:
     void platformSetCacheModel(CacheModel);
 
     void setEnhancedAccessibility(bool);
+    void bindAccessibilityFrameWithData(WebCore::FrameIdentifier, std::span<const uint8_t>);
 
     void startMemorySampler(SandboxExtension::Handle&&, const String&, const double);
     void stopMemorySampler();
@@ -660,7 +666,7 @@ private:
     void sendMessageToWebProcessExtension(UserMessage&&);
 #endif
 
-#if PLATFORM(GTK) && !USE(GTK4)
+#if PLATFORM(GTK) && !USE(GTK4) && USE(CAIRO)
     void setUseSystemAppearanceForScrollbars(bool);
 #endif
 
@@ -731,6 +737,7 @@ private:
 #endif
 
 #if ENABLE(MODEL_PROCESS)
+    Ref<ModelProcessModelPlayerManager> m_modelProcessModelPlayerManager;
     RefPtr<ModelProcessConnection> m_modelProcessConnection;
 #endif
 
@@ -767,8 +774,6 @@ private:
 #if ENABLE(NON_VISIBLE_WEBPROCESS_MEMORY_CLEANUP_TIMER)
     WebCore::Timer m_nonVisibleProcessMemoryCleanupTimer;
 #endif
-
-    RefPtr<WebCore::ApplicationCacheStorage> m_applicationCacheStorage;
 
 #if USE(RUNNINGBOARD)
     WebSQLiteDatabaseTracker m_webSQLiteDatabaseTracker;
@@ -819,6 +824,8 @@ private:
     HashCountedSet<WebCore::ServiceWorkerRegistrationIdentifier> m_swRegistrationCounts;
 
     HashMap<StorageAreaMapIdentifier, WeakPtr<StorageAreaMap>> m_storageAreaMaps;
+
+    void updateIsWebTransportEnabled();
     
     // Prewarmed WebProcesses do not have an associated sessionID yet, which is why this is an optional.
     // By the time the WebProcess gets a WebPage, it is guaranteed to have a sessionID.
@@ -831,6 +838,7 @@ private:
 #if PLATFORM(COCOA)
     HashCountedSet<String> m_pendingPasteboardWriteCounts;
     std::optional<audit_token_t> m_auditTokenForSelf;
+    RetainPtr<NSMutableDictionary> m_accessibilityRemoteFrameTokenCache;
 #endif
 
 #if ENABLE(GPU_PROCESS)
@@ -849,6 +857,7 @@ private:
     bool m_imageAnimationEnabled { true };
     bool m_hasEverHadAnyWebPages { false };
     bool m_hasPendingAccessibilityUnsuspension { false };
+    bool m_isWebTransportEnabled { false };
 #if ENABLE(ACCESSIBILITY_NON_BLINKING_CURSOR)
     bool m_prefersNonBlinkingCursor { false };
 #endif

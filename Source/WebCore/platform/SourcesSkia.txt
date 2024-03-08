@@ -22,9 +22,11 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 
 platform/graphics/skia/TransformationMatrixSkia.cpp
+platform/graphics/skia/ColorSkia.cpp
 platform/graphics/skia/ComplexTextControllerSkia.cpp
 platform/graphics/skia/DrawGlyphsRecorderSkia.cpp
 platform/graphics/skia/FloatRectSkia.cpp
+platform/graphics/skia/FloatRoundedRectSkia.cpp
 platform/graphics/skia/FontCacheSkia.cpp
 platform/graphics/skia/FontCascadeSkia.cpp
 platform/graphics/skia/FontCustomPlatformDataSkia.cpp
@@ -46,6 +48,7 @@ platform/graphics/skia/PathSkia.cpp
 platform/graphics/skia/PatternSkia.cpp
 platform/graphics/skia/PlatformDisplaySkia.cpp
 platform/graphics/skia/ShareableBitmapSkia.cpp
+platform/graphics/skia/SkiaAcceleratedBufferPool.cpp
 platform/graphics/skia/SkiaHarfBuzzFont.cpp
 platform/graphics/skia/SkiaHarfBuzzFontCache.cpp
 

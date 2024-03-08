@@ -63,6 +63,8 @@ void AXIsolatedObject::initializePlatformProperties(const Ref<const Accessibilit
         }
     }
 
+    setProperty(AXPropertyName::RemoteFramePlatformElement, object->remoteFramePlatformElement());
+
     // Cache the StringValue only if it differs from the AttributedText.
     auto value = object->stringValue();
     if (!attributedText || value != String([attributedText string]))
@@ -84,7 +86,8 @@ RemoteAXObjectRef AXIsolatedObject::remoteParentObject() const
     auto* scrollView = Accessibility::findAncestor<AXCoreObject>(*this, true, [] (const AXCoreObject& object) {
         return object.isScrollView();
     });
-    return is<AXIsolatedObject>(scrollView) ? downcast<AXIsolatedObject>(scrollView)->m_remoteParent.get() : nil;
+    auto* isolatedObject = dynamicDowncast<AXIsolatedObject>(scrollView);
+    return isolatedObject ? isolatedObject->m_remoteParent.get() : nil;
 }
 
 FloatRect AXIsolatedObject::primaryScreenRect() const
@@ -150,16 +153,14 @@ AXTextMarkerRange AXIsolatedObject::textMarkerRange() const
         // {ID 5, Role Group}
         //
         // We would expect the returned range to be: {ID 2, offset 0} to {ID 4, offset 3}
-        auto* stopObject = sibling(AXDirection::Next);
-        if (!stopObject)
-            stopObject = parentObject();
+        auto* stopObject = siblingOrParent(AXDirection::Next);
 
         auto thisMarker = AXTextMarker { tree()->treeID(), objectID(), 0 };
         AXTextMarkerRange range { thisMarker, thisMarker };
         auto endMarker = thisMarker.findLastBefore(stopObject ? std::make_optional(stopObject->objectID()) : std::nullopt);
-        if (endMarker.isValid() && endMarker.isInTextLeaf()) {
+        if (endMarker.isValid() && endMarker.isInTextRun()) {
             // One or more of our descendants have text, so let's form a range from the first and last text positions.
-            range = { thisMarker.toTextLeafMarker(), WTFMove(endMarker) };
+            range = { thisMarker.toTextRunMarker(), WTFMove(endMarker) };
         }
         return range;
     }
@@ -203,6 +204,11 @@ unsigned AXIsolatedObject::textLength() const
     if (auto attributedText = propertyValue<RetainPtr<NSAttributedString>>(AXPropertyName::AttributedText))
         return [attributedText length];
     return 0;
+}
+
+RetainPtr<id> AXIsolatedObject::remoteFramePlatformElement() const
+{
+    return propertyValue<RetainPtr<id>>(AXPropertyName::RemoteFramePlatformElement);
 }
 
 RetainPtr<NSAttributedString> AXIsolatedObject::attributedStringForTextMarkerRange(AXTextMarkerRange&& markerRange, SpellCheck spellCheck) const

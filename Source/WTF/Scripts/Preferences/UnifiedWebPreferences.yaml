@@ -1511,7 +1511,7 @@ CSSTypedOMEnabled:
 
 CSSUnprefixedBackdropFilterEnabled:
   type: bool
-  status: testable
+  status: Backdropfilter_feature_status
   category: css
   humanReadableName: "CSS Unprefixed Backdrop Filter"
   humanReadableDescription: "Enable unprefixed backdrop-filter CSS property"
@@ -2231,20 +2231,6 @@ DeclarativeWebPush:
     WebCore:
       default: false
 
-DefaultARIAForCustomElementsEnabled:
-  type: bool
-  status: stable
-  category: dom
-  humanReadableName: "Default ARIA for Custom Elements"
-  humanReadableDescription: "Enable Default ARIA for Custom Elements"
-  defaultValue:
-    WebKitLegacy:
-      default: true
-    WebKit:
-      default: true
-    WebCore:
-      default: true
-
 DefaultFixedFontSize:
   type: double
   status: embedder
@@ -2408,12 +2394,12 @@ DiagnosticLoggingEnabled:
     WebCore:
       default: false
 
-DigitalIdentityEnabled:
+DigitalCredentialsEnabled:
   type: bool
   status: unstable
   category: dom
-  humanReadableName: "Digital Identity API"
-  humanReadableDescription: "Enable the experimental Digital Identity API"
+  humanReadableName: "Digital Credentials API"
+  humanReadableDescription: "Enable the experimental Digital Credentials API"
   defaultValue:
     WebKitLegacy:
       default: false
@@ -4321,11 +4307,14 @@ MasonryEnabled:
   humanReadableDescription: "Enable Masonry Layout for CSS Grid"
   defaultValue:
     WebKitLegacy:
-      default: true
+      "PLATFORM(COCOA)": true
+      default: false
     WebKit:
-      default: true
+      "PLATFORM(COCOA)": true
+      default: false
     WebCore:
-      default: true
+      "PLATFORM(COCOA)": true
+      default: false
 
 MathMLEnabled:
   type: bool
@@ -4629,7 +4618,7 @@ MediaSourceEnabled:
 
 MediaSourceInWorkerEnabled:
   type: bool
-  status: unstable
+  status: preview
   category: media
   humanReadableName: "MediaSource in a Worker"
   humanReadableDescription: "MediaSource in a Worker"
@@ -5114,13 +5103,16 @@ PDFJSViewerEnabled:
 PDFPluginEnabled:
   type: bool
   status: embedder
-  webcoreBinding: none
   condition: PLATFORM(COCOA)
   exposed: [ WebKit ]
   defaultValue:
+    WebKitLegacy:
+      default: false
     WebKit:
       "PLATFORM(IOS_FAMILY)": false
       default: true
+    WebCore:
+      default: false
 
 PDFPluginHUDEnabled:
   type: bool
@@ -5278,6 +5270,18 @@ PermissionsAPIEnabled:
     WebCore:
       default: false
 
+PhotoPickerPrefersOriginalImageFormat:
+  type: bool
+  status: internal
+  humanReadableName: "Photo Picker Prefers Original Image Format"
+  humanReadableDescription: "Prefer the original image format when selecting photos for file upload"
+  webcoreBinding: none
+  condition: HAVE(PHOTOS_UI)
+  exposed: [ WebKit ]
+  defaultValue:
+    WebKit:
+      default: true
+
 PictographFontFamily:
   type: String
   status: embedder
@@ -5319,19 +5323,6 @@ PitchCorrectionAlgorithm:
       default: static_cast<uint32_t>(WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm::BestAllAround)
     WebCore:
       default: MediaPlayerEnums::PitchCorrectionAlgorithm::BestAllAround
-
-PluginsEnabled:
-  type: bool
-  status: embedder
-  webcoreGetter: arePluginsEnabled
-  webcoreOnChange: pluginsEnabledChanged
-  defaultValue:
-    WebKitLegacy:
-      default: false
-    WebKit:
-      default: false
-    WebCore:
-      default: false
 
 PopoverAttributeEnabled:
   type: bool
@@ -5949,6 +5940,20 @@ ScrollToTextFragmentEnabled:
       default: true
     WebCore:
       default: true
+      
+ScrollToTextFragmentGenerationEnabled:
+  type: bool
+  status: unstable
+  category: dom
+  humanReadableName: "Scroll To Text Fragment Generation"
+  humanReadableDescription: "Enable Scroll To Text Fragment Generation Menu"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
 
 ScrollToTextFragmentIndicatorEnabled:
   type: bool
@@ -7732,7 +7737,7 @@ WebCryptoSafeCurvesEnabled:
 
 WebCryptoX25519Enabled:
   type: bool
-  status: testable
+  status: preview
   category: dom
   humanReadableName: "Web Crypto X25519 algorithm"
   humanReadableDescription: "Enable Web Crypto X25519 algorithm"
@@ -8322,6 +8327,21 @@ WriteRichTextDataWhenCopyingOrDragging:
       default: true
     WebKit:
       "PLATFORM(IOS_FAMILY)": WebKit::defaultWriteRichTextDataWhenCopyingOrDragging()
+      default: true
+    WebCore:
+      default: true
+
+WritingSuggestionsAttributeEnabled:
+  type: bool
+  status: stable
+  category: dom
+  humanReadableName: "Writing Suggestions"
+  humanReadableDescription: "Enable the writingsuggestions attribute"
+  condition: ENABLE(WRITING_SUGGESTIONS)
+  defaultValue:
+    WebKitLegacy:
+      default: true
+    WebKit:
       default: true
     WebCore:
       default: true

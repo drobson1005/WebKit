@@ -34,6 +34,7 @@
 #include "InjectedBundle.h"
 #include "LibWebRTCNetwork.h"
 #include "Logging.h"
+#include "ModelProcessModelPlayerManager.h"
 #include "NetworkConnectionToWebProcessMessages.h"
 #include "NetworkProcessConnection.h"
 #include "NetworkProcessConnectionInfo.h"
@@ -91,7 +92,6 @@
 #include <JavaScriptCore/MemoryStatistics.h>
 #include <JavaScriptCore/WasmFaultSignalHandler.h>
 #include <WebCore/AXObjectCache.h>
-#include <WebCore/ApplicationCacheStorage.h>
 #include <WebCore/AuthenticationChallenge.h>
 #include <WebCore/BackForwardCache.h>
 #include <WebCore/CPUMonitor.h>
@@ -293,6 +293,9 @@ WebProcess::WebProcess()
 #if PLATFORM(COCOA) && USE(LIBWEBRTC) && ENABLE(WEB_CODECS)
     , m_remoteVideoCodecFactory(*this)
 #endif
+#if ENABLE(MODEL_PROCESS)
+    , m_modelProcessModelPlayerManager(ModelProcessModelPlayerManager::create())
+#endif
     , m_cacheStorageProvider(WebCacheStorageProvider::create())
     , m_badgeClient(WebBadgeClient::create())
 #if ENABLE(GPU_PROCESS) && ENABLE(VIDEO)
@@ -478,14 +481,15 @@ void WebProcess::initializeWebProcess(WebProcessCreationParameters&& parameters)
             parentProcessConnection()->send(Messages::WebProcessProxy::DidExceedMemoryFootprintThreshold(footprint), 0);
         });
 #endif
-        memoryPressureHandler.setMemoryPressureStatusChangedCallback([this](WTF::MemoryPressureStatus memoryPressureStatus) {
+        memoryPressureHandler.setMemoryPressureStatusChangedCallback([this]() {
             if (parentProcessConnection())
                 parentProcessConnection()->send(Messages::WebProcessProxy::MemoryPressureStatusChanged(MemoryPressureHandler::singleton().isUnderMemoryPressure()), 0);
-
-            if (memoryPressureStatus == WTF::MemoryPressureStatus::ProcessLimitWarning && !m_loggedProcessLimitWarningMemoryStatistics) {
+        });
+        memoryPressureHandler.setDidExceedProcessMemoryLimitCallback([this](WTF::ProcessMemoryLimit limit) {
+            if (limit == WTF::ProcessMemoryLimit::Warning && !m_loggedProcessLimitWarningMemoryStatistics) {
                 m_loggedProcessLimitWarningMemoryStatistics = true;
                 scheduleLogMemoryStatistics(LogMemoryStatisticsReason::WarningMemoryPressureNotification);
-            } else if (memoryPressureStatus == WTF::MemoryPressureStatus::ProcessLimitCritical && !m_loggedProcessLimitCriticalMemoryStatistics) {
+            } else if (limit == WTF::ProcessMemoryLimit::Critical && !m_loggedProcessLimitCriticalMemoryStatistics) {
                 m_loggedProcessLimitCriticalMemoryStatistics = true;
                 scheduleLogMemoryStatistics(LogMemoryStatisticsReason::CriticalMemoryPressureNotification);
             }
@@ -641,12 +645,6 @@ void WebProcess::setWebsiteDataStoreParameters(WebProcessDataStoreParameters&& p
     ASSERT(!m_sessionID);
     m_sessionID = parameters.sessionID;
 
-    // FIXME: This should be constructed per data store, not per process.
-    m_applicationCacheStorage = ApplicationCacheStorage::create(parameters.applicationCacheDirectory, parameters.applicationCacheFlatFileSubdirectoryName);
-#if PLATFORM(IOS_FAMILY)
-    m_applicationCacheStorage->setDefaultOriginQuota(25ULL * 1024 * 1024);
-#endif
-
 #if ENABLE(VIDEO)
     if (!parameters.mediaCacheDirectory.isEmpty())
         WebCore::HTMLMediaElement::setMediaCacheDirectory(parameters.mediaCacheDirectory);
@@ -685,6 +683,17 @@ bool WebProcess::areAllPagesSuspended() const
             return false;
     }
     return true;
+}
+
+void WebProcess::updateIsWebTransportEnabled()
+{
+    for (auto& page : m_pageMap.values()) {
+        if (page->isWebTransportEnabled()) {
+            m_isWebTransportEnabled = true;
+            return;
+        }
+    }
+    m_isWebTransportEnabled = false;
 }
 
 void WebProcess::setHasSuspendedPageProxy(bool hasSuspendedPageProxy)
@@ -886,6 +895,7 @@ void WebProcess::createWebPage(PageIdentifier pageID, WebPageCreationParameters&
         // Balanced by an enableTermination in removeWebPage.
         disableTermination();
         updateCPULimit();
+        updateIsWebTransportEnabled();
 #if OS(LINUX)
         RealTimeThreads::singleton().setEnabled(hasVisibleWebPage());
 #endif
@@ -910,6 +920,7 @@ void WebProcess::removeWebPage(PageIdentifier pageID)
 
     enableTermination();
     updateCPULimit();
+    updateIsWebTransportEnabled();
 #if OS(LINUX)
     RealTimeThreads::singleton().setEnabled(hasVisibleWebPage());
 #endif
@@ -986,8 +997,6 @@ void WebProcess::didClose(IPC::Connection& connection)
 #if ENABLE(VIDEO)
     FileSystem::markPurgeable(WebCore::HTMLMediaElement::mediaCacheDirectory());
 #endif
-    if (m_applicationCacheStorage)
-        FileSystem::markPurgeable(m_applicationCacheStorage->cacheDirectory());
 #if ENABLE(ARKIT_INLINE_PREVIEW_MAC)
     FileSystem::markPurgeable(ARKitInlinePreviewModelPlayerMac::modelElementCacheDirectory());
 #endif
@@ -1539,10 +1548,10 @@ void WebProcess::deleteWebsiteDataForOrigins(OptionSet<WebsiteDataType> websiteD
     completionHandler();
 }
 
-void WebProcess::setHiddenPageDOMTimerThrottlingIncreaseLimit(int milliseconds)
+void WebProcess::setHiddenPageDOMTimerThrottlingIncreaseLimit(Seconds seconds)
 {
     for (auto& page : m_pageMap.values())
-        page->setHiddenPageDOMTimerThrottlingIncreaseLimit(Seconds::fromMilliseconds(milliseconds));
+        page->setHiddenPageDOMTimerThrottlingIncreaseLimit(seconds);
 }
 
 #if !PLATFORM(COCOA)
@@ -1568,6 +1577,10 @@ void WebProcess::updateCPULimit()
 }
 
 void WebProcess::updateCPUMonitorState(CPUMonitorUpdateReason)
+{
+}
+
+void WebProcess::bindAccessibilityFrameWithData(WebCore::FrameIdentifier, std::span<const uint8_t>)
 {
 }
 

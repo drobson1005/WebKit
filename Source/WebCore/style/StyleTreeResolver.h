@@ -111,7 +111,10 @@ private:
     };
 
     Scope& scope() { return m_scopeStack.last(); }
+    const Scope& scope() const { return m_scopeStack.last(); }
+
     Parent& parent() { return m_parentStack.last(); }
+    const Parent& parent() const { return m_parentStack.last(); }
 
     void pushScope(ShadowRoot&);
     void pushEnclosingScope();
@@ -121,7 +124,7 @@ private:
     void popParent();
     void popParentsToDepth(unsigned depth);
 
-    static DescendantsToResolve computeDescendantsToResolve(Change, Validity, DescendantsToResolve);
+    DescendantsToResolve computeDescendantsToResolve(const ElementUpdate&, const RenderStyle* existingStyle, Validity) const;
     static std::optional<ResolutionType> determineResolutionType(const Element&, const RenderStyle*, DescendantsToResolve, Change parentChange);
     static void resetDescendantStyleRelations(Element&, DescendantsToResolve);
 

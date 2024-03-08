@@ -214,6 +214,7 @@ RenderStyle::RenderStyle(CreateDefaultStyleTag)
     m_nonInheritedFlags.overflowX = static_cast<unsigned>(initialOverflowX());
     m_nonInheritedFlags.overflowY = static_cast<unsigned>(initialOverflowY());
     m_nonInheritedFlags.clear = static_cast<unsigned>(initialClear());
+    m_nonInheritedFlags.position = static_cast<unsigned>(initialPosition());
     m_nonInheritedFlags.unicodeBidi = static_cast<unsigned>(initialUnicodeBidi());
     m_nonInheritedFlags.floating = static_cast<unsigned>(initialFloating());
     m_nonInheritedFlags.tableLayout = static_cast<unsigned>(initialTableLayout());
@@ -393,6 +394,7 @@ inline void RenderStyle::NonInheritedFlags::copyNonInheritedFrom(const NonInheri
     overflowX = other.overflowX;
     overflowY = other.overflowY;
     clear = other.clear;
+    position = other.position;
     unicodeBidi = other.unicodeBidi;
     floating = other.floating;
     tableLayout = other.tableLayout;
@@ -549,7 +551,7 @@ static inline unsigned computeFontHash(const FontCascade& font)
 unsigned RenderStyle::hashForTextAutosizing() const
 {
     // FIXME: Not a very smart hash. Could be improved upon. See <https://bugs.webkit.org/show_bug.cgi?id=121131>.
-    unsigned hash = m_nonInheritedData->miscData->effectiveAppearance;
+    unsigned hash = m_nonInheritedData->miscData->usedAppearance;
     hash ^= m_nonInheritedData->rareData->lineClamp.value();
     hash ^= m_rareInheritedData->overflowWrap;
     hash ^= m_rareInheritedData->nbspMode;
@@ -560,7 +562,7 @@ unsigned RenderStyle::hashForTextAutosizing() const
     hash ^= WTF::FloatHash<float>::hash(m_inheritedData->verticalBorderSpacing);
     hash ^= m_inheritedFlags.boxDirection;
     hash ^= m_inheritedFlags.rtlOrdering;
-    hash ^= m_nonInheritedData->boxData->m_position;
+    hash ^= m_nonInheritedFlags.position;
     hash ^= m_nonInheritedFlags.floating;
     hash ^= m_nonInheritedData->miscData->textOverflow;
     hash ^= m_rareInheritedData->textSecurity;
@@ -569,7 +571,7 @@ unsigned RenderStyle::hashForTextAutosizing() const
 
 bool RenderStyle::equalForTextAutosizing(const RenderStyle& other) const
 {
-    return m_nonInheritedData->miscData->effectiveAppearance == other.m_nonInheritedData->miscData->effectiveAppearance
+    return m_nonInheritedData->miscData->usedAppearance == other.m_nonInheritedData->miscData->usedAppearance
         && m_nonInheritedData->rareData->lineClamp == other.m_nonInheritedData->rareData->lineClamp
         && m_rareInheritedData->textSizeAdjust == other.m_rareInheritedData->textSizeAdjust
         && m_rareInheritedData->overflowWrap == other.m_rareInheritedData->overflowWrap
@@ -582,7 +584,7 @@ bool RenderStyle::equalForTextAutosizing(const RenderStyle& other) const
         && m_inheritedData->verticalBorderSpacing == other.m_inheritedData->verticalBorderSpacing
         && m_inheritedFlags.boxDirection == other.m_inheritedFlags.boxDirection
         && m_inheritedFlags.rtlOrdering == other.m_inheritedFlags.rtlOrdering
-        && m_nonInheritedData->boxData->position() == other.m_nonInheritedData->boxData->position()
+        && m_nonInheritedFlags.position == other.m_nonInheritedFlags.position
         && m_nonInheritedFlags.floating == other.m_nonInheritedFlags.floating
         && m_nonInheritedData->miscData->textOverflow == other.m_nonInheritedData->miscData->textOverflow;
 }
@@ -715,10 +717,7 @@ inline bool RenderStyle::changeAffectsVisualOverflow(const RenderStyle& other) c
         || m_rareInheritedData->textUnderlinePosition != other.m_rareInheritedData->textUnderlinePosition) {
         // Underlines are always drawn outside of their textbox bounds when text-underline-position: under;
         // is specified. We can take an early out here.
-        auto isVertialWritingMode = isVerticalWritingMode() || other.isVerticalWritingMode();
-        auto isAlignedForUnder = textUnderlinePosition() == TextUnderlinePosition::Under || other.textUnderlinePosition() == TextUnderlinePosition::Under
-            || (isVertialWritingMode && (textUnderlinePosition() == TextUnderlinePosition::Right || other.textUnderlinePosition() == TextUnderlinePosition::Right || textUnderlinePosition() == TextUnderlinePosition::Left || other.textUnderlinePosition() == TextUnderlinePosition::Left));
-        if (isAlignedForUnder)
+        if (isAlignedForUnder(*this) || isAlignedForUnder(other))
             return true;
         return visualOverflowForDecorations(*this) != visualOverflowForDecorations(other);
     }
@@ -736,7 +735,7 @@ static bool miscDataChangeRequiresLayout(const StyleMiscNonInheritedData& first,
 {
     ASSERT(&first != &second);
 
-    if (first.effectiveAppearance != second.effectiveAppearance
+    if (first.usedAppearance != second.usedAppearance
         || first.textOverflow != second.textOverflow)
         return true;
 
@@ -949,9 +948,6 @@ bool RenderStyle::changeRequiresLayout(const RenderStyle& other, OptionSet<Style
                 || m_nonInheritedData->boxData->maxHeight() != other.m_nonInheritedData->boxData->maxHeight())
                 return true;
 
-            if (m_nonInheritedData->boxData->position() != other.m_nonInheritedData->boxData->position())
-                return true;
-
             if (m_nonInheritedData->boxData->verticalAlign() != other.m_nonInheritedData->boxData->verticalAlign()
                 || m_nonInheritedData->boxData->verticalAlignLength() != other.m_nonInheritedData->boxData->verticalAlignLength())
                 return true;
@@ -1024,6 +1020,7 @@ bool RenderStyle::changeRequiresLayout(const RenderStyle& other, OptionSet<Style
 
     if (m_inheritedFlags.boxDirection != other.m_inheritedFlags.boxDirection
         || m_inheritedFlags.rtlOrdering != other.m_inheritedFlags.rtlOrdering
+        || m_nonInheritedFlags.position != other.m_nonInheritedFlags.position
         || m_nonInheritedFlags.floating != other.m_nonInheritedFlags.floating
         || m_nonInheritedFlags.originalDisplay != other.m_nonInheritedFlags.originalDisplay)
         return true;
@@ -1543,6 +1540,8 @@ void RenderStyle::conservativelyCollectChangedAnimatableProperties(const RenderS
             changingProperties.m_properties.set(CSSPropertyOverflowY);
         if (first.clear != second.clear)
             changingProperties.m_properties.set(CSSPropertyClear);
+        if (first.position != second.position)
+            changingProperties.m_properties.set(CSSPropertyPosition);
         if (first.floating != second.floating)
             changingProperties.m_properties.set(CSSPropertyFloat);
         if (first.tableLayout != second.tableLayout)
@@ -1602,8 +1601,6 @@ void RenderStyle::conservativelyCollectChangedAnimatableProperties(const RenderS
             changingProperties.m_properties.set(CSSPropertyBoxSizing);
         if (first.boxDecorationBreak() != second.boxDecorationBreak())
             changingProperties.m_properties.set(CSSPropertyWebkitBoxDecorationBreak);
-        if (first.position() != second.position())
-            changingProperties.m_properties.set(CSSPropertyPosition);
         // Non animated styles are followings.
         // usedZIndex
         // hasAutoUsedZIndex
@@ -1801,7 +1798,7 @@ void RenderStyle::conservativelyCollectChangedAnimatableProperties(const RenderS
         // hasExplicitlySetDirection
         // hasExplicitlySetWritingMode
         // appearance
-        // effectiveAppearance
+        // usedAppearance
         // userDrag
     };
 
@@ -2770,21 +2767,21 @@ void RenderStyle::setLineHeight(Length&& height)
     SET_VAR(m_inheritedData, lineHeight, WTFMove(height));
 }
 
-int RenderStyle::computedLineHeight() const
+float RenderStyle::computedLineHeight() const
 {
     return computeLineHeight(lineHeight());
 }
 
-int RenderStyle::computeLineHeight(const Length& lineHeightLength) const
+float RenderStyle::computeLineHeight(const Length& lineHeightLength) const
 {
     // Negative value means the line height is not set. Use the font's built-in spacing.
     if (lineHeightLength.isNegative())
-        return metricsOfPrimaryFont().intLineSpacing();
+        return metricsOfPrimaryFont().lineSpacing();
 
     if (lineHeightLength.isPercentOrCalculated())
-        return minimumValueForLength(lineHeightLength, computedFontSize());
+        return minimumValueForLength(lineHeightLength, computedFontSize()).toFloat();
 
-    return clampTo<int>(lineHeightLength.value());
+    return lineHeightLength.value();
 }
 
 // FIXME: Remove this after all old calls to whiteSpace() are replaced with appropriate
@@ -3098,7 +3095,7 @@ Color RenderStyle::colorWithColorFilter(const StyleColor& color) const
     return colorByApplyingColorFilter(colorResolvingCurrentColor(color));
 }
 
-Color RenderStyle::effectiveAccentColor() const
+Color RenderStyle::usedAccentColor() const
 {
     if (hasAutoAccentColor())
         return { };
@@ -3465,6 +3462,20 @@ const CSSCustomPropertyValue* RenderStyle::customPropertyValue(const AtomString&
     return nullptr;
 }
 
+bool RenderStyle::customPropertyValueEqual(const RenderStyle& other, const AtomString& name) const
+{
+    if (&nonInheritedCustomProperties() == &other.nonInheritedCustomProperties() && &inheritedCustomProperties() == &other.inheritedCustomProperties())
+        return true;
+
+    auto* value = customPropertyValue(name);
+    auto* otherValue = other.customPropertyValue(name);
+    if (value == otherValue)
+        return true;
+    if (!value || !otherValue)
+        return false;
+    return *value == *otherValue;
+}
+
 bool RenderStyle::customPropertiesEqual(const RenderStyle& other) const
 {
     return m_nonInheritedData->rareData->customProperties == other.m_nonInheritedData->rareData->customProperties
@@ -3812,7 +3823,7 @@ UsedFloat RenderStyle::usedFloat(const RenderObject& renderer)
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-UserSelect RenderStyle::effectiveUserSelect() const
+UserSelect RenderStyle::usedUserSelect() const
 {
     if (effectiveInert())
         return UserSelect::None;

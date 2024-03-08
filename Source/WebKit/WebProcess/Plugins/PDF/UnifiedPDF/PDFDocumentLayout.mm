@@ -42,6 +42,22 @@ static constexpr float minScale = 0.1; // Arbitrarily chosen min scale.
 PDFDocumentLayout::PDFDocumentLayout() = default;
 PDFDocumentLayout::~PDFDocumentLayout() = default;
 
+
+bool PDFDocumentLayout::isLeftPageIndex(PageIndex pageIndex) const
+{
+    return !(pageIndex % 2);
+}
+
+bool PDFDocumentLayout::isRightPageIndex(PageIndex pageIndex) const
+{
+    return pageIndex % 2;
+}
+
+bool PDFDocumentLayout::isLastPageIndex(PageIndex pageIndex) const
+{
+    return pageIndex == pageCount() - 1;
+}
+
 RetainPtr<PDFPage> PDFDocumentLayout::pageAtIndex(PageIndex index) const
 {
     return [m_pdfDocument pageAtIndex:index];
@@ -54,6 +70,47 @@ std::optional<unsigned> PDFDocumentLayout::indexForPage(RetainPtr<PDFPage> page)
             return pageIndex;
     }
     return std::nullopt;
+}
+
+PDFDocumentLayout::PageIndex PDFDocumentLayout::nearestPageIndexForDocumentPoint(FloatPoint documentSpacePoint) const
+{
+    auto pageCount = this->pageCount();
+    switch (displayMode()) {
+    case PDFDocumentLayout::DisplayMode::TwoUpDiscrete:
+    case PDFDocumentLayout::DisplayMode::TwoUpContinuous:
+        for (PDFDocumentLayout::PageIndex index = 0; index < pageCount; ++index) {
+            if (index == pageCount - 1)
+                return index;
+
+            auto currentPageBounds = layoutBoundsForPageAtIndex(index);
+            if (documentSpacePoint.y() < currentPageBounds.maxY()) {
+
+                auto pairedPageIndex =  [index, this]() {
+                    if (index % pagesPerRow())
+                        return index - 1;
+                    return index + 1;
+                }();
+
+                auto pairedPageMaxX= layoutBoundsForPageAtIndex(pairedPageIndex).maxX();
+                auto currentPageMaxX = currentPageBounds.maxX();
+                if (currentPageMaxX < pairedPageMaxX)
+                    return documentSpacePoint.x() < currentPageMaxX ? index : pairedPageIndex;
+                return documentSpacePoint.x() < pairedPageMaxX ? pairedPageIndex : index;
+            }
+        }
+        break;
+    case PDFDocumentLayout::DisplayMode::SinglePageDiscrete:
+    case PDFDocumentLayout::DisplayMode::SinglePageContinuous: {
+        for (PDFDocumentLayout::PageIndex index = 0; index < pageCount; ++index) {
+            auto pageBounds = layoutBoundsForPageAtIndex(index);
+
+            if (documentSpacePoint.y() <= pageBounds.maxY() || index == pageCount - 1)
+                return index;
+        }
+    }
+    }
+    ASSERT_NOT_REACHED();
+    return pageCount - 1;
 }
 
 void PDFDocumentLayout::updateLayout(IntSize pluginSize)
@@ -82,7 +139,7 @@ void PDFDocumentLayout::updateLayout(IntSize pluginSize)
 
     float maxRowWidth = 0;
     float currentRowWidth = 0;
-    bool isTwoUpLayout = m_displayMode == DisplayMode::TwoUp || m_displayMode == DisplayMode::TwoUpContinuous;
+    bool isTwoUpLayout = m_displayMode == DisplayMode::TwoUpDiscrete || m_displayMode == DisplayMode::TwoUpContinuous;
 
     for (PageIndex i = 0; i < pageCount; ++i) {
         auto page = pageAtIndex(i);
@@ -124,12 +181,12 @@ void PDFDocumentLayout::layoutPages(float availableWidth, float maxRowWidth)
 {
     // We always lay out in a continuous mode. We handle non-continuous mode via scroll snap.
     switch (m_displayMode) {
-    case DisplayMode::SinglePage:
-    case DisplayMode::Continuous:
+    case DisplayMode::SinglePageDiscrete:
+    case DisplayMode::SinglePageContinuous:
         layoutSingleColumn(availableWidth, maxRowWidth);
         break;
 
-    case DisplayMode::TwoUp:
+    case DisplayMode::TwoUpDiscrete:
     case DisplayMode::TwoUpContinuous:
         layoutTwoUpColumn(availableWidth, maxRowWidth);
         break;
@@ -231,7 +288,7 @@ size_t PDFDocumentLayout::pageCount() const
     return [m_pdfDocument pageCount];
 }
 
-WebCore::FloatRect PDFDocumentLayout::layoutBoundsForPageAtIndex(PageIndex index) const
+FloatRect PDFDocumentLayout::layoutBoundsForPageAtIndex(PageIndex index) const
 {
     if (index >= m_pageGeometry.size())
         return { };
@@ -247,9 +304,16 @@ IntDegrees PDFDocumentLayout::rotationForPageAtIndex(PageIndex index) const
     return m_pageGeometry[index].rotation;
 }
 
-WebCore::FloatSize PDFDocumentLayout::scaledContentsSize() const
+FloatSize PDFDocumentLayout::scaledContentsSize() const
 {
     return m_documentBounds.size().scaled(m_scale);
+}
+
+auto PDFDocumentLayout::geometryForPage(RetainPtr<PDFPage> page) const -> std::optional<PageGeometry>
+{
+    if (auto pageIndex = indexForPage(page))
+        return m_pageGeometry[*pageIndex];
+    return { };
 }
 
 AffineTransform PDFDocumentLayout::toPageTransform(const PageGeometry& pageGeometry) const
@@ -277,7 +341,7 @@ AffineTransform PDFDocumentLayout::toPageTransform(const PageGeometry& pageGeome
     return matrix;
 }
 
-WebCore::FloatPoint PDFDocumentLayout::documentPointToPDFPagePoint(WebCore::FloatPoint documentPoint, PageIndex pageIndex) const
+FloatPoint PDFDocumentLayout::documentToPDFPage(FloatPoint documentPoint, PageIndex pageIndex) const
 {
     if (pageIndex >= m_pageGeometry.size())
         return documentPoint;
@@ -294,7 +358,25 @@ WebCore::FloatPoint PDFDocumentLayout::documentPointToPDFPagePoint(WebCore::Floa
     return mappedPoint;
 }
 
-WebCore::FloatPoint PDFDocumentLayout::pdfPagePointToDocumentPoint(WebCore::FloatPoint pagePoint, PageIndex pageIndex) const
+FloatRect PDFDocumentLayout::documentToPDFPage(FloatRect documentRect, PageIndex pageIndex) const
+{
+    if (pageIndex >= m_pageGeometry.size())
+        return documentRect;
+
+    auto& pageGeometry = m_pageGeometry[pageIndex];
+
+    auto mappedRect = documentRect;
+
+    // FIXME: Possibly wrong.
+    mappedRect.moveBy(-pageGeometry.layoutBounds.location());
+    mappedRect.setY(pageGeometry.layoutBounds.height() - mappedRect.y());
+
+    auto matrix = toPageTransform(pageGeometry);
+    mappedRect = matrix.mapRect(mappedRect);
+    return mappedRect;
+}
+
+FloatPoint PDFDocumentLayout::pdfPageToDocument(FloatPoint pagePoint, PageIndex pageIndex) const
 {
     if (pageIndex >= m_pageGeometry.size())
         return pagePoint;
@@ -310,7 +392,7 @@ WebCore::FloatPoint PDFDocumentLayout::pdfPagePointToDocumentPoint(WebCore::Floa
     return mappedPoint;
 }
 
-WebCore::FloatRect PDFDocumentLayout::pdfPageRectToDocumentRect(const WebCore::FloatRect pageSpaceRect, PageIndex pageIndex) const
+FloatRect PDFDocumentLayout::pdfPageToDocument(const FloatRect pageSpaceRect, PageIndex pageIndex) const
 {
     if (pageIndex >= m_pageGeometry.size())
         return pageSpaceRect;

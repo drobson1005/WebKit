@@ -1032,23 +1032,30 @@ const std::optional<MediaCapability>& WebPageProxy::mediaCapability() const
 
 void WebPageProxy::setMediaCapability(std::optional<MediaCapability>&& capability)
 {
-    if (auto oldCapability = std::exchange(internals().mediaCapability, std::nullopt)) {
-        WEBPAGEPROXY_RELEASE_LOG(ProcessCapabilities, "setMediaCapability: deactivating (envID=%{public}s) for registrable domain '%{sensitive}s'", oldCapability->environmentIdentifier().utf8().data(), oldCapability->registrableDomain().string().utf8().data());
-        Ref processPool { protectedProcess()->protectedProcessPool() };
-        processPool->extensionCapabilityGranter().setMediaCapabilityActive(*oldCapability, false);
-        processPool->extensionCapabilityGranter().revoke(*oldCapability);
-    }
+    if (auto oldCapability = std::exchange(internals().mediaCapability, std::nullopt))
+        deactivateMediaCapability(*oldCapability);
 
     internals().mediaCapability = WTFMove(capability);
 
-    if (auto& newCapability = internals().mediaCapability) {
-        WEBPAGEPROXY_RELEASE_LOG(ProcessCapabilities, "setMediaCapability: creating (envID=%{public}s) for registrable domain '%{sensitive}s'", newCapability->environmentIdentifier().utf8().data(), newCapability->registrableDomain().string().utf8().data());
-        send(Messages::WebPage::SetMediaEnvironment(newCapability->environmentIdentifier()));
-    } else
+    if (!internals().mediaCapability) {
+        WEBPAGEPROXY_RELEASE_LOG(ProcessCapabilities, "setMediaCapability: clearing media capability");
         send(Messages::WebPage::SetMediaEnvironment({ }));
+        return;
+    }
+
+    WEBPAGEPROXY_RELEASE_LOG(ProcessCapabilities, "setMediaCapability: creating (envID=%{public}s) for URL '%{sensitive}s'", internals().mediaCapability->environmentIdentifier().utf8().data(), internals().mediaCapability->webPageURL().string().utf8().data());
+    send(Messages::WebPage::SetMediaEnvironment(internals().mediaCapability->environmentIdentifier()));
 }
 
-void WebPageProxy::updateMediaCapability()
+void WebPageProxy::deactivateMediaCapability(MediaCapability& capability)
+{
+    WEBPAGEPROXY_RELEASE_LOG(ProcessCapabilities, "deactivateMediaCapability: deactivating (envID=%{public}s) for URL '%{sensitive}s'", capability.environmentIdentifier().utf8().data(), capability.webPageURL().string().utf8().data());
+    Ref processPool { protectedProcess()->protectedProcessPool() };
+    processPool->extensionCapabilityGranter().setMediaCapabilityActive(capability, false);
+    processPool->extensionCapabilityGranter().revoke(capability);
+}
+
+void WebPageProxy::resetMediaCapability()
 {
     if (!preferences().mediaCapabilityGrantsEnabled())
         return;
@@ -1060,15 +1067,18 @@ void WebPageProxy::updateMediaCapability()
         return;
     }
 
-    if (!mediaCapability() || !equalIgnoringFragmentIdentifier(mediaCapability()->url(), currentURL))
-        setMediaCapability(MediaCapability { currentURL });
+    if (!mediaCapability() || !protocolHostAndPortAreEqual(mediaCapability()->webPageURL(), currentURL))
+        setMediaCapability(MediaCapability { WTFMove(currentURL) });
+}
 
+void WebPageProxy::updateMediaCapability()
+{
     auto& mediaCapability = internals().mediaCapability;
     if (!mediaCapability)
         return;
 
     if (shouldDeactivateMediaCapability()) {
-        setMediaCapability(std::nullopt);
+        deactivateMediaCapability(*mediaCapability);
         return;
     }
 
@@ -1104,6 +1114,9 @@ bool WebPageProxy::shouldDeactivateMediaCapability() const
         return false;
 
     if (internals().mediaState.containsAny(MediaProducerMediaState::HasAudioOrVideo))
+        return false;
+
+    if (hasValidAudibleActivity())
         return false;
 
     return true;

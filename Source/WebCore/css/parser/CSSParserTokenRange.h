@@ -91,10 +91,12 @@ public:
             ++m_first;
     }
 
-    CSSParserTokenRange consumeAll() { return { std::exchange(m_first, m_last), m_last }; }
-    CSSParserTokenRange consumeAllExcludingTrailingWhitespace();
+    void trimTrailingWhitespace();
+    const CSSParserToken& consumeLast();
 
-    String serialize() const;
+    CSSParserTokenRange consumeAll() { return { std::exchange(m_first, m_last), m_last }; }
+
+    String serialize(CSSParserToken::SerializationMode = CSSParserToken::SerializationMode::Normal) const;
 
     const CSSParserToken* begin() const { return m_first; }
 

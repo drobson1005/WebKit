@@ -29,6 +29,7 @@
 
 #include "GraphicsContext.h"
 #include <skia/core/SkCanvas.h>
+#include <skia/effects/SkDashPathEffect.h>
 
 IGNORE_CLANG_WARNINGS_BEGIN("cast-align")
 #include <skia/core/SkSurface.h>
@@ -38,7 +39,7 @@ namespace WebCore {
 
 class WEBCORE_EXPORT GraphicsContextSkia final : public GraphicsContext {
 public:
-    explicit GraphicsContextSkia(sk_sp<SkSurface>&&);
+    GraphicsContextSkia(sk_sp<SkSurface>&&, RenderingMode, RenderingPurpose);
     virtual ~GraphicsContextSkia();
 
     bool hasPlatformContext() const final;
@@ -98,29 +99,33 @@ public:
 
     RenderingMode renderingMode() const final;
 
+    enum class ShadowStyle : uint8_t { Outset, Inset };
+    sk_sp<SkImageFilter> createDropShadowFilterIfNeeded(ShadowStyle) const;
+
     SkPaint createFillPaint(std::optional<Color> fillColor = std::nullopt) const;
+    SkPaint createStrokeStylePaint() const;
     SkPaint createStrokePaint(std::optional<Color> strokeColor = std::nullopt) const;
 
 private:
     SkCanvas& canvas() const;
+
+    bool makeGLContextCurrentIfNeeded() const;
 
     class SkiaState {
     public:
         SkiaState() = default;
 
         struct {
-            SkScalar miter { 0 };
+            SkScalar miter { SkFloatToScalar(4) };
             SkPaint::Cap cap { SkPaint::kButt_Cap };
             SkPaint::Join join { SkPaint::kMiter_Join };
+            sk_sp<SkPathEffect> dash;
         } m_stroke;
-
-        struct {
-            DashArray array;
-            float offset { 0.0f };
-        } m_dash;
     };
 
     sk_sp<SkSurface> m_surface;
+    RenderingMode m_renderingMode { RenderingMode::Accelerated };
+    RenderingPurpose m_renderingPurpose { RenderingPurpose::Unspecified };
     SkiaState m_skiaState;
     Vector<SkiaState, 1> m_skiaStateStack;
 };

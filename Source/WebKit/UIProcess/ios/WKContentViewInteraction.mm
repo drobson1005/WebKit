@@ -207,6 +207,10 @@
 
 #if USE(BROWSERENGINEKIT)
 
+// FIXME: Replace this with linker flags in WebKit.xcconfig once BrowserEngineKit
+// is available everywhere we require it.
+asm(".linker_option \"-framework\", \"BrowserEngineKit\"");
+
 @interface WKUITextSelectionRect : UITextSelectionRect
 + (instancetype)selectionRectWithCGRect:(CGRect)rect;
 @end
@@ -4259,15 +4263,28 @@ WEBCORE_COMMAND_FOR_WEBVIEW(pasteAndMatchStyle);
         return result;
 
     auto typingAttributes = _page->editorState().postLayoutData->typingAttributes;
-    
-    UIFont *font = _autocorrectionData.font.get();
+
+    RetainPtr font = _autocorrectionData.font.get();
     double zoomScale = self._contentZoomScale;
     if (std::abs(zoomScale - 1) > FLT_EPSILON)
-        font = [font fontWithSize:font.pointSize * zoomScale];
+        font = [font fontWithSize:[font pointSize] * zoomScale];
 
-    if (font)
-        [result setObject:font forKey:NSFontAttributeName];
-    
+    if (font) {
+        auto originalTraits = [font fontDescriptor].symbolicTraits;
+        auto newTraits = originalTraits;
+        if (typingAttributes.contains(WebKit::TypingAttribute::Bold))
+            newTraits |= UIFontDescriptorTraitBold;
+
+        if (typingAttributes.contains(WebKit::TypingAttribute::Italics))
+            newTraits |= UIFontDescriptorTraitItalic;
+
+        if (originalTraits != newTraits) {
+            RetainPtr descriptor = [[font fontDescriptor] ?: adoptNS([UIFontDescriptor new]) fontDescriptorWithSymbolicTraits:newTraits];
+            font = [UIFont fontWithDescriptor:descriptor.get() size:[font pointSize]];
+        }
+        [result setObject:font.get() forKey:NSFontAttributeName];
+    }
+
     if (typingAttributes.contains(WebKit::TypingAttribute::Underline))
         [result setObject:@(NSUnderlineStyleSingle) forKey:NSUnderlineStyleAttributeName];
 
@@ -4370,15 +4387,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     _page->insertionPointColorDidChange();
 }
 
-#if ENABLE(APP_HIGHLIGHTS)
-
-- (BOOL)shouldAllowAppHighlightCreation
+- (BOOL)shouldAllowHighlightLinkCreation
 {
     auto editorState = _page->editorState();
     return editorState.selectionIsRange && !editorState.isContentEditable && !editorState.selectionIsRangeInsideImageOverlay;
 }
-
-#endif // ENABLE(APP_HIGHLIGHTS)
 
 - (BOOL)canPerformAction:(SEL)action withSender:(id)sender
 {
@@ -6915,7 +6928,7 @@ static UITextAutocapitalizationType toUITextAutocapitalize(WebCore::Autocapitali
         privateTraits.shortcutConversionType = _focusedElementInformation.elementType == WebKit::InputType::Password ? UITextShortcutConversionTypeNo : UITextShortcutConversionTypeDefault;
 
 #if HAVE(INLINE_PREDICTIONS)
-    traits.inlinePredictionType = (self.webView.configuration.allowsInlinePredictions || _page->preferences().inlinePredictionsInAllEditableElementsEnabled()) ? UITextInlinePredictionTypeDefault : UITextInlinePredictionTypeNo;
+    traits.inlinePredictionType = (self.webView.configuration.allowsInlinePredictions || _page->preferences().inlinePredictionsInAllEditableElementsEnabled() || _focusedElementInformation.isWritingSuggestionsEnabled) ? UITextInlinePredictionTypeDefault : UITextInlinePredictionTypeNo;
 #endif
 
     [self _updateTextInputTraitsForInteractionTintColor];
@@ -9009,6 +9022,14 @@ static bool canUseQuickboardControllerFor(UITextContentType type)
     return [uiDelegate respondsToSelector:@selector(_webView:fileUploadPanelContentIsManagedWithInitiatingFrame:)]
         && [uiDelegate _webView:webView.get() fileUploadPanelContentIsManagedWithInitiatingFrame:wrapper(API::FrameInfo::create(WTFMove(_frameInfoForFileUploadPanel), _page.get())).get()];
 }
+
+#if HAVE(PHOTOS_UI)
+- (BOOL)fileUploadPanelPhotoPickerPrefersOriginalImageFormat:(WKFileUploadPanel *)fileUploadPanel
+{
+    ASSERT(_fileUploadPanel.get() == fileUploadPanel);
+    return _page->preferences().photoPickerPrefersOriginalImageFormat();
+}
+#endif
 
 - (void)_showShareSheet:(const WebCore::ShareDataWithParsedURL&)data inRect:(std::optional<WebCore::FloatRect>)rect completionHandler:(CompletionHandler<void(bool)>&&)completionHandler
 {
@@ -11180,6 +11201,9 @@ static Vector<WebCore::IntSize> sizesOfPlaceholderElementsToInsertWhenDroppingIt
     if (auto menu = self.appHighlightMenu)
         [builder insertChildMenu:menu atEndOfMenuForIdentifier:UIMenuRoot];
 #endif
+
+    if (auto menu = self.scrollToTextFragmentGenerationMenu)
+        [builder insertSiblingMenu:menu afterMenuForIdentifier:UIMenuStandardEdit];
 }
 
 - (UIMenu *)menuWithInlineAction:(NSString *)title image:(UIImage *)image identifier:(NSString *)identifier handler:(Function<void(WKContentView *)>&&)handler
@@ -11195,7 +11219,7 @@ static Vector<WebCore::IntSize> sizesOfPlaceholderElementsToInsertWhenDroppingIt
 
 - (UIMenu *)appHighlightMenu
 {
-    if (!_page->preferences().appHighlightsEnabled() || !_page->editorState().selectionIsRange || !self.shouldAllowAppHighlightCreation)
+    if (!_page->preferences().appHighlightsEnabled() || !_page->editorState().selectionIsRange || !self.shouldAllowHighlightLinkCreation)
         return nil;
 
     bool isVisible = _page->appHighlightsVisibility();
@@ -11206,6 +11230,16 @@ static Vector<WebCore::IntSize> sizesOfPlaceholderElementsToInsertWhenDroppingIt
 }
 
 #endif // ENABLE(APP_HIGHLIGHTS)
+
+- (UIMenu *)scrollToTextFragmentGenerationMenu
+{
+    if (!_page->preferences().scrollToTextFragmentGenerationEnabled() || !_page->editorState().selectionIsRange || !self.shouldAllowHighlightLinkCreation)
+        return nil;
+
+    return [self menuWithInlineAction:WebCore::contextMenuItemTagCopyLinkToHighlight() image:nil identifier:@"WKActionScrollToTextFragmentGeneration" handler:[](WKContentView *view) mutable {
+        view->_page->copyLinkToHighlight();
+    }];
+}
 
 - (void)setContinuousSpellCheckingEnabled:(BOOL)enabled
 {

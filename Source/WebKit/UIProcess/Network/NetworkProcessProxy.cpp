@@ -193,6 +193,8 @@ void NetworkProcessProxy::sendCreationParametersToNewProcess()
     parameters.websiteDataStoreParameters = WebsiteDataStore::parametersFromEachWebsiteDataStore();
     WebsiteDataStore::forEachWebsiteDataStore([&](auto& websiteDataStore) {
         addSession(websiteDataStore, SendParametersToNetworkProcess::No);
+        // Notify WebsiteDataStore that they have been added to the network process.
+        websiteDataStore.setNetworkProcess(*this);
     });
 #endif
 
@@ -227,16 +229,17 @@ static bool anyProcessPoolAlwaysRunsAtBackgroundPriority()
 }
 
 NetworkProcessProxy::NetworkProcessProxy()
-    : AuxiliaryProcessProxy(anyProcessPoolAlwaysRunsAtBackgroundPriority(), networkProcessResponsivenessTimeout)
+    : AuxiliaryProcessProxy(WebProcessPool::anyProcessPoolNeedsUIBackgroundAssertion() ? ShouldTakeUIBackgroundAssertion::Yes : ShouldTakeUIBackgroundAssertion::No
+    , anyProcessPoolAlwaysRunsAtBackgroundPriority() ? AlwaysRunsAtBackgroundPriority::Yes : AlwaysRunsAtBackgroundPriority::No
+    , networkProcessResponsivenessTimeout)
 #if ENABLE(LEGACY_CUSTOM_PROTOCOL_MANAGER)
     , m_customProtocolManagerClient(makeUniqueRef<LegacyCustomProtocolManagerClient>())
     , m_customProtocolManagerProxy(*this)
 #else
     , m_customProtocolManagerClient(makeUniqueRef<API::CustomProtocolManagerClient>())
 #endif
-    , m_throttler(*this, WebProcessPool::anyProcessPoolNeedsUIBackgroundAssertion())
 #if PLATFORM(MAC)
-    , m_backgroundActivityToPreventSuspension(m_throttler.backgroundActivity("Prevent suspension"_s))
+    , m_backgroundActivityToPreventSuspension(throttler().backgroundActivity("Prevent suspension"_s))
 #endif
 {
     RELEASE_LOG(Process, "%p - NetworkProcessProxy::NetworkProcessProxy", this);
@@ -304,6 +307,10 @@ void NetworkProcessProxy::getNetworkProcessConnection(WebProcessProxy& webProces
 #if ENABLE(IPC_TESTING_API)
     parameters.ignoreInvalidMessageForTesting = webProcessProxy.ignoreInvalidMessageForTesting();
 #endif
+    // The WebProcess shouldn't request a connection to the network process before we've had a chance to
+    // initialize the preferences for the network process.
+    ASSERT(webProcessProxy.preferencesForNetworkProcess());
+    parameters.preferencesForWebProcess = *webProcessProxy.preferencesForNetworkProcess();
     sendWithAsyncReply(Messages::NetworkProcess::CreateNetworkConnectionToWebProcess { webProcessProxy.coreProcessIdentifier(), webProcessProxy.sessionID(), parameters }, [this, weakThis = WeakPtr { *this }, reply = WTFMove(reply)](auto&& identifier, auto cookieAcceptPolicy) mutable {
         if (!weakThis) {
             RELEASE_LOG_ERROR(Process, "NetworkProcessProxy::getNetworkProcessConnection: NetworkProcessProxy deallocated during connection establishment");
@@ -344,16 +351,17 @@ Ref<DownloadProxy> NetworkProcessProxy::createDownloadProxy(WebsiteDataStore& da
     return m_downloadProxyMap->createDownloadProxy(dataStore, WTFMove(client), resourceRequest, frameInfo, originatingPage);
 }
 
-void NetworkProcessProxy::dataTaskWithRequest(WebPageProxy& page, PAL::SessionID sessionID, WebCore::ResourceRequest&& request, const std::optional<SecurityOriginData>& topOrigin, CompletionHandler<void(API::DataTask&)>&& completionHandler)
+void NetworkProcessProxy::dataTaskWithRequest(WebPageProxy& page, PAL::SessionID sessionID, WebCore::ResourceRequest&& request, const std::optional<SecurityOriginData>& topOrigin, bool shouldRunAtForegroundPriority, CompletionHandler<void(API::DataTask&)>&& completionHandler)
 {
-    sendWithAsyncReply(Messages::NetworkProcess::DataTaskWithRequest(page.identifier(), sessionID, request, topOrigin, IPC::FormDataReference(request.httpBody())), [this, protectedThis = Ref { *this }, weakPage = WeakPtr { page }, completionHandler = WTFMove(completionHandler), originalURL = request.url()] (DataTaskIdentifier identifier) mutable {
-        auto dataTask = API::DataTask::create(identifier, WTFMove(weakPage), WTFMove(originalURL));
+    auto activity = shouldRunAtForegroundPriority ? throttler().foregroundActivity("WKDataTask initialization"_s) : throttler().backgroundActivity("WKDataTask initialization"_s);
+    sendWithAsyncReply(Messages::NetworkProcess::DataTaskWithRequest(page.identifier(), sessionID, request, topOrigin, IPC::FormDataReference(request.httpBody())), [this, protectedThis = Ref { *this }, weakPage = WeakPtr { page }, activity = WTFMove(activity), shouldRunAtForegroundPriority, completionHandler = WTFMove(completionHandler), originalURL = request.url()] (DataTaskIdentifier identifier) mutable {
+        auto dataTask = API::DataTask::create(identifier, WTFMove(weakPage), WTFMove(originalURL), shouldRunAtForegroundPriority);
         completionHandler(dataTask);
         if (decltype(m_dataTasks)::isValidKey(identifier))
             m_dataTasks.add(identifier, WTFMove(dataTask));
         else
             dataTask->networkProcessCrashed();
-    });
+    }, 0, { }, ShouldStartProcessThrottlerActivity::No);
 }
 
 void NetworkProcessProxy::dataTaskReceivedChallenge(DataTaskIdentifier identifier, WebCore::AuthenticationChallenge&& challenge, CompletionHandler<void(AuthenticationChallengeDisposition, WebCore::Credential&&)>&& completionHandler)
@@ -392,13 +400,13 @@ void NetworkProcessProxy::dataTaskDidCompleteWithError(DataTaskIdentifier identi
 {
     MESSAGE_CHECK(decltype(m_dataTasks)::isValidKey(identifier));
     if (auto task = m_dataTasks.take(identifier))
-        task->client().didCompleteWithError(*task, WTFMove(error));
+        task->didCompleteWithError(WTFMove(error));
 }
 
 void NetworkProcessProxy::cancelDataTask(DataTaskIdentifier identifier, PAL::SessionID sessionID)
 {
     m_dataTasks.remove(identifier);
-    send(Messages::NetworkProcess::CancelDataTask(identifier, sessionID), 0);
+    sendWithAsyncReply(Messages::NetworkProcess::CancelDataTask(identifier, sessionID), [] { });
 }
 
 void NetworkProcessProxy::fetchWebsiteData(PAL::SessionID sessionID, OptionSet<WebsiteDataType> dataTypes, OptionSet<WebsiteDataFetchOption> fetchOptions, CompletionHandler<void(WebsiteData)>&& completionHandler)
@@ -577,14 +585,6 @@ void NetworkProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Con
         networkProcessDidTerminate(ProcessTerminationReason::Crash);
         return;
     }
-    
-#if USE(RUNNINGBOARD)
-    m_throttler.didConnectToProcess(*this);
-#if USE(EXTENSIONKIT)
-    if (launcher)
-        launcher->releaseLaunchGrant();
-#endif
-#endif
 }
 
 void NetworkProcessProxy::logDiagnosticMessage(WebPageProxyIdentifier pageID, const String& message, const String& description, WebCore::ShouldSample shouldSample)
@@ -1421,9 +1421,6 @@ void NetworkProcessProxy::addSession(WebsiteDataStore& store, SendParametersToNe
     // DispatchMessageEvenWhenWaitingForSyncReply flag.
     if (canSendMessage() && sendParametersToNetworkProcess == SendParametersToNetworkProcess::Yes)
         send(Messages::NetworkProcess::AddWebsiteDataStore { store.parameters() }, 0, IPC::SendOption::DispatchMessageEvenWhenWaitingForSyncReply);
-    auto sessionID = store.sessionID();
-    if (!sessionID.isEphemeral())
-        createSymLinkForFileUpgrade(store.resolvedIndexedDBDatabaseDirectory());
 }
 
 void NetworkProcessProxy::removeSession(WebsiteDataStore& websiteDataStore, CompletionHandler<void(String&&)>&& completionHandler)
@@ -1691,17 +1688,6 @@ void NetworkProcessProxy::testProcessIncomingSyncMessagesWhenWaitingForSyncReply
     auto syncResult = page->sendSync(Messages::WebPage::TestProcessIncomingSyncMessagesWhenWaitingForSyncReply(), Seconds::infinity(), IPC::SendSyncOption::ForceDispatchWhenDestinationIsWaitingForUnboundedSyncReply);
     auto [handled] = syncResult.takeReplyOr(false);
     reply(handled);
-}
-
-void NetworkProcessProxy::createSymLinkForFileUpgrade(const String& indexedDatabaseDirectory)
-{
-    if (indexedDatabaseDirectory.isEmpty())
-        return;
-
-    String oldVersionDirectory = FileSystem::pathByAppendingComponent(indexedDatabaseDirectory, "v0"_s);
-    FileSystem::deleteEmptyDirectory(oldVersionDirectory);
-    if (!FileSystem::fileExists(oldVersionDirectory))
-        FileSystem::createSymbolicLink(indexedDatabaseDirectory, oldVersionDirectory);
 }
 
 void NetworkProcessProxy::preconnectTo(PAL::SessionID sessionID, WebPageProxyIdentifier webPageProxyID, WebCore::PageIdentifier webPageID, WebCore::ResourceRequest&& request, WebCore::StoredCredentialsPolicy storedCredentialsPolicy, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)

@@ -165,7 +165,6 @@ add_library(Skia STATIC
     src/core/SkBitmapProcState.cpp
     src/core/SkBitmapProcState_matrixProcs.cpp
     src/core/SkBitmapProcState_opts.cpp
-    src/core/SkBitmapProcState_opts_hsw.cpp
     src/core/SkBitmapProcState_opts_ssse3.cpp
     src/core/SkBlendMode.cpp
     src/core/SkBlendModeBlender.cpp
@@ -236,6 +235,7 @@ add_library(Skia STATIC
     src/core/SkImageFilterTypes.cpp
     src/core/SkImageGenerator.cpp
     src/core/SkImageInfo.cpp
+    src/core/SkKnownRuntimeEffects.cpp
     src/core/SkLatticeIter.cpp
     src/core/SkLineClipper.cpp
     src/core/SkLocalMatrixImageFilter.cpp
@@ -329,7 +329,6 @@ add_library(Skia STATIC
     src/core/SkSwizzler_opts_ssse3.cpp
     src/core/SkTaskGroup.cpp
     src/core/SkTextBlob.cpp
-    src/core/SkTextBlobTrace.cpp
     src/core/SkTypeface.cpp
     src/core/SkTypefaceCache.cpp
     src/core/SkTypeface_remote.cpp
@@ -517,7 +516,6 @@ add_library(Skia STATIC
     src/gpu/ganesh/gl/builders/GrGLProgramBuilder.cpp
     src/gpu/ganesh/gl/builders/GrGLShaderStringBuilder.cpp
     src/gpu/ganesh/gl/epoxy/GrGLMakeEpoxyEGLInterface.cpp
-    src/gpu/ganesh/gl/epoxy/GrGLMakeNativeInterface_epoxy.cpp
     src/gpu/ganesh/glsl/GrGLSLBlend.cpp
     src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.cpp
     src/gpu/ganesh/glsl/GrGLSLProgramBuilder.cpp
@@ -602,6 +600,7 @@ add_library(Skia STATIC
     src/image/SkRescaleAndReadPixels.cpp
     src/image/SkSurface.cpp
     src/image/SkSurface_Base.cpp
+    src/image/SkSurface_Null.cpp
     src/image/SkSurface_Raster.cpp
 
     src/effects/Sk1DPathEffect.cpp
@@ -845,7 +844,6 @@ add_library(Skia STATIC
     src/ports/SkFontMgr_fontconfig.cpp
     src/ports/SkGlobalInitialization_default.cpp
     src/ports/SkImageGenerator_skia.cpp
-    src/ports/SkMemory_malloc.cpp
     src/ports/SkOSFile_posix.cpp
     src/ports/SkOSFile_stdio.cpp
 
@@ -857,6 +855,20 @@ add_library(Skia STATIC
     modules/skcms/src/skcms_TransformHsw.cc
     modules/skcms/src/skcms_TransformSkx.cc
 )
+
+if (USE_SYSTEM_MALLOC)
+    target_sources(Skia PRIVATE src/ports/SkMemory_malloc.cpp)
+else ()
+    # Using WTF headers needs including Source/WTF/config.h first, and
+    # in turn that needs cmakeconfig.h from the top build directory, so
+    # arrange the include directories accordingly.
+    target_sources(Skia PRIVATE ${WEBCORE_DIR}/platform/skia/SkiaAllocatorFastMalloc.cpp)
+    set_property(
+        SOURCE ${WEBCORE_DIR}/platform/skia/SkiaAllocatorFastMalloc.cpp
+        APPEND PROPERTY INCLUDE_DIRECTORIES ${WTF_DIR} ${CMAKE_BINARY_DIR}
+    )
+    target_link_libraries(Skia PRIVATE WebKit::WTF)
+endif ()
 
 set_target_properties(Skia PROPERTIES
     CXX_STANDARD 17
@@ -913,6 +925,7 @@ target_compile_definitions(Skia PRIVATE
 )
 
 target_compile_definitions(Skia PUBLIC
+    SK_DISABLE_LEGACY_GL_MAKE_NATIVE_INTERFACE
     SK_DISABLE_LEGACY_IMAGE_READBUFFER
     SK_DISABLE_LEGACY_INIT_DECODERS
     SK_DISABLE_LEGACY_PNG_WRITEBUFFER
@@ -989,59 +1002,21 @@ set(Skia_SkCMS_SKX_FLAGS
 if (WTF_CPU_X86 OR WTF_CPU_X86_64)
     target_compile_definitions(Skia PRIVATE SK_ENABLE_AVX512_OPTS)
 
-    set(Skia_SkCMS_HSW_OPTS TRUE)
-    foreach (_flag ${Skia_SkCMS_HSW_FLAGS})
-        if (NOT DEFINED CXX_COMPILER_SUPPORTS_${_flag})
-            check_cxx_compiler_flag("${_flag}" CXX_COMPILER_SUPPORTS_${_flag})
-        endif ()
-        if (NOT CXX_COMPILER_SUPPORTS_${_flag})
-            set(Skia_SkCMS_HSW_OPTS FALSE)
-            break ()
-        endif ()
-    endforeach ()
+    WEBKIT_CHECK_COMPILER_FLAGS(CXX Skia_SkCMS_HSW_OPTS ${Skia_SkCMS_HSW_FLAGS})
+    WEBKIT_CHECK_COMPILER_FLAGS(CXX Skia_SkCMS_SKX_OPTS ${Skia_SkCMS_SKX_FLAGS})
 
-    set(Skia_SkCMS_SKX_OPTS TRUE)
-    foreach (_flag ${Skia_SkCMS_SKX_FLAGS})
-        if (NOT DEFINED CXX_COMPILER_SUPPORTS_${_flag})
-            check_cxx_compiler_flag("${_flag}" CXX_COMPILER_SUPPORTS_${_flag})
-        endif ()
-        if (NOT CXX_COMPILER_SUPPORTS_${_flag})
-            set(Skia_SkCMS_SKX_OPTS FALSE)
-            break ()
-        endif ()
-    endforeach ()
-
-    if (NOT DEFINED CXX_COMPILER_SUPPORTS_-march=haswell)
-        check_cxx_compiler_flag(-march=haswell CXX_COMPILER_SUPPORTS_-march=haswell)
-    endif ()
-    if (CXX_COMPILER_SUPPORTS_-march=haswell)
-        set_property(
-            SOURCE src/opts/SkOpts_hsw.cpp
-            APPEND PROPERTY COMPILE_OPTIONS -march=haswell
-        )
-    endif ()
-
-    if (NOT DEFINED CXX_COMPILER_SUPPORTS_-march=skylake-avx512)
-        check_cxx_compiler_flag(-march=skylake-avx512 CXX_COMPILER_SUPPORTS_-march=skylake-avx512)
-    endif ()
-    if (CXX_COMPILER_SUPPORTS_-march=skylake-avx512)
-        set_property(
-            SOURCE src/opts/SkOpts_skx.cpp
-            APPEND PROPERTY COMPILE_OPTIONS -march=skylake-avx512
-        )
-    endif ()
+    WEBKIT_ADD_COMPILER_FLAGS(CXX SOURCE src/opts/SkOpts_hsw.cpp "-march=haswell")
+    WEBKIT_ADD_COMPILER_FLAGS(CXX SOURCE src/opts/SkOpts_skx.cpp "-march=skylake-avx512")
 endif ()
 
 if (Skia_SkCMS_HSW_OPTS)
-    set_property(SOURCE modules/skcms/src/skcms_TransformHsw.cc
-        APPEND PROPERTY COMPILE_OPTIONS ${Skia_SkCMS_HSW_FLAGS})
+    WEBKIT_ADD_COMPILER_FLAGS(CXX SOURCE modules/skcms/src/skcms_TransformHsw.cc ${Skia_SkCMS_HSW_FLAGS})
 else ()
     target_compile_definitions(Skia PRIVATE SKCMS_DISABLE_HSW)
 endif ()
 
 if (Skia_SkCMS_SKX_OPTS)
-    set_property(SOURCE modules/skcms/src/skcms_TransformSkx.cc
-        APPEND PROPERTY COMPILE_OPTIONS ${Skia_SkCMS_SKX_FLAGS})
+    WEBKIT_ADD_COMPILER_FLAGS(CXX SOURCE modules/skcms/src/skcms_TransformSkx.cc ${Skia_SkCMS_SKX_FLAGS})
 else ()
     target_compile_definitions(Skia PRIVATE SKCMS_DISABLE_SKX)
 endif ()

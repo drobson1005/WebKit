@@ -357,6 +357,7 @@ public:
     inline const StyleCustomPropertyData& inheritedCustomProperties() const;
     inline const StyleCustomPropertyData& nonInheritedCustomProperties() const;
     const CSSCustomPropertyValue* customPropertyValue(const AtomString&) const;
+    bool customPropertyValueEqual(const RenderStyle&, const AtomString&) const;
 
     void deduplicateCustomProperties(const RenderStyle&);
     void setCustomPropertyValue(Ref<const CSSCustomPropertyValue>&&, bool isInherited);
@@ -426,7 +427,7 @@ public:
     inline bool hasStaticInlinePosition(bool horizontal) const;
     inline bool hasStaticBlockPosition(bool horizontal) const;
 
-    PositionType position() const;
+    PositionType position() const { return static_cast<PositionType>(m_nonInheritedFlags.position); }
     inline bool hasOutOfFlowPosition() const;
     inline bool hasInFlowPosition() const;
     inline bool hasViewportConstrainedPosition() const;
@@ -586,8 +587,8 @@ public:
 
     const Length& specifiedLineHeight() const;
     WEBCORE_EXPORT const Length& lineHeight() const;
-    WEBCORE_EXPORT int computedLineHeight() const;
-    int computeLineHeight(const Length&) const;
+    WEBCORE_EXPORT float computedLineHeight() const;
+    float computeLineHeight(const Length&) const;
 
     WhiteSpace whiteSpace() const;
     inline bool autoWrap() const;
@@ -698,7 +699,7 @@ public:
     inline float opacity() const;
     inline bool hasOpacity() const;
     inline StyleAppearance appearance() const;
-    inline StyleAppearance effectiveAppearance() const;
+    inline StyleAppearance usedAppearance() const;
     inline AspectRatioType aspectRatioType() const;
     inline double aspectRatioWidth() const;
     inline double aspectRatioHeight() const;
@@ -825,10 +826,10 @@ public:
     inline int marqueeLoopCount() const;
     inline MarqueeBehavior marqueeBehavior() const;
     inline MarqueeDirection marqueeDirection() const;
-    inline UserModify effectiveUserModify() const;
+    inline UserModify usedUserModify() const;
     inline UserModify userModify() const;
     inline UserDrag userDrag() const;
-    WEBCORE_EXPORT UserSelect effectiveUserSelect() const;
+    WEBCORE_EXPORT UserSelect usedUserSelect() const;
     inline UserSelect userSelect() const;
     inline TextOverflow textOverflow() const;
     inline WordBreak wordBreak() const;
@@ -1104,7 +1105,7 @@ public:
         m_nonInheritedFlags.effectiveDisplay = m_nonInheritedFlags.originalDisplay;
     }
     void setEffectiveDisplay(DisplayType v) { m_nonInheritedFlags.effectiveDisplay = static_cast<unsigned>(v); }
-    inline void setPosition(PositionType);
+    void setPosition(PositionType v) { m_nonInheritedFlags.position = static_cast<unsigned>(v); }
     void setFloating(Float v) { m_nonInheritedFlags.floating = static_cast<unsigned>(v); }
 
     inline void setLeft(Length&&);
@@ -1387,7 +1388,7 @@ public:
     inline void setHasAutoAccentColor();
     inline void setOpacity(float);
     inline void setAppearance(StyleAppearance);
-    inline void setEffectiveAppearance(StyleAppearance);
+    inline void setUsedAppearance(StyleAppearance);
     inline void setBoxAlign(BoxAlignment);
     void setBoxDirection(BoxDirection d) { m_inheritedFlags.boxDirection = static_cast<unsigned>(d); }
     inline void setBoxFlex(float);
@@ -2138,7 +2139,7 @@ public:
     inline const StyleColor& floodColor() const;
     inline const StyleColor& lightingColor() const;
 
-    Color effectiveAccentColor() const;
+    Color usedAccentColor() const;
     inline const StyleColor& accentColor() const;
     inline bool hasAutoAccentColor() const;
 
@@ -2193,6 +2194,7 @@ private:
         unsigned overflowX : 3; // Overflow
         unsigned overflowY : 3; // Overflow
         unsigned clear : 3; // Clear
+        unsigned position : 3; // PositionType
         unsigned unicodeBidi : 3; // UnicodeBidi
         unsigned floating : 3; // Float
         unsigned tableLayout : 1; // TableLayoutType

@@ -70,6 +70,7 @@
 #include "HTMLDialogElement.h"
 #include "HTMLDocument.h"
 #include "HTMLHtmlElement.h"
+#include "HTMLInputElement.h"
 #include "HTMLLabelElement.h"
 #include "HTMLNameCollection.h"
 #include "HTMLObjectElement.h"
@@ -79,8 +80,10 @@
 #include "HTMLScriptElement.h"
 #include "HTMLSelectElement.h"
 #include "HTMLTemplateElement.h"
+#include "HTMLTextAreaElement.h"
 #include "IdChangeInvalidation.h"
 #include "IdTargetObserverRegistry.h"
+#include "InputType.h"
 #include "InspectorInstrumentation.h"
 #include "JSDOMPromiseDeferred.h"
 #include "JSLazyEventListener.h"
@@ -867,8 +870,8 @@ void Element::setActive(bool value, Style::InvalidationScope invalidationScope)
     if (!renderer)
         return;
 
-    if (renderer->style().hasEffectiveAppearance())
-        renderer->theme().stateChanged(*renderer, ControlStyle::State::Pressed);
+    if (!isDisabledFormControl() && renderer->style().hasEffectiveAppearance())
+        renderer->repaint();
 }
 
 static bool shouldAlwaysHaveFocusVisibleWhenFocused(const Element& element)
@@ -942,8 +945,8 @@ void Element::setHovered(bool value, Style::InvalidationScope invalidationScope,
     }
 
     if (auto* style = renderStyle(); style && style->hasEffectiveAppearance()) {
-        CheckedPtr renderer = this->renderer();
-        renderer->theme().stateChanged(*renderer, ControlStyle::State::Hovered);
+        if (CheckedPtr renderer = this->renderer(); renderer && renderer->theme().supportsHover())
+            renderer->repaint();
     }
 }
 
@@ -2546,18 +2549,16 @@ void Element::parserSetAttributes(std::span<const Attribute> attributes)
             m_elementData = sharedObjectPool->cachedShareableElementDataWithAttributes(attributes);
         else
             m_elementData = ShareableElementData::createWithAttributes(attributes);
-
     }
 
-    parserDidSetAttributes();
+    if (auto* inputElement = dynamicDowncast<HTMLInputElement>(*this)) {
+        DelayedUpdateValidityScope delayedUpdateValidityScope(*inputElement);
+        inputElement->initializeInputTypeAfterParsingOrCloning();
+    }
 
     // Use attributes instead of m_elementData because attributeChanged might modify m_elementData.
     for (const auto& attribute : attributes)
-        notifyAttributeChanged(attribute.name(), nullAtom(), attribute.value(), AttributeModificationReason::Directly);
-}
-
-void Element::parserDidSetAttributes()
-{
+        notifyAttributeChanged(attribute.name(), nullAtom(), attribute.value(), AttributeModificationReason::Parser);
 }
 
 void Element::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
@@ -2692,36 +2693,28 @@ Node::InsertedIntoAncestorResult Element::insertedIntoAncestor(InsertionType ins
 {
     ContainerNode::insertedIntoAncestor(insertionType, parentOfInsertedTree);
 
-    if (parentOfInsertedTree.isInTreeScope()) {
-        bool becomeConnected = insertionType.connectedToDocument;
-        auto* newScope = &parentOfInsertedTree.treeScope();
-        RefPtr newDocument = becomeConnected ? dynamicDowncast<HTMLDocument>(newScope->documentScope()) : nullptr;
-        if (!insertionType.treeScopeChanged)
-            newScope = nullptr;
-
+    if (insertionType.treeScopeChanged) {
+        RefPtr<HTMLDocument> newHTMLDocument = insertionType.connectedToDocument && parentOfInsertedTree.isInDocumentTree()
+            ? dynamicDowncast<HTMLDocument>(treeScope().documentScope()) : nullptr;
         if (auto& idValue = getIdAttribute(); !idValue.isEmpty()) {
-            if (newScope)
-                newScope->addElementById(idValue, *this);
-            if (newDocument)
-                updateIdForDocument(*newDocument, nullAtom(), idValue, HTMLDocumentNamedItemMapsUpdatingCondition::Always);
+            treeScope().addElementById(idValue, *this);
+            if (newHTMLDocument)
+                updateIdForDocument(*newHTMLDocument, nullAtom(), idValue, HTMLDocumentNamedItemMapsUpdatingCondition::Always);
         }
-
         if (auto& nameValue = getNameAttribute(); !nameValue.isEmpty()) {
-            if (newScope)
-                newScope->addElementByName(nameValue, *this);
-            if (newDocument)
-                updateNameForDocument(*newDocument, nullAtom(), nameValue);
+            treeScope().addElementByName(nameValue, *this);
+            if (newHTMLDocument)
+                updateNameForDocument(*newHTMLDocument, nullAtom(), nameValue);
         }
+    }
 
-        if (becomeConnected) {
-            if (UNLIKELY(isCustomElementUpgradeCandidate())) {
-                ASSERT(isConnected());
-                CustomElementReactionQueue::tryToUpgradeElement(*this);
-            }
-            if (UNLIKELY(isDefinedCustomElement()))
-                CustomElementReactionQueue::enqueueConnectedCallbackIfNeeded(*this);
+    if (insertionType.connectedToDocument) {
+        if (UNLIKELY(isCustomElementUpgradeCandidate())) {
+            ASSERT(isConnected());
+            CustomElementReactionQueue::tryToUpgradeElement(*this);
         }
-
+        if (UNLIKELY(isDefinedCustomElement()))
+            CustomElementReactionQueue::enqueueConnectedCallbackIfNeeded(*this);
         if (shouldAutofocus(*this))
             Ref { document().topDocument() }->appendAutofocusCandidate(*this);
     }
@@ -2766,6 +2759,8 @@ bool Element::hasEffectiveLangState() const
 
 void Element::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
+    ContainerNode::removedFromAncestor(removalType, oldParentOfRemovedTree);
+
     if (RefPtr page = document().page()) {
 #if ENABLE(POINTER_LOCK)
         page->pointerLockController().elementWasRemoved(*this);
@@ -2777,33 +2772,51 @@ void Element::removedFromAncestor(RemovalType removalType, ContainerNode& oldPar
 #endif
     }
 
-    setSavedLayerScrollPosition({ });
-
-    if (oldParentOfRemovedTree.isInTreeScope()) {
-        TreeScope* oldScope = &oldParentOfRemovedTree.treeScope();
-        Document* oldDocument = removalType.disconnectedFromDocument ? &oldScope->documentScope() : nullptr;
-        auto* oldHTMLDocument = dynamicDowncast<HTMLDocument>(oldDocument);
-        if (!removalType.treeScopeChanged)
-            oldScope = nullptr;
+    if (removalType.treeScopeChanged) {
+        auto& oldTreeScope = oldParentOfRemovedTree.treeScope();
+        RefPtrAllowingPartiallyDestroyed<HTMLDocument> oldHTMLDocument = removalType.disconnectedFromDocument
+            && oldParentOfRemovedTree.isInDocumentTree() ? dynamicDowncast<HTMLDocument>(oldTreeScope.documentScope()) : nullptr;
 
         if (auto& idValue = getIdAttribute(); !idValue.isEmpty()) {
-            if (oldScope)
-                oldScope->removeElementById(idValue, *this);
+            oldTreeScope.removeElementById(idValue, *this);
             if (oldHTMLDocument)
                 updateIdForDocument(*oldHTMLDocument, idValue, nullAtom(), HTMLDocumentNamedItemMapsUpdatingCondition::Always);
         }
-
         if (auto& nameValue = getNameAttribute(); !nameValue.isEmpty()) {
-            if (oldScope)
-                oldScope->removeElementByName(nameValue, *this);
+            oldTreeScope.removeElementByName(nameValue, *this);
             if (oldHTMLDocument)
                 updateNameForDocument(*oldHTMLDocument, nameValue, nullAtom());
         }
+    }
 
-        if (oldDocument && oldDocument->cssTarget() == this)
+    if (removalType.disconnectedFromDocument) {
+        RefAllowingPartiallyDestroyed<Document> oldDocument = oldParentOfRemovedTree.treeScope().documentScope();
+        ASSERT(&document() == oldDocument.ptr());
+
+        if (lastRememberedLogicalWidth() || lastRememberedLogicalHeight()) {
+            // The disconnected element could be unobserved because of other properties, here we need to make sure it is observed,
+            // so that deliver could be triggered and it would clear lastRememberedSize.
+            oldDocument->observeForContainIntrinsicSize(*this);
+            oldDocument->resetObservationSizeForContainIntrinsicSize(*this);
+        }
+
+        setSavedLayerScrollPosition({ });
+
+        clearBeforePseudoElement();
+        clearAfterPseudoElement();
+
+#if ENABLE(FULLSCREEN_API)
+        if (UNLIKELY(hasFullscreenFlag()))
+            oldDocument->fullscreenManager().exitRemovedFullscreenElement(*this);
+#endif
+
+        if (UNLIKELY(isInTopLayer()))
+            removeFromTopLayer();
+
+        if (oldDocument->cssTarget() == this)
             oldDocument->setCSSTarget(nullptr);
 
-        if (removalType.disconnectedFromDocument && UNLIKELY(isDefinedCustomElement()))
+        if (UNLIKELY(isDefinedCustomElement()))
             CustomElementReactionQueue::enqueueDisconnectedCallbackIfNeeded(*this);
     }
 
@@ -2812,16 +2825,6 @@ void Element::removedFromAncestor(RemovalType removalType, ContainerNode& oldPar
             shadowRoot->hostChildElementDidChange(*this);
     }
 
-    clearBeforePseudoElement();
-    clearAfterPseudoElement();
-
-    ContainerNode::removedFromAncestor(removalType, oldParentOfRemovedTree);
-
-#if ENABLE(FULLSCREEN_API)
-    if (UNLIKELY(hasFullscreenFlag()))
-        document().fullscreenManager().exitRemovedFullscreenElement(*this);
-#endif
-
     if (!parentNode() && is<Document>(oldParentOfRemovedTree)) {
         setEffectiveLangStateOnOldDocumentElement();
         document().setDocumentElementLanguage(nullAtom());
@@ -2829,9 +2832,6 @@ void Element::removedFromAncestor(RemovalType removalType, ContainerNode& oldPar
         updateEffectiveLangStateFromParent();
 
     Styleable::fromElement(*this).elementWasRemoved();
-
-    if (UNLIKELY(isInTopLayer()))
-        removeFromTopLayer();
 
     document().userActionElements().clearAllForElement(*this);
 }
@@ -3618,7 +3618,7 @@ void Element::focus(const FocusOptions& options)
         // Focus and change event handlers can cause us to lose our last ref.
         // If a focus event handler changes the focus to a different node it
         // does not make sense to continue and update appearence.
-        if (!CheckedRef(page->focusController())->setFocusedElement(newTarget.get(), frame, optionsWithVisibility))
+        if (!page->checkedFocusController()->setFocusedElement(newTarget.get(), frame, optionsWithVisibility))
             return;
     }
 
@@ -3684,7 +3684,7 @@ void Element::blur()
 {
     if (treeScope().focusedElementInScope() == this) {
         if (RefPtr frame = document().frame())
-            CheckedRef(frame->page()->focusController())->setFocusedElement(nullptr, *frame);
+            frame->page()->checkedFocusController()->setFocusedElement(nullptr, *frame);
         else
             protectedDocument()->setFocusedElement(nullptr);
     }
@@ -4140,8 +4140,7 @@ const RenderStyle& Element::resolvePseudoElementStyle(const Style::PseudoElement
         style->inheritFrom(*parentStyle);
         // FIXME: RenderStyle should switch to use PseudoElementIdentifier.
         style->setPseudoElementType(pseudoElementIdentifier.pseudoId);
-        if (!pseudoElementIdentifier.nameArgument.isNull())
-            style->setPseudoElementNameArgument(pseudoElementIdentifier.nameArgument);
+        style->setPseudoElementNameArgument(pseudoElementIdentifier.nameArgument);
     }
 
     auto* computedStyle = style.get();
@@ -4753,6 +4752,53 @@ bool Element::isSpellCheckingEnabled() const
     return true;
 }
 
+bool Element::isWritingSuggestionsEnabled() const
+{
+    // If none of the following conditions are true, then return `false`.
+
+    // `element` is an `input` element whose `type` attribute is in either the
+    // `Text`, `Search`, `URL`, `Email` state and is `mutable`.
+    auto isEligibleInputElement = [&] {
+        RefPtr input = dynamicDowncast<HTMLInputElement>(*this);
+        if (!input)
+            return false;
+
+        return !input->isDisabledFormControl() && input->supportsWritingSuggestions();
+    };
+
+    // `element` is a `textarea` element that is `mutable`.
+    auto isEligibleTextArea = [&] {
+        RefPtr textArea = dynamicDowncast<HTMLTextAreaElement>(*this);
+        if (!textArea)
+            return false;
+
+        return !textArea->isDisabledFormControl();
+    };
+
+    // `element` is an `editing host` or is `editable`.
+
+    if (!isEligibleInputElement() && !isEligibleTextArea() && !hasEditableStyle())
+        return false;
+
+    // If `element` has an 'inclusive ancestor' with a `writingsuggestions` content attribute that's
+    // not in the `default` state and the nearest such ancestor's `writingsuggestions` content attribute
+    // is in the `false` state, then return `false`.
+
+    for (auto* ancestor = this; ancestor; ancestor = ancestor->parentElementInComposedTree()) {
+        auto& value = ancestor->attributeWithoutSynchronization(HTMLNames::writingsuggestionsAttr);
+
+        if (value.isNull())
+            continue;
+        if (value.isEmpty() || equalLettersIgnoringASCIICase(value, "true"_s))
+            return true;
+        if (equalLettersIgnoringASCIICase(value, "false"_s))
+            return false;
+    }
+
+    // Otherwise, return `true`.
+    return true;
+}
+
 #if ASSERT_ENABLED
 bool Element::fastAttributeLookupAllowed(const QualifiedName& name) const
 {
@@ -4783,7 +4829,7 @@ inline void Element::updateName(const AtomString& oldName, const AtomString& new
 
     updateNameForTreeScope(treeScope(), oldName, newName);
 
-    if (!isConnected())
+    if (!isInDocumentTree())
         return;
     if (RefPtr htmlDocument = dynamicDowncast<HTMLDocument>(document()))
         updateNameForDocument(*htmlDocument, oldName, newName);
@@ -4802,9 +4848,6 @@ void Element::updateNameForTreeScope(TreeScope& scope, const AtomString& oldName
 void Element::updateNameForDocument(HTMLDocument& document, const AtomString& oldName, const AtomString& newName)
 {
     ASSERT(oldName != newName);
-
-    if (isInShadowTree())
-        return;
 
     if (WindowNameCollection::elementMatchesIfNameAttributeMatch(*this)) {
         const AtomString& id = WindowNameCollection::elementMatchesIfIdAttributeMatch(*this) ? getIdAttribute() : nullAtom();
@@ -4833,7 +4876,7 @@ inline void Element::updateId(const AtomString& oldId, const AtomString& newId, 
 
     updateIdForTreeScope(treeScope(), oldId, newId, notifyObservers);
 
-    if (!isConnected())
+    if (!isInDocumentTree())
         return;
     if (RefPtr htmlDocument = dynamicDowncast<HTMLDocument>(document()))
         updateIdForDocument(*htmlDocument, oldId, newId, HTMLDocumentNamedItemMapsUpdatingCondition::UpdateOnlyIfDiffersFromNameAttribute);
@@ -4841,7 +4884,6 @@ inline void Element::updateId(const AtomString& oldId, const AtomString& newId, 
 
 void Element::updateIdForTreeScope(TreeScope& scope, const AtomString& oldId, const AtomString& newId, NotifyObservers notifyObservers)
 {
-    ASSERT(isInTreeScope());
     ASSERT(oldId != newId);
 
     if (!oldId.isEmpty())
@@ -4852,11 +4894,7 @@ void Element::updateIdForTreeScope(TreeScope& scope, const AtomString& oldId, co
 
 void Element::updateIdForDocument(HTMLDocument& document, const AtomString& oldId, const AtomString& newId, HTMLDocumentNamedItemMapsUpdatingCondition condition)
 {
-    ASSERT(isConnected());
     ASSERT(oldId != newId);
-
-    if (isInShadowTree())
-        return;
 
     if (WindowNameCollection::elementMatchesIfIdAttributeMatch(*this)) {
         const AtomString& name = condition == HTMLDocumentNamedItemMapsUpdatingCondition::UpdateOnlyIfDiffersFromNameAttribute && WindowNameCollection::elementMatchesIfNameAttributeMatch(*this) ? getNameAttribute() : nullAtom();
@@ -5080,6 +5118,10 @@ void Element::cloneAttributesFromElement(const Element& other)
     other.synchronizeAllAttributes();
     if (!other.m_elementData) {
         m_elementData = nullptr;
+        if (auto* inputElement = dynamicDowncast<HTMLInputElement>(*this)) {
+            DelayedUpdateValidityScope delayedUpdateValidityScope(*inputElement);
+            inputElement->initializeInputTypeAfterParsingOrCloning();
+        }
         return;
     }
 
@@ -5112,6 +5154,11 @@ void Element::cloneAttributesFromElement(const Element& other)
     else
         m_elementData = other.m_elementData->makeUniqueCopy();
 
+    if (auto* inputElement = dynamicDowncast<HTMLInputElement>(*this)) {
+        DelayedUpdateValidityScope delayedUpdateValidityScope(*inputElement);
+        inputElement->initializeInputTypeAfterParsingOrCloning();
+    }
+
     for (const Attribute& attribute : attributesIterator())
         notifyAttributeChanged(attribute.name(), nullAtom(), attribute.value(), AttributeModificationReason::ByCloning);
 
@@ -5122,6 +5169,10 @@ void Element::cloneDataFromElement(const Element& other)
 {
     cloneAttributesFromElement(other);
     copyNonAttributePropertiesFromElement(other);
+#if ASSERT_ENABLED
+    if (auto* input = dynamicDowncast<HTMLInputElement>(*this))
+        ASSERT(!input->userAgentShadowRoot());
+#endif
 }
 
 void Element::createUniqueElementData()

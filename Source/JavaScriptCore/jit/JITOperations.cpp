@@ -1181,10 +1181,9 @@ ALWAYS_INLINE static void putByIdMegamorphic(JSGlobalObject* globalObject, VM& v
         return;
     }
 
-    if (newStructure->outOfLineCapacity() == oldStructure->outOfLineCapacity()) {
-        if (LIKELY(slot.cachedOffset() <= MegamorphicCache::maxOffset))
-            vm.megamorphicCache()->initAsTransition(StructureID::encode(oldStructure), StructureID::encode(newStructure), uid, slot.cachedOffset());
-    }
+    bool reallocating = newStructure->outOfLineCapacity() != oldStructure->outOfLineCapacity();
+    if (LIKELY(slot.cachedOffset() <= MegamorphicCache::maxOffset))
+        vm.megamorphicCache()->initAsTransition(StructureID::encode(oldStructure), StructureID::encode(newStructure), uid, slot.cachedOffset(), reallocating);
 }
 
 JSC_DEFINE_JIT_OPERATION(operationPutByIdStrictMegamorphic, void, (EncodedJSValue encodedValue, EncodedJSValue encodedBase, JSGlobalObject* globalObject, StructureStubInfo* stubInfo))
@@ -1245,6 +1244,26 @@ JSC_DEFINE_JIT_OPERATION(operationPutByIdSloppyMegamorphicGeneric, void, (JSGlob
     CacheableIdentifier identifier = CacheableIdentifier::createFromRawBits(rawCacheableIdentifier);
 
     putByIdMegamorphic(globalObject, vm, callFrame, nullptr, baseValue, value, identifier, PutByKind::ByIdSloppy);
+}
+
+JSC_DEFINE_JIT_OPERATION(operationPutByMegamorphicReallocating, void, (VM* vmPointer, JSObject* baseObject, EncodedJSValue encodedValue, const MegamorphicCache::StoreEntry* entry))
+{
+    constexpr bool verbose = false;
+    VM& vm = *vmPointer;
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+
+    Structure* oldStructure = baseObject->structure();
+    Structure* newStructure = entry->m_newStructureID.decode();
+    PropertyOffset offset = entry->m_offset;
+
+    ASSERT(oldStructure == entry->m_oldStructureID.decode());
+    Butterfly* newButterfly = baseObject->allocateMoreOutOfLineStorage(vm, oldStructure->outOfLineCapacity(), newStructure->outOfLineCapacity());
+    baseObject->nukeStructureAndSetButterfly(vm, StructureID::encode(oldStructure), newButterfly);
+    baseObject->putDirectOffset(vm, offset, JSValue::decode(encodedValue));
+    baseObject->setStructure(vm, newStructure);
+    ASSERT(newStructure == baseObject->structure());
+    dataLogLnIf(verbose, JSValue(baseObject), " ", offset);
 }
 
 JSC_DEFINE_JIT_OPERATION(operationPutByIdDirectStrictGaveUp, void, (EncodedJSValue encodedValue, EncodedJSValue encodedBase, JSGlobalObject* globalObject, StructureStubInfo* stubInfo))
@@ -1918,10 +1937,9 @@ ALWAYS_INLINE static void putByValMegamorphic(JSGlobalObject* globalObject, VM& 
         return;
     }
 
-    if (newStructure->outOfLineCapacity() == oldStructure->outOfLineCapacity()) {
-        if (LIKELY(slot.cachedOffset() <= MegamorphicCache::maxOffset))
-            vm.megamorphicCache()->initAsTransition(StructureID::encode(oldStructure), StructureID::encode(newStructure), uid, slot.cachedOffset());
-    }
+    bool reallocating = newStructure->outOfLineCapacity() != oldStructure->outOfLineCapacity();
+    if (LIKELY(slot.cachedOffset() <= MegamorphicCache::maxOffset))
+        vm.megamorphicCache()->initAsTransition(StructureID::encode(oldStructure), StructureID::encode(newStructure), uid, slot.cachedOffset(), reallocating);
 }
 
 JSC_DEFINE_JIT_OPERATION(operationPutByValStrictMegamorphic, void, (EncodedJSValue encodedBaseValue, EncodedJSValue encodedSubscript, EncodedJSValue encodedValue, JSGlobalObject* globalObject, StructureStubInfo* stubInfo, ArrayProfile* profile))
@@ -2412,6 +2430,47 @@ JSC_DEFINE_JIT_OPERATION(operationNewArrayWithSizeAndProfile, EncodedJSValue, (J
     JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
     JSValue sizeValue = JSValue::decode(size);
     return JSValue::encode(constructArrayWithSizeQuirk(globalObject, profile, sizeValue));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationCreateLexicalEnvironmentTDZ, EncodedJSValue, (JSGlobalObject* globalObject, JSScope* scope, SymbolTable* table))
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    return JSValue::encode(JSLexicalEnvironment::create(vm, globalObject->activationStructure(), scope, table, jsTDZValue()));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationCreateLexicalEnvironmentUndefined, EncodedJSValue, (JSGlobalObject* globalObject, JSScope* scope, SymbolTable* table))
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    return JSValue::encode(JSLexicalEnvironment::create(vm, globalObject->activationStructure(), scope, table, jsUndefined()));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationCreateDirectArgumentsBaseline, EncodedJSValue, (JSGlobalObject* globalObject))
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    return JSValue::encode(DirectArguments::createByCopying(globalObject, callFrame));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationCreateScopedArgumentsBaseline, EncodedJSValue, (JSGlobalObject* globalObject, JSLexicalEnvironment* scope))
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    ScopedArgumentsTable* table = scope->symbolTable()->arguments();
+    return JSValue::encode(ScopedArguments::createByCopying(globalObject, callFrame, table, scope));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationCreateClonedArgumentsBaseline, EncodedJSValue, (JSGlobalObject* globalObject))
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    return JSValue::encode(ClonedArguments::createWithMachineFrame(globalObject, callFrame, ArgumentsMode::Cloned));
 }
 
 template<typename FunctionType>
@@ -3010,8 +3069,13 @@ ALWAYS_INLINE static JSValue getByVal(JSGlobalObject* globalObject, CallFrame* c
         }
 
         RELEASE_AND_RETURN(scope, baseValue.get(globalObject, i));
-    } else if (subscript.isNumber() && baseValue.isCell() && arrayProfile)
+    } else if (subscript.isNumber() && baseValue.isCell() && arrayProfile) {
         arrayProfile->setOutOfBounds();
+        if (subscript == jsNumber(-1)) {
+            if (auto* array = jsDynamicCast<JSArray*>(baseValue.asCell()); LIKELY(array && array->definitelyNegativeOneMiss()))
+                return jsUndefined();
+        }
+    }
 
     baseValue.requireObjectCoercible(globalObject);
     RETURN_IF_EXCEPTION(scope, JSValue());
@@ -3129,8 +3193,13 @@ ALWAYS_INLINE static JSValue getByValWithThis(JSGlobalObject* globalObject, Call
         }
 
         RELEASE_AND_RETURN(scope, baseValue.get(globalObject, i, slot));
-    } else if (subscript.isNumber() && baseValue.isCell() && arrayProfile)
+    } else if (subscript.isNumber() && baseValue.isCell() && arrayProfile) {
         arrayProfile->setOutOfBounds();
+        if (subscript == jsNumber(-1)) {
+            if (auto* array = jsDynamicCast<JSArray*>(baseValue.asCell()); LIKELY(array && array->definitelyNegativeOneMiss()))
+                return jsUndefined();
+        }
+    }
 
     baseValue.requireObjectCoercible(globalObject);
     RETURN_IF_EXCEPTION(scope, { });

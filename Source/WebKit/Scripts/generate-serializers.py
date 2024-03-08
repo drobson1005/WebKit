@@ -400,6 +400,12 @@ class MemberVariable(object):
             return value
         return value + ' *'
 
+    def type_check(self):
+        value = self.ns_type()
+        if value == 'SecTrustRef':
+            return '(m_' + self.type + ' && CFGetTypeID((CFTypeRef)m_' + self.type + '.get()) == SecTrustGetTypeID())'
+        return '[m_' + self.type + ' isKindOfClass:IPC::getClass<' + value + '>()]'
+
     def id_cast(self):
         value = self.ns_type()
         if value == 'SecTrustRef':
@@ -1320,6 +1326,14 @@ def generate_serialized_type_info(serialized_types, serialized_enums, headers, u
     result.extend(output_sorted_headers(sorted(header_set)))
 
     result.append('')
+    for using_statement in using_statements:
+        if using_statement.condition is not None:
+            result.append('#if ' + using_statement.condition)
+        result.append('static_assert(std::is_same_v<' + using_statement.name + ', ' + using_statement.alias + '>);')
+        if using_statement.condition is not None:
+            result.append('#endif')
+
+    result.append('')
     result.append('#if ENABLE(IPC_TESTING_API)')
     result.append('')
     result.append('namespace WebKit {')
@@ -1735,13 +1749,9 @@ def generate_webkit_secure_coding_impl(serialized_types, headers):
                         result.append('    m_' + member.type + ' = vectorFromArray<' + member.array_contents() + '>((' + member.ns_type_pointer() + ')[dictionary objectForKey:@"' + member.type + '"]);')
             else:
                 result.append('    m_' + member.type + ' = (' + member.ns_type_pointer() + ')[dictionary objectForKey:@"' + member.type + '"];')
-                if member.value_is_optional():
-                    result.append('    if (m_' + member.type + ' && IPC::typeFromObject(' + member.id_cast() + 'm_' + member.type + '.get()) != IPC::NSType::' + member.ns_type_enum_value() + ') {')
-                else:
-                    result.append('    if (!m_' + member.type + ' || IPC::typeFromObject(' + member.id_cast() + 'm_' + member.type + '.get()) != IPC::NSType::' + member.ns_type_enum_value() + ') {')
+                result.append('    if (!' + member.type_check() + ')')
                 result.append('        m_' + member.type + ' = nullptr;')
                 # FIXME: We ought to be able to ASSERT_NOT_REACHED() here once all the question marks are in the right places.
-                result.append('    }')
                 result.append('')
         result.append('}')
         result.append('')

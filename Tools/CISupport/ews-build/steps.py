@@ -2451,7 +2451,7 @@ class CheckStatusOfPR(buildstep.BuildStep, GitHubMixin, AddToLogMixin):
     haltOnFailure = False
     EMBEDDED_CHECKS = ['ios', 'ios-sim', 'ios-wk2', 'ios-wk2-wpt', 'api-ios', 'tv', 'tv-sim', 'watch', 'watch-sim']
     MACOS_CHECKS = ['mac', 'mac-AS-debug', 'api-mac', 'mac-wk1', 'mac-wk2', 'mac-AS-debug-wk2', 'mac-wk2-stress']
-    LINUX_CHECKS = ['gtk', 'gtk-wk2', 'api-gtk', 'wpe', 'wpe-wk2', 'api-wpe']
+    LINUX_CHECKS = ['gtk', 'gtk-wk2', 'api-gtk', 'wpe', 'wpe-skia', 'wpe-wk2', 'api-wpe']
     WINDOWS_CHECKS = ['wincairo']
     EWS_WEBKIT_FAILED = 0
     EWS_WEBKIT_PASSED = 1
@@ -3477,6 +3477,7 @@ class AnalyzeCompileWebKitResults(buildstep.BuildStep, BugzillaMixin, GitHubMixi
             builder_name = self.getProperty('buildername', '')
             worker_name = self.getProperty('workername', '')
             platform = self.getProperty('platform', '')
+            identifier = self.getProperty('identifier', None)
             build_url = '{}#/builders/{}/builds/{}'.format(self.master.config.buildbotURL, self.build._builderid, self.build.number)
             logs = self.error_logs.get(self.compile_webkit_step)
             if platform in ['wincairo']:
@@ -3485,7 +3486,8 @@ class AnalyzeCompileWebKitResults(buildstep.BuildStep, BugzillaMixin, GitHubMixi
                 logs = self.filter_logs_containing_error(logs)
 
             email_subject = 'Build failure on trunk on {}'.format(builder_name)
-            email_text = 'Failed to build WebKit without patch in {}\n\nBuilder: {}\n\nWorker: {}'.format(build_url, builder_name, worker_name)
+            email_text = f'Failed to build WebKit without change in {build_url}\n\nBuilder: {builder_name}\nWorker: {worker_name}'
+            email_text += f'\nIdentifier: {identifier}'
             if logs:
                 logs = logs.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 email_text += '\n\nError lines:\n\n<code>{}</code>'.format(logs)

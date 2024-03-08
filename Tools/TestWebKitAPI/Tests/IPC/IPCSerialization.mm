@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2023-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,9 +30,14 @@
 #import "Encoder.h"
 #import "MessageSenderInlines.h"
 #import "test.h"
+#import <CoreVideo/CoreVideo.h>
 #import <Foundation/NSValue.h>
 #import <Security/Security.h>
+#import <WebCore/AttributedString.h>
+#import <WebCore/CVUtilities.h>
+#import <WebCore/ColorCocoa.h>
 #import <WebCore/FontCocoa.h>
+#import <WebCore/IOSurface.h>
 #import <limits.h>
 #import <pal/spi/cocoa/ContactsSPI.h>
 #import <wtf/RetainPtr.h>
@@ -44,6 +49,7 @@
 #import <pal/cocoa/ContactsSoftLink.h>
 #import <pal/cocoa/DataDetectorsCoreSoftLink.h>
 #import <pal/cocoa/PassKitSoftLink.h>
+#import <pal/ios/UIKitSoftLink.h>
 #import <pal/mac/DataDetectorsSoftLink.h>
 
 // This test makes it trivial to test round trip encoding and decoding of a particular object type.
@@ -71,7 +77,7 @@ private:
 
 bool SerializationTestSender::performSendWithAsyncReplyWithoutUsingIPCConnection(UniqueRef<IPC::Encoder>&& encoder, CompletionHandler<void(IPC::Decoder*)>&& completionHandler) const
 {
-    auto decoder = IPC::Decoder::create({ encoder->buffer(), encoder->bufferSize() }, { });
+    auto decoder = IPC::Decoder::create({ encoder->buffer(), encoder->bufferSize() }, encoder->releaseAttachments());
     ASSERT(decoder);
 
     completionHandler(decoder.get());
@@ -105,6 +111,7 @@ struct CFHolderForTesting {
         RetainPtr<CFNumberRef>,
         RetainPtr<CFStringRef>,
         RetainPtr<CFURLRef>,
+        RetainPtr<CVPixelBufferRef>,
         RetainPtr<CGColorRef>,
         RetainPtr<CGColorSpaceRef>,
         RetainPtr<SecCertificateRef>,
@@ -138,6 +145,22 @@ std::optional<CFHolderForTesting> CFHolderForTesting::decode(IPC::Decoder& decod
     return { {
         WTFMove(*value)
     } };
+}
+
+static bool cvPixelBufferRefsEqual(CVPixelBufferRef pixelBuffer1, CVPixelBufferRef pixelBuffer2)
+{
+    CVPixelBufferLockBaseAddress(pixelBuffer1, 0);
+    CVPixelBufferLockBaseAddress(pixelBuffer2, 0);
+    size_t pixelBuffer1Size = CVPixelBufferGetDataSize(pixelBuffer1);
+    size_t pixelBuffer2Size = CVPixelBufferGetDataSize(pixelBuffer2);
+    if (pixelBuffer1Size != pixelBuffer2Size)
+        return false;
+    auto base1 = CVPixelBufferGetBaseAddress(pixelBuffer1);
+    auto base2 = CVPixelBufferGetBaseAddress(pixelBuffer2);
+    bool areEqual = !memcmp(base1, base2, pixelBuffer1Size);
+    CVPixelBufferUnlockBaseAddress(pixelBuffer1, 0);
+    CVPixelBufferUnlockBaseAddress(pixelBuffer2, 0);
+    return areEqual;
 }
 
 static bool secTrustRefsEqual(SecTrustRef trust1, SecTrustRef trust2)
@@ -190,6 +213,7 @@ static bool secTrustRefsEqual(SecTrustRef trust1, SecTrustRef trust2)
     if (!equal)
         return false;
 
+#if HAVE(SECTRUST_COPYPROPERTIES)
     array1 = SecTrustCopyProperties(trust1);
     array2 = SecTrustCopyProperties(trust2);
     EXPECT_TRUE(array1);
@@ -200,6 +224,7 @@ static bool secTrustRefsEqual(SecTrustRef trust1, SecTrustRef trust2)
     EXPECT_TRUE(equal);
     if (!equal)
         return false;
+#endif
 
     Boolean bool1, bool2;
     EXPECT_TRUE(SecTrustGetNetworkFetchAllowed(trust1, &bool1) == errSecSuccess);
@@ -243,6 +268,8 @@ CFHolderForTesting cfHolder(CFTypeRef type)
         return { (CFStringRef)type };
     if (typeID == CFURLGetTypeID())
         return { (CFURLRef)type };
+    if (typeID == CVPixelBufferGetTypeID())
+        return { (CVPixelBufferRef)type };
     if (typeID == CGColorSpaceGetTypeID())
         return { (CGColorSpaceRef)type };
     if (typeID == CGColorGetTypeID())
@@ -289,6 +316,10 @@ inline bool operator==(const CFHolderForTesting& a, const CFHolderForTesting& b)
 
     auto aTypeID = CFGetTypeID(aObject);
     auto bTypeID = CFGetTypeID(bObject);
+
+    if (aTypeID == CVPixelBufferGetTypeID() && bTypeID == CVPixelBufferGetTypeID())
+        return cvPixelBufferRefsEqual((CVPixelBufferRef)aObject, (CVPixelBufferRef)bObject);
+
     if (aTypeID == SecTrustGetTypeID() && bTypeID == SecTrustGetTypeID())
         return secTrustRefsEqual((SecTrustRef)aObject, (SecTrustRef)bObject);
 
@@ -386,6 +417,7 @@ struct ObjCHolderForTesting {
         RetainPtr<NSPersonNameComponents>,
         RetainPtr<NSPresentationIntent>,
         RetainPtr<NSURLProtectionSpace>,
+        RetainPtr<NSURLCredential>,
 #if USE(PASSKIT) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
         RetainPtr<CNContact>,
         RetainPtr<CNPhoneNumber>,
@@ -399,6 +431,7 @@ struct ObjCHolderForTesting {
         RetainPtr<PKShippingMethod>,
         RetainPtr<PKPayment>,
 #endif
+        RetainPtr<NSShadow>,
         RetainPtr<NSValue>
     > ValueType;
 
@@ -500,6 +533,21 @@ static bool wkNSURLProtectionSpace_isEqual(NSURLProtectionSpace *a, SEL, NSURLPr
     return true;
 }
 
+static bool NSURLCredentialTesting_isEqual(NSURLCredential *a, NSURLCredential *b)
+{
+    if (a.persistence != b.persistence)
+        return false;
+    if (a.user && ![a.user isEqualToString:b.user])
+        return false;
+    if (a.password && ![a.password isEqualToString:b.password])
+        return false;
+    if (a.hasPassword != b.hasPassword)
+        return false;
+    if (a.certificates.count != b.certificates.count)
+        return false;
+    return true;
+}
+
 #if USE(PASSKIT) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
 static BOOL wkSecureCoding_isEqual(id a, SEL, id b)
 {
@@ -547,6 +595,9 @@ inline bool operator==(const ObjCHolderForTesting& a, const ObjCHolderForTesting
 
     EXPECT_TRUE(aObject != nil);
     EXPECT_TRUE(bObject != nil);
+
+    if ([aObject isKindOfClass:NSURLCredential.class])
+        return NSURLCredentialTesting_isEqual(aObject, bObject);
 
     return [aObject isEqual:bObject];
 }
@@ -792,38 +843,46 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 }
 #endif // USE(PASSKIT) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
 
+static void runTestNS(ObjCHolderForTesting&& holderArg)
+{
+    __block bool done = false;
+    __block ObjCHolderForTesting holder = WTFMove(holderArg);
+    auto sender = SerializationTestSender { };
+    sender.sendWithAsyncReplyWithoutUsingIPCConnection(ObjCPingBackMessage(holder), ^(ObjCHolderForTesting&& result) {
+        EXPECT_TRUE(holder == result);
+        done = true;
+    });
+
+    // The completion handler should be called synchronously, so this should be true already.
+    EXPECT_TRUE(done);
+};
+
+static void runTestCFWithExpectedResult(const CFHolderForTesting& holderArg, const CFHolderForTesting& expectedResult)
+{
+    __block bool done = false;
+    __block CFHolderForTesting holder = expectedResult;
+    auto sender = SerializationTestSender { };
+    sender.sendWithAsyncReplyWithoutUsingIPCConnection(CFPingBackMessage(holderArg), ^(CFHolderForTesting&& result) {
+        EXPECT_TRUE(holder == result);
+        done = true;
+    });
+
+    // The completion handler should be called synchronously, so this should be true already.
+    EXPECT_TRUE(done);
+};
+
+static void runTestCF(const CFHolderForTesting& holderArg)
+{
+    runTestCFWithExpectedResult(holderArg, holderArg);
+};
 
 TEST(IPCSerialization, Basic)
 {
-    auto runTestNS = [](ObjCHolderForTesting&& holderArg) {
-        __block bool done = false;
-        __block ObjCHolderForTesting holder = WTFMove(holderArg);
-        auto sender = SerializationTestSender { };
-        sender.sendWithAsyncReplyWithoutUsingIPCConnection(ObjCPingBackMessage(holder), ^(ObjCHolderForTesting&& result) {
-            EXPECT_TRUE(holder == result);
-            done = true;
-        });
+    // CVPixelBuffer
+    auto s1 = WebCore::IOSurface::create(nullptr, { 5, 5 }, WebCore::DestinationColorSpace::SRGB());
+    auto pixelBuffer = WebCore::createCVPixelBuffer(s1->surface());
 
-        // The completion handler should be called synchronously, so this should be true already.
-        EXPECT_TRUE(done);
-    };
-
-    auto runTestCFWithExpectedResult = [](const CFHolderForTesting& holderArg, const CFHolderForTesting& expectedResult) {
-        __block bool done = false;
-        __block CFHolderForTesting holder = expectedResult;
-        auto sender = SerializationTestSender { };
-        sender.sendWithAsyncReplyWithoutUsingIPCConnection(CFPingBackMessage(holderArg), ^(CFHolderForTesting&& result) {
-            EXPECT_TRUE(holder == result);
-            done = true;
-        });
-
-        // The completion handler should be called synchronously, so this should be true already.
-        EXPECT_TRUE(done);
-    };
-
-    auto runTestCF = [&] (const CFHolderForTesting& holderArg) {
-        runTestCFWithExpectedResult(holderArg, holderArg);
-    };
+    runTestCF({ pixelBuffer->get() });
 
     // NSString/CFString
     runTestNS({ @"Hello world" });
@@ -1022,6 +1081,7 @@ TEST(IPCSerialization, Basic)
     runValueTest([NSValue valueWithRange:NSMakeRange(1, 2)]);
     runValueTest([NSValue valueWithRect:NSMakeRect(1, 2, 79, 80)]);
 
+
     // SecTrust -- evaluate the trust of the cert created above
     SecTrustRef trustRef = NULL;
     auto policy = adoptCF(SecPolicyCreateBasicX509());
@@ -1170,6 +1230,29 @@ TEST(IPCSerialization, Basic)
     [protectionSpace2.get() _setServerTrust:trustRef];
     [protectionSpace2.get() _setDistinguishedNames:distinguishedNames];
     runTestNS({ protectionSpace2.get() });
+
+    runTestNS({ [NSURLCredential credentialForTrust:trust.get()] });
+#if HAVE(DICTIONARY_SERIALIZABLE_NSURLCREDENTIAL)
+    runTestNS({ [NSURLCredential credentialWithIdentity:identity.get() certificates:@[(id)cert.get()] persistence:NSURLCredentialPersistencePermanent] });
+    runTestNS({ [NSURLCredential credentialWithIdentity:identity.get() certificates:nil persistence:NSURLCredentialPersistenceForSession] });
+#endif
+    runTestNS({ [NSURLCredential credentialWithUser:@"user" password:@"password" persistence:NSURLCredentialPersistenceSynchronizable] });
+}
+
+TEST(IPCSerialization, NSShadow)
+{
+    auto runTestNSShadow = [&](CGSize shadowOffset, CGFloat shadowBlurRadius, PlatformColor *shadowColor) {
+        RetainPtr<NSShadow> shadow = adoptNS([[PlatformNSShadow alloc] init]);
+        [shadow setShadowOffset:shadowOffset];
+        [shadow setShadowBlurRadius:shadowBlurRadius];
+        [shadow setShadowColor:shadowColor];
+        runTestNS({ shadow.get() });
+    };
+
+    runTestNSShadow({ 5.7, 10.5 }, 0.49, nil);
+
+    RetainPtr<PlatformColor> platformColor = cocoaColor(WebCore::Color::blue);
+    runTestNSShadow({ 10.5, 5.7 }, 0.79, platformColor.get());
 }
 
 #if PLATFORM(MAC)
@@ -1216,19 +1299,6 @@ static RetainPtr<DDScannerResult> fakeDataDetectorResultForTesting()
 
 TEST(IPCSerialization, SecureCoding)
 {
-    auto runTestNS = [](ObjCHolderForTesting&& holderArg) {
-        __block bool done = false;
-        __block ObjCHolderForTesting holder = WTFMove(holderArg);
-        auto sender = SerializationTestSender { };
-        sender.sendWithAsyncReplyWithoutUsingIPCConnection(ObjCPingBackMessage(holder), ^(ObjCHolderForTesting&& result) {
-            EXPECT_TRUE(holder == result);
-            done = true;
-        });
-
-        // The completion handler should be called synchronously, so this should be true already.
-        EXPECT_TRUE(done);
-    };
-
     // DDScannerResult
     //   - Note: For now, there's no reasonable way to create anything but an empty DDScannerResult object
     auto scannerResult = fakeDataDetectorResultForTesting();

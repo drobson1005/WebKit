@@ -56,6 +56,10 @@ Interpolate = properties.Interpolate
 THRESHOLD_FOR_EXCESSIVE_LOGS = 1000000
 MSG_FOR_EXCESSIVE_LOGS = f'Stopped due to excessive logging, limit: {THRESHOLD_FOR_EXCESSIVE_LOGS}'
 
+DNS_NAME = CURRENT_HOSTNAME
+if DNS_NAME in BUILD_WEBKIT_HOSTNAMES:
+    DNS_NAME = 'build.webkit.org'
+
 
 class CustomFlagsMixin(object):
 
@@ -73,7 +77,7 @@ class CustomFlagsMixin(object):
             platform = platform + '-simulator'
         elif platform in ['ios', 'tvos', 'watchos']:
             platform = platform + '-device'
-        self.setCommand(self.command + ['--' + platform])
+        self.command += ['--' + platform]
 
     def appendCustomTestingFlags(self, platform, device_model):
         if platform not in ('gtk', 'wincairo', 'ios', 'jsc-only', 'wpe'):
@@ -628,7 +632,7 @@ class RunJavaScriptCoreTests(TestWithFailureCount, CustomFlagsMixin):
         "--builder-name", WithProperties("%(buildername)s"),
         "--build-number", WithProperties("%(buildnumber)s"),
         "--buildbot-worker", WithProperties("%(workername)s"),
-        "--buildbot-master", CURRENT_HOSTNAME,
+        "--buildbot-master", DNS_NAME,
         "--report", RESULTS_WEBKIT_URL,
     ]
     commandExtra = ['--treat-failing-as-flaky=0.7,10,20']
@@ -659,10 +663,10 @@ class RunJavaScriptCoreTests(TestWithFailureCount, CustomFlagsMixin):
         # Linux bots have currently problems with JSC tests that try to use large amounts of memory.
         # Check: https://bugs.webkit.org/show_bug.cgi?id=175140
         if platform in ('gtk', 'wpe', 'jsc-only'):
-            self.setCommand(self.command + ['--memory-limited', '--verbose'])
+            self.command += ['--memory-limited', '--verbose']
         # WinCairo uses the Windows command prompt, not Cygwin.
         elif platform == 'wincairo':
-            self.setCommand(self.command + ['--test-writer=ruby'])
+            self.command += ['--test-writer=ruby']
 
         self.appendCustomBuildFlags(platform, self.getProperty('fullPlatform'))
         return super().run()
@@ -723,7 +727,7 @@ class RunWebKitTests(shell.TestNewStyle, CustomFlagsMixin):
                "--builder-name", WithProperties("%(buildername)s"),
                "--build-number", WithProperties("%(buildnumber)s"),
                "--buildbot-worker", WithProperties("%(workername)s"),
-               "--buildbot-master", CURRENT_HOSTNAME,
+               "--buildbot-master", DNS_NAME,
                "--report", RESULTS_WEBKIT_URL,
                "--exit-after-n-crashes-or-timeouts", "50",
                "--exit-after-n-failures", "500",
@@ -859,7 +863,7 @@ class RunAPITests(TestWithFailureCount, CustomFlagsMixin):
         f"--json-output={jsonFileName}",
         WithProperties("--%(configuration)s"),
         "--verbose",
-        "--buildbot-master", CURRENT_HOSTNAME,
+        "--buildbot-master", DNS_NAME,
         "--builder-name", WithProperties("%(buildername)s"),
         "--build-number", WithProperties("%(buildnumber)s"),
         "--buildbot-worker", WithProperties("%(workername)s"),
@@ -947,7 +951,7 @@ class RunWebKitPyTests(RunPythonTests):
         "python3",
         "Tools/Scripts/test-webkitpy",
         "--verbose",
-        "--buildbot-master", CURRENT_HOSTNAME,
+        "--buildbot-master", DNS_NAME,
         "--builder-name", WithProperties("%(buildername)s"),
         "--build-number", WithProperties("%(buildnumber)s"),
         "--buildbot-worker", WithProperties("%(workername)s"),
@@ -1015,7 +1019,7 @@ class RunLLINTCLoopTests(TestWithFailureCount):
         "--builder-name", WithProperties("%(buildername)s"),
         "--build-number", WithProperties("%(buildnumber)s"),
         "--buildbot-worker", WithProperties("%(workername)s"),
-        "--buildbot-master", CURRENT_HOSTNAME,
+        "--buildbot-master", DNS_NAME,
         "--report", RESULTS_WEBKIT_URL,
     ]
     failedTestsFormatString = "%d regression%s found."
@@ -1056,7 +1060,7 @@ class Run32bitJSCTests(TestWithFailureCount):
         "--builder-name", WithProperties("%(buildername)s"),
         "--build-number", WithProperties("%(buildnumber)s"),
         "--buildbot-worker", WithProperties("%(workername)s"),
-        "--buildbot-master", CURRENT_HOSTNAME,
+        "--buildbot-master", DNS_NAME,
         "--report", RESULTS_WEBKIT_URL,
     ]
     failedTestsFormatString = "%d regression%s found."
@@ -1111,7 +1115,7 @@ class RunGLibAPITests(shell.TestNewStyle):
         self.log_observer = logobserver.BufferLogObserver()
         self.addLogObserver('stdio', self.log_observer)
 
-        rc = yield super().run(self)
+        rc = yield super().run()
 
         logText = self.log_observer.getStdout()
 
@@ -1145,16 +1149,10 @@ class RunGLibAPITests(shell.TestNewStyle):
         if messages:
             self.statusLine = ["API tests: %s" % ", ".join(messages)]
 
-        defer.returnValue(rc)
-
-    def evaluateCommand(self, cmd):
         if self.totalFailedTests > 0:
-            return FAILURE
-
-        if cmd.rc != 0:
-            return FAILURE
-
-        return SUCCESS
+            defer.returnValue(FAILURE)
+        else:
+            defer.returnValue(SUCCESS if rc == 0 else FAILURE)
 
     def getText(self, cmd, results):
         return self.getText2(cmd, results)
@@ -1174,7 +1172,7 @@ class RunWPEAPITests(RunGLibAPITests):
     command = ["python3", "Tools/Scripts/run-wpe-tests", WithProperties("--%(configuration)s")]
 
 
-class RunWebDriverTests(shell.Test):
+class RunWebDriverTests(shell.Test, CustomFlagsMixin):
     name = "webdriver-test"
     description = ["webdriver-tests running"]
     descriptionDone = ["webdriver-tests"]
@@ -1188,7 +1186,7 @@ class RunWebDriverTests(shell.Test):
         if additionalArguments:
             self.command += additionalArguments
 
-        appendCustomBuildFlags(self, self.getProperty('platform'), self.getProperty('fullPlatform'))
+        self.appendCustomBuildFlags(self.getProperty('platform'), self.getProperty('fullPlatform'))
 
         self.log_observer = logobserver.BufferLogObserver()
         self.addLogObserver('stdio', self.log_observer)
@@ -1206,19 +1204,14 @@ class RunWebDriverTests(shell.Test):
         if foundItems:
             self.newPassesCount = int(foundItems[0])
 
-        defer.returnValue(rc)
-
-    def evaluateCommand(self, cmd):
-        if self.failuresCount:
-            return FAILURE
-
-        if self.newPassesCount:
-            return WARNINGS
-
-        if cmd.rc != 0:
-            return FAILURE
-
-        return SUCCESS
+        if rc != 0:
+            defer.returnValue(FAILURE)
+        elif self.failuresCount:
+            defer.returnValue(FAILURE)
+        elif self.newPassesCount:
+            defer.returnValue(WARNINGS)
+        else:
+            defer.returnValue(SUCCESS)
 
     def getText(self, cmd, results):
         return self.getText2(cmd, results)
@@ -1247,7 +1240,7 @@ class RunWebKit1LeakTests(RunWebKit1Tests):
     warnOnWarnings = True
 
     def start(self):
-        self.setCommand(self.command + ["--leaks", "--result-report-flavor", "Leaks"])
+        self.command += ["--leaks", "--result-report-flavor", "Leaks"]
         return RunWebKit1Tests.start(self)
 
 

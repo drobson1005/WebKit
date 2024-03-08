@@ -28,6 +28,7 @@
 #include "Document.h"
 #include "Element.h"
 #include "ExceptionOr.h"
+#include "ImageBuffer.h"
 #include "JSValueInWrappedObject.h"
 #include "MutableStyleProperties.h"
 #include "ViewTransitionUpdateCallback.h"
@@ -51,20 +52,15 @@ enum class ViewTransitionPhase : uint8_t {
 struct CapturedElement {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    // FIXME: Add the following:
-    // old image (2d bitmap)
+    // std::nullopt represents an non-capturable element.
+    // nullptr represents an absent snapshot on an capturable element.
+    std::optional<RefPtr<ImageBuffer>> oldImage;
+    LayoutRect oldOverflowRect;
     LayoutSize oldSize;
     RefPtr<MutableStyleProperties> oldProperties;
-    // old transform
     WeakPtr<Element, WeakPtrImplWithEventTargetData> newElement;
 
     RefPtr<MutableStyleProperties> groupStyleProperties;
-
-    // FIXME: Also handle these:
-    // group keyframes
-    // group animation name rule
-    // image pair isolation rule
-    // image animation name rule
 };
 
 struct OrderedNamedElementsMap {
@@ -104,6 +100,11 @@ public:
     bool isEmpty() const
     {
         return m_keys.isEmpty();
+    }
+
+    size_t size() const
+    {
+        return m_keys.size();
     }
 
     CapturedElement* find(const AtomString& key)
@@ -154,9 +155,10 @@ public:
 private:
     ViewTransition(Document&, RefPtr<ViewTransitionUpdateCallback>&&);
 
-    Ref<MutableStyleProperties> copyElementBaseProperties(Element&);
+    Ref<MutableStyleProperties> copyElementBaseProperties(Element&, const LayoutSize&);
 
     void updatePseudoElementStyles();
+    void setupDynamicStyleSheet(const AtomString&, const CapturedElement&);
 
     WeakPtr<Document, WeakPtrImplWithEventTargetData> m_document;
 

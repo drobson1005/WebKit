@@ -47,7 +47,7 @@ PASS outer style(--outer-space-after: true)
 PASS outer style(--outer-space-after:true)
 PASS outer style(--outer-space-after:true )
 PASS outer style(--outer-space-after: true )
-FAIL Query custom property with !important declaration assert_equals: expected "rgb(0, 128, 0)" but got "rgb(0, 0, 0)"
+PASS Query custom property with !important declaration
 PASS Query custom property using var()
 PASS Query custom property including unknown var() reference
 PASS Query custom property including unknown var() reference with non-matching fallback
@@ -67,9 +67,9 @@ PASS Match registered <length> custom property with px.
 PASS Match registered <length> custom property with px via initial keyword.
 PASS Match registered <length> custom property with em in query.
 PASS Match registered <length> custom property with em in computed value.
-FAIL Match registered <length> custom property with cqi unit. assert_equals: expected "rgb(0, 128, 0)" but got "rgb(0, 0, 0)"
+PASS Match registered <length> custom property with cqi unit.
 PASS Match registered <length> custom property with initial value.
 PASS Match registered <length> custom property with initial value via initial keyword.
-FAIL Should only match exact string for numbers in non-registered custom properties assert_equals: expected "rgb(0, 128, 0)" but got "rgb(255, 0, 0)"
+PASS Should only match exact string for numbers in non-registered custom properties
 PASS Spaces should not collapse in non-registered custom properties
 

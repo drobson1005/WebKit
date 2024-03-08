@@ -29,7 +29,6 @@
 #include "MessageReceiverMap.h"
 #include "ProcessLauncher.h"
 #include "ProcessThrottler.h"
-#include "ProcessThrottlerClient.h"
 #include "ResponsivenessTimer.h"
 #include <WebCore/ProcessIdentifier.h>
 #include <memory>
@@ -57,6 +56,9 @@ struct AuxiliaryProcessCreationParameters;
 
 enum class ProcessThrottleState : uint8_t;
 
+enum class ShouldTakeUIBackgroundAssertion : bool { No, Yes };
+enum class AlwaysRunsAtBackgroundPriority : bool { No, Yes };
+
 using ExtensionCapabilityGrantMap = HashMap<String, ExtensionCapabilityGrant>;
 
 class AuxiliaryProcessProxy
@@ -64,12 +66,11 @@ class AuxiliaryProcessProxy
     , public ResponsivenessTimer::Client
     , private ProcessLauncher::Client
     , public IPC::Connection::Client
-    , public ProcessThrottlerClient
     , public CanMakeThreadSafeCheckedPtr {
     WTF_MAKE_NONCOPYABLE(AuxiliaryProcessProxy);
 
 protected:
-    AuxiliaryProcessProxy(bool alwaysRunsAtBackgroundPriority = false, Seconds responsivenessTimeout = ResponsivenessTimer::defaultResponsivenessTimeout);
+    AuxiliaryProcessProxy(ShouldTakeUIBackgroundAssertion, AlwaysRunsAtBackgroundPriority = AlwaysRunsAtBackgroundPriority::No, Seconds responsivenessTimeout = ResponsivenessTimer::defaultResponsivenessTimeout);
 
 public:
     using ResponsivenessTimer::Client::weakPtrFactory;
@@ -83,8 +84,8 @@ public:
     void connect();
     virtual void terminate();
 
-    virtual ProcessThrottler& throttler() = 0;
-    virtual const ProcessThrottler& throttler() const = 0;
+    ProcessThrottler& throttler() { return m_throttler; }
+    const ProcessThrottler& throttler() const { return m_throttler; }
 
     template<typename T> bool send(T&& message, uint64_t destinationID, OptionSet<IPC::SendOption> sendOptions = { });
 
@@ -215,6 +216,15 @@ public:
     std::optional<TaskInfo> taskInfo() const;
 #endif
 
+    enum ResumeReason : bool { ForegroundActivity, BackgroundActivity };
+    virtual void sendPrepareToSuspend(IsSuspensionImminent, double remainingRunTime, CompletionHandler<void()>&&) = 0;
+    virtual void sendProcessDidResume(ResumeReason) = 0;
+    virtual void didChangeThrottleState(ProcessThrottleState) { };
+    virtual ASCIILiteral clientName() const = 0;
+    virtual String environmentIdentifier() const { return emptyString(); }
+    virtual void prepareToDropLastAssertion(CompletionHandler<void()>&& completionHandler) { completionHandler(); }
+    virtual void didDropLastAssertion() { }
+
 protected:
     // ProcessLauncher::Client
     void didFinishLaunching(ProcessLauncher*, IPC::Connection::Identifier) override;
@@ -265,9 +275,10 @@ private:
     IPC::MessageReceiverMap m_messageReceiverMap;
     bool m_alwaysRunsAtBackgroundPriority { false };
     bool m_didBeginResponsivenessChecks { false };
-    WebCore::ProcessIdentifier m_processIdentifier { WebCore::ProcessIdentifier::generate() };
+    const WebCore::ProcessIdentifier m_processIdentifier { WebCore::ProcessIdentifier::generate() };
     std::optional<UseLazyStop> m_delayedResponsivenessCheck;
     MonotonicTime m_processStart;
+    ProcessThrottler m_throttler;
 #if USE(RUNNINGBOARD)
     ProcessThrottler::TimedActivity m_timedActivityForIPC;
 #if PLATFORM(MAC)

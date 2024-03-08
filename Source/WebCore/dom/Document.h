@@ -46,6 +46,7 @@
 #include "Supplementable.h"
 #include "Timer.h"
 #include "TreeScope.h"
+#include "TrustedHTML.h"
 #include "URLKeepingBlobAlive.h"
 #include "UserActionElementSet.h"
 #include "ViewportArguments.h"
@@ -281,6 +282,10 @@ struct EventTrackingRegions;
 struct SystemPreviewInfo;
 #endif
 
+#if ENABLE(WEB_RTC)
+class RTCPeerConnection;
+#endif
+
 template<typename> class ExceptionOr;
 
 enum class CollectionType : uint8_t;
@@ -398,8 +403,7 @@ private:
 };
 
 class Document
-    : public CanMakeCheckedPtr
-    , public ContainerNode
+    : public ContainerNode
     , public TreeScope
     , public ScriptExecutionContext
     , public FontSelectorClient
@@ -418,16 +422,6 @@ public:
     static Ref<Document> create(Document&);
 
     virtual ~Document();
-
-    // Resolve ambiguity for CanMakeCheckedPtr.
-    using CanMakeCheckedPtr::incrementPtrCount;
-    using CanMakeCheckedPtr::decrementPtrCount;
-#if CHECKED_POINTER_DEBUG
-    using CanMakeCheckedPtr::registerCheckedPtr;
-    using CanMakeCheckedPtr::copyCheckedPtr;
-    using CanMakeCheckedPtr::moveCheckedPtr;
-    using CanMakeCheckedPtr::unregisterCheckedPtr;
-#endif // CHECKED_POINTER_DEBUG
 
     // Nodes belonging to this document increase referencingNodeCount -
     // these are enough to keep the document from being destroyed, but
@@ -455,7 +449,7 @@ public:
 
     void removedLastRef();
 
-    using DocumentsMap = HashMap<ScriptExecutionContextIdentifier, CheckedRef<Document>>;
+    using DocumentsMap = HashMap<ScriptExecutionContextIdentifier, WeakRef<Document, WeakPtrImplWithEventTargetData>>;
     WEBCORE_EXPORT static DocumentsMap::ValuesIteratorRange allDocuments();
     WEBCORE_EXPORT static DocumentsMap& allDocumentsMap();
 
@@ -858,6 +852,8 @@ public:
 #if ENABLE(WEB_RTC)
     RTCNetworkManager* rtcNetworkManager() { return m_rtcNetworkManager.get(); }
     WEBCORE_EXPORT void setRTCNetworkManager(Ref<RTCNetworkManager>&&);
+    void startGatheringRTCLogs(Function<void(String&& logType, String&& logMessage, String&& logLevel, RefPtr<RTCPeerConnection>&&)>&&);
+    void stopGatheringRTCLogs();
 #endif
 
     bool canNavigate(Frame* targetFrame, const URL& destinationURL = URL());
@@ -1202,7 +1198,7 @@ public:
     inline CheckedRef<DocumentMarkerController> checkedMarkers(); // Defined in DocumentInlines.h.
     inline CheckedRef<const DocumentMarkerController> checkedMarkers() const; // Defined in DocumentInlines.h.
 
-    WEBCORE_EXPORT ExceptionOr<bool> execCommand(const String& command, bool userInterface = false, const String& value = String());
+    WEBCORE_EXPORT ExceptionOr<bool> execCommand(const String& command, bool userInterface = false, const std::variant<String, RefPtr<TrustedHTML>>& value = String());
     WEBCORE_EXPORT ExceptionOr<bool> queryCommandEnabled(const String& command);
     WEBCORE_EXPORT ExceptionOr<bool> queryCommandIndeterm(const String& command);
     WEBCORE_EXPORT ExceptionOr<bool> queryCommandState(const String& command);
@@ -1870,8 +1866,8 @@ public:
     const String& fragmentDirective() const { return m_fragmentDirective; }
 
     void prepareCanvasesForDisplayOrFlushIfNeeded();
-    void addCanvasNeedingPreparationForDisplayOrFlush(CanvasBase&);
-    void removeCanvasNeedingPreparationForDisplayOrFlush(CanvasBase&);
+    void addCanvasNeedingPreparationForDisplayOrFlush(CanvasRenderingContext&);
+    void removeCanvasNeedingPreparationForDisplayOrFlush(CanvasRenderingContext&);
 
     bool contains(const Node& node) const { return this == &node.treeScope() && node.isConnected(); }
     bool contains(const Node* node) const { return node && contains(*node); }

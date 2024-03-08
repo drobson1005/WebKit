@@ -394,6 +394,9 @@
 /* Title for Copy Link button */
 "Copy Link (ActionSheet)" = "Copy Link";
 
+/* Copy link to highlight context menu item */
+"Copy Link to Highlight" = "Copy Link to Highlight";
+
 /* Title for Copy Subject */
 "Copy Subject" = "Copy Subject";
 
@@ -1166,7 +1169,7 @@
 "Previous Page" = "Previous Page";
 
 /* Title for the webarea while the accessibility tree is being built. */
-"Processing page" = "Processing page";
+"Processing page %@" = "Processing page %@";
 
 /* Codec Strings */
 "Professional Profile (AV1 Codec Profile)" = "Professional Profile, ";
@@ -1215,9 +1218,6 @@
 
 /* Title of the Search button for zoomed form controls. */
 "Search" = "Search";
-
-/* Search in Spotlight context menu item */
-"Search in Spotlight" = "Search in Spotlight";
 
 /* Search the Web context menu item */
 "Search the Web" = "Search the Web";
@@ -2010,6 +2010,13 @@
 
 /* accessibility label for a date field year input. */
 "year" = "year";
+
+/* Accessibility labels for time fields. */
+"hour" = "hour";
+"minutes" = "minutes";
+"seconds" = "seconds";
+"milliseconds" = "milliseconds";
+"meridiem" = "meridiem";
 
 /* Message for requesting access to the device motion and orientation */
 "“%@” Would Like to Access Motion and Orientation" = "“%@” Would Like to Access Motion and Orientation";

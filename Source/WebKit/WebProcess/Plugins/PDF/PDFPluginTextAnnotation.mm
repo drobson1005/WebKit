@@ -31,7 +31,6 @@
 #import "PDFAnnotationTextWidgetDetails.h"
 #import "PDFLayerControllerSPI.h"
 #import "PDFPlugin.h"
-#import "UnifiedPDFPlugin.h"
 #import <Quartz/Quartz.h>
 #import <WebCore/AddEventListenerOptions.h>
 #import <WebCore/CSSPrimitiveValue.h>
@@ -110,12 +109,7 @@ void PDFPluginTextAnnotation::updateGeometry()
     PDFPluginAnnotation::updateGeometry();
 
     StyledElement* styledElement = static_cast<StyledElement*>(element());
-    auto scaleFactor = plugin()->scaleFactor();
-#if ENABLE(UNIFIED_PDF)
-    if (plugin()->isUnifiedPDFPlugin())
-        scaleFactor *= downcast<UnifiedPDFPlugin>(plugin())->documentFittingScale();
-#endif
-    styledElement->setInlineStyleProperty(CSSPropertyFontSize, textAnnotation().font.pointSize * scaleFactor, CSSUnitType::CSS_PX);
+    styledElement->setInlineStyleProperty(CSSPropertyFontSize, textAnnotation().font.pointSize * plugin()->contentScaleFactor(), CSSUnitType::CSS_PX);
 }
 
 void PDFPluginTextAnnotation::commit()
@@ -139,14 +133,12 @@ bool PDFPluginTextAnnotation::handleEvent(Event& event)
     if (PDFPluginAnnotation::handleEvent(event))
         return true;
 
-    if (event.isKeyboardEvent() && event.type() == eventNames().keydownEvent) {
-        auto& keyboardEvent = downcast<KeyboardEvent>(event);
-
-        if (keyboardEvent.keyIdentifier() == "U+0009"_s) {
-            if (keyboardEvent.ctrlKey() || keyboardEvent.metaKey())
+    if (auto* keyboardEvent = dynamicDowncast<KeyboardEvent>(event); keyboardEvent && keyboardEvent->type() == eventNames().keydownEvent) {
+        if (keyboardEvent->keyIdentifier() == "U+0009"_s) {
+            if (keyboardEvent->ctrlKey() || keyboardEvent->metaKey())
                 return false;
 
-            if (keyboardEvent.shiftKey())
+            if (keyboardEvent->shiftKey())
                 plugin()->focusPreviousAnnotation();
             else
                 plugin()->focusNextAnnotation();

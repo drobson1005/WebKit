@@ -44,7 +44,6 @@
 #include <wtf/CheckedRef.h>
 #include <wtf/Function.h>
 #include <wtf/HashSet.h>
-#include <wtf/Identified.h>
 #include <wtf/OptionSet.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -119,7 +118,7 @@ struct WebPushMessage;
 struct WebsiteDataRecord;
 struct WebsiteDataStoreParameters;
 
-class WebsiteDataStore : public API::ObjectImpl<API::Object::Type::WebsiteDataStore>, public Identified<WebsiteDataStore>, public CanMakeWeakPtr<WebsiteDataStore> {
+class WebsiteDataStore : public API::ObjectImpl<API::Object::Type::WebsiteDataStore>, public CanMakeWeakPtr<WebsiteDataStore> {
 public:
     static Ref<WebsiteDataStore> defaultDataStore();
     static bool defaultDataStoreExists();
@@ -141,6 +140,7 @@ public:
     NetworkProcessProxy& networkProcess();
     Ref<NetworkProcessProxy> protectedNetworkProcess() const;
     NetworkProcessProxy* networkProcessIfExists() { return m_networkProcess.get(); }
+    void setNetworkProcess(NetworkProcessProxy&);
     
     static WebsiteDataStore* existingDataStoreForSessionID(PAL::SessionID);
 
@@ -268,17 +268,13 @@ public:
     void setResourceLoadStatisticsFirstPartyHostCNAMEDomainForTesting(const URL& firstPartyURL, const URL& cnameURL, CompletionHandler<void()>&&);
     void setResourceLoadStatisticsThirdPartyCNAMEDomainForTesting(const URL&, CompletionHandler<void()>&&);
     WebCore::ThirdPartyCookieBlockingMode thirdPartyCookieBlockingMode() const;
-    bool isTrackingPreventionStateExplicitlySet() const { return m_isTrackingPreventionStateExplicitlySet; }
-    void useExplicitTrackingPreventionState() { m_isTrackingPreventionStateExplicitlySet = true; }
     void closeDatabases(CompletionHandler<void()>&&);
     void syncLocalStorage(CompletionHandler<void()>&&);
     void storeServiceWorkerRegistrations(CompletionHandler<void()>&&);
     void setCacheMaxAgeCapForPrevalentResources(Seconds, CompletionHandler<void()>&&);
     void resetCacheMaxAgeCapForPrevalentResources(CompletionHandler<void()>&&);
     void resolveDirectoriesIfNecessary();
-    const String& applicationCacheFlatFileSubdirectoryName() const { return m_configuration->applicationCacheFlatFileSubdirectoryName(); }
     const String& resolvedCacheStorageDirectory() const { return m_resolvedConfiguration->cacheStorageDirectory(); }
-    const String& resolvedApplicationCacheDirectory() const { return m_resolvedConfiguration->applicationCacheDirectory(); }
     const String& resolvedLocalStorageDirectory() const { return m_resolvedConfiguration->localStorageDirectory(); }
     const String& resolvedNetworkCacheDirectory() const { return m_resolvedConfiguration->networkCacheDirectory(); }
     const String& resolvedAlternativeServicesStorageDirectory() const { return m_resolvedConfiguration->alternativeServicesDirectory(); }
@@ -526,6 +522,7 @@ private:
 
     void registerWithSessionIDMap();
     bool hasActivePages();
+    bool defaultTrackingPreventionEnabled() const;
 
 #if ENABLE(APP_BOUND_DOMAINS)
     static std::optional<HashSet<WebCore::RegistrableDomain>> appBoundDomainsIfInitialized();
@@ -561,7 +558,8 @@ private:
 #endif
 
     bool m_trackingPreventionDebugMode { false };
-    bool m_trackingPreventionEnabled { false };
+    enum class TrackingPreventionEnabled : uint8_t { Default, No, Yes };
+    TrackingPreventionEnabled m_trackingPreventionEnabled { TrackingPreventionEnabled::Default };
     Function<void(const String&)> m_statisticsTestingCallback;
 
     Ref<WorkQueue> m_queue;
@@ -586,8 +584,6 @@ private:
 
     WeakHashSet<WebProcessProxy> m_processes;
     WeakHashSet<WebPageProxy> m_pages;
-
-    bool m_isTrackingPreventionStateExplicitlySet { false };
 
 #if HAVE(SEC_KEY_PROXY)
     Vector<Ref<SecKeyProxyStore>> m_secKeyProxyStores;

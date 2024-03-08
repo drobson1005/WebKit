@@ -53,8 +53,9 @@ class Decoder;
 
 namespace WebKit {
 
+class BrowsingContextGroup;
+class FrameProcess;
 class ProvisionalFrameProxy;
-class RemotePageProxy;
 class SafeBrowsingWarning;
 class UserData;
 class WebFramePolicyListenerProxy;
@@ -74,7 +75,7 @@ struct WebsitePoliciesData;
 
 class WebFrameProxy : public API::ObjectImpl<API::Object::Type::Frame>, public CanMakeWeakPtr<WebFrameProxy> {
 public:
-    static Ref<WebFrameProxy> create(WebPageProxy& page, WebProcessProxy& process, WebCore::FrameIdentifier frameID)
+    static Ref<WebFrameProxy> create(WebPageProxy& page, FrameProcess& process, WebCore::FrameIdentifier frameID)
     {
         return adoptRef(*new WebFrameProxy(page, process, frameID));
     }
@@ -86,6 +87,7 @@ public:
 
     WebCore::FrameIdentifier frameID() const { return m_frameID; }
     WebPageProxy* page() const;
+    RefPtr<WebPageProxy> protectedPage() const;
 
     bool pageIsClosed() const { return !m_page; } // Needs to be thread-safe.
 
@@ -152,7 +154,7 @@ public:
     void disconnect();
     void didCreateSubframe(WebCore::FrameIdentifier, const String& frameName);
     ProcessID processID() const;
-    void prepareForProvisionalNavigationInProcess(WebProcessProxy&, const API::Navigation&, CompletionHandler<void()>&&);
+    void prepareForProvisionalNavigationInProcess(WebProcessProxy&, const API::Navigation&, BrowsingContextGroup&, CompletionHandler<void()>&&);
 
     void commitProvisionalFrame(WebCore::FrameIdentifier, FrameInfoData&&, WebCore::ResourceRequest&&, uint64_t navigationID, const String& mimeType, bool frameHasCustomContentProvider, WebCore::FrameLoadType, const WebCore::CertificateInfo&, bool usedLegacyTLS, bool privateRelayed, bool containsPluginDocument, WebCore::HasInsecureContent, WebCore::MouseEventPolicy, const UserData&);
 
@@ -160,16 +162,18 @@ public:
     FrameTreeCreationParameters frameTreeCreationParameters() const;
 
     WebFrameProxy* parentFrame() const { return m_parentFrame.get(); }
-    Ref<WebFrameProxy> rootFrame();
-    WebProcessProxy& process() const { return m_process.get(); }
+    WebFrameProxy& rootFrame();
+    WebProcessProxy& process() const;
     Ref<WebProcessProxy> protectedProcess() const { return process(); }
-    void setProcess(WebProcessProxy& process) { m_process = process; }
+    void setProcess(FrameProcess&);
+    const FrameProcess& frameProcess() const { return m_frameProcess.get(); }
     ProvisionalFrameProxy* provisionalFrame() { return m_provisionalFrame.get(); }
     std::unique_ptr<ProvisionalFrameProxy> takeProvisionalFrame();
-    RefPtr<RemotePageProxy> remotePageProxy();
-    void remoteProcessDidTerminate();
+    void remoteProcessDidTerminate(WebProcessProxy&);
     std::optional<WebCore::PageIdentifier> webPageIDInCurrentProcess();
     void notifyParentOfLoadCompletion(WebProcessProxy&);
+    void removeRemotePagesForSuspension();
+    void bindAccessibilityFrameWithData(std::span<const uint8_t>);
 
     bool isFocused() const;
 
@@ -182,18 +186,18 @@ public:
     TraversalResult traversePrevious(CanWrap);
 
 private:
-    WebFrameProxy(WebPageProxy&, WebProcessProxy&, WebCore::FrameIdentifier);
+    WebFrameProxy(WebPageProxy&, FrameProcess&, WebCore::FrameIdentifier);
 
     std::optional<WebCore::PageIdentifier> pageIdentifier() const;
 
-    RefPtr<WebFrameProxy> deepLastChild();
-    RefPtr<WebFrameProxy> firstChild() const;
-    RefPtr<WebFrameProxy> lastChild() const;
-    RefPtr<WebFrameProxy> nextSibling() const;
-    RefPtr<WebFrameProxy> previousSibling() const;
+    WebFrameProxy* deepLastChild();
+    WebFrameProxy* firstChild() const;
+    WebFrameProxy* lastChild() const;
+    WebFrameProxy* nextSibling() const;
+    WebFrameProxy* previousSibling() const;
 
     WeakPtr<WebPageProxy> m_page;
-    Ref<WebProcessProxy> m_process;
+    Ref<FrameProcess> m_frameProcess;
 
     FrameLoadState m_frameLoadState;
 
@@ -207,7 +211,6 @@ private:
     ListHashSet<Ref<WebFrameProxy>> m_childFrames;
     WeakPtr<WebFrameProxy> m_parentFrame;
     std::unique_ptr<ProvisionalFrameProxy> m_provisionalFrame;
-    RefPtr<RemotePageProxy> m_remotePageProxy;
 #if ENABLE(CONTENT_FILTERING)
     WebCore::ContentFilterUnblockHandler m_contentFilterUnblockHandler;
 #endif

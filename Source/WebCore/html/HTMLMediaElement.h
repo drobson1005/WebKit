@@ -49,6 +49,7 @@
 #include "VisibilityChangeClient.h"
 #include <wtf/Forward.h>
 #include <wtf/Function.h>
+#include <wtf/Identified.h>
 #include <wtf/LoggerHelper.h>
 #include <wtf/Observer.h>
 #include <wtf/WallTime.h>
@@ -126,7 +127,7 @@ template<typename, typename> class PODInterval;
 class RemotePlayback;
 #endif
 
-using CueInterval = PODInterval<MediaTime, WeakPtr<TextTrackCue, WeakPtrImplWithEventTargetData>>;
+using CueInterval = PODInterval<MediaTime, TextTrackCue*>;
 using CueList = Vector<CueInterval>;
 
 using MediaProvider = std::optional < std::variant <
@@ -146,6 +147,7 @@ class HTMLMediaElement
     , public ActiveDOMObject
     , public MediaControllerInterface
     , public PlatformMediaSessionClient
+    , public Identified<HTMLMediaElementIdentifier>
     , private MediaCanStartListener
     , private MediaPlayerClient
     , private MediaProducer
@@ -170,13 +172,9 @@ public:
     using CanMakeWeakPtr<HTMLMediaElement, WeakPtrFactoryInitialization::Eager>::WeakValueType;
     using CanMakeWeakPtr<HTMLMediaElement, WeakPtrFactoryInitialization::Eager>::WeakPtrImplType;
 
-    HTMLMediaElementIdentifier identifier() const { return m_identifier; }
-
     MediaPlayer* player() const { return m_player.get(); }
     RefPtr<MediaPlayer> protectedPlayer() const { return m_player; }
     WEBCORE_EXPORT std::optional<MediaPlayerIdentifier> playerIdentifier() const;
-
-    bool supportsAcceleratedRendering() const { return m_player && m_player->supportsAcceleratedRendering(); }
 
     virtual bool isVideo() const { return false; }
     bool hasVideo() const override { return false; }
@@ -367,7 +365,7 @@ public:
 
     bool shouldForceControlsDisplay() const;
 
-    ExceptionOr<TextTrack&> addTextTrack(const AtomString& kind, const AtomString& label, const AtomString& language);
+    ExceptionOr<Ref<TextTrack>> addTextTrack(const AtomString& kind, const AtomString& label, const AtomString& language);
 
     AudioTrackList& ensureAudioTracks();
     TextTrackList& ensureTextTracks();
@@ -585,6 +583,8 @@ public:
 
     bool supportsSeeking() const override;
 
+    using Identified<HTMLMediaElementIdentifier>::identifier;
+
 #if !RELEASE_LOG_DISABLED
     const Logger& logger() const final { return *m_logger.get(); }
     Ref<Logger> protectedLogger() const;
@@ -628,8 +628,6 @@ public:
     using EventTarget::dispatchEvent;
     void dispatchEvent(Event&) override;
 
-    WEBCORE_EXPORT bool mediaPlayerRenderingCanBeAccelerated() final;
-
 #if USE(AUDIO_SESSION)
     AudioSessionCategory categoryAtMostRecentPlayback() const { return m_categoryAtMostRecentPlayback; }
     AudioSessionMode modeAtMostRecentPlayback() const { return m_modeAtMostRecentPlayback; }
@@ -671,6 +669,11 @@ public:
     String localizedSourceType() const;
 
     LayoutRect contentBoxRect() const { return mediaPlayerContentBoxRect(); }
+
+    const String& spatialTrackingLabel() const;
+    void setSpatialTrackingLabel(String&&);
+
+    void mediaSourceWasDetached();
 
 protected:
     HTMLMediaElement(const QualifiedName&, Document&, bool createdByParser);
@@ -723,7 +726,6 @@ protected:
     void mediaPlayerResourceNotSupported() final;
     void mediaPlayerRepaint() final;
     void mediaPlayerSizeChanged() final;
-    void mediaPlayerRenderingModeChanged() final;
     bool mediaPlayerAcceleratedCompositingEnabled() final;
     void mediaPlayerWillInitializeMediaEngine() final;
     void mediaPlayerDidInitializeMediaEngine() final;
@@ -990,6 +992,9 @@ private:
     bool hasMediaStreamSource() const final;
     void processIsSuspendedChanged() final;
     bool shouldOverridePauseDuringRouteChange() const final;
+    bool isNowPlayingEligible() const final { return m_mediaSession->hasNowPlayingInfo(); }
+    std::optional<NowPlayingInfo> nowPlayingInfo() const final;
+    WeakPtr<PlatformMediaSession> selectBestMediaSession(const Vector<WeakPtr<PlatformMediaSession>>&, PlatformMediaSession::PlaybackControlsPurpose) final;
 
     void pageMutedStateDidChange() override;
 
@@ -1049,6 +1054,8 @@ private:
     void playPlayer();
     void pausePlayer();
 
+    virtual void computeAcceleratedRenderingStateAndUpdateMediaPlayer() { }
+
     struct RemotePlaybackConfiguration {
         MediaTime currentTime;
         double rate;
@@ -1062,8 +1069,6 @@ private:
 #endif
 
     bool shouldDisableHDR() const;
-
-    HTMLMediaElementIdentifier m_identifier { HTMLMediaElementIdentifier::generate() };
 
     Timer m_progressEventTimer;
     Timer m_playbackProgressTimer;

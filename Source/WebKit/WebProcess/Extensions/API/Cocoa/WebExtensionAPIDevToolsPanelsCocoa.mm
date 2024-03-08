@@ -52,13 +52,13 @@ void WebExtensionAPIDevToolsPanels::createPanel(WebPage& page, NSString *title, 
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/devtools/panels/create
 
-    WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::DevToolsPanelsCreate(page.webPageProxyIdentifier(), title, iconPath, pagePath), [this, protectedThis = Ref { *this }, callback = WTFMove(callback)](Expected<Inspector::ExtensionTabID, String> result) mutable {
+    WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::DevToolsPanelsCreate(page.webPageProxyIdentifier(), title, iconPath, pagePath), [this, protectedThis = Ref { *this }, callback = WTFMove(callback)](Expected<Inspector::ExtensionTabID, WebExtensionError>&& result) mutable {
         if (!result) {
             callback->reportError(result.error());
             return;
         }
 
-        Ref extensionPanel = WebExtensionAPIDevToolsExtensionPanel::create(forMainWorld(), runtime(), extensionContext());
+        Ref extensionPanel = WebExtensionAPIDevToolsExtensionPanel::create(*this);
         m_extensionPanels.set(result.value(), extensionPanel);
 
         auto globalContext = callback->globalContext();
@@ -86,7 +86,7 @@ WebExtensionAPIEvent& WebExtensionAPIDevToolsPanels::onThemeChanged()
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/devtools/panels/onThemeChanged
 
     if (!m_onThemeChanged)
-        m_onThemeChanged = WebExtensionAPIEvent::create(forMainWorld(), runtime(), extensionContext(), WebExtensionEventListenerType::DevToolsPanelsOnThemeChanged);
+        m_onThemeChanged = WebExtensionAPIEvent::create(*this, WebExtensionEventListenerType::DevToolsPanelsOnThemeChanged);
 
     return *m_onThemeChanged;
 }

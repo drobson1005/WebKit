@@ -58,15 +58,23 @@ enum class WebEventType : uint8_t;
 enum class WebMouseEventButton : int8_t;
 enum class WebEventModifier : uint8_t;
 
+enum class RepaintRequirement : uint8_t {
+    PDFContent      = 1 << 0,
+    Selection       = 1 << 1,
+    HoverOverlay    = 1 << 2
+};
+
 class AnnotationTrackingState {
 public:
-    void startAnnotationTracking(RetainPtr<PDFAnnotation>&&, WebEventType, WebMouseEventButton);
-    void finishAnnotationTracking(WebEventType, WebMouseEventButton);
+    OptionSet<RepaintRequirement> startAnnotationTracking(RetainPtr<PDFAnnotation>&&, WebEventType, WebMouseEventButton);
+    OptionSet<RepaintRequirement> finishAnnotationTracking(PDFAnnotation* annotationUnderMouse, WebEventType, WebMouseEventButton);
+
     PDFAnnotation *trackedAnnotation() const { return m_trackedAnnotation.get(); }
     bool isBeingHovered() const;
+
 private:
-    void handleMouseDraggedOffTrackedAnnotation();
     void resetAnnotationTrackingState();
+
     RetainPtr<PDFAnnotation> m_trackedAnnotation;
     bool m_isBeingHovered { false };
 };
@@ -102,6 +110,9 @@ public:
     RetainPtr<PDFAnnotation> nextTextAnnotation(AnnotationSearchDirection) const;
     void handlePDFActionForAnnotation(PDFAnnotation *, unsigned currentPageIndex);
 #endif
+    enum class IsAnnotationCommit : bool { No, Yes };
+    static OptionSet<RepaintRequirement> repaintRequirementsForAnnotation(PDFAnnotation *, IsAnnotationCommit = IsAnnotationCommit::No);
+    void repaintAnnotationsForFormField(NSString *fieldName);
 
     void attemptToUnlockPDF(const String& password) final;
     void windowActivityDidChange() final;
@@ -109,6 +120,11 @@ public:
     void didSameDocumentNavigationForFrame(WebFrame&) final;
 
     float documentFittingScale() const { return m_documentLayout.scale(); }
+
+#if PLATFORM(MAC)
+    WebCore::FloatRect convertFromPDFPageToScreenForAccessibility(const WebCore::FloatRect&, PDFDocumentLayout::PageIndex) const;
+    void accessibilityScrollToPage(PDFDocumentLayout::PageIndex);
+#endif
 
 private:
     explicit UnifiedPDFPlugin(WebCore::HTMLPlugInElement&);
@@ -125,34 +141,36 @@ private:
     float initialScale() const;
     float scaleForFitToView() const;
 
+    /*
+        Unified PDF Plugin scales, in depth order:
+
+        - "device": same as the rest of WebKit. CSS-to-screen pixel ratio.
+
+        - "page": the scale of the WebPage.
+
+        - "scale factor": the user's chosen scale for the PDF contents (by zoom buttons, pinch-zoom, etc.).
+            for main frame plugins, this is synced with the page scale
+            for embedded plugins, this is on top of the page scale
+
+        - "document layout scale": the scale between contents and document space, to fit the pages in the scroll view's contents
+
+        Convenience names:
+
+        - "contentScaleFactor": the scale between the plugin and document space (scaleFactor * document layout scale)
+    */
     CGFloat scaleFactor() const override;
+    float contentScaleFactor() const final;
 
     void didBeginMagnificationGesture() override;
     void didEndMagnificationGesture() override;
     void setPageScaleFactor(double scale, std::optional<WebCore::IntPoint> origin) final;
-
-    /*
-        Unified PDF Plugin coordinate spaces, in depth order:
-
-        - "root view": same as the rest of WebKit.
-
-        - "plugin": the space of the plugin element (origin at the top left,
-            ignoring all internal transforms).
-
-        - "contents": the space of the contents layer, with scrolling subtracted
-            out and page scale multiplied in; the painting space.
-
-        - "document": the space that the PDF pages are laid down in, with
-            PDFDocumentLayout's width-fitting scale divided out; includes margins.
-
-        - "page": the space of each actual PDFPage, as used by PDFKit; origin at
-            the bottom left of the crop box; page rotation multiplied in.
-    */
+    void setScaleFactor(double scale, std::optional<WebCore::IntPoint> origin = std::nullopt);
 
     WebCore::IntSize documentSize() const;
     WebCore::IntSize contentsSize() const override;
     unsigned firstPageHeight() const override;
-    unsigned heightForPage(PDFDocumentLayout::PageIndex) const;
+    unsigned heightForPageAtIndex(PDFDocumentLayout::PageIndex) const;
+    WebCore::FloatRect layoutBoundsForPageAtIndex(PDFDocumentLayout::PageIndex) const;
 
     void scheduleRenderingUpdate();
 
@@ -171,6 +189,7 @@ private:
 
     void scrollbarStyleChanged(WebCore::ScrollbarStyle, bool forceUpdate) override;
     void updateScrollbars() override;
+    void willAttachScrollingNode() final;
     void didAttachScrollingNode() final;
 
     bool geometryDidChange(const WebCore::IntSize&, const WebCore::AffineTransform&) override;
@@ -248,14 +267,20 @@ private:
         WindowActivityChanged,
     };
 
+    enum class IsDraggingSelection : bool { No, Yes };
+
     SelectionGranularity selectionGranularityForMouseEvent(const WebMouseEvent&) const;
-    void beginTrackingSelection(PDFDocumentLayout::PageIndex, const WebCore::IntPoint& pagePoint, const WebMouseEvent&);
+    void beginTrackingSelection(PDFDocumentLayout::PageIndex, const WebCore::FloatPoint& pagePoint, const WebMouseEvent&);
     void extendCurrentSelectionIfNeeded();
     void updateCurrentSelectionForContextMenuEventIfNeeded();
-    void continueTrackingSelection(PDFDocumentLayout::PageIndex, const WebCore::IntPoint& pagePoint);
+    void continueTrackingSelection(PDFDocumentLayout::PageIndex, const WebCore::FloatPoint& pagePoint, IsDraggingSelection);
+    void freezeCursorDuringSelectionDragIfNeeded(IsDraggingSelection);
+    void unfreezeCursorAfterSelectionDragIfNeeded();
     void stopTrackingSelection();
     void setCurrentSelection(RetainPtr<PDFSelection>&&);
-    void repaintOnSelectionActiveStateChangeIfNeeded(ActiveStateChangeReason);
+    RetainPtr<PDFSelection> protectedCurrentSelection() const;
+    Vector<WebCore::FloatRect> selectionBoundsAcrossDocument(const PDFSelection *) const;
+    void repaintOnSelectionActiveStateChangeIfNeeded(ActiveStateChangeReason, const Vector<WebCore::FloatRect>& additionalDocumentRectsToRepaint = { });
     bool isSelectionActiveAfterContextMenuInteraction() const;
 
     String selectionString() const override;
@@ -266,15 +291,18 @@ private:
     Vector<WebCore::FloatRect> rectsForTextMatchesInRect(const WebCore::IntRect&) const final;
     bool drawsFindOverlay() const final { return false; }
     void collectFindMatchRects(const String&, WebCore::FindOptions);
+    RefPtr<WebCore::TextIndicator> textIndicatorForSelection(OptionSet<WebCore::TextIndicatorOption>, WebCore::TextIndicatorPresentationTransition) final;
     bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&) override;
     [[maybe_unused]] bool searchInDictionary(const RetainPtr<PDFSelection>&);
-    std::optional<WebCore::IntRect> selectionBoundsForFirstPageInDocumentSpace(const RetainPtr<PDFSelection>&) const;
-    bool showDefinitionForAttributedString(RetainPtr<NSAttributedString>&&, const WebCore::IntRect& rectInDocumentSpace);
+    std::optional<WebCore::FloatRect> selectionBoundsForFirstPageInDocumentSpace(const RetainPtr<PDFSelection>&) const;
+    bool showDefinitionForAttributedString(RetainPtr<NSAttributedString>&&, const WebCore::FloatRect& rectInDocumentSpace);
     LookupTextResult lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) override;
 
     id accessibilityHitTest(const WebCore::IntPoint&) const override;
     id accessibilityObject() const override;
-    id accessibilityAssociatedPluginParentForElement(WebCore::Element*) const override;
+#if PLATFORM(MAC)
+    id accessibilityHitTestIntPoint(const WebCore::IntPoint&) const;
+#endif
 
     void paint(WebCore::GraphicsContext&, const WebCore::IntRect&) override;
 
@@ -288,11 +316,13 @@ private:
     // Package up the data needed to paint a set of pages for the given clip, for use by UnifiedPDFPlugin::paintPDFContent and async rendering.
     PDFPageCoverage pageCoverageForRect(const WebCore::FloatRect& clipRect) const;
 
-    void paintPDFContent(WebCore::GraphicsContext&, const WebCore::FloatRect& clipRect);
+    enum class PaintingBehavior : uint8_t { All, PageContentsOnly };
+    void paintPDFContent(WebCore::GraphicsContext&, const WebCore::FloatRect& clipRect, PaintingBehavior = PaintingBehavior::All);
 
     void ensureLayers();
     void updatePageBackgroundLayers();
     void updateLayerHierarchy();
+    void updateLayerPositions();
 
     void didChangeScrollOffset() override;
     void didChangeIsInWindow();
@@ -320,7 +350,7 @@ private:
     void createScrollingNodeIfNecessary();
 
     void scrollToPDFDestination(PDFDestination *);
-    void scrollToPointInPage(WebCore::IntPoint pointInPDFPageSpace, PDFDocumentLayout::PageIndex);
+    void scrollToPointInPage(WebCore::FloatPoint pointInPDFPageSpace, PDFDocumentLayout::PageIndex);
     void scrollToPage(PDFDocumentLayout::PageIndex);
     void scrollToFragmentIfNeeded();
 
@@ -348,27 +378,55 @@ private:
     std::optional<PDFDocumentLayout::PageIndex> pageIndexWithHoveredAnnotation() const;
     void paintHoveredAnnotationOnPage(PDFDocumentLayout::PageIndex, WebCore::GraphicsContext&, const WebCore::FloatRect& clipRect);
 
+    WebCore::FloatRect documentRectForAnnotation(PDFAnnotation *) const;
+
     void followLinkAnnotation(PDFAnnotation *);
+
+    void startTrackingAnnotation(RetainPtr<PDFAnnotation>&&, WebEventType, WebMouseEventButton);
+    void updateTrackedAnnotation(PDFAnnotation *annotationUnderMouse);
+    void finishTrackingAnnotation(PDFAnnotation *annotationUnderMouse, WebEventType, WebMouseEventButton, OptionSet<RepaintRequirement> = { });
 
     RefPtr<WebCore::GraphicsLayer> createGraphicsLayer(const String& name, WebCore::GraphicsLayer::Type);
 
-    WebCore::IntPoint convertFromRootViewToDocument(const WebCore::IntPoint&) const;
-    WebCore::IntPoint convertFromPluginToDocument(const WebCore::IntPoint&) const;
-    WebCore::IntPoint convertFromDocumentToPlugin(const WebCore::IntPoint&) const;
-    WebCore::IntRect convertFromDocumentToPlugin(const WebCore::IntRect&) const;
-    WebCore::IntPoint convertFromDocumentToPage(const WebCore::IntPoint&, PDFDocumentLayout::PageIndex) const;
-    WebCore::IntRect convertFromPageToRootView(const WebCore::IntRect&, PDFDocumentLayout::PageIndex) const;
-    WebCore::IntPoint convertFromPageToDocument(const WebCore::IntPoint&, PDFDocumentLayout::PageIndex) const;
-    WebCore::IntRect convertFromPageToDocument(const WebCore::IntRect&, PDFDocumentLayout::PageIndex) const;
-    WebCore::IntPoint convertFromPageToContents(const WebCore::IntPoint&, PDFDocumentLayout::PageIndex) const;
-    WebCore::IntRect convertFromPageToContents(const WebCore::IntRect&, PDFDocumentLayout::PageIndex) const;
+    void setNeedsRepaintInDocumentRect(OptionSet<RepaintRequirement>, const WebCore::FloatRect&);
+    void setNeedsRepaintInDocumentRects(OptionSet<RepaintRequirement>, const Vector<WebCore::FloatRect>&);
 
-    WebCore::IntPoint convertFromDocumentToContents(WebCore::IntPoint) const;
+    /*
+        Unified PDF Plugin coordinate spaces, in depth order:
 
-    WebCore::IntPoint offsetContentsSpacePointByPageMargins(WebCore::IntPoint pointInContentsSpace) const;
+        - "root view": same as the rest of WebKit.
 
-    std::optional<PDFDocumentLayout::PageIndex> pageIndexForDocumentPoint(const WebCore::IntPoint&) const;
-    std::optional<PDFDocumentLayout::PageIndex> indexForCurrentPageInView() const;
+        - "plugin": the space of the plugin element (origin at the top left,
+            ignoring all internal transforms).
+
+        - "contents": the space of the contents layer, with scrolling subtracted
+            out and page scale multiplied in; the painting space.
+
+        - "document": the space that the PDF pages are laid down in, with
+            PDFDocumentLayout's width-fitting scale divided out; includes margins.
+
+        - "page": the space of each actual PDFPage, as used by PDFKit; origin at
+            the bottom left of the crop box; page rotation multiplied in.
+    */
+
+    enum class CoordinateSpace : uint8_t {
+        PDFPage,
+        PDFDocumentLayout,
+        Contents, // aka "ScaledDocument" aka "Painting"
+        ScrolledContents,
+        Plugin
+    };
+
+    // "Up" is inside-out.
+    template <typename T>
+    T convertUp(CoordinateSpace sourceSpace, CoordinateSpace destinationSpace, T sourceValue, std::optional<PDFDocumentLayout::PageIndex> pageIndex = { }) const;
+
+    // "Down" is outside-in.
+    template <typename T>
+    T convertDown(CoordinateSpace sourceSpace, CoordinateSpace destinationSpace, T sourceValue, std::optional<PDFDocumentLayout::PageIndex> = { }) const;
+
+    std::optional<PDFDocumentLayout::PageIndex> pageIndexForDocumentPoint(const WebCore::FloatPoint&) const;
+    PDFDocumentLayout::PageIndex indexForCurrentPageInView() const;
 
     RetainPtr<PDFAnnotation> annotationForRootViewPoint(const WebCore::IntPoint&) const;
 
@@ -376,7 +434,7 @@ private:
 
     bool isTaggedPDF() const;
 
-    std::pair<bool, bool> shouldShowDebugIndicators() const;
+    bool shouldShowDebugIndicators() const;
 
 #if PLATFORM(MAC)
     void createPasswordEntryForm();
@@ -384,6 +442,8 @@ private:
 
     Ref<AsyncPDFRenderer> asyncRenderer();
     RefPtr<AsyncPDFRenderer> asyncRendererIfExists() const;
+
+    void paintBackgroundLayerForPage(const WebCore::GraphicsLayer*, WebCore::GraphicsContext&, const WebCore::FloatRect&);
 
     PDFDocumentLayout m_documentLayout;
     RefPtr<WebCore::GraphicsLayer> m_rootLayer;
@@ -412,11 +472,12 @@ private:
         bool shouldExtendCurrentSelection { false };
         bool shouldMakeMarqueeSelection { false };
         bool lastHandledEventWasContextMenuEvent { false };
+        bool cursorIsFrozenForSelectionDrag { false };
         SelectionGranularity granularity { SelectionGranularity::Character };
         PDFDocumentLayout::PageIndex startPageIndex;
-        WebCore::IntPoint startPagePoint;
+        WebCore::FloatPoint startPagePoint;
         RetainPtr<PDFSelection> selectionToExtendWith;
-        WebCore::IntRect marqueeSelectionRect;
+        WebCore::FloatRect marqueeSelectionRect;
     };
     SelectionTrackingData m_selectionTrackingData;
     RetainPtr<PDFSelection> m_currentSelection;

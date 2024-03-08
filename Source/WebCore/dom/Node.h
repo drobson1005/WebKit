@@ -286,6 +286,10 @@ public:
     bool isPrecustomizedCustomElement() const { return customElementState() == CustomElementState::FailedOrPrecustomized && !isUnknownElement(); }
     bool isPrecustomizedOrDefinedCustomElement() const { return isPrecustomizedCustomElement() || isDefinedCustomElement(); }
 
+    bool isInCustomElementReactionQueue() const { return hasStateFlag(StateFlag::IsInCustomElementReactionQueue); }
+    void setIsInCustomElementReactionQueue() { setStateFlag(StateFlag::IsInCustomElementReactionQueue); }
+    void clearIsInCustomElementReactionQueue() { clearStateFlag(StateFlag::IsInCustomElementReactionQueue); }
+
     // Returns null, a child of ShadowRoot, or a legacy shadow root.
     Node* nonBoundaryShadowTreeRootNode();
 
@@ -488,7 +492,7 @@ public:
 
 #if ENABLE(TREE_DEBUGGING)
     void showNode(const char* prefix = "") const;
-    void showTreeForThis() const;
+    WEBCORE_EXPORT void showTreeForThis() const;
     void showNodePathForThis() const;
     void showTreeAndMark(const Node* markedNode1, const char* markedLabel1, const Node* markedNode2 = nullptr, const char* markedLabel2 = nullptr) const;
     void showTreeForThisAcrossFrame() const;
@@ -507,7 +511,7 @@ public:
 
     WEBCORE_EXPORT unsigned short compareDocumentPosition(Node&);
 
-    EventTargetInterface eventTargetInterface() const override;
+    enum EventTargetInterfaceType eventTargetInterface() const override;
     ScriptExecutionContext* scriptExecutionContext() const final; // Implemented in DocumentInlines.h.
 
     WEBCORE_EXPORT bool addEventListener(const AtomString& eventType, Ref<EventListener>&&, const AddEventListenerOptions&) override;
@@ -635,6 +639,7 @@ protected:
         ContainsOnlyASCIIWhitespaceIsValid = 1 << 12, // Only used on CharacterData.
         HasHeldBackChildrenChanged = 1 << 13,
         HasStartedDeletion = 1 << 14,
+        IsInCustomElementReactionQueue = 1 << 15,
     };
 
     enum class TabIndexState : uint8_t {
@@ -740,6 +745,9 @@ protected:
     void updateAncestorsForStyleRecalc();
     void markAncestorsForInvalidatedStyle();
 
+    template<typename NodeClass>
+    static NodeClass& traverseToRootNodeInternal(const NodeClass&);
+
     // FIXME: Replace all uses of convertNodesOrStringsIntoNode by convertNodesOrStringsIntoNodeVector.
     ExceptionOr<RefPtr<Node>> convertNodesOrStringsIntoNode(FixedVector<NodeOrString>&&);
     ExceptionOr<NodeVector> convertNodesOrStringsIntoNodeVector(FixedVector<NodeOrString>&&);
@@ -777,7 +785,7 @@ private:
     mutable OptionSet<StateFlag> m_stateFlags;
 
     ContainerNode* m_parentNode { nullptr };
-    CheckedPtr<TreeScope> m_treeScope;
+    TreeScope* m_treeScope { nullptr };
     Node* m_previous { nullptr };
     Node* m_next { nullptr };
     CompactPointerTuple<RenderObject*, uint16_t> m_rendererWithStyleFlags;
@@ -945,6 +953,15 @@ inline void EventTarget::deref()
         node->deref();
     else
         derefEventTarget();
+}
+
+template<typename NodeClass>
+inline NodeClass& Node::traverseToRootNodeInternal(const NodeClass& node)
+{
+    auto* current = const_cast<NodeClass*>(&node);
+    while (current->parentNode())
+        current = current->parentNode();
+    return *current;
 }
 
 WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, const Node&);

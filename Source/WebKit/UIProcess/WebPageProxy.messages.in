@@ -266,9 +266,6 @@ messages -> WebPageProxy {
     # Database messages
     ExceededDatabaseQuota(WebCore::FrameIdentifier frameID, String originIdentifier, String databaseName, String databaseDisplayName, uint64_t currentQuota, uint64_t currentOriginUsage, uint64_t currentDatabaseUsage, uint64_t expectedUsage) -> (uint64_t newQuota) Synchronous
 
-    # Application cache messages
-    ReachedApplicationCacheOriginQuota(String originIdentifier, uint64_t currentQuota, uint64_t totalBytesNeeded) -> (uint64_t newQuota) Synchronous
-
     # Geolocation messages
     RequestGeolocationPermissionForFrame(WebKit::GeolocationIdentifier geolocationID, struct WebKit::FrameInfoData frameInfo)
     RevokeGeolocationAuthorizationToken(String authorizationToken);
@@ -325,7 +322,7 @@ messages -> WebPageProxy {
     ExecuteSavedCommandBySelector(String selector) -> (bool handled) Synchronous
 
     # Remote accessibility messages
-    RegisterWebProcessAccessibilityToken(std::span<const uint8_t> data)
+    RegisterWebProcessAccessibilityToken(std::span<const uint8_t> data, WebCore::FrameIdentifier frameID)
 
     # Speech messages
     GetIsSpeaking() -> (bool isSpeaking) Synchronous
@@ -334,9 +331,6 @@ messages -> WebPageProxy {
 
     MakeFirstResponder()
     AssistiveTechnologyMakeFirstResponder()
-
-    # Spotlight
-    SearchWithSpotlight(String string)
 
     SearchTheWeb(String string)
 #endif
@@ -631,4 +625,6 @@ messages -> WebPageProxy {
     FocusRemoteFrame(WebCore::FrameIdentifier frameID)
     PostMessageToRemote(WebCore::FrameIdentifier source, String sourceOrigin, WebCore::FrameIdentifier target, std::optional<WebCore::SecurityOriginData> targetOrigin, struct WebCore::MessageWithMessagePorts message)
     RenderTreeAsText(WebCore::FrameIdentifier identifier, size_t baseIndent, OptionSet<WebCore::RenderAsTextFlag> behavior) -> (String renderTreeDump) Synchronous
+    BindRemoteAccessibilityFrames(int processIdentifier, WebCore::FrameIdentifier frameID, std::span<const uint8_t> dataToken) -> (std::span<const uint8_t> token, int processIdentifier) Synchronous
+    UpdateRemoteFrameAccessibilityOffset(WebCore::FrameIdentifier frameID, WebCore::IntPoint offset)
 }

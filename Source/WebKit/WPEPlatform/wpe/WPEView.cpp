@@ -640,6 +640,44 @@ gboolean wpe_view_unfullscreen(WPEView* view)
 }
 
 /**
+ * wpe_view_maximize:
+ * @view: a #WPEView
+ *
+ * Request that the @view is maximized. If the view is already maximized this function
+ * does nothing.
+ *
+ * To track the state see #WPEView::state-changed
+ *
+ * Returns: %TRUE if maximize is supported, otherwise %FALSE
+ */
+gboolean wpe_view_maximize(WPEView* view)
+{
+    g_return_val_if_fail(WPE_IS_VIEW(view), FALSE);
+
+    auto* viewClass = WPE_VIEW_GET_CLASS(view);
+    return viewClass->set_maximized ? viewClass->set_maximized(view, TRUE) : FALSE;
+}
+
+/**
+ * wpe_view_unmaximize:
+ * @view: a #WPEView
+ *
+ * Request that the @view is unmaximized. If the view is not maximized this function
+ * does nothing.
+ *
+ * To track the state see #WPEView::state-changed
+ *
+ * Returns: %TRUE if maximize is supported, otherwise %FALSE
+ */
+gboolean wpe_view_unmaximize(WPEView* view)
+{
+    g_return_val_if_fail(WPE_IS_VIEW(view), FALSE);
+
+    auto* viewClass = WPE_VIEW_GET_CLASS(view);
+    return viewClass->set_maximized ? viewClass->set_maximized(view, FALSE) : FALSE;
+}
+
+/**
  * wpe_view_render_buffer:
  * @view: a #WPEView
  * @buffer: a #WPEBuffer to render
@@ -796,4 +834,24 @@ GList* wpe_view_get_preferred_dma_buf_formats(WPEView* view)
         return viewClass->get_preferred_dma_buf_formats(view);
 
     return wpe_display_get_preferred_dma_buf_formats(view->priv->display.get());
+}
+
+/**
+ * wpe_view_set_opaque_rectangles:
+ * @view: a #WPEView
+ * @rects: (nullable) (array length=n_rects): opaque rectangles in view-local coordinates
+ * @n_rects: the total number of elements in @rects
+ *
+ * Set the rectangles of @view that contain opaque content.
+ * This is an optimization hint that is automatically set by WebKit when the
+ * web view background color is opaque.
+ */
+void wpe_view_set_opaque_rectangles(WPEView* view, WPERectangle* rects, guint rectsCount)
+{
+    g_return_if_fail(WPE_IS_VIEW(view));
+    g_return_if_fail(!rects || rectsCount > 0);
+
+    auto* viewClass = WPE_VIEW_GET_CLASS(view);
+    if (viewClass->set_opaque_rectangles)
+        viewClass->set_opaque_rectangles(view, rects, rectsCount);
 }

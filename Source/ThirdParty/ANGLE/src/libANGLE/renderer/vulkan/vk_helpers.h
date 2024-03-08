@@ -51,6 +51,14 @@ constexpr VkPipelineStageFlags kSwapchainAcquireImageWaitStageFlags =
     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |  // First use is a draw command.
     VK_PIPELINE_STAGE_TRANSFER_BIT;                  // First use is a clear without scissor.
 
+// For each level, write  layers that don't conflict in parallel.  The layer is hashed to
+// `layer % kMaxParallelLayerWrites` and used to track whether that subresource is currently
+// being written.  If so, a barrier is inserted; otherwise, the barrier is avoided.  If the updated
+// layer count is greater than kMaxParallelLayerWrites, there will be a few unnecessary
+// barriers.
+constexpr uint32_t kMaxParallelLayerWrites = 64;
+using ImageLayerWriteMask                  = std::bitset<kMaxParallelLayerWrites>;
+
 using StagingBufferOffsetArray = std::array<VkDeviceSize, 2>;
 
 // A dynamic buffer is conceptually an infinitely long buffer. Each time you write to the buffer,
@@ -749,6 +757,8 @@ enum class MemoryHostVisibility
     Visible
 };
 
+class BufferPool;
+
 class BufferHelper : public ReadWriteResource
 {
   public:
@@ -758,18 +768,19 @@ class BufferHelper : public ReadWriteResource
     BufferHelper(BufferHelper &&other);
     BufferHelper &operator=(BufferHelper &&other);
 
-    angle::Result init(vk::Context *context,
+    angle::Result init(Context *context,
                        const VkBufferCreateInfo &createInfo,
                        VkMemoryPropertyFlags memoryPropertyFlags);
-    angle::Result initExternal(ContextVk *contextVk,
+    angle::Result initExternal(Context *context,
                                VkMemoryPropertyFlags memoryProperties,
                                const VkBufferCreateInfo &requestedCreateInfo,
                                GLeglClientBufferEXT clientBuffer);
-    VkResult initSuballocation(ContextVk *contextVk,
+    VkResult initSuballocation(Context *context,
                                uint32_t memoryTypeIndex,
                                size_t size,
                                size_t alignment,
-                               BufferUsageType usageType);
+                               BufferUsageType usageType,
+                               BufferPool *pool);
 
     void destroy(RendererVk *renderer);
     void release(RendererVk *renderer);
@@ -803,14 +814,8 @@ class BufferHelper : public ReadWriteResource
     bool isCached() const { return mSuballocation.isCached(); }
     bool isMapped() const { return mSuballocation.isMapped(); }
 
-    // Also implicitly sets up the correct barriers.
-    angle::Result copyFromBuffer(ContextVk *contextVk,
-                                 BufferHelper *srcBuffer,
-                                 uint32_t regionCount,
-                                 const VkBufferCopy *copyRegions);
-
     angle::Result map(Context *context, uint8_t **ptrOut);
-    angle::Result mapWithOffset(ContextVk *contextVk, uint8_t **ptrOut, size_t offset);
+    angle::Result mapWithOffset(Context *context, uint8_t **ptrOut, size_t offset);
     void unmap(RendererVk *renderer) {}
     // After a sequence of writes, call flush to ensure the data is visible to the device.
     angle::Result flush(RendererVk *renderer);
@@ -822,14 +827,12 @@ class BufferHelper : public ReadWriteResource
     void changeQueue(uint32_t newQueueFamilyIndex, OutsideRenderPassCommandBuffer *commandBuffer);
 
     // Performs an ownership transfer from an external instance or API.
-    void acquireFromExternal(ContextVk *contextVk,
-                             uint32_t externalQueueFamilyIndex,
+    void acquireFromExternal(uint32_t externalQueueFamilyIndex,
                              uint32_t rendererQueueFamilyIndex,
                              OutsideRenderPassCommandBuffer *commandBuffer);
 
     // Performs an ownership transfer to an external instance or API.
-    void releaseToExternal(ContextVk *contextVk,
-                           uint32_t rendererQueueFamilyIndex,
+    void releaseToExternal(uint32_t rendererQueueFamilyIndex,
                            uint32_t externalQueueFamilyIndex,
                            OutsideRenderPassCommandBuffer *commandBuffer);
 
@@ -2322,7 +2325,20 @@ class ImageHelper final : public Resource, public angle::Subject
     void recordWriteBarrier(Context *context,
                             VkImageAspectFlags aspectMask,
                             ImageLayout newLayout,
+                            gl::LevelIndex levelStart,
+                            uint32_t levelCount,
+                            uint32_t layerStart,
+                            uint32_t layerCount,
                             OutsideRenderPassCommandBufferHelper *commands);
+
+    void recordReadSubresourceBarrier(Context *context,
+                                      VkImageAspectFlags aspectMask,
+                                      ImageLayout newLayout,
+                                      gl::LevelIndex levelStart,
+                                      uint32_t levelCount,
+                                      uint32_t layerStart,
+                                      uint32_t layerCount,
+                                      OutsideRenderPassCommandBufferHelper *commands);
 
     void recordWriteBarrierOneOff(Context *context,
                                   ImageLayout newLayout,
@@ -2335,6 +2351,16 @@ class ImageHelper final : public Resource, public angle::Subject
 
     // This function can be used to prevent issuing redundant layout transition commands.
     bool isReadBarrierNecessary(ImageLayout newLayout) const;
+    bool isReadSubresourceBarrierNecessary(ImageLayout newLayout,
+                                           gl::LevelIndex levelStart,
+                                           uint32_t levelCount,
+                                           uint32_t layerStart,
+                                           uint32_t layerCount) const;
+    bool isWriteBarrierNecessary(ImageLayout newLayout,
+                                 gl::LevelIndex levelStart,
+                                 uint32_t levelCount,
+                                 uint32_t layerStart,
+                                 uint32_t layerCount) const;
 
     void recordReadBarrier(Context *context,
                            VkImageAspectFlags aspectMask,
@@ -2653,6 +2679,18 @@ class ImageHelper final : public Resource, public angle::Subject
                      CommandBufferT *commandBuffer,
                      VkSemaphore *acquireNextImageSemaphoreOut);
 
+    void setSubresourcesWrittenSinceBarrier(gl::LevelIndex levelStart,
+                                            uint32_t levelCount,
+                                            uint32_t layerStart,
+                                            uint32_t layerCount);
+
+    void resetSubresourcesWrittenSinceBarrier();
+    bool areLevelSubresourcesWrittenWithinMaskRange(uint32_t level,
+                                                    ImageLayerWriteMask &layerMask) const
+    {
+        return (mSubresourcesWrittenSinceBarrier[level] & layerMask) != 0;
+    }
+
     // If the image has emulated channels, we clear them once so as not to leave garbage on those
     // channels.
     VkColorComponentFlags getEmulatedChannelsMask() const;
@@ -2701,6 +2739,26 @@ class ImageHelper final : public Resource, public angle::Subject
                                           const GLuint rowPitch,
                                           const GLuint depthPitch,
                                           bool *copiedOut);
+
+    // ClearEmulatedChannels updates are expected in the beginning of the level update list. They
+    // can be processed first and removed. By doing so, if this is the only update for the image,
+    // an unnecessary layout transition can be avoided.
+    angle::Result flushStagedClearEmulatedChannelsUpdates(ContextVk *contextVk,
+                                                          gl::LevelIndex levelGLStart,
+                                                          gl::LevelIndex levelGLLimit,
+                                                          bool *otherUpdatesToFlushOut);
+
+    // Flushes staged updates to a range of levels and layers from start to end. The updates do not
+    // include ClearEmulatedChannelsOnly, which are processed in a separate function.
+    angle::Result flushStagedUpdatesImpl(ContextVk *contextVk,
+                                         gl::LevelIndex levelGLStart,
+                                         gl::LevelIndex levelGLEnd,
+                                         uint32_t layerStart,
+                                         uint32_t layerEnd,
+                                         const gl::TexLevelMask &skipLevelsAllFaces);
+
+    // Limit the input level to the number of levels in subresource update list.
+    void clipLevelToUpdateListUpperLimit(gl::LevelIndex *level) const;
 
     std::vector<SubresourceUpdate> *getLevelUpdates(gl::LevelIndex level);
     const std::vector<SubresourceUpdate> *getLevelUpdates(gl::LevelIndex level) const;
@@ -2891,6 +2949,11 @@ class ImageHelper final : public Resource, public angle::Subject
     // Only used for swapChain images. This is set when an image is acquired and is waited on
     // by the next submission (which uses this image), at which point it is released.
     Semaphore mAcquireNextImageSemaphore;
+
+    // Used to track subresource writes per level/layer. This can help parallelize writes to
+    // different levels or layers of the image, such as data uploads.
+    // See comment on kMaxParallelLayerWrites.
+    gl::TexLevelArray<ImageLayerWriteMask> mSubresourcesWrittenSinceBarrier;
 };
 
 ANGLE_INLINE bool RenderPassCommandBufferHelper::usesImage(const ImageHelper &image) const
@@ -3357,7 +3420,7 @@ struct CommandBufferImageAccess
     VkImageAspectFlags aspectFlags;
     ImageLayout imageLayout;
 };
-struct CommandBufferImageWrite
+struct CommandBufferImageSubresourceAccess
 {
     CommandBufferImageAccess access;
     gl::LevelIndex levelStart;
@@ -3416,19 +3479,35 @@ class CommandBufferAccess : angle::NonCopyable
         onImageWrite(levelStart, levelCount, layerStart, layerCount, aspectFlags,
                      ImageLayout::TransferDst, image);
     }
-    void onImageSelfCopy(gl::LevelIndex writeLevelStart,
+    void onImageSelfCopy(gl::LevelIndex readLevelStart,
+                         uint32_t readLevelCount,
+                         uint32_t readLayerStart,
+                         uint32_t readLayerCount,
+                         gl::LevelIndex writeLevelStart,
                          uint32_t writeLevelCount,
                          uint32_t writeLayerStart,
                          uint32_t writeLayerCount,
                          VkImageAspectFlags aspectFlags,
                          ImageHelper *image)
     {
+        onImageReadSubresources(readLevelStart, readLevelCount, readLayerStart, readLayerCount,
+                                aspectFlags, ImageLayout::TransferSrcDst, image);
         onImageWrite(writeLevelStart, writeLevelCount, writeLayerStart, writeLayerCount,
                      aspectFlags, ImageLayout::TransferSrcDst, image);
     }
     void onImageComputeShaderRead(VkImageAspectFlags aspectFlags, ImageHelper *image)
     {
         onImageRead(aspectFlags, ImageLayout::ComputeShaderReadOnly, image);
+    }
+    void onImageComputeMipmapGenerationRead(gl::LevelIndex levelStart,
+                                            uint32_t levelCount,
+                                            uint32_t layerStart,
+                                            uint32_t layerCount,
+                                            VkImageAspectFlags aspectFlags,
+                                            ImageHelper *image)
+    {
+        onImageReadSubresources(levelStart, levelCount, layerStart, layerCount, aspectFlags,
+                                ImageLayout::ComputeShaderWrite, image);
     }
     void onImageComputeShaderWrite(gl::LevelIndex levelStart,
                                    uint32_t levelCount,
@@ -3456,10 +3535,12 @@ class CommandBufferAccess : angle::NonCopyable
 
     // The limits reflect the current maximum concurrent usage of each resource type.  ASSERTs will
     // fire if this limit is exceeded in the future.
-    using ReadBuffers  = angle::FixedVector<CommandBufferBufferAccess, 2>;
-    using WriteBuffers = angle::FixedVector<CommandBufferBufferAccess, 2>;
-    using ReadImages   = angle::FixedVector<CommandBufferImageAccess, 2>;
-    using WriteImages  = angle::FixedVector<CommandBufferImageWrite, 1>;
+    using ReadBuffers           = angle::FixedVector<CommandBufferBufferAccess, 2>;
+    using WriteBuffers          = angle::FixedVector<CommandBufferBufferAccess, 2>;
+    using ReadImages            = angle::FixedVector<CommandBufferImageAccess, 2>;
+    using WriteImages           = angle::FixedVector<CommandBufferImageSubresourceAccess, 1>;
+    using ReadImageSubresources = angle::FixedVector<CommandBufferImageSubresourceAccess, 1>;
+
     using ExternalAcquireReleaseBuffers =
         angle::FixedVector<CommandBufferBufferExternalAcquireRelease, 1>;
     using AccessResources = angle::FixedVector<CommandBufferResourceAccess, 1>;
@@ -3468,6 +3549,7 @@ class CommandBufferAccess : angle::NonCopyable
     const WriteBuffers &getWriteBuffers() const { return mWriteBuffers; }
     const ReadImages &getReadImages() const { return mReadImages; }
     const WriteImages &getWriteImages() const { return mWriteImages; }
+    const ReadImageSubresources &getReadImageSubresources() const { return mReadImageSubresources; }
     const ExternalAcquireReleaseBuffers &getExternalAcquireReleaseBuffers() const
     {
         return mExternalAcquireReleaseBuffers;
@@ -3488,12 +3570,22 @@ class CommandBufferAccess : angle::NonCopyable
                       VkImageAspectFlags aspectFlags,
                       ImageLayout imageLayout,
                       ImageHelper *image);
+
+    void onImageReadSubresources(gl::LevelIndex levelStart,
+                                 uint32_t levelCount,
+                                 uint32_t layerStart,
+                                 uint32_t layerCount,
+                                 VkImageAspectFlags aspectFlags,
+                                 ImageLayout imageLayout,
+                                 ImageHelper *image);
+
     void onResourceAccess(Resource *resource);
 
     ReadBuffers mReadBuffers;
     WriteBuffers mWriteBuffers;
     ReadImages mReadImages;
     WriteImages mWriteImages;
+    ReadImageSubresources mReadImageSubresources;
     ExternalAcquireReleaseBuffers mExternalAcquireReleaseBuffers;
     AccessResources mAccessResources;
 };

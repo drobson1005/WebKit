@@ -73,6 +73,7 @@
 #include "TiledBacking.h"
 #include "TransformState.h"
 #include "TranslateTransformOperation.h"
+#include "ViewTransition.h"
 #include "WillChangeData.h"
 #include <wtf/HexNumber.h>
 #include <wtf/MemoryPressureHandler.h>
@@ -1399,6 +1400,28 @@ void RenderLayerCompositor::traverseUnchangedSubtree(RenderLayer* ancestorLayer,
     ASSERT(!layer.needsCompositingRequirementsTraversal());
 }
 
+void RenderLayerCompositor::collectViewTransitionNewContentLayers(RenderLayer& layer, Vector<Ref<GraphicsLayer>>& childList)
+{
+    if (layer.renderer().style().pseudoElementType() != PseudoId::ViewTransitionNew || !layer.hasVisibleContent())
+        return;
+
+    RefPtr activeViewTransition = layer.renderer().document().activeViewTransition();
+    if (!activeViewTransition)
+        return;
+
+    auto* capturedElement = activeViewTransition->namedElements().find(layer.renderer().style().pseudoElementNameArgument());
+    if (!capturedElement || !capturedElement->newElement)
+        return;
+
+    auto* capturedRenderer = capturedElement->newElement->renderer();
+    if (!capturedRenderer || !capturedRenderer->hasLayer())
+        return;
+
+    auto& modelObject = downcast<RenderLayerModelObject>(*capturedRenderer);
+    if (RenderLayerBacking* backing = modelObject.layer()->backing())
+        childList.append(*backing->childForSuperlayers());
+}
+
 void RenderLayerCompositor::updateBackingAndHierarchy(RenderLayer& layer, Vector<Ref<GraphicsLayer>>& childLayersOfEnclosingLayer, UpdateBackingTraversalState& traversalState, ScrollingTreeState& scrollingTreeState, OptionSet<UpdateLevel> updateLevel)
 {
     layer.updateDescendantDependentFlags();
@@ -1520,6 +1543,8 @@ void RenderLayerCompositor::updateBackingAndHierarchy(RenderLayer& layer, Vector
             if (auto* renderWidget = dynamicDowncast<RenderWidget>(layer.renderer()))
                 attachedWidgetContents = attachWidgetContentLayers(*renderWidget);
 
+            collectViewTransitionNewContentLayers(layer, childList);
+
             if (!attachedWidgetContents) {
                 // If the layer has a clipping layer the overflow controls layers will be siblings of the clipping layer.
                 // Otherwise, the overflow control layers are normal children.
@@ -1533,7 +1558,8 @@ void RenderLayerCompositor::updateBackingAndHierarchy(RenderLayer& layer, Vector
             }
         }
 
-        childLayersOfEnclosingLayer.append(*layerBacking->childForSuperlayers());
+        if (!layer.renderer().capturedInViewTransition())
+            childLayersOfEnclosingLayer.append(*layerBacking->childForSuperlayers());
 
         if (layerBacking->hasAncestorClippingLayers() && layerBacking->ancestorClippingStack()->hasAnyScrollingLayers())
             traversalState.layersClippedByScrollers->append(&layer);
@@ -2652,16 +2678,23 @@ bool RenderLayerCompositor::attachWidgetContentLayers(RenderWidget& renderer)
         if (auto* contentsLayer = backing->layerForContents()) {
             addContentsLayerChildIfNecessary(*contentsLayer);
 
-            if (isLayerForPluginWithScrollCoordinatedContents(*layer)) {
-                if (auto pluginHostingNodeID = backing->scrollingNodeIDForRole(ScrollCoordinationRole::PluginHosting)) {
-                    auto* renderEmbeddedObject = dynamicDowncast<RenderEmbeddedObject>(renderer);
-                    if (auto pluginScrollingNodeID = renderEmbeddedObject->scrollingNodeID()) {
-                        if (auto* scrollingCoordinator = this->scrollingCoordinator()) {
-                            scrollingCoordinator->insertNode(ScrollingNodeType::PluginScrolling, pluginScrollingNodeID, pluginHostingNodeID, 0);
-                            renderEmbeddedObject->didAttachScrollingNode();
-                        }
-                    }
-                }
+            if (!isLayerForPluginWithScrollCoordinatedContents(*layer))
+                return true;
+
+            auto* scrollingCoordinator = this->scrollingCoordinator();
+            if (!scrollingCoordinator)
+                return true;
+
+            auto pluginHostingNodeID = backing->scrollingNodeIDForRole(ScrollCoordinationRole::PluginHosting);
+            if (!pluginHostingNodeID)
+                return true;
+
+            CheckedPtr renderEmbeddedObject = dynamicDowncast<RenderEmbeddedObject>(renderer);
+            renderEmbeddedObject->willAttachScrollingNode();
+
+            if (auto pluginScrollingNodeID = renderEmbeddedObject->scrollingNodeID()) {
+                scrollingCoordinator->insertNode(ScrollingNodeType::PluginScrolling, pluginScrollingNodeID, pluginHostingNodeID, 0);
+                renderEmbeddedObject->didAttachScrollingNode();
             }
 
             return true;
@@ -2864,6 +2897,7 @@ bool RenderLayerCompositor::requiresCompositingLayer(const RenderLayer& layer, R
         || requiresCompositingForFilters(renderer)
         || requiresCompositingForWillChange(renderer)
         || requiresCompositingForBackfaceVisibility(renderer)
+        || requiresCompositingForViewTransition(renderer)
         || requiresCompositingForVideo(renderer)
         || requiresCompositingForModel(renderer)
         || requiresCompositingForFrame(renderer, queryData)
@@ -2938,6 +2972,7 @@ bool RenderLayerCompositor::requiresOwnBackingStore(const RenderLayer& layer, co
         || requiresCompositingForFilters(renderer)
         || requiresCompositingForWillChange(renderer)
         || requiresCompositingForBackfaceVisibility(renderer)
+        || requiresCompositingForViewTransition(renderer)
         || requiresCompositingForVideo(renderer)
         || requiresCompositingForModel(renderer)
         || requiresCompositingForFrame(renderer, queryData)
@@ -3368,6 +3403,8 @@ bool RenderLayerCompositor::requiresCompositingForAnimation(RenderLayerModelObje
         return false;
 
     if (auto styleable = Styleable::fromRenderer(renderer)) {
+        if (styleable->hasRunningAcceleratedAnimations())
+            return true;
         if (auto* effectsStack = styleable->keyframeEffectStack()) {
             return (effectsStack->isCurrentlyAffectingProperty(CSSPropertyOpacity)
                 && (usesCompositing() || (m_compositingTriggers & ChromeClient::AnimatedOpacityTrigger)))
@@ -3453,6 +3490,11 @@ bool RenderLayerCompositor::requiresCompositingForBackfaceVisibility(RenderLayer
         return true;
 
     return false;
+}
+
+bool RenderLayerCompositor::requiresCompositingForViewTransition(RenderLayerModelObject& renderer) const
+{
+    return renderer.capturedInViewTransition() || renderer.isViewTransitionPseudo();
 }
 
 bool RenderLayerCompositor::requiresCompositingForVideo(RenderLayerModelObject& renderer) const

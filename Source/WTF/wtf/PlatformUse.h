@@ -70,7 +70,7 @@
 #define USE_GLIB 1
 #endif
 
-#if PLATFORM(GTK) || (PLATFORM(WPE) && !USE(SKIA))
+#if ((PLATFORM(GTK) || PLATFORM(WPE)) && !USE(SKIA))
 #define USE_FREETYPE 1
 #endif
 
@@ -444,4 +444,8 @@
 
 #if !defined(USE_BROWSERENGINEKIT) && PLATFORM(IOS) && __has_include(<BrowserEngineKit/BETextInput.h>)
 #define USE_BROWSERENGINEKIT 1
+#endif
+
+#if !defined(USE_LEGACY_EXTENSIONKIT_SPI) && PLATFORM(IOS_SIMULATOR) && __IPHONE_OS_VERSION_MAX_ALLOWED <= 170400
+#define USE_LEGACY_EXTENSIONKIT_SPI 1
 #endif

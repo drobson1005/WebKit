@@ -42,12 +42,12 @@ public:
         return adoptRef(*new InbandTextTrackPrivateGStreamer(index, WTFMove(pad), shouldHandleStreamStartEvent));
     }
 
-    static Ref<InbandTextTrackPrivateGStreamer> create(WeakPtr<MediaPlayerPrivateGStreamer>, unsigned index, GRefPtr<GstPad> pad)
+    static Ref<InbandTextTrackPrivateGStreamer> create(ThreadSafeWeakPtr<MediaPlayerPrivateGStreamer>&&, unsigned index, GRefPtr<GstPad> pad)
     {
         return create(index, WTFMove(pad));
     }
 
-    static Ref<InbandTextTrackPrivateGStreamer> create(WeakPtr<MediaPlayerPrivateGStreamer>, unsigned index, GstStream* stream)
+    static Ref<InbandTextTrackPrivateGStreamer> create(ThreadSafeWeakPtr<MediaPlayerPrivateGStreamer>&&, unsigned index, GstStream* stream)
     {
         return adoptRef(*new InbandTextTrackPrivateGStreamer(index, stream));
     }
@@ -73,7 +73,6 @@ private:
     Vector<GRefPtr<GstSample>> m_pendingSamples WTF_GUARDED_BY_LOCK(m_sampleMutex);
     Kind m_kind;
     Lock m_sampleMutex;
-    std::optional<TrackID> m_trackID;
 };
 
 } // namespace WebCore

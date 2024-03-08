@@ -1765,20 +1765,32 @@ bool CSSPrimitiveValue::convertingToLengthHasRequiredConversionData(int lengthCo
     // return std::optional<double> instead of having this check here.
 
     bool isFixedNumberConversion = lengthConversion & (FixedIntegerConversion | FixedFloatConversion);
+    if (!isFixedNumberConversion)
+        return true;
+
     auto dependencies = computedStyleDependencies();
     if (!dependencies.rootProperties.isEmpty() && !conversionData.rootStyle())
-        return !isFixedNumberConversion;
+        return false;
 
     if (!dependencies.properties.isEmpty() && !conversionData.style())
-        return !isFixedNumberConversion;
+        return false;
 
     if (dependencies.containerDimensions && !conversionData.elementForContainerUnitResolution())
-        return !isFixedNumberConversion;
+        return false;
 
-    if (dependencies.viewportDimensions && conversionData.defaultViewportFactor().isEmpty())
-        return !isFixedNumberConversion;
+    if (dependencies.viewportDimensions && !conversionData.renderView())
+        return false;
 
     return true;
+}
+
+IterationStatus CSSPrimitiveValue::customVisitChildren(const Function<IterationStatus(CSSValue&)>& func) const
+{
+    if (auto* calc = cssCalcValue()) {
+        if (func(const_cast<CSSCalcValue&>(*calc)) == IterationStatus::Done)
+            return IterationStatus::Done;
+    }
+    return IterationStatus::Continue;
 }
 
 } // namespace WebCore

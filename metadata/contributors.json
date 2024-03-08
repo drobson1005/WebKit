@@ -69,7 +69,7 @@
       "nicks" : [
          "aprotyas"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -2566,6 +2566,15 @@
    },
    {
       "emails" : [
+         "elijahsawyers@gmail.com",
+         "esawyers@apple.com"
+      ],
+      "github" : "elijahsawyers",
+      "name" : "Elijah Sawyers",
+      "status" : "committer"
+   },
+   {
+      "emails" : [
          "fantasai.bugs@inkedblade.net",
          "fantasai@apple.com"
       ],
@@ -2573,7 +2582,8 @@
       "name" : "Elika Etemad",
       "nicks" : [
          "fantasai"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -5078,6 +5088,13 @@
    },
    {
       "emails" : [
+         "loic.yhuel@softathome.com"
+      ],
+      "github" : "hwti",
+      "name" : "Lo\u00efc Yhuel"
+   },
+   {
+      "emails" : [
          "demarchi@webkit.org",
          "lucas.demarchi@profusion.mobi"
       ],
@@ -6579,6 +6596,16 @@
       "name" : "Robert Kroeger",
       "nicks" : [
          "rjkroege"
+      ]
+   },
+   {
+      "emails" : [
+         "robinm@apple.com"
+      ],
+      "github" : "codeofrobin",
+      "name" : "Robin Malhotra",
+      "nicks" : [
+         "robinm"
       ]
    },
    {

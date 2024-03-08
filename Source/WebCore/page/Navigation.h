@@ -25,17 +25,46 @@
 
 #pragma once
 
-#include "DOMPromiseProxy.h"
 #include "EventTarget.h"
 #include "JSDOMPromise.h"
 #include "LocalDOMWindowProperty.h"
 #include "NavigationHistoryEntry.h"
 #include "NavigationTransition.h"
 #include <JavaScriptCore/JSCJSValue.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
 class HistoryItem;
+class SerializedScriptValue;
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#navigation-api-method-tracker
+struct NavigationAPIMethodTracker {
+    NavigationAPIMethodTracker(uint64_t id, Ref<DeferredPromise>&& committed, Ref<DeferredPromise>&& finished, JSC::JSValue&& info, RefPtr<SerializedScriptValue>&& serializedState)
+        : info(info)
+        , serializedState(serializedState)
+        , committedPromise(DOMPromise::create(*committed->globalObject(), *JSC::jsCast<JSC::JSPromise*>(committed->promise())))
+        , finishedPromise(DOMPromise::create(*finished->globalObject(), *JSC::jsCast<JSC::JSPromise*>(finished->promise())))
+        , id(id)
+    {
+    };
+
+    bool operator==(const NavigationAPIMethodTracker& other) const
+    {
+        // key is optional so we manually identify each tracker.
+        return id == other.id;
+    };
+
+    String key;
+    JSC::JSValue info;
+    RefPtr<SerializedScriptValue> serializedState;
+    RefPtr<NavigationHistoryEntry> committedToEntry;
+    Ref<DOMPromise> committedPromise;
+    Ref<DOMPromise> finishedPromise;
+
+private:
+    uint64_t id;
+};
 
 class Navigation final : public RefCounted<Navigation>, public EventTarget, public ContextDestructionObserver, public LocalDOMWindowProperty {
     WTF_MAKE_ISO_ALLOCATED(Navigation);
@@ -84,7 +113,7 @@ public:
 
     void initializeEntries(const Ref<HistoryItem>& currentItem, Vector<Ref<HistoryItem>> &items);
 
-    Result navigate(const String& url, NavigateOptions&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
+    Result navigate(ScriptExecutionContext&, const String& url, NavigateOptions&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
 
     Result reload(ReloadOptions&&, Ref<DeferredPromise>&&, Ref<DeferredPromise>&&);
 
@@ -97,16 +126,24 @@ public:
 private:
     Navigation(ScriptExecutionContext*, LocalDOMWindow&);
 
-    EventTargetInterface eventTargetInterface() const final;
+    enum EventTargetInterfaceType eventTargetInterface() const final;
     ScriptExecutionContext* scriptExecutionContext() const final;
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
     bool hasEntriesAndEventsDisabled() const;
+    Result performTraversal(NavigationHistoryEntry&, Ref<DeferredPromise> committed, Ref<DeferredPromise> finished);
+    std::optional<Ref<NavigationHistoryEntry>> findEntryByKey(const String& key);
+    ExceptionOr<RefPtr<SerializedScriptValue>> serializeState(JSC::JSValue state);
+    NavigationAPIMethodTracker maybeSetUpcomingNonTraversalTracker(Ref<DeferredPromise>&& committed, Ref<DeferredPromise>&& finished, JSC::JSValue info, RefPtr<SerializedScriptValue>&&);
+
 
     std::optional<size_t> m_currentEntryIndex;
     RefPtr<NavigationTransition> m_transition;
     Vector<Ref<NavigationHistoryEntry>> m_entries;
+
+    std::optional<NavigationAPIMethodTracker> m_upcomingNonTraverseMethodTracker;
+    HashMap<String, NavigationAPIMethodTracker> m_upcomingTraverseMethodTrackers;
 };
 
 } // namespace WebCore

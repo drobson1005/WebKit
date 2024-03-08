@@ -28,10 +28,11 @@
 
 #if ENABLE(LINEAR_MEDIA_PLAYER)
 
+#import "WKSLinearMediaPlayer.h"
+#import "WKSLinearMediaTypes.h"
 #import <WebCore/MediaSelectionOption.h>
 #import <WebCore/PlaybackSessionModel.h>
 #import <WebCore/TimeRanges.h>
-#import <WebKitSwift/WebKitSwift.h>
 #import <wtf/OSObjectPtr.h>
 #import <wtf/WeakPtr.h>
 
@@ -163,6 +164,12 @@
         model->toggleFullscreen();
 }
 
+- (void)linearMediaPlayer:(WKSLinearMediaPlayer *)player didExitFullscreenWithError:(NSError * _Nullable)error
+{
+    if (auto model = _model.get())
+        model->setVideoReceiverEndpoint(nullptr);
+}
+
 - (void)linearMediaPlayer:(WKSLinearMediaPlayer *)player setVideoReceiverEndpoint:(xpc_object_t)videoReceiverEndpoint
 {
     if (auto model = _model.get())
@@ -185,11 +192,11 @@ PlaybackSessionInterfaceLMK::PlaybackSessionInterfaceLMK(PlaybackSessionModel& m
     , m_player { adoptNS([allocWKSLinearMediaPlayerInstance() init]) }
     , m_playerDelegate { adoptNS([[WKLinearMediaPlayerDelegate alloc] initWithModel:model]) }
 {
+    [m_player setDelegate:m_playerDelegate.get()];
 }
 
 PlaybackSessionInterfaceLMK::~PlaybackSessionInterfaceLMK()
 {
-    ASSERT(isUIThread());
     invalidate();
 }
 
@@ -200,12 +207,16 @@ WKSLinearMediaPlayer *PlaybackSessionInterfaceLMK::linearMediaPlayer() const
 
 void PlaybackSessionInterfaceLMK::durationChanged(double duration)
 {
+    [m_player setStartTime:0];
+    [m_player setEndTime:duration];
     [m_player setDuration:duration];
+    [m_player setCanTogglePlayback:YES];
 }
 
 void PlaybackSessionInterfaceLMK::currentTimeChanged(double currentTime, double)
 {
     [m_player setCurrentTime:currentTime];
+    [m_player setRemainingTime:std::max([m_player duration] - currentTime, 0.0)];
 }
 
 void PlaybackSessionInterfaceLMK::rateChanged(OptionSet<PlaybackSessionModel::PlaybackState> playbackState, double playbackRate, double)

@@ -31,6 +31,7 @@
 #include <WebCore/PluginViewBase.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/SharedBuffer.h>
+#include <WebCore/TextIndicator.h>
 #include <WebCore/Timer.h>
 #include <memory>
 #include <wtf/RunLoop.h>
@@ -89,6 +90,7 @@ public:
     void didEndMagnificationGesture();
     void setPageScaleFactor(double, std::optional<WebCore::IntPoint> origin);
     double pageScaleFactor() const;
+    void pluginScaleFactorDidChange();
 
     void topContentInsetDidChange();
 
@@ -101,6 +103,7 @@ public:
     bool findString(const String& target, WebCore::FindOptions, unsigned maxMatchCount);
     Vector<WebCore::FloatRect> rectsForTextMatchesInRect(const WebCore::IntRect&) const;
     bool drawsFindOverlay() const;
+    RefPtr<WebCore::TextIndicator> textIndicatorForSelection(OptionSet<WebCore::TextIndicatorOption>, WebCore::TextIndicatorPresentationTransition);
 
     String selectionString() const;
 
@@ -162,6 +165,7 @@ private:
 
     bool usesAsyncScrolling() const final;
     WebCore::ScrollingNodeID scrollingNodeID() const final;
+    void willAttachScrollingNode() final;
     void didAttachScrollingNode() final;
 
     // WebCore::Widget

@@ -47,6 +47,7 @@ class TextStream;
 
 namespace WebCore {
 
+class AXRemoteFrame;
 class AccessibilityTable;
 class AccessibilityTableCell;
 class Document;
@@ -65,7 +66,7 @@ class VisiblePosition;
 class Widget;
 
 struct CharacterOffset {
-    Node* node;
+    RefPtr<Node> node;
     int startIndex;
     int offset;
     int remainingOffset;
@@ -208,7 +209,13 @@ public:
     void valueChanged(Element*);
     void checkedStateChanged(Node*);
     void autofillTypeChanged(Node*);
-    void handleRoleChanged(AccessibilityObject*);
+    void handleRoleChanged(AccessibilityObject&);
+
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    void columnIndexChanged(AccessibilityObject&);
+    void rowIndexChanged(AccessibilityObject&);
+#endif
+
     // Called when a RenderObject is created for an Element. Depending on the
     // presence of a RenderObject, we may have instatiated an AXRenderObject or
     // an AXNodeObject. This occurs when an Element with no renderer is
@@ -217,7 +224,9 @@ public:
 #if PLATFORM(MAC)
     void onSelectedTextChanged(const VisiblePositionRange&);
 #endif
-
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    void onTextRunsChanged(const RenderObject&);
+#endif
     void updateLoadingProgress(double);
     void loadingFinished() { updateLoadingProgress(1); }
     double loadingProgress() const { return m_loadingProgress; }
@@ -246,6 +255,7 @@ public:
     void deferNodeAddedOrRemoved(Node*);
     void handleScrolledToAnchor(const Node* anchorNode);
     void onScrollbarUpdate(ScrollView*);
+    void onRemoteFrameInitialized(AXRemoteFrame&);
 
     bool isRetrievingCurrentModalNode() { return m_isRetrievingCurrentModalNode; }
     Node* modalNode();
@@ -350,6 +360,10 @@ public:
         AXAnnouncementRequested,
         AXAutocorrectionOccured,
         AXAutofillTypeChanged,
+        AXARIAColumnIndexChanged,
+        AXARIARowIndexChanged,
+        AXBrailleLabelChanged,
+        AXBrailleRoleDescriptionChanged,
         AXCellSlotsChanged,
         AXCheckedStateChanged,
         AXChildrenChanged,
@@ -426,6 +440,10 @@ public:
         AXSortDirectionChanged,
         AXTextChanged,
         AXTextCompositionChanged,
+        AXTextUnderElementChanged,
+#if ENABLE(AX_THREAD_TEXT_APIS)
+        AXTextRunsChanged,
+#endif
         AXTextSecurityChanged,
         AXElementBusyChanged,
         AXDraggingStarted,
@@ -438,6 +456,12 @@ public:
     void postNotification(RenderObject*, AXNotification, PostTarget = PostTarget::Element);
     void postNotification(Node*, AXNotification, PostTarget = PostTarget::Element);
     void postNotification(AccessibilityObject*, Document*, AXNotification, PostTarget = PostTarget::Element);
+    void postNotification(AccessibilityObject* object, AXNotification notification)
+    {
+        if (object)
+            postNotification(*object, notification);
+    }
+    void postNotification(AccessibilityObject&, AXNotification);
     // Requests clients to announce to the user the given message in the way they deem appropriate.
     WEBCORE_EXPORT void announce(const String&);
 
@@ -472,6 +496,7 @@ public:
     AXComputedObjectAttributeCache* computedObjectAttributeCache() { return m_computedObjectAttributeCache.get(); }
 
     Document& document() const { return const_cast<Document&>(m_document.get()); }
+    Ref<Document> protectedDocument() const;
     constexpr const std::optional<PageIdentifier>& pageID() const { return m_pageID; }
 
 #if PLATFORM(MAC)
@@ -483,7 +508,7 @@ public:
     void deferRecomputeTableCellSlots(AccessibilityTable&);
     void deferTextChangedIfNeeded(Node*);
     void deferSelectedChildrenChangedIfNeeded(Element&);
-    void performDeferredCacheUpdate(ForceLayout);
+    WEBCORE_EXPORT void performDeferredCacheUpdate(ForceLayout);
     void deferTextReplacementNotificationForTextControl(HTMLTextFormControlElement&, const String& previousValue);
 
     std::optional<SimpleRange> rangeMatchesTextNearRange(const SimpleRange&, const String&);
@@ -549,9 +574,9 @@ protected:
     void handleLabelChanged(AccessibilityObject*);
 
     // This is a weak reference cache for knowing if Nodes used by TextMarkers are valid.
-    void setNodeInUse(Node* n) { m_textMarkerNodes.add(n); }
-    void removeNodeForUse(Node& n) { m_textMarkerNodes.remove(&n); }
-    bool isNodeInUse(Node* n) { return m_textMarkerNodes.contains(n); }
+    void setNodeInUse(Node& n) { m_textMarkerNodes.add(n); }
+    void removeNodeForUse(Node& n) { m_textMarkerNodes.remove(n); }
+    bool isNodeInUse(Node& n) { return m_textMarkerNodes.contains(n); }
     
     // CharacterOffset functions.
     enum TraverseOption { TraverseOptionDefault = 1 << 0, TraverseOptionToNodeEnd = 1 << 1, TraverseOptionIncludeStart = 1 << 2, TraverseOptionValidateOffset = 1 << 3, TraverseOptionDoNotEnterTextControls = 1 << 4 };
@@ -673,11 +698,11 @@ private:
     HashMap<AXID, RefPtr<AccessibilityObject>> m_objects;
 
     // The pointers in these mapping HashMaps should never be dereferenced.
-    HashMap<RenderObject*, AXID> m_renderObjectMapping;
-    HashMap<Widget*, AXID> m_widgetObjectMapping;
-    HashMap<Node*, AXID> m_nodeObjectMapping;
+    HashMap<SingleThreadWeakRef<RenderObject>, AXID> m_renderObjectMapping;
+    HashMap<SingleThreadWeakRef<Widget>, AXID> m_widgetObjectMapping;
+    HashMap<WeakRef<Node, WeakPtrImplWithEventTargetData>, AXID> m_nodeObjectMapping;
     // The pointers in this HashSet should never be dereferenced.
-    ListHashSet<Node*> m_textMarkerNodes;
+    ListHashSet<WeakRef<Node, WeakPtrImplWithEventTargetData>> m_textMarkerNodes;
 
     std::unique_ptr<AXComputedObjectAttributeCache> m_computedObjectAttributeCache;
 

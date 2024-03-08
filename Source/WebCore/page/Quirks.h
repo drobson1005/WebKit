@@ -39,6 +39,7 @@ class EventTypeInfo;
 class HTMLElement;
 class HTMLVideoElement;
 class LayoutUnit;
+class LocalFrame;
 class PlatformMouseEvent;
 class RegistrableDomain;
 class SecurityOriginData;
@@ -83,6 +84,7 @@ public:
     bool shouldExposeShowModalDialog() const;
     bool shouldNavigatorPluginsBeEmpty() const;
     bool shouldDisableNavigatorStandaloneQuirk() const;
+    static bool shouldSendLongerAcceptHeaderQuirk(const URL&, LocalFrame*);
 
     WEBCORE_EXPORT bool shouldDispatchSyntheticMouseEventsWhenModifyingSelection() const;
     WEBCORE_EXPORT bool shouldSuppressAutocorrectionAndAutocapitalizationInHiddenEditableAreas() const;
@@ -184,11 +186,16 @@ public:
     bool needsDisableDOMPasteAccessQuirk() const;
 
     bool shouldDisableElementFullscreenQuirk() const;
+    bool shouldIgnorePlaysInlineRequirementQuirk() const;
+    WEBCORE_EXPORT bool shouldUseEphemeralPartitionedStorageForDOMCookies(const URL&) const;
+
+    bool needsGetElementsByNameQuirk() const;
 
 private:
     bool needsQuirks() const;
     bool isDomain(const String&) const;
     bool isEmbedDomain(const String&) const;
+    bool isYoutubeEmbedDomain() const;
 
 #if ENABLE(TOUCH_EVENTS)
     bool isAmazon() const;
@@ -254,6 +261,7 @@ private:
     mutable std::optional<bool> m_shouldDisableDataURLPaddingValidation;
     mutable std::optional<bool> m_needsDisableDOMPasteAccessQuirk;
     mutable std::optional<bool> m_shouldDisableElementFullscreen;
+    mutable std::optional<bool> m_shouldIgnorePlaysInlineRequirementQuirk;
 
     Vector<RegistrableDomain> m_subFrameDomainsForStorageAccessQuirk;
 };

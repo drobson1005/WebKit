@@ -115,8 +115,6 @@ public:
     Ref<ComputeSeekPromise> computeSeekTime(const SeekTarget&);
     void seekToTime(const MediaTime&);
 
-    bool canPlayThroughRange(const PlatformTimeRanges&);
-
     bool hasVideo() const;
 
     bool active() const { return m_active; }
@@ -166,7 +164,7 @@ private:
     bool virtualHasPendingActivity() const final;
 
     Ref<MediaPromise> sourceBufferPrivateDidReceiveInitializationSegment(SourceBufferPrivateClient::InitializationSegment&&);
-    Ref<MediaPromise> sourceBufferPrivateBufferedChanged(Vector<PlatformTimeRanges>&&, uint64_t);
+    Ref<MediaPromise> sourceBufferPrivateBufferedChanged(Vector<PlatformTimeRanges>&&);
     void sourceBufferPrivateHighestPresentationTimestampChanged(const MediaTime&);
     Ref<MediaPromise> sourceBufferPrivateDurationChanged(const MediaTime& duration);
     void sourceBufferPrivateDidDropSample();
@@ -190,7 +188,7 @@ private:
     void videoTrackSelectedChanged(VideoTrack&) final;
 
     // EventTarget
-    EventTargetInterface eventTargetInterface() const final { return SourceBufferEventTargetInterfaceType; }
+    enum EventTargetInterfaceType eventTargetInterface() const final { return EventTargetInterfaceType::SourceBuffer; }
 
     bool isRemoved() const;
     void scheduleEvent(const AtomString& eventName);
@@ -219,6 +217,7 @@ private:
     WEBCORE_EXPORT Ref<SamplesPromise> enqueuedSamplesForTrackID(TrackID);
     WEBCORE_EXPORT MediaTime minimumUpcomingPresentationTimeForTrackID(TrackID);
     WEBCORE_EXPORT void setMaximumQueueDepthForTrackID(TrackID, uint64_t);
+    WEBCORE_EXPORT Ref<GenericPromise> setMaximumSourceBufferSize(uint64_t);
 
     void updateBuffered();
 
@@ -265,6 +264,7 @@ private:
     bool m_appendBufferPending { false };
     uint32_t m_appendBufferOperationId { 0 };
     bool m_removeCodedFramesPending { false };
+    std::optional<uint64_t> m_maximumBufferSize;
 
 #if !RELEASE_LOG_DISABLED
     Ref<const Logger> m_logger;

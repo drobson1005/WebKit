@@ -60,6 +60,7 @@
 #include "WasmThunks.h"
 #include "WasmTypeDefinition.h"
 #include <bit>
+#include <cmath>
 #include <wtf/Assertions.h>
 #include <wtf/Compiler.h>
 #include <wtf/HashFunctions.h>
@@ -1416,14 +1417,14 @@ void BBQJIT::pushArrayNewFromSegment(arraySegmentOperation operation, uint32_t t
 
 PartialResult WARN_UNUSED_RETURN BBQJIT::addArrayNewData(uint32_t typeIndex, uint32_t dataIndex, ExpressionType arraySize, ExpressionType offset, ExpressionType& result)
 {
-    pushArrayNewFromSegment(operationWasmArrayNewData, typeIndex, dataIndex, arraySize, offset, ExceptionType::OutOfBoundsDataSegmentAccess, result);
+    pushArrayNewFromSegment(operationWasmArrayNewData, typeIndex, dataIndex, arraySize, offset, ExceptionType::BadArrayNewInitData, result);
     LOG_INSTRUCTION("ArrayNewData", typeIndex, dataIndex, arraySize, offset, RESULT(result));
     return { };
 }
 
 PartialResult WARN_UNUSED_RETURN BBQJIT::addArrayNewElem(uint32_t typeIndex, uint32_t elemSegmentIndex, ExpressionType arraySize, ExpressionType offset, ExpressionType& result)
 {
-    pushArrayNewFromSegment(operationWasmArrayNewElem, typeIndex, elemSegmentIndex, arraySize, offset, ExceptionType::OutOfBoundsElementSegmentAccess, result);
+    pushArrayNewFromSegment(operationWasmArrayNewElem, typeIndex, elemSegmentIndex, arraySize, offset, ExceptionType::BadArrayNewInitElem, result);
     LOG_INSTRUCTION("ArrayNewElem", typeIndex, elemSegmentIndex, arraySize, offset, RESULT(result));
     return { };
 }
@@ -1717,8 +1718,10 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Sub(Value lhs, Value rhs, Value& 
         ),
         BLOCK(
             if (rhs.isConst()) {
-                // Add a negative if rhs is a constant.
-                emitMoveConst(Value::fromF32(-rhs.asF32()), Location::fromFPR(wasmScratchFPR));
+                // If rhs is a constant, it will be expressed as a positive
+                // value and so needs to be negated unless it is NaN
+                auto floatVal = std::isnan(rhs.asF32()) ? rhs.asF32() : -rhs.asF32();
+                emitMoveConst(Value::fromF32(floatVal), Location::fromFPR(wasmScratchFPR));
                 m_jit.addFloat(lhsLocation.asFPR(), wasmScratchFPR, resultLocation.asFPR());
             } else {
                 emitMoveConst(lhs, Location::fromFPR(wasmScratchFPR));
@@ -1738,8 +1741,10 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addF64Sub(Value lhs, Value rhs, Value& 
         ),
         BLOCK(
             if (rhs.isConst()) {
-                // Add a negative if rhs is a constant.
-                emitMoveConst(Value::fromF64(-rhs.asF64()), Location::fromFPR(wasmScratchFPR));
+                // If rhs is a constant, it will be expressed as a positive
+                // value and so needs to be negated unless it is NaN
+                auto floatVal = std::isnan(rhs.asF64()) ? rhs.asF64() : -rhs.asF64();
+                emitMoveConst(Value::fromF64(floatVal), Location::fromFPR(wasmScratchFPR));
                 m_jit.addDouble(lhsLocation.asFPR(), wasmScratchFPR, resultLocation.asFPR());
             } else {
                 emitMoveConst(lhs, Location::fromFPR(wasmScratchFPR));

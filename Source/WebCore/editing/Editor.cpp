@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2024 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
  *
  * Redistribution and use in source and binary forms, with or without
@@ -3285,13 +3285,16 @@ void Editor::updateMarkersForWordsAffectedByEditing(bool doNotRemoveIfSelectionA
 
     OptionSet<DocumentMarker::Type> markerTypesToRemove {
         DocumentMarker::Type::CorrectionIndicator,
-        DocumentMarker::Type::DictationAlternatives,
         DocumentMarker::Type::SpellCheckingExemption,
         DocumentMarker::Type::Spelling,
 #if !PLATFORM(IOS_FAMILY)
         DocumentMarker::Type::Grammar,
 #endif
     };
+
+    if (CheckedPtr client = this->client(); client && client->shouldRemoveDictationAlternativesAfterEditing())
+        markerTypesToRemove.add(DocumentMarker::Type::DictationAlternatives);
+
     adjustMarkerTypesToRemoveForWordsAffectedByEditing(markerTypesToRemove);
 
     removeMarkers(wordRange, markerTypesToRemove, RemovePartiallyOverlappingMarker::Yes);
@@ -4089,8 +4092,8 @@ bool Editor::selectionStartHasMarkerFor(DocumentMarker::Type markerType, int fro
     if (!markers)
         return false;
 
-    unsigned int startOffset = static_cast<unsigned int>(from);
-    unsigned int endOffset = static_cast<unsigned int>(from + length);
+    unsigned startOffset = static_cast<unsigned>(from);
+    unsigned endOffset = static_cast<unsigned>(from + length);
     for (auto& marker : markers->markersFor(*node)) {
         if (marker->startOffset() <= startOffset && endOffset <= marker->endOffset() && marker->type() == markerType)
             return true;

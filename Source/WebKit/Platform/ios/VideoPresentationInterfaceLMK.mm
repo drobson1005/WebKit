@@ -29,9 +29,10 @@
 #if ENABLE(LINEAR_MEDIA_PLAYER)
 
 #import "PlaybackSessionInterfaceLMK.h"
+#import "WKSLinearMediaPlayer.h"
+#import "WKSLinearMediaTypes.h"
 #import <UIKit/UIKit.h>
 #import <WebCore/WebAVPlayerLayerView.h>
-#import <WebKitSwift/WebKitSwift.h>
 #import <pal/spi/vision/LinearMediaKitSPI.h>
 
 namespace WebKit {
@@ -63,13 +64,16 @@ void VideoPresentationInterfaceLMK::setupFullscreen(UIView& videoView, const Flo
 
 void VideoPresentationInterfaceLMK::setupPlayerViewController()
 {
-    if (!m_playerViewController)
-        m_playerViewController = [linearMediaPlayer() makeViewController];
+    if (m_playerViewController)
+        return;
 
     linearMediaPlayer().allowFullScreenFromInline = YES;
     linearMediaPlayer().contentType = WKSLinearMediaContentTypePlanar;
     linearMediaPlayer().presentationMode = WKSLinearMediaPresentationModeInline;
+    linearMediaPlayer().captionLayer = captionsLayer();
     linearMediaPlayer().videoLayer = [m_playerLayerView playerLayer];
+
+    m_playerViewController = [linearMediaPlayer() makeViewController];
 }
 
 void VideoPresentationInterfaceLMK::invalidatePlayerViewController()

@@ -147,35 +147,50 @@ static bool requiresVisualReordering(const Box& layoutBox)
     return false;
 }
 
-bool InlineItemsBuilder::traverseUntilDamaged(LayoutQueue& layoutQueue, const Box& subtreeRoot, const Box& firstDamagedLayoutBox)
+InlineItemsBuilder::LayoutQueue InlineItemsBuilder::traverseUntilDamaged(const Box& firstDamagedLayoutBox)
 {
-    if (&subtreeRoot == &firstDamagedLayoutBox)
-        return true;
+    LayoutQueue queue;
 
-    m_contentRequiresVisualReordering = m_contentRequiresVisualReordering || requiresVisualReordering(subtreeRoot);
-    if (!isTextOrLineBreak(subtreeRoot)) {
-        m_isTextAndForcedLineBreakOnlyContent = false;
-        if (subtreeRoot.isInlineBox())
-            ++m_inlineBoxCount;
-    }
+    auto appendAndCheckForDamage = [&] (auto& layoutBox) {
+        queue.append(layoutBox);
 
-    auto shouldSkipSubtree = subtreeRoot.establishesFormattingContext();
-    if (!shouldSkipSubtree) {
-        if (auto* elementBox = dynamicDowncast<ElementBox>(subtreeRoot); elementBox && elementBox->hasChild()) {
-            auto& firstChild = *elementBox->firstChild();
-            layoutQueue.append(firstChild);
-            if (traverseUntilDamaged(layoutQueue, firstChild, firstDamagedLayoutBox))
-                return true;
-            layoutQueue.takeLast();
+        m_contentRequiresVisualReordering = m_contentRequiresVisualReordering || requiresVisualReordering(layoutBox);
+        if (!isTextOrLineBreak(layoutBox)) {
+            m_isTextAndForcedLineBreakOnlyContent = false;
+            if (layoutBox.isInlineBox())
+                ++m_inlineBoxCount;
+        }
+        return &layoutBox == &firstDamagedLayoutBox;
+    };
+
+    if (appendAndCheckForDamage(*root().firstChild()))
+        return queue;
+
+    while (!queue.isEmpty()) {
+        while (true) {
+            auto layoutBox = queue.last();
+            auto isInlineBoxWithInlineContent = layoutBox->isInlineBox() && !layoutBox->isInlineTextBox() && !layoutBox->isLineBreakBox() && !layoutBox->isOutOfFlowPositioned();
+            if (!isInlineBoxWithInlineContent)
+                break;
+            auto* firstChild = downcast<ElementBox>(layoutBox).firstChild();
+            if (!firstChild)
+                break;
+            if (appendAndCheckForDamage(*firstChild))
+                return queue;
+        }
+
+        while (!queue.isEmpty()) {
+            if (auto* nextSibling = queue.takeLast()->nextSibling()) {
+                if (appendAndCheckForDamage(*nextSibling))
+                    return queue;
+                break;
+            }
         }
     }
-    if (auto* nextSibling = subtreeRoot.nextSibling()) {
-        layoutQueue.takeLast();
-        layoutQueue.append(*nextSibling);
-        if (traverseUntilDamaged(layoutQueue, *nextSibling, firstDamagedLayoutBox))
-            return true;
-    }
-    return false;
+    // How did we miss the damaged box?
+    ASSERT_NOT_REACHED();
+    queue.append(*root().firstChild());
+    return queue;
 }
 
 InlineItemsBuilder::LayoutQueue InlineItemsBuilder::initializeLayoutQueue(InlineItemPosition startPosition)
@@ -205,16 +220,7 @@ InlineItemsBuilder::LayoutQueue InlineItemsBuilder::initializeLayoutQueue(Inline
     }
 
     auto& firstDamagedLayoutBox = existingInlineItems[startPosition.index].layoutBox();
-    auto& firstChild = *root.firstChild();
-    LayoutQueue layoutQueue;
-    layoutQueue.append(firstChild);
-    traverseUntilDamaged(layoutQueue, firstChild, firstDamagedLayoutBox);
-
-    if (layoutQueue.isEmpty()) {
-        ASSERT_NOT_REACHED();
-        layoutQueue.append(*root.firstChild());
-    }
-    return layoutQueue;
+    return traverseUntilDamaged(firstDamagedLayoutBox);
 }
 
 void InlineItemsBuilder::collectInlineItems(InlineItemList& inlineItemList, InlineItemPosition startPosition)
@@ -262,10 +268,9 @@ void InlineItemsBuilder::collectInlineItems(InlineItemList& inlineItemList, Inli
             if (layoutBox->isOutOfFlowPositioned()) {
                 m_isTextAndForcedLineBreakOnlyContent = false;
                 inlineItemList.append({ layoutBox, InlineItem::Type::Opaque });
-            } else if (layoutBox->isInlineTextBox()) {
-                auto& inlineTextBox = downcast<InlineTextBox>(layoutBox);
-                handleTextContent(inlineTextBox, inlineItemList, partialContentOffset(inlineTextBox));
-            } else if (layoutBox->isAtomicInlineLevelBox() || layoutBox->isLineBreakBox())
+            } else if (auto* inlineTextBox = dynamicDowncast<InlineTextBox>(layoutBox.get()))
+                handleTextContent(*inlineTextBox, inlineItemList, partialContentOffset(*inlineTextBox));
+            else if (layoutBox->isAtomicInlineLevelBox() || layoutBox->isLineBreakBox())
                 handleInlineLevelBox(layoutBox, inlineItemList);
             else if (layoutBox->isInlineBox())
                 handleInlineBoxEnd(layoutBox, inlineItemList);
@@ -450,21 +455,22 @@ static inline void buildBidiParagraph(const RenderStyle& rootStyle, const Inline
     for (size_t index = 0; index < inlineItemList.size(); ++index) {
         auto& inlineItem = inlineItemList[index];
         auto& layoutBox = inlineItem.layoutBox();
-        auto mayAppendTextContentAsOneEntry = is<InlineTextBox>(layoutBox) && !TextUtil::shouldPreserveNewline(downcast<InlineTextBox>(layoutBox));
 
         if (inlineItem.isText() || inlineItem.isSoftLineBreak()) {
+            auto* inlineTextBox = dynamicDowncast<InlineTextBox>(layoutBox);
+            auto mayAppendTextContentAsOneEntry = inlineTextBox && !TextUtil::shouldPreserveNewline(*inlineTextBox);
             if (mayAppendTextContentAsOneEntry) {
                 // Append the entire InlineTextBox content and keep track of individual inline item positions as we process them.
                 if (lastInlineTextBox != &layoutBox) {
                     inlineTextBoxOffset = paragraphContentBuilder.length();
-                    replaceNonPreservedNewLineAndTabCharactersAndAppend(downcast<InlineTextBox>(layoutBox), paragraphContentBuilder);
+                    replaceNonPreservedNewLineAndTabCharactersAndAppend(*inlineTextBox, paragraphContentBuilder);
                     lastInlineTextBox = &layoutBox;
                 }
-                inlineItemOffsetList.append({ inlineTextBoxOffset + (is<InlineTextItem>(inlineItem) ? downcast<InlineTextItem>(inlineItem).start() : downcast<InlineSoftLineBreakItem>(inlineItem).position()) });
-            } else if (is<InlineTextItem>(inlineItem)) {
+                auto* inlineTextItem = dynamicDowncast<InlineTextItem>(inlineItem);
+                inlineItemOffsetList.append({ inlineTextBoxOffset + (inlineTextItem ? inlineTextItem->start() : downcast<InlineSoftLineBreakItem>(inlineItem).position()) });
+            } else if (auto* inlineTextItem = dynamicDowncast<InlineTextItem>(inlineItem)) {
                 inlineItemOffsetList.append({ paragraphContentBuilder.length() });
-                auto& inlineTextItem = downcast<InlineTextItem>(inlineItem);
-                paragraphContentBuilder.append(StringView(inlineTextItem.inlineTextBox().content()).substring(inlineTextItem.start(), inlineTextItem.length()));
+                paragraphContentBuilder.append(StringView(inlineTextItem->inlineTextBox().content()).substring(inlineTextItem->start(), inlineTextItem->length()));
             } else if (is<InlineSoftLineBreakItem>(inlineItem))
                 handleBidiParagraphStart(paragraphContentBuilder, inlineItemOffsetList, bidiContextStack);
             else

@@ -280,7 +280,7 @@ static void openNewWindow(const URL& urlToLoad, LocalFrame& frame, Event* event,
 
 static void insertUnicodeCharacter(UChar character, LocalFrame& frame)
 {
-    String text(&character, 1);
+    String text(span(character));
     if (!frame.checkedEditor()->shouldInsertText(text, frame.selection().selection().toNormalizedRange(), EditorInsertAction::Typed))
         return;
 
@@ -1515,14 +1515,14 @@ void ContextMenuController::checkOrEnableIfNeeded(ContextMenuItem& item) const
             shouldEnable = frame->selection().isRange();
             break;
         case ContextMenuItemTagPaste:
-            shouldEnable = frame->editor().canDHTMLPaste() || frame->editor().canPaste();
+            shouldEnable = frame->editor().canDHTMLPaste() || frame->editor().canEdit();
             break;
         case ContextMenuItemTagCopyLinkToHighlight:
             shouldEnable = shouldEnableCopyLinkToHighlight();
             break;
 #if PLATFORM(GTK)
         case ContextMenuItemTagPasteAsPlainText:
-            shouldEnable = frame->editor().canDHTMLPaste() || frame->editor().canPaste();
+            shouldEnable = frame->editor().canDHTMLPaste() || frame->editor().canEdit();
             break;
         case ContextMenuItemTagDelete:
             shouldEnable = frame->editor().canDelete();

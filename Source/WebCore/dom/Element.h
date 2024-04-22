@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2024 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -64,6 +64,7 @@ class ElementRareData;
 class FormAssociatedCustomElement;
 class FormListedElement;
 class HTMLDocument;
+class HTMLFormControlElement;
 class IntSize;
 class JSCustomElementInterface;
 class KeyframeEffectStack;
@@ -98,12 +99,18 @@ enum class IsSyntheticClick : bool { No, Yes };
 enum class ParserContentPolicy : uint8_t;
 enum class ResolveURLs : uint8_t { No, NoExcludingURLsForPrivacy, Yes, YesExcludingURLsForPrivacy };
 enum class SelectionRestorationMode : uint8_t;
+enum class ShadowRootDelegatesFocus : bool { No, Yes };
+enum class ShadowRootClonable : bool { No, Yes };
+enum class ShadowRootSerializable : bool { No, Yes };
+enum class VisibilityAdjustment : uint8_t;
 
 struct CheckVisibilityOptions;
 struct FullscreenOptions;
 struct GetAnimationsOptions;
+struct GetHTMLOptions;
 struct IntersectionObserverData;
 struct KeyframeAnimationOptions;
+struct PointerLockOptions;
 struct ResizeObserverData;
 struct ScrollIntoViewOptions;
 struct ScrollToOptions;
@@ -154,15 +161,17 @@ public:
     WEBCORE_EXPORT void setUnsignedIntegralAttribute(const QualifiedName& attributeName, unsigned value);
     WEBCORE_EXPORT RefPtr<Element> getElementAttribute(const QualifiedName& attributeName) const;
     WEBCORE_EXPORT void setElementAttribute(const QualifiedName& attributeName, Element* value);
-    WEBCORE_EXPORT std::optional<Vector<RefPtr<Element>>> getElementsArrayAttribute(const QualifiedName& attributeName) const;
-    WEBCORE_EXPORT void setElementsArrayAttribute(const QualifiedName& attributeName, std::optional<Vector<RefPtr<Element>>>&& value);
+    WEBCORE_EXPORT std::optional<Vector<Ref<Element>>> getElementsArrayAttribute(const QualifiedName& attributeName) const;
+    WEBCORE_EXPORT void setElementsArrayAttribute(const QualifiedName& attributeName, std::optional<Vector<Ref<Element>>>&& value);
     static bool isElementReflectionAttribute(const Settings&, const QualifiedName&);
-    static bool isElementsArrayReflectionAttribute(const Settings&, const QualifiedName&);
+    static bool isElementsArrayReflectionAttribute(const QualifiedName&);
 
     // Call this to get the value of an attribute that is known not to be the style
     // attribute or one of the SVG animatable attributes.
     inline bool hasAttributeWithoutSynchronization(const QualifiedName&) const;
     inline const AtomString& attributeWithoutSynchronization(const QualifiedName&) const;
+    inline const AtomString& attributeWithDefaultARIA(const QualifiedName&) const;
+    inline String attributeTrimmedWithDefaultARIA(const QualifiedName&) const;
 
 #if DUMP_NODE_STATISTICS
     bool hasNamedNodeMap() const;
@@ -356,13 +365,12 @@ public:
 
     virtual RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&);
     virtual bool rendererIsNeeded(const RenderStyle&);
-    virtual bool rendererIsEverNeeded() { return true; }
 
     inline ShadowRoot* shadowRoot() const; // Defined in ElementRareData.h
     RefPtr<ShadowRoot> shadowRootForBindings(JSC::JSGlobalObject&) const;
 
     WEBCORE_EXPORT ExceptionOr<ShadowRoot&> attachShadow(const ShadowRootInit&);
-    ExceptionOr<ShadowRoot&> attachDeclarativeShadow(ShadowRootMode, bool delegatesFocus, bool clonable);
+    ExceptionOr<ShadowRoot&> attachDeclarativeShadow(ShadowRootMode, ShadowRootDelegatesFocus, ShadowRootClonable, ShadowRootSerializable);
 
     ShadowRoot* userAgentShadowRoot() const;
     RefPtr<ShadowRoot> protectedUserAgentShadowRoot() const;
@@ -379,7 +387,7 @@ public:
 
     CustomElementDefaultARIA& customElementDefaultARIA();
     CheckedRef<CustomElementDefaultARIA> checkedCustomElementDefaultARIA();
-    CustomElementDefaultARIA* customElementDefaultARIAIfExists();
+    CustomElementDefaultARIA* customElementDefaultARIAIfExists() const;
 
     bool isInActiveChain() const { return isUserActionElement() && isUserActionElementInActiveChain(); }
     bool active() const { return isUserActionElement() && isUserActionElementActive(); }
@@ -492,6 +500,7 @@ public:
     virtual void runFocusingStepsForAutofocus();
 
     ExceptionOr<void> setHTMLUnsafe(const String&);
+    String getHTML(GetHTMLOptions&&) const;
 
     WEBCORE_EXPORT String innerHTML() const;
     WEBCORE_EXPORT String outerHTML() const;
@@ -609,7 +618,7 @@ public:
     void removeFromTopLayer();
 
 #if ENABLE(FULLSCREEN_API)
-    bool hasFullscreenFlag() const { return hasStateFlag(StateFlag::IsFullscreen); }
+    bool hasFullscreenFlag() const { return hasElementStateFlag(ElementStateFlag::IsFullscreen); }
     void setFullscreenFlag(bool);
     WEBCORE_EXPORT void webkitRequestFullscreen();
     virtual void requestFullscreen(FullscreenOptions&&, RefPtr<DeferredPromise>&&);
@@ -620,15 +629,19 @@ public:
     void clearPopoverData();
     bool isPopoverShowing() const;
 
-    virtual void handleInvokeInternal(const AtomString&) { }
+    virtual bool handleInvokeInternal(const HTMLFormControlElement&, const AtomString&) { return false; }
 
     ExceptionOr<void> setPointerCapture(int32_t);
     ExceptionOr<void> releasePointerCapture(int32_t);
     bool hasPointerCapture(int32_t);
 
 #if ENABLE(POINTER_LOCK)
+    JSC::JSValue requestPointerLock(JSC::JSGlobalObject& lexicalGlobalObject, PointerLockOptions&&);
     WEBCORE_EXPORT void requestPointerLock();
 #endif
+
+    OptionSet<VisibilityAdjustment> visibilityAdjustment() const;
+    void setVisibilityAdjustment(OptionSet<VisibilityAdjustment>);
 
     bool isSpellCheckingEnabled() const;
     WEBCORE_EXPORT bool isWritingSuggestionsEnabled() const;
@@ -732,8 +745,8 @@ public:
     using ContainerNode::setAttributeEventListener;
     void setAttributeEventListener(const AtomString& eventType, const QualifiedName& attributeName, const AtomString& value);
 
-    IntersectionObserverData& ensureIntersectionObserverData();
-    IntersectionObserverData* intersectionObserverDataIfExists();
+    virtual IntersectionObserverData& ensureIntersectionObserverData();
+    virtual IntersectionObserverData* intersectionObserverDataIfExists();
 
     ResizeObserverData& ensureResizeObserverData();
     ResizeObserverData* resizeObserverDataIfExists();
@@ -774,6 +787,9 @@ public:
     bool hasCustomState(const AtomString& state) const;
     CustomStateSet& ensureCustomStateSet();
 
+    bool capturedInViewTransition() const { return hasElementStateFlag(ElementStateFlag::CapturedInViewTransition); }
+    void setCapturedInViewTransition(bool captured) { setElementStateFlag(ElementStateFlag::CapturedInViewTransition, captured); }
+
 protected:
     Element(const QualifiedName&, Document&, OptionSet<TypeFlag>);
 
@@ -799,6 +815,7 @@ protected:
     FormAssociatedCustomElement& formAssociatedCustomElementUnsafe() const;
     void ensureFormAssociatedCustomElement();
 
+    void disconnectFromIntersectionObservers();
     static AtomString makeTargetBlankIfHasDanglingMarkup(const AtomString& target);
 
 private:
@@ -858,7 +875,6 @@ private:
     LayoutRect absoluteEventBounds(bool& boundsIncludeAllDescendantElements, bool& includesFixedPositionElements);
     LayoutRect absoluteEventBoundsOfElementAndDescendants(bool& includesFixedPositionElements);
 
-    void disconnectFromIntersectionObservers();
     void disconnectFromIntersectionObserversSlow(IntersectionObserverData&);
 
     void disconnectFromResizeObservers();
@@ -918,8 +934,8 @@ private:
     bool hasLanguageAttribute() const { return hasLangAttr() || hasXMLLangAttr(); }
     bool hasLangAttrKnownToMatchDocumentElement() const { return hasLanguageAttribute() && effectiveLangKnownToMatchDocumentElement(); }
 
-    bool hasEverHadSmoothScroll() const { return hasStateFlag(StateFlag::EverHadSmoothScroll); }
-    void setHasEverHadSmoothScroll(bool value) { return setStateFlag(StateFlag::EverHadSmoothScroll, value); }
+    bool hasEverHadSmoothScroll() const { return hasElementStateFlag(ElementStateFlag::EverHadSmoothScroll); }
+    void setHasEverHadSmoothScroll(bool value) { return setElementStateFlag(ElementStateFlag::EverHadSmoothScroll, value); }
 
     void parentOrShadowHostNode() const = delete; // Call parentNode() instead.
 

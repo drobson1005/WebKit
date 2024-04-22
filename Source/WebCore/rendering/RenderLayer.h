@@ -151,8 +151,9 @@ struct ScrollRectToVisibleOptions {
 
 using ScrollingScope = uint64_t;
 
-class RenderLayer : public CanMakeSingleThreadWeakPtr<RenderLayer>, public CanMakeCheckedPtr {
+class RenderLayer final : public CanMakeSingleThreadWeakPtr<RenderLayer>, public CanMakeCheckedPtr<RenderLayer> {
     WTF_MAKE_ISO_ALLOCATED(RenderLayer);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderLayer);
 public:
     friend class RenderReplica;
     friend class RenderLayerFilters;
@@ -416,11 +417,9 @@ public:
             || m_hasNotIsolatedBlendingDescendantsStatusDirty;
     }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     bool isPaintingSVGResourceLayer() const { return m_isPaintingSVGResourceLayer; }
 
     inline RenderSVGHiddenContainer* enclosingSVGHiddenOrResourceContainer() const;
-#endif
 
     void repaintIncludingDescendants();
 
@@ -693,6 +692,7 @@ public:
         UseFragmentBoxesExcludingCompositing    = 1 << 7,
         UseFragmentBoxesIncludingCompositing    = 1 << 8,
         IncludeRootBackgroundPaintingArea       = 1 << 9,
+        PreserveAncestorFlags                   = 1 << 10,
     };
     static constexpr OptionSet<CalculateLayerBoundsFlag> defaultCalculateLayerBoundsFlags() { return { IncludeSelfTransform, UseLocalClipRectIfPossible, IncludePaintedFilterOutsets, UseFragmentBoxesExcludingCompositing }; }
 
@@ -885,6 +885,8 @@ public:
 
     void paintSVGResourceLayer(GraphicsContext&, const AffineTransform& contentTransform);
 
+    bool ancestorLayerIsDOMParent(const RenderLayer* ancestor) const;
+
 private:
 
     void setNextSibling(RenderLayer* next) { m_next = next; }
@@ -1011,10 +1013,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->location();
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->currentSVGLayoutLocation();
-#endif
         return { };
     }
 
@@ -1022,10 +1022,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->borderBoxRect();
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->borderBoxRectEquivalent();
-#endif
         return { };
     }
 
@@ -1033,10 +1031,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->borderBoxRectInFragment(fragment, flags);
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->borderBoxRectInFragmentEquivalent(fragment, flags);
-#endif
         return { };
     }
 
@@ -1044,10 +1040,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->visualOverflowRect();
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->visualOverflowRectEquivalent();
-#endif
         return { };
     }
 
@@ -1055,10 +1049,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->overflowClipRect(location, fragment, relevancy);
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->overflowClipRect(location, fragment, relevancy);
-#endif
         return { };
     }
 
@@ -1066,10 +1058,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->overflowClipRectForChildLayers(location, fragment, relevancy);
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->overflowClipRectForChildLayers(location, fragment, relevancy);
-#endif
         return { };
     }
 
@@ -1077,10 +1067,8 @@ private:
     {
         if (auto* box = dynamicDowncast<RenderBox>(renderer()))
             return box->hasVisualOverflow();
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
             return svgModelObject->hasVisualOverflow();
-#endif
         return false;
     }
 
@@ -1137,8 +1125,7 @@ private:
         const LayoutSize& translationOffset = LayoutSize());
     HitLayer hitTestList(LayerList, RenderLayer* rootLayer, const HitTestRequest&, HitTestResult&,
         const LayoutRect& hitTestRect, const HitTestLocation&,
-        const HitTestingTransformState*, double* zOffsetForDescendants, double* zOffset,
-        const HitTestingTransformState* unflattenedTransformState, bool depthSortDescendants);
+        const HitTestingTransformState*, double* zOffsetForDescendants, bool depthSortDescendants);
 
     Ref<HitTestingTransformState> createLocalTransformState(RenderLayer* rootLayer, RenderLayer* containerLayer,
         const LayoutRect& hitTestRect, const HitTestLocation&,
@@ -1261,9 +1248,7 @@ private:
 
     bool m_insideSVGForeignObject : 1;
     bool m_isHiddenByOverflowTruncation : 1 { false };
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     bool m_isPaintingSVGResourceLayer : 1 { false };
-#endif
 
     unsigned m_indirectCompositingReason : 4; // IndirectCompositingReason
     unsigned m_viewportConstrainedNotCompositedReason : 2; // ViewportConstrainedNotCompositedReason
@@ -1323,10 +1308,8 @@ private:
     // Pointer to the enclosing RenderLayer that caused us to be paginated. It is 0 if we are not paginated.
     SingleThreadWeakPtr<RenderLayer> m_enclosingPaginationLayer;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // Pointer to the enclosing RenderSVGHiddenContainer or RenderSVGResourceContainer, if present.
     SingleThreadWeakPtr<RenderSVGHiddenContainer> m_enclosingSVGHiddenOrResourceContainer;
-#endif
 
     IntRect m_blockSelectionGapsBounds;
 

@@ -120,6 +120,7 @@ public:
     template<PtrTag tag>
     LinkBuffer(MacroAssembler& macroAssembler, CodePtr<tag> code, size_t size, Profile profile = Profile::Uncategorized, JITCompilationEffort effort = JITCompilationMustSucceed, bool shouldPerformBranchCompaction = true)
         : m_size(size)
+        , m_isRewriting(true)
         , m_profile(profile)
         , m_code(code.template retagged<LinkBufferPtrTag>())
     {
@@ -404,6 +405,7 @@ private:
 #endif
     bool m_alreadyDisassembled { false };
     bool m_isThunk { false };
+    bool m_isRewriting { false };
     Profile m_profile { Profile::Uncategorized };
     CodePtr<LinkBufferPtrTag> m_code;
     Vector<RefPtr<SharedTask<void(LinkBuffer&)>>> m_linkTasks;
@@ -439,6 +441,9 @@ private:
 
 #define FINALIZE_CODE(linkBufferReference, resultPtrTag, simpleName, ...)  \
     FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly()), linkBufferReference, resultPtrTag, simpleName, __VA_ARGS__)
+
+#define FINALIZE_BASELINE_CODE(linkBufferReference, resultPtrTag, ...)  \
+    FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly() || Options::dumpBaselineDisassembly()), linkBufferReference, resultPtrTag, nullptr, __VA_ARGS__)
 
 #define FINALIZE_DFG_CODE(linkBufferReference, resultPtrTag, ...)  \
     FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly() || Options::dumpDFGDisassembly()), linkBufferReference, resultPtrTag, nullptr, __VA_ARGS__)

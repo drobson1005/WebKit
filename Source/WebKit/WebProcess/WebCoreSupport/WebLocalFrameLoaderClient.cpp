@@ -1358,22 +1358,21 @@ void WebLocalFrameLoaderClient::loadStorageAccessQuirksIfNeeded()
 {
     RefPtr webPage = m_frame->page();
 
-    if (!webPage || !m_frame->coreLocalFrame() || !m_frame->coreLocalFrame()->isMainFrame() || !m_frame->coreLocalFrame()->document())
+    if (!webPage || !m_frame->isMainFrame() || !m_frame->coreLocalFrame()->document())
         return;
 
     auto* document = m_frame->coreLocalFrame()->document();
-    RegistrableDomain domain { document->url() };
-    if (!WebProcess::singleton().haveStorageAccessQuirksForDomain(domain))
+    URL documentURLWithoutFragmentOrQueries { document->url().viewWithoutQueryOrFragmentIdentifier().toStringWithoutCopying() };
+    if (!WebProcess::singleton().haveStorageAccessQuirksForDomain(RegistrableDomain { documentURLWithoutFragmentOrQueries }))
         return;
 
-    WebProcess::singleton().ensureNetworkProcessConnection().connection().sendWithAsyncReply(Messages::NetworkConnectionToWebProcess::StorageAccessQuirkForTopFrameDomain(WTFMove(domain)), [weakDocument = WeakPtr { *document }](Vector<RegistrableDomain>&& domains) {
+    WebProcess::singleton().ensureNetworkProcessConnection().connection().sendWithAsyncReply(Messages::NetworkConnectionToWebProcess::StorageAccessQuirkForTopFrameDomain(documentURLWithoutFragmentOrQueries), [weakDocument = WeakPtr { *document }](Vector<RegistrableDomain>&& domains) {
         if (!domains.size())
             return;
         if (!weakDocument)
             return;
         weakDocument->quirks().setSubFrameDomainsForStorageAccessQuirk(WTFMove(domains));
     });
-
 }
 
 String WebLocalFrameLoaderClient::generatedMIMETypeForURLScheme(StringView /*URLScheme*/) const
@@ -1542,7 +1541,8 @@ void WebLocalFrameLoaderClient::transitionToCommittedForNewPage()
     bool horizontalLock = shouldHideScrollbars || webPage->alwaysShowsHorizontalScroller();
     bool verticalLock = shouldHideScrollbars || webPage->alwaysShowsVerticalScroller();
 
-    m_frame->coreLocalFrame()->createView(webPage->size(), webPage->backgroundColor(),
+    auto size = m_frame->isRootFrame() && !isMainFrame && oldView ? oldView->size() : webPage->size();
+    m_frame->coreLocalFrame()->createView(size, webPage->backgroundColor(),
         webPage->fixedLayoutSize(), fixedVisibleContentRect, shouldUseFixedLayout,
         horizontalScrollbarMode, horizontalLock, verticalScrollbarMode, verticalLock);
 
@@ -1589,6 +1589,8 @@ void WebLocalFrameLoaderClient::transitionToCommittedForNewPage()
 
     if (webPage->scrollPinningBehavior() != ScrollPinningBehavior::DoNotPin)
         view->setScrollPinningBehavior(webPage->scrollPinningBehavior());
+
+    webPage->scheduleFullEditorStateUpdate();
 
 #if USE(COORDINATED_GRAPHICS)
     if (shouldUseFixedLayout) {
@@ -1940,11 +1942,6 @@ void WebLocalFrameLoaderClient::getLoadDecisionForIcons(const Vector<std::pair<W
 
     for (auto& icon : icons)
         webPage->send(Messages::WebPageProxy::GetLoadDecisionForIcon(icon.first, CallbackID::fromInteger(icon.second)));
-}
-
-void WebLocalFrameLoaderClient::broadcastFrameRemovalToOtherProcesses()
-{
-    WebFrameLoaderClient::broadcastFrameRemovalToOtherProcesses();
 }
 
 void WebLocalFrameLoaderClient::broadcastMainFrameURLChangeToOtherProcesses(const URL& url)

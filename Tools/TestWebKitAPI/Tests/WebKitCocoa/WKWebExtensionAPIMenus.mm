@@ -27,6 +27,7 @@
 
 #if ENABLE(WK_WEB_EXTENSIONS)
 
+#import "HTTPServer.h"
 #import "TestUIDelegate.h"
 #import "TestWKWebView.h"
 #import "TestWebExtensionsDelegate.h"
@@ -1906,6 +1907,48 @@ TEST(WKWebExtensionAPIMenus, MacFrameContextMenuItems)
     [webView mouseUpAtPoint:NSMakePoint(200, 200) withFlags:0 eventType:NSEventTypeRightMouseUp];
 
     Util::run(&gotContextMenu);
+
+    [manager run];
+}
+
+TEST(WKWebExtensionAPIMenus, ClickedMenuItemAndPermissionsRequest)
+{
+    auto *backgroundScript = Util::constructScript(@[
+        @"browser.menus.create({",
+        @"  id: 'click-item',",
+        @"  title: 'Click Item',",
+        @"  contexts: ['all'],",
+        @"  onclick: async (info, tab) => {",
+        @"    try {",
+        @"      const result = await browser.permissions.request({ 'permissions': [ 'menus' ] })",
+        @"      if (result)",
+        @"        browser.test.notifyPass()",
+        @"      else",
+        @"        browser.test.notifyFail('Permissions request was rejected')",
+        @"    } catch (error) {",
+        @"      browser.test.notifyFail('Permissions request failed')",
+        @"    }",
+        @"  }",
+        @"}, () => browser.test.yield('Menu Item Created'))"
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:menusManifest resources:@{ @"background.js": backgroundScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    manager.get().internalDelegate.promptForPermissions = ^(id<_WKWebExtensionTab> tab, NSSet<NSString *> *requestedPermissions, void (^callback)(NSSet<NSString *> *, NSDate *)) {
+        EXPECT_EQ(requestedPermissions.count, 1lu);
+        EXPECT_TRUE([requestedPermissions isEqualToSet:[NSSet setWithObject:@"menus"]]);
+        callback(requestedPermissions, nil);
+    };
+
+    [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Menu Item Created");
+
+    auto *menuItems = [manager.get().context menuItemsForTab:manager.get().defaultTab];
+    EXPECT_EQ(menuItems.count, 1lu);
+
+    performMenuItemAction(menuItems.firstObject);
 
     [manager run];
 }

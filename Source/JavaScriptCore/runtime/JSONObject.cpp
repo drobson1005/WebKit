@@ -177,17 +177,17 @@ static inline String gap(JSGlobalObject* globalObject, JSValue space)
     // If the space value is a number, create a gap string with that number of spaces.
     if (space.isNumber()) {
         double spaceCount = space.asNumber();
-        int count;
+        size_t count;
         if (spaceCount > maxGapLength)
             count = maxGapLength;
         else if (!(spaceCount > 0))
             count = 0;
         else
-            count = static_cast<int>(spaceCount);
+            count = static_cast<size_t>(spaceCount);
         char spaces[maxGapLength];
-        for (int i = 0; i < count; ++i)
+        for (size_t i = 0; i < count; ++i)
             spaces[i] = ' ';
-        return String(spaces, count);
+        return String({ spaces, count });
     }
 
     // If the space value is a string, use it as the gap string, otherwise use no gap string.
@@ -843,7 +843,7 @@ inline String FastStringifier<CharType>::result() const
     }
     logOutcome("success"_s);
 #endif
-    return { m_buffer, m_length };
+    return std::span { m_buffer, m_length };
 }
 
 template<typename CharType>
@@ -1525,7 +1525,7 @@ JSC_DEFINE_HOST_FUNCTION(jsonProtoFuncParse, (JSGlobalObject* globalObject, Call
 
     JSValue unfiltered;
     if (view.is8Bit()) {
-        LiteralParser<LChar> jsonParser(globalObject, view.characters8(), view.length(), StrictJSON);
+        LiteralParser jsonParser(globalObject, view.span8(), StrictJSON);
         unfiltered = jsonParser.tryLiteralParse();
         EXCEPTION_ASSERT(!scope.exception() || !unfiltered);
         if (!unfiltered) {
@@ -1533,7 +1533,7 @@ JSC_DEFINE_HOST_FUNCTION(jsonProtoFuncParse, (JSGlobalObject* globalObject, Call
             return throwVMError(globalObject, scope, createSyntaxError(globalObject, jsonParser.getErrorMessage()));
         }
     } else {
-        LiteralParser<UChar> jsonParser(globalObject, view.characters16(), view.length(), StrictJSON);
+        LiteralParser jsonParser(globalObject, view.span16(), StrictJSON);
         unfiltered = jsonParser.tryLiteralParse();
         EXCEPTION_ASSERT(!scope.exception() || !unfiltered);
         if (!unfiltered) {
@@ -1567,11 +1567,11 @@ JSValue JSONParse(JSGlobalObject* globalObject, StringView json)
         return JSValue();
 
     if (json.is8Bit()) {
-        LiteralParser<LChar> jsonParser(globalObject, json.characters8(), json.length(), StrictJSON);
+        LiteralParser jsonParser(globalObject, json.span8(), StrictJSON);
         return jsonParser.tryLiteralParse();
     }
 
-    LiteralParser<UChar> jsonParser(globalObject, json.characters16(), json.length(), StrictJSON);
+    LiteralParser jsonParser(globalObject, json.span16(), StrictJSON);
     return jsonParser.tryLiteralParse();
 }
 
@@ -1584,7 +1584,7 @@ JSValue JSONParseWithException(JSGlobalObject* globalObject, StringView json)
         return JSValue();
 
     if (json.is8Bit()) {
-        LiteralParser<LChar> jsonParser(globalObject, json.characters8(), json.length(), StrictJSON);
+        LiteralParser jsonParser(globalObject, json.span8(), StrictJSON);
         JSValue result = jsonParser.tryLiteralParse();
         RETURN_IF_EXCEPTION(scope, { });
         if (!result)
@@ -1592,7 +1592,7 @@ JSValue JSONParseWithException(JSGlobalObject* globalObject, StringView json)
         return result;
     }
 
-    LiteralParser<UChar> jsonParser(globalObject, json.characters16(), json.length(), StrictJSON);
+    LiteralParser jsonParser(globalObject, json.span16(), StrictJSON);
     JSValue result = jsonParser.tryLiteralParse();
     RETURN_IF_EXCEPTION(scope, { });
     if (!result)

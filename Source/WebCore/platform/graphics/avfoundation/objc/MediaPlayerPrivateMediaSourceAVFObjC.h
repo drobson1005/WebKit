@@ -304,7 +304,7 @@ private:
     void setResourceOwner(const ProcessIdentity& resourceOwner) final { m_resourceOwner = resourceOwner; }
 
     void checkNewVideoFrameMetadata(CMTime);
-    MediaTime clampTimeToLastSeekTime(const MediaTime&) const;
+    MediaTime clampTimeToSensicalValue(const MediaTime&) const;
 
     bool shouldEnsureLayer() const;
     bool shouldEnsureVideoRenderer() const;
@@ -314,12 +314,15 @@ private:
     void setShouldMaintainAspectRatio(bool) final;
 
 #if HAVE(SPATIAL_TRACKING_LABEL)
+    const String& defaultSpatialTrackingLabel() const final;
+    void setDefaultSpatialTrackingLabel(const String&) final;
     const String& spatialTrackingLabel() const final;
-    void setSpatialTrackingLabel(String&&) final;
+    void setSpatialTrackingLabel(const String&) final;
     void updateSpatialTrackingLabel();
 #endif
 
     friend class MediaSourcePrivateAVFObjC;
+    void bufferedChanged();
 
     std::optional<SeekTarget> m_pendingSeek;
 
@@ -340,7 +343,7 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
     mutable MediaPlayer::CurrentTimeDidChangeCallback m_currentTimeDidChangeCallback;
     RetainPtr<id> m_timeChangedObserver;
     RetainPtr<id> m_timeJumpedObserver;
-    RetainPtr<id> m_durationObserver;
+    RetainPtr<id> m_gapObserver;
     RetainPtr<id> m_performTaskObserver;
     RetainPtr<CVPixelBufferRef> m_lastPixelBuffer;
     RefPtr<NativeImage> m_lastImage;
@@ -386,6 +389,7 @@ ALLOW_NEW_API_WITHOUT_GUARDS_END
     ProcessIdentity m_resourceOwner;
     bool m_shouldMaintainAspectRatio { true };
 #if HAVE(SPATIAL_TRACKING_LABEL)
+    String m_defaultSpatialTrackingLabel;
     String m_spatialTrackingLabel;
 #endif
 #if ENABLE(LINEAR_MEDIA_PLAYER)

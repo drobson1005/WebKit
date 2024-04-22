@@ -45,6 +45,7 @@
 #import <WebCore/DictionaryLookup.h>
 #import <WebCore/DocumentInlines.h>
 #import <WebCore/DocumentMarkerController.h>
+#import <WebCore/DragImage.h>
 #import <WebCore/Editing.h>
 #import <WebCore/Editor.h>
 #import <WebCore/EventHandler.h>
@@ -79,6 +80,7 @@
 #import <pal/spi/cocoa/LaunchServicesSPI.h>
 #import <pal/spi/cocoa/NSAccessibilitySPI.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
+#import <wtf/cocoa/SpanCocoa.h>
 #import <wtf/spi/darwin/SandboxSPI.h>
 
 #if ENABLE(GPU_PROCESS) && PLATFORM(COCOA)
@@ -110,9 +112,16 @@ void WebPage::platformInitialize(const WebPageCreationParameters& parameters)
     platformInitializeAccessibility();
 
 #if ENABLE(MEDIA_STREAM)
-    if (auto* captureManager = WebProcess::singleton().supplement<UserMediaCaptureManager>())
-        captureManager->setupCaptureProcesses(parameters.shouldCaptureAudioInUIProcess, parameters.shouldCaptureAudioInGPUProcess, parameters.shouldCaptureVideoInUIProcess, parameters.shouldCaptureVideoInGPUProcess, parameters.shouldCaptureDisplayInUIProcess, parameters.shouldCaptureDisplayInGPUProcess, m_page->settings().webRTCRemoteVideoFrameEnabled());
-#endif
+    if (auto* captureManager = WebProcess::singleton().supplement<UserMediaCaptureManager>()) {
+        captureManager->setupCaptureProcesses(parameters.shouldCaptureAudioInUIProcess, parameters.shouldCaptureAudioInGPUProcess, parameters.shouldCaptureVideoInUIProcess, parameters.shouldCaptureVideoInGPUProcess, parameters.shouldCaptureDisplayInUIProcess, parameters.shouldCaptureDisplayInGPUProcess,
+#if ENABLE(WEB_RTC)
+            m_page->settings().webRTCRemoteVideoFrameEnabled()
+#else
+            false
+#endif // ENABLE(WEB_RTC)
+        );
+    }
+#endif // ENABLE(MEDIA_STREAM)
 #if USE(LIBWEBRTC)
     LibWebRTCCodecs::setCallbacks(m_page->settings().webRTCPlatformCodecsInGPUProcessEnabled(), m_page->settings().webRTCRemoteVideoFrameEnabled());
     LibWebRTCCodecs::setWebRTCMediaPipelineAdditionalLoggingEnabled(m_page->settings().webRTCMediaPipelineAdditionalLoggingEnabled());
@@ -148,6 +157,7 @@ void WebPage::setHasLaunchedWebContentProcess()
 
 void WebPage::platformDidReceiveLoadParameters(const LoadParameters& parameters)
 {
+    WebCore::PublicSuffixStore::singleton().addPublicSuffix(parameters.publicSuffix);
     m_dataDetectionReferenceDate = parameters.dataDetectionReferenceDate;
 }
 
@@ -299,6 +309,111 @@ DictionaryPopupInfo WebPage::dictionaryPopupInfoForRange(LocalFrame& frame, cons
     return dictionaryPopupInfo;
 }
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+void WebPage::getTextIndicatorForID(const WTF::UUID& uuid, CompletionHandler<void(std::optional<WebCore::TextIndicatorData>&&)>&& completionHandler)
+{
+    auto sessionRange = m_unifiedTextReplacementController->contextRangeForSessionWithUUID(uuid);
+    if (!sessionRange) {
+        if (RefPtr liveRange = m_textIndicatorStyleEnablementRanges.get(uuid))
+            sessionRange = WebCore::makeSimpleRange(liveRange);
+    }
+
+    if (!sessionRange) {
+        completionHandler(std::nullopt);
+        return;
+    }
+
+    if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame())) {
+        std::optional<TextIndicatorData> textIndicatorData;
+        constexpr OptionSet textIndicatorOptions {
+            TextIndicatorOption::IncludeSnapshotOfAllVisibleContentWithoutSelection,
+            TextIndicatorOption::ExpandClipBeyondVisibleRect,
+            TextIndicatorOption::UseSelectionRectForSizing
+        };
+        if (auto textIndicator = TextIndicator::createWithRange(*sessionRange, textIndicatorOptions, TextIndicatorPresentationTransition::None, { }))
+            textIndicatorData = textIndicator->data();
+        completionHandler(WTFMove(textIndicatorData));
+        return;
+    }
+    completionHandler(std::nullopt);
+}
+
+void WebPage::updateTextIndicatorStyleVisibilityForID(const WTF::UUID uuid, bool visible, CompletionHandler<void()>&& completionHandler)
+{
+    // FIXME: Turn on/off the visibility.
+
+    completionHandler();
+}
+
+void WebPage::enableTextIndicatorStyleAfterElementWithID(const String& elementID, const WTF::UUID& uuid)
+{
+    // FIXME: move the start of the range to be after the element with the ID listed.
+
+    RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
+    if (!frame) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    RefPtr document = frame->document();
+    if (!document) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    RefPtr root = document->documentElement();
+    if (!root) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    VisibleSelection fullDocumentSelection(VisibleSelection::selectionFromContentsOfNode(root.get()));
+    auto simpleRange = fullDocumentSelection.range();
+    if (!simpleRange) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    m_textIndicatorStyleEnablementRanges.add(uuid, createLiveRange(*simpleRange));
+}
+
+void WebPage::enableTextIndicatorStyleForElementWithID(const String& elementID, const WTF::UUID& uuid)
+{
+    RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
+    if (!frame) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    RefPtr document = frame->document();
+    if (!document) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    RefPtr root = document->documentElement();
+    if (!root) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    RefPtr element = document->getElementById(elementID);
+    if (!element) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    auto elementRange = makeRangeSelectingNodeContents(*element);
+    if (elementRange.collapsed()) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    m_textIndicatorStyleEnablementRanges.add(uuid, createLiveRange(elementRange));
+}
+
+#endif // ENABLE(UNIFIED_TEXT_REPLACEMENT)
+
 void WebPage::insertDictatedTextAsync(const String& text, const EditingRange& replacementEditingRange, const Vector<WebCore::DictationAlternative>& dictationAlternativeLocations, InsertTextOptions&& options)
 {
     RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
@@ -358,7 +473,7 @@ void WebPage::addDictationAlternative(const String& text, DictationContext conte
 
     auto targetOffset = characterCount(*searchRange);
     targetOffset -= std::min<uint64_t>(targetOffset, text.length());
-    auto matchRange = findClosestPlainText(*searchRange, text, { Backwards, DoNotRevealSelection }, targetOffset);
+    auto matchRange = findClosestPlainText(*searchRange, text, { FindOption::Backwards, FindOption::DoNotRevealSelection }, targetOffset);
     if (matchRange.collapsed()) {
         completion(false);
         return;
@@ -421,8 +536,7 @@ void WebPage::clearDictationAlternatives(Vector<DictationContext>&& contexts)
 
 void WebPage::accessibilityTransferRemoteToken(RetainPtr<NSData> remoteToken, FrameIdentifier frameID)
 {
-    std::span dataToken(reinterpret_cast<const uint8_t*>([remoteToken bytes]), [remoteToken length]);
-    send(Messages::WebPageProxy::RegisterWebProcessAccessibilityToken(dataToken, frameID));
+    send(Messages::WebPageProxy::RegisterWebProcessAccessibilityToken(span(remoteToken.get()), frameID));
 }
 
 void WebPage::accessibilityManageRemoteElementStatus(bool registerStatus, int processIdentifier)
@@ -461,9 +575,7 @@ void WebPage::bindRemoteAccessibilityFrames(int processIdentifier, WebCore::Fram
     registerRemoteFrameAccessibilityTokens(processIdentifier, dataToken);
 
     // Get our remote token data and send back to the RemoteFrame.
-    auto remoteToken = accessibilityRemoteTokenData();
-    std::span remoteDataToken(reinterpret_cast<const uint8_t*>([remoteToken bytes]), [remoteToken length]);
-    completionHandler(remoteDataToken, getpid());
+    completionHandler(span(accessibilityRemoteTokenData().get()), getpid());
 }
 
 #if ENABLE(APPLE_PAY)
@@ -793,14 +905,14 @@ void WebPage::readSelectionFromPasteboard(const String& pasteboardName, Completi
 }
 
 #if ENABLE(MULTI_REPRESENTATION_HEIC)
-void WebPage::insertMultiRepresentationHEIC(std::span<const uint8_t> data)
+void WebPage::insertMultiRepresentationHEIC(std::span<const uint8_t> data, const String& altText)
 {
     RefPtr frame = m_page->focusController().focusedOrMainFrame();
     if (!frame)
         return;
     if (frame->selection().isNone())
         return;
-    frame->editor().insertMultiRepresentationHEIC(data);
+    frame->editor().insertMultiRepresentationHEIC(data, altText);
 }
 #endif
 
@@ -903,9 +1015,9 @@ void WebPage::setMediaEnvironment(const String& mediaEnvironment)
 #endif
 
 #if ENABLE(UNIFIED_TEXT_REPLACEMENT)
-void WebPage::willBeginTextReplacementSession(const WTF::UUID& uuid, CompletionHandler<void(const Vector<WebUnifiedTextReplacementContextData>&)>&& completionHandler)
+void WebPage::willBeginTextReplacementSession(const WTF::UUID& uuid, WebUnifiedTextReplacementType type, CompletionHandler<void(const Vector<WebUnifiedTextReplacementContextData>&)>&& completionHandler)
 {
-    m_unifiedTextReplacementController->willBeginTextReplacementSession(uuid, WTFMove(completionHandler));
+    m_unifiedTextReplacementController->willBeginTextReplacementSession(uuid, type, WTFMove(completionHandler));
 }
 
 void WebPage::didBeginTextReplacementSession(const WTF::UUID& uuid, const Vector<WebUnifiedTextReplacementContextData>& contexts)
@@ -936,6 +1048,16 @@ void WebPage::textReplacementSessionDidReceiveTextWithReplacementRange(const WTF
 void WebPage::textReplacementSessionDidReceiveEditAction(const WTF::UUID& uuid, WebKit::WebTextReplacementData::EditAction action)
 {
     m_unifiedTextReplacementController->textReplacementSessionDidReceiveEditAction(uuid, action);
+}
+
+void WebPage::textReplacementSessionShowInformationForReplacementWithUUIDRelativeToRect(const WTF::UUID& sessionUUID, const WTF::UUID& replacementUUID, WebCore::IntRect rect)
+{
+    send(Messages::WebPageProxy::TextReplacementSessionShowInformationForReplacementWithUUIDRelativeToRect(sessionUUID, replacementUUID, rect));
+}
+
+void WebPage::textReplacementSessionUpdateStateForReplacementWithUUID(const WTF::UUID& sessionUUID, WebTextReplacementData::State state, const WTF::UUID& replacementUUID)
+{
+    send(Messages::WebPageProxy::TextReplacementSessionUpdateStateForReplacementWithUUID(sessionUUID, state, replacementUUID));
 }
 
 #endif

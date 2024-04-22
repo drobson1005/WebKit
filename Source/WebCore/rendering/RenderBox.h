@@ -33,7 +33,6 @@
 
 namespace WebCore {
 
-class LegacyInlineElementBox;
 class RenderBlockFlow;
 class RenderBoxFragmentInfo;
 class RenderFragmentContainer;
@@ -50,6 +49,7 @@ enum class StretchingMode { Any, Explicit };
 
 class RenderBox : public RenderBoxModelObject {
     WTF_MAKE_ISO_ALLOCATED(RenderBox);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderBox);
 public:
     virtual ~RenderBox();
 
@@ -169,8 +169,10 @@ public:
 
     void addVisualEffectOverflow();
     LayoutRect applyVisualEffectOverflow(const LayoutRect&) const;
+
     void addOverflowFromChild(const RenderBox& child) { addOverflowFromChild(child, child.locationOffset()); }
     void addOverflowFromChild(const RenderBox& child, const LayoutSize& delta);
+    void addOverflowFromChild(const RenderBox&, const LayoutSize& delta, const LayoutRect& flippedClientRect);
 
     void applyTransform(TransformationMatrix&, const RenderStyle&, const FloatRect& boundingBox, OptionSet<RenderStyle::TransformOperationOption>) const override;
 
@@ -361,18 +363,6 @@ public:
     RenderFragmentContainer* clampToStartAndEndFragments(RenderFragmentContainer*) const;
     bool hasFragmentRangeInFragmentedFlow() const;
     virtual LayoutUnit offsetFromLogicalTopOfFirstPage() const;
-    
-    void positionLineBox(LegacyInlineElementBox&);
-
-    virtual std::unique_ptr<LegacyInlineElementBox> createInlineBox();
-    void dirtyLineBoxes(bool fullLayout);
-
-    // For inline replaced elements, this function returns the inline box that owns us.  Enables
-    // the replaced RenderObject to quickly determine what line it is contained on and to easily
-    // iterate over structures on the line.
-    LegacyInlineElementBox* inlineBoxWrapper() const { return m_inlineBoxWrapper; }
-    void setInlineBoxWrapper(LegacyInlineElementBox*);
-    void deleteLineBoxWrapper();
 
     RepaintRects localRectsForRepaint(RepaintOutlineBounds) const override;
     std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, VisibleRectContext) const override;
@@ -526,7 +516,7 @@ public:
 
     LayoutRect maskClipRect(const LayoutPoint& paintOffset);
 
-    VisiblePosition positionForPoint(const LayoutPoint&, const RenderFragmentContainer*) override;
+    VisiblePosition positionForPoint(const LayoutPoint&, HitTestSource, const RenderFragmentContainer*) override;
 
     void removeFloatingAndInvalidateForLayout();
     void removeFloatingOrPositionedChildFromBlockLists();
@@ -598,7 +588,6 @@ public:
     virtual bool hasRelativeDimensions() const;
     virtual bool hasRelativeLogicalHeight() const;
     virtual bool hasRelativeLogicalWidth() const;
-    void willBeRemovedFromTree(IsInternalMove) override;
 
     bool hasHorizontalLayoutOverflow() const
     {
@@ -786,6 +775,8 @@ private:
 
     void clipContentForBorderRadius(GraphicsContext&, const LayoutPoint&, float);
 
+    void addLayoutOverflow(const LayoutRect&, const LayoutRect& flippedClientRect);
+
 private:
     // The width/height of the contents + borders + padding.  The x/y location is relative to our container (which is not always our parent).
     LayoutRect m_frameRect;
@@ -798,9 +789,6 @@ protected:
     
     // The preferred logical width of the element if it never breaks any lines at all.
     LayoutUnit m_maxPreferredLogicalWidth;
-
-    // For inline replaced elements, the inline box that owns us.
-    LegacyInlineElementBox* m_inlineBoxWrapper { nullptr };
 
     // Our overflow information.
     RefPtr<RenderOverflow> m_overflow;
@@ -881,21 +869,6 @@ inline RenderBox* RenderBox::nextInFlowSiblingBox() const
             return curr;
     }
     return nullptr;
-}
-
-inline void RenderBox::setInlineBoxWrapper(LegacyInlineElementBox* boxWrapper)
-{
-    if (boxWrapper) {
-        ASSERT(!m_inlineBoxWrapper);
-        // m_inlineBoxWrapper should already be 0. Deleting it is a safeguard against security issues.
-        // Otherwise, there will two line box wrappers keeping the reference to this renderer, and
-        // only one will be notified when the renderer is getting destroyed. The second line box wrapper
-        // will keep a stale reference.
-        if (UNLIKELY(m_inlineBoxWrapper != nullptr))
-            deleteLineBoxWrapper();
-    }
-
-    m_inlineBoxWrapper = boxWrapper;
 }
 
 LayoutUnit synthesizedBaseline(const RenderBox&, const RenderStyle& parentStyle, LineDirectionMode, BaselineSynthesisEdge);

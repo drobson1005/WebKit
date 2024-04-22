@@ -74,7 +74,6 @@ static const char* boolString(bool val)
 static const Seconds defaultWatchdogTimerInterval { 1_s };
 static bool ignoreWatchdogForDebugging = false;
 
-#if PLATFORM(WATCHOS) || PLATFORM(APPLETV)
 static UIViewController *fallbackViewController(UIView *view)
 {
     // FIXME: This logic to find a fallback view controller should move out of WebCore,
@@ -99,7 +98,6 @@ UIViewController *VideoPresentationInterfaceIOS::presentingViewController()
 
     return controller;
 }
-#endif
 
 VideoPresentationInterfaceIOS::VideoPresentationInterfaceIOS(PlaybackSessionInterfaceIOS& playbackSessionInterface)
     : m_watchdogTimer(RunLoop::main(), this, &VideoPresentationInterfaceIOS::watchdogTimerFired)
@@ -215,7 +213,7 @@ void VideoPresentationInterfaceIOS::doSetup()
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
 
-#if !PLATFORM(WATCHOS)
+#if !PLATFORM(WATCHOS) && !ENABLE(LINEAR_MEDIA_PLAYER)
     if (![[m_parentView window] _isHostedInAnotherProcess] && !m_window) {
         m_window = adoptNS([PAL::allocUIWindowInstance() initWithWindowScene:[[m_parentView window] windowScene]]);
         [m_window setBackgroundColor:clearUIColor()];
@@ -231,7 +229,7 @@ void VideoPresentationInterfaceIOS::doSetup()
         [m_window setWindowLevel:textEffectsWindowLevel - 1];
         [m_window makeKeyAndVisible];
     }
-#endif // !PLATFORM(WATCHOS)
+#endif // !PLATFORM(WATCHOS) && !ENABLE(LINEAR_MEDIA_PLAYER)
 
     if (!m_playerLayerView)
         m_playerLayerView = adoptNS([allocWebAVPlayerLayerViewInstance() init]);
@@ -538,9 +536,9 @@ void VideoPresentationInterfaceIOS::cleanupFullscreen()
         });
     }
 
+    [playerViewController willMoveToParentViewController:nil];
     [[playerViewController view] removeFromSuperview];
-    if (m_viewController)
-        [playerViewController removeFromParentViewController];
+    [playerViewController removeFromParentViewController];
 
     [m_playerLayerView setVideoView:nil];
     [m_playerLayerView removeFromSuperview];

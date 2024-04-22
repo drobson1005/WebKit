@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2022-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #import <span>
 #import <webrtc/modules/video_coding/include/video_error_codes.h>
 #import <wtf/BlockPtr.h>
+#import <wtf/CheckedArithmetic.h>
 #import <wtf/FastMalloc.h>
 #import <wtf/RetainPtr.h>
 
@@ -53,9 +54,10 @@ public:
     }
 
     std::optional<uint64_t> read(size_t);
-    std::optional<bool> readBit();
 
 private:
+    std::optional<bool> readBit();
+
     std::span<const uint8_t> m_data;
     size_t m_index { 0 };
     uint8_t m_currentByte { 0 };
@@ -100,9 +102,9 @@ static size_t readULEBSize(std::span<const uint8_t> data, size_t& index)
 
         uint8_t dataByte = data[index++];
         uint8_t decodedByte = dataByte & 0x7f;
+        value |= decodedByte << (7 * cptr);
         if (value >= std::numeric_limits<uint32_t>::max())
             return 0;
-        value |= decodedByte << (7 * cptr);
         if (!(dataByte & 0x80))
             break;
     }
@@ -129,8 +131,8 @@ static std::optional<std::pair<std::span<const uint8_t>, std::span<const uint8_t
         if (hasExtension)
             ++index;
 
-        size_t payloadSize = readULEBSize(data, index);
-        if (index >= data.size())
+        Checked<size_t> payloadSize = readULEBSize(data, index);
+        if (index + payloadSize >= data.size())
             return { };
 
         if (headerType == 1) {
@@ -252,9 +254,9 @@ static std::optional<ParsedSequenceHeaderParameters> parseSequenceHeaderOBU(std:
     return parameters;
 }
 
-static RetainPtr<CMVideoFormatDescriptionRef> computeAV1InputFormat(const uint8_t* data, size_t size, int32_t width, int32_t height)
+static RetainPtr<CMVideoFormatDescriptionRef> computeAV1InputFormat(std::span<const uint8_t> data, int32_t width, int32_t height)
 {
-    auto sequenceHeaderData = getSequenceHeaderOBU({ data, size });
+    auto sequenceHeaderData = getSequenceHeaderOBU(data);
     if (!sequenceHeaderData)
         return { };
 
@@ -304,16 +306,16 @@ struct RTCFrameDecodeParams {
 - (void)setError:(OSStatus)error;
 @end
 
-static RetainPtr<CMSampleBufferRef> av1BufferToCMSampleBuffer(const uint8_t* buffer, size_t bufferSize, CMVideoFormatDescriptionRef videoFormat)
+static RetainPtr<CMSampleBufferRef> av1BufferToCMSampleBuffer(std::span<const uint8_t> buffer, CMVideoFormatDescriptionRef videoFormat)
 {
     CMBlockBufferRef newVlockBuffer;
-    if (auto error = PAL::CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, NULL, bufferSize, kCFAllocatorDefault, NULL, 0, bufferSize, kCMBlockBufferAssureMemoryNowFlag, &newVlockBuffer)) {
+    if (auto error = PAL::CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, NULL, buffer.size(), kCFAllocatorDefault, NULL, 0, buffer.size(), kCMBlockBufferAssureMemoryNowFlag, &newVlockBuffer)) {
         RELEASE_LOG_ERROR(WebRTC, "AV1BufferToCMSampleBuffer CMBlockBufferCreateWithMemoryBlock failed with: %d", error);
         return nullptr;
     }
     auto blockBuffer = adoptCF(newVlockBuffer);
 
-    if (auto error = PAL::CMBlockBufferReplaceDataBytes(buffer, blockBuffer.get(), 0, bufferSize)) {
+    if (auto error = PAL::CMBlockBufferReplaceDataBytes(buffer.data(), blockBuffer.get(), 0, buffer.size())) {
         RELEASE_LOG_ERROR(WebRTC, "AV1BufferToCMSampleBuffer CMBlockBufferReplaceDataBytes failed with: %d", error);
         return nullptr;
     }
@@ -380,7 +382,7 @@ static void av1DecompressionOutputCallback(void* decoderRef, void* params, OSSta
     }
 
     if (_shouldCheckFormat || !_videoFormat) {
-        auto inputFormat = computeAV1InputFormat(data, size, _width, _height);
+        auto inputFormat = computeAV1InputFormat({ data, size }, _width, _height);
         if (inputFormat) {
             _shouldCheckFormat = false;
             if (!PAL::CMFormatDescriptionEqual(inputFormat.get(), _videoFormat.get())) {
@@ -397,7 +399,7 @@ static void av1DecompressionOutputCallback(void* decoderRef, void* params, OSSta
     if (!_videoFormat)
         return WEBRTC_VIDEO_CODEC_ERROR;
 
-    auto sampleBuffer = av1BufferToCMSampleBuffer(data, size, _videoFormat.get());
+    auto sampleBuffer = av1BufferToCMSampleBuffer({ data, size }, _videoFormat.get());
     if (!sampleBuffer)
         return WEBRTC_VIDEO_CODEC_ERROR;
 

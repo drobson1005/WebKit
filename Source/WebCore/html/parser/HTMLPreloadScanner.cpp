@@ -119,9 +119,8 @@ public:
 
         Ref document = protectedDocument();
         for (auto& attribute : attributes) {
-            auto knownAttributeName = AtomString::lookUp(attribute.name.data(), attribute.name.size());
-            StringView attributeValue { attribute.value.data(), static_cast<unsigned>(attribute.value.size()) };
-            processAttribute(knownAttributeName, attributeValue, pictureState);
+            auto knownAttributeName = AtomString::lookUp(attribute.name.span());
+            processAttribute(knownAttributeName, attribute.value.span(), pictureState);
         }
 
         if (m_tagId == TagId::Source && !pictureState.isEmpty() && !pictureState.last() && m_mediaMatched && m_typeMatched && !m_srcSetAttribute.isEmpty()) {
@@ -538,7 +537,7 @@ void HTMLPreloadScanner::scan(HTMLResourcePreloader& preloader, Document& docume
 
     while (auto token = m_tokenizer.nextToken(m_source)) {
         if (token->type() == HTMLToken::Type::StartTag)
-            m_tokenizer.updateStateFor(AtomString::lookUp(token->name().data(), token->name().size()));
+            m_tokenizer.updateStateFor(AtomString::lookUp(token->name().span()));
         m_scanner.scan(*token, requests, document);
     }
 

@@ -45,7 +45,7 @@ std::ostream &operator<<(std::ostream &stream, const UserDefinedNameExpr &expr)
 struct UserDefinedNameComponentExpr
 {
     UserDefinedNameExpr name;
-    int component;
+    const int component;
 };
 
 std::ostream &operator<<(std::ostream &stream, const UserDefinedNameComponentExpr &expr)
@@ -66,7 +66,7 @@ std::ostream &operator<<(std::ostream &stream, const InternalNameExpr &expr)
 struct InternalNameComponentExpr
 {
     InternalNameExpr name;
-    int component;
+    const int component;
 };
 
 std::ostream &operator<<(std::ostream &stream, const InternalNameComponentExpr &expr)
@@ -104,7 +104,7 @@ ResolveUserDefinedName(const std::string &name, int component, int componentCoun
     {
         return UserDefinedNameExpr{name};
     }
-    return UserDefinedNameComponentExpr{UserDefinedNameExpr{name}, component};
+    return UserDefinedNameComponentExpr{{name}, component};
 }
 
 template <class T>
@@ -112,13 +112,14 @@ struct ApplyOStream
 {
     const T &value;
 };
-template<class T>
+
+template <class T>
 ApplyOStream(T) -> ApplyOStream<T>;
 
 template <class T>
-std::ostream &operator<<(std::ostream &stream, ApplyOStream<T> v)
+std::ostream &operator<<(std::ostream &stream, ApplyOStream<T> sv)
 {
-    stream << v.value;
+    stream << sv.value;
     return stream;
 }
 
@@ -375,17 +376,16 @@ std::string UpdateFragmentShaderOutputs(std::string shaderSourceIn,
             {
                 continue;
             }
-
-            const gl::ProgramOutput &outputVar = outputVariables[outputLocation.index];
             const int index                    = outputLocation.arrayIndex;
-            const int location                 = outputVar.pod.location + index;
-            const int arraySize                = outputVar.getOutermostArraySize();
+            const gl::ProgramOutput &outputVar = outputVariables[outputLocation.index];
+            ASSERT(outputVar.pod.location >= 0);
+            const int location  = outputVar.pod.location + index;
+            const int arraySize = outputVar.getOutermostArraySize();
             stream.str("");
             stream << ApplyOStream{ResolveModifiedOutputName(outputVar.name, index, arraySize)}
                    << " [[" << sh::kUnassignedFragmentOutputString;
             const std::string placeholder(stream.str());
 
-            ASSERT(outputVar.pod.location >= 0);
             size_t outputFound = outputSource.find(placeholder);
             if (outputFound != std::string::npos)
             {
@@ -399,6 +399,7 @@ std::string UpdateFragmentShaderOutputs(std::string shaderSourceIn,
 
             if (defineAlpha0 && location == 0 && !secondary && outputVar.pod.type == GL_FLOAT_VEC4)
             {
+                ASSERT(index == 0);
                 ASSERT(alphaOutputName.empty());
                 std::ostringstream nameStream;
                 nameStream << "ANGLE_fragmentOut."
@@ -505,7 +506,7 @@ std::string GenerateTransformFeedbackVaryingOutput(const gl::TransformFeedbackVa
                 result << "        ";
                 result << "ANGLE_" << "xfbBuffer" << bufferIndex << "[" << "ANGLE_"
                        << std::string(sh::kUniformsVar) << ".ANGLE_xfbBufferOffsets[" << bufferIndex
-                       << "] + (gl_VertexID + (ANGLE_instanceIdMod - ANGLE_baseInstance) * "
+                       << "] + (ANGLE_vertexIDMetal + (ANGLE_instanceIdMod - ANGLE_baseInstance) * "
                        << "ANGLE_" << std::string(sh::kUniformsVar)
                        << ".ANGLE_xfbVerticesPerInstance) * " << stride << " + " << offset
                        << "] = " << "as_type<float>" << "(" << "ANGLE_vertexOut.";

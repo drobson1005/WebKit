@@ -383,19 +383,21 @@ void HTMLTextAreaElement::setValueCommon(const String& newValue, TextFieldEventB
     setFormControlValueMatchesRenderer(true);
 
     auto endOfString = m_value.length();
-    if (document().focusedElement() == this)
-        setSelectionRange(endOfString, endOfString);
-    else if (selection == TextControlSetValueSelection::SetSelectionToEnd) {
-        // We don't change text selection here but need to update caret to
-        // the end of the text value except for initialize.
-        cacheSelection(endOfString, endOfString, SelectionHasNoDirection);
+    if (selection == TextControlSetValueSelection::SetSelectionToEnd) {
+        if (document().focusedElement() == this)
+            setSelectionRange(endOfString, endOfString);
+        else {
+            // We don't change text selection here but need to update caret to
+            // the end of the text value except for initialize.
+            cacheSelection(endOfString, endOfString, SelectionHasNoDirection);
+        }
     } else if (shouldClamp)
         cacheSelection(std::min(endOfString, selectionStartValue), std::min(endOfString, selectionEndValue), SelectionHasNoDirection);
 
     setTextAsOfLastFormControlChangeEvent(normalizedValue);
 
     if (auto* cache = document().existingAXObjectCache())
-        cache->valueChanged(this);
+        cache->valueChanged(*this);
 }
 
 String HTMLTextAreaElement::defaultValue() const

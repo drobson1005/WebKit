@@ -25,6 +25,7 @@
   { include: ["<__algorithm/search.h>", "private", "<algorithm>", "public"] },
   { include: ["<__algorithm/sort.h>", "private", "<algorithm>", "public"] },
   { include: ["<__algorithm/stable_sort.h>", "private", "<algorithm>", "public"] },
+  { include: ["<__algorithm/transform.h>", "private", "<algorithm>", "public"] },
   { include: ["<__algorithm/unique.h>", "private", "<algorithm>", "public"] },
   { include: ["<__algorithm/upper_bound.h>", "private", "<algorithm>", "public"] },
 
@@ -368,6 +369,8 @@
   { include: ["<__type_traits/type_list.h>", "private", "<type_traits>", "public"] },
   { include: ["<__type_traits/underlying_type.h>", "private", "<type_traits>", "public"] },
   { include: ["<__type_traits/void_t.h>", "private", "<type_traits>", "public"] },
+
+  { include: ["<__variant/monostate.h>", "private", "<variant>", "public"] },
 
   { symbol: ["std::__bit_reference", "private", "<vector>", "public"] },
   { include: ["<__bit_reference>", "private",  "<vector>", "public"] },

@@ -26,7 +26,7 @@
 #include "config.h"
 #include "MediaRecorderPrivate.h"
 
-#if PLATFORM(COCOA) && ENABLE(GPU_PROCESS) && ENABLE(MEDIA_STREAM)
+#if PLATFORM(COCOA) && ENABLE(GPU_PROCESS) && ENABLE(MEDIA_RECORDER)
 
 #include "GPUProcessConnection.h"
 #include "RemoteMediaRecorderManagerMessages.h"
@@ -177,7 +177,7 @@ void MediaRecorderPrivate::fetchData(CompletionHandler<void(RefPtr<WebCore::Frag
         // FIXME: If completion handler is called following a GPUProcess connection being closed, we should fail the MediaRecorder.
         RefPtr<FragmentedSharedBuffer> buffer;
         if (data.size())
-            buffer = SharedBuffer::create(data.data(), data.size());
+            buffer = SharedBuffer::create(data);
         completionHandler(WTFMove(buffer), mimeType, timeCode);
     }, identifier());
 }
@@ -212,4 +212,4 @@ void MediaRecorderPrivate::gpuProcessConnectionDidClose()
 
 }
 
-#endif // PLATFORM(COCOA) && ENABLE(GPU_PROCESS) && ENABLE(MEDIA_STREAM)
+#endif // PLATFORM(COCOA) && ENABLE(GPU_PROCESS) && ENABLE(MEDIA_RECORDER)

@@ -1718,6 +1718,16 @@ JSC_DEFINE_JIT_OPERATION(operationToPropertyKey, EncodedJSValue, (JSGlobalObject
     return JSValue::encode(JSValue::decode(value).toPropertyKeyValue(globalObject));
 }
 
+JSC_DEFINE_JIT_OPERATION(operationToPropertyKeyOrNumber, EncodedJSValue, (JSGlobalObject* globalObject, EncodedJSValue value))
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+
+    JSValue jsValue = JSValue::decode(value);
+    return JSValue::encode(jsValue.isNumber() ? jsValue : jsValue.toPropertyKeyValue(globalObject));
+}
+
 JSC_DEFINE_JIT_OPERATION(operationToNumber, EncodedJSValue, (JSGlobalObject* globalObject, EncodedJSValue value))
 {
     VM& vm = globalObject->vm();
@@ -4686,7 +4696,7 @@ static char* tierUpCommon(VM& vm, CallFrame* callFrame, BytecodeIndex originByte
     CODEBLOCK_LOG_EVENT(codeBlock, "triggerFTLOSR", ());
     CompilationResult forEntryResult = compile(
         vm, replacementCodeBlock, codeBlock, JITCompilationMode::FTLForOSREntry, originBytecodeIndex,
-        mustHandleValues, ToFTLForOSREntryDeferredCompilationCallback::create(triggerAddress));
+        WTFMove(mustHandleValues), ToFTLForOSREntryDeferredCompilationCallback::create(triggerAddress));
 
     if (jitCode->neverExecutedEntry)
         triggerFTLReplacementCompile(vm, codeBlock, jitCode);

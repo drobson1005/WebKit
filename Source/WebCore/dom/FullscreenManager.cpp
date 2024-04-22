@@ -220,7 +220,7 @@ void FullscreenManager::requestFullscreenForElement(Ref<Element>&& element, RefP
 
         // The context object's node document, or an ancestor browsing context's document does not have
         // the fullscreen enabled flag set.
-        if (checkType == EnforceIFrameAllowFullscreenRequirement && !isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Fullscreen, document)) {
+        if (checkType == EnforceIFrameAllowFullscreenRequirement && !isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Fullscreen, document)) {
             ERROR_LOG(identifier, "task - ancestor document does not enable fullscreen; failing.");
             failedPreflights(WTFMove(element), WTFMove(promise));
             return;
@@ -228,8 +228,8 @@ void FullscreenManager::requestFullscreenForElement(Ref<Element>&& element, RefP
 
         // A descendant browsing context's document has a non-empty fullscreen element stack.
         bool descendentHasNonEmptyStack = false;
-        for (auto* descendant = frame() ? frame()->tree().traverseNext() : nullptr; descendant; descendant = descendant->tree().traverseNext()) {
-            auto* localFrame = dynamicDowncast<LocalFrame>(descendant);
+        for (RefPtr descendant = frame() ? frame()->tree().traverseNext() : nullptr; descendant; descendant = descendant->tree().traverseNext()) {
+            auto* localFrame = dynamicDowncast<LocalFrame>(descendant.get());
             if (!localFrame)
                 continue;
             if (localFrame->document()->fullscreenManager().fullscreenElement()) {
@@ -312,8 +312,8 @@ void FullscreenManager::cancelFullscreen()
         }
 
         // This triggers finishExitFullscreen with ExitMode::Resize, which fully exits the document.
-        if (auto* fullscreenElement = topDocument->fullscreenManager().fullscreenElement())
-            topDocument->page()->chrome().client().exitFullScreenForElement(fullscreenElement);
+        if (RefPtr fullscreenElement = topDocument->fullscreenManager().fullscreenElement())
+            topDocument->page()->chrome().client().exitFullScreenForElement(fullscreenElement.get());
         else
             INFO_LOG(identifier, "Top document has no fullscreen element");
     });
@@ -365,8 +365,7 @@ void FullscreenManager::exitFullscreen(RefPtr<DeferredPromise>&& promise)
         exitingDocument = topDocument;
     }
 
-    auto element = exitingDocument->fullscreenManager().fullscreenElement();
-    if (element && !element->isConnected()) {
+    if (RefPtr element = exitingDocument->fullscreenManager().fullscreenElement(); element && !element->isConnected()) {
         addDocumentToFullscreenChangeEventQueue(exitingDocument);
         clearFullscreenFlags(*element);
         element->removeFromTopLayer();
@@ -382,7 +381,7 @@ void FullscreenManager::exitFullscreen(RefPtr<DeferredPromise>&& promise)
             return;
         }
 
-        auto* page = this->page();
+        RefPtr page = this->page();
         if (!page) {
             m_pendingExitFullscreen = false;
             if (promise)
@@ -476,7 +475,7 @@ bool FullscreenManager::isFullscreenEnabled() const
     // browsing context's documents have their fullscreen enabled flag set, or false otherwise.
 
     // Top-level browsing contexts are implied to have their allowFullscreen attribute set.
-    return isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Fullscreen, protectedDocument());
+    return isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Fullscreen, protectedDocument());
 }
 
 static void markRendererDirtyAfterTopLayerChange(RenderElement* renderer, RenderBlock* containingBlockBeforeStyleResolution)
@@ -529,9 +528,11 @@ bool FullscreenManager::willEnterFullscreen(Element& element, HTMLMediaElementEn
     INFO_LOG(LOGIDENTIFIER);
     ASSERT(page()->settings().fullScreenEnabled());
 
+#if ENABLE(VIDEO)
     if (RefPtr mediaElement = dynamicDowncast<HTMLMediaElement>(element))
         mediaElement->willBecomeFullscreenElement(mode);
     else
+#endif
         element.willBecomeFullscreenElement();
 
     ASSERT(&element == m_pendingFullscreenElement);
@@ -559,7 +560,7 @@ bool FullscreenManager::willEnterFullscreen(Element& element, HTMLMediaElementEn
             ancestor->removeFromTopLayer();
         ancestor->addToTopLayer();
 
-        markRendererDirtyAfterTopLayerChange(ancestor->renderer(), containingBlockBeforeStyleResolution.get());
+        markRendererDirtyAfterTopLayerChange(ancestor->checkedRenderer().get(), containingBlockBeforeStyleResolution.get());
     }
 
     for (auto ancestor : ancestorsInTreeOrder)
@@ -671,19 +672,16 @@ void FullscreenManager::notifyAboutFullscreenChangeOrError()
 
 void FullscreenManager::dispatchEventForNode(Node& node, EventType eventType)
 {
-    bool supportsUnprefixedAPI = document().settings().unprefixedFullscreenAPIEnabled();
     switch (eventType) {
     case EventType::Change: {
-        if (supportsUnprefixedAPI)
-            node.dispatchEvent(Event::create(eventNames().fullscreenchangeEvent, Event::CanBubble::Yes, Event::IsCancelable::No, Event::IsComposed::Yes));
+        node.dispatchEvent(Event::create(eventNames().fullscreenchangeEvent, Event::CanBubble::Yes, Event::IsCancelable::No, Event::IsComposed::Yes));
         bool shouldEmitUnprefixed = !(node.hasEventListeners(eventNames().webkitfullscreenchangeEvent) && node.hasEventListeners(eventNames().fullscreenchangeEvent)) && !(node.document().hasEventListeners(eventNames().webkitfullscreenchangeEvent) && node.document().hasEventListeners(eventNames().fullscreenchangeEvent));
-        if (!supportsUnprefixedAPI || shouldEmitUnprefixed)
+        if (shouldEmitUnprefixed)
             node.dispatchEvent(Event::create(eventNames().webkitfullscreenchangeEvent, Event::CanBubble::Yes, Event::IsCancelable::No, Event::IsComposed::Yes));
         break;
     }
     case EventType::Error:
-        if (supportsUnprefixedAPI)
-            node.dispatchEvent(Event::create(eventNames().fullscreenerrorEvent, Event::CanBubble::Yes, Event::IsCancelable::No, Event::IsComposed::Yes));
+        node.dispatchEvent(Event::create(eventNames().fullscreenerrorEvent, Event::CanBubble::Yes, Event::IsCancelable::No, Event::IsComposed::Yes));
         node.dispatchEvent(Event::create(eventNames().webkitfullscreenerrorEvent, Event::CanBubble::Yes, Event::IsCancelable::No, Event::IsComposed::Yes));
         break;
     }

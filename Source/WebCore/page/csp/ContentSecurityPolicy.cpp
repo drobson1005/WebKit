@@ -261,7 +261,7 @@ void ContentSecurityPolicy::didReceiveHeader(const String& header, ContentSecuri
 
             // header1,header2 OR header1
             //        ^                  ^
-            m_policies.append(ContentSecurityPolicyDirectiveList::create(*this, String(begin, buffer.position() - begin), type, policyFrom));
+            m_policies.append(ContentSecurityPolicyDirectiveList::create(*this, String({ begin, buffer.position() }), type, policyFrom));
 
             // Skip the comma, and begin the next header from the current position.
             ASSERT(buffer.atEnd() || *buffer == ',');
@@ -395,7 +395,7 @@ static Vector<ContentSecurityPolicyHash> generateHashesForContent(const StringVi
     CString utf8Content = content.utf8(StrictConversionReplacingUnpairedSurrogatesWithFFFD);
     Vector<ContentSecurityPolicyHash> hashes;
     for (auto algorithm : algorithms) {
-        auto hash = cryptographicDigestForBytes(algorithm, utf8Content.data(), utf8Content.length());
+        auto hash = cryptographicDigestForBytes(algorithm, utf8Content.span());
         hashes.append(hash);
     }
 
@@ -1109,11 +1109,16 @@ void ContentSecurityPolicy::upgradeInsecureRequestIfNeeded(URL& url, InsecureReq
 
     bool upgradeRequest = m_insecureNavigationRequestsToUpgrade.contains(SecurityOriginData::fromURL(url));
     bool isUpgradeMixedContentEnabled = m_scriptExecutionContext ? m_scriptExecutionContext->settingsValues().upgradeMixedContentEnabled : false;
+    bool shouldUpgradeLocalhost = isUpgradeMixedContentEnabled && m_scriptExecutionContext ? m_scriptExecutionContext->settingsValues().iPAddressAndLocalhostMixedContentUpgradeTestingEnabled : false;
 
     if (requestType == InsecureRequestType::Load || requestType == InsecureRequestType::FormSubmission)
         upgradeRequest |= m_upgradeInsecureRequests;
 
     if (!upgradeRequest && (alwaysUpgradeRequest == AlwaysUpgradeRequest::No || !isUpgradeMixedContentEnabled))
+        return;
+
+    // Do not automatically upgrade locahost connections.
+    if (!upgradeRequest && SecurityOrigin::isLocalhostAddress(url.host()) && !shouldUpgradeLocalhost && alwaysUpgradeRequest == AlwaysUpgradeRequest::Yes)
         return;
 
     if (url.protocolIs("http"_s))

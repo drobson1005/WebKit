@@ -29,12 +29,14 @@
 
 #include "APIObject.h"
 #include "CocoaImage.h"
+#include "WebExtensionContentWorldType.h"
 #include "WebExtensionMatchPattern.h"
 #include <wtf/Forward.h>
 #include <wtf/HashSet.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
+#include <wtf/spi/cocoa/SecuritySPI.h>
 
 OBJC_CLASS NSArray;
 OBJC_CLASS NSBundle;
@@ -50,10 +52,6 @@ OBJC_CLASS UTType;
 OBJC_CLASS _WKWebExtension;
 OBJC_CLASS _WKWebExtensionLocalization;
 OBJC_CLASS _WKWebExtensionMatchPattern;
-
-#if PLATFORM(MAC)
-#include <Security/CSCommon.h>
-#endif
 
 #ifdef __OBJC__
 #include "_WKWebExtensionPermission.h"
@@ -117,6 +115,11 @@ public:
         DocumentEnd,
     };
 
+    enum class Environment : bool {
+        Document,
+        ServiceWorker,
+    };
+
     using PermissionsSet = HashSet<String>;
     using MatchPatternSet = HashSet<Ref<WebExtensionMatchPattern>>;
 
@@ -155,7 +158,7 @@ public:
 
         bool matchesAboutBlank { false };
         bool injectsIntoAllFrames { false };
-        bool forMainWorld { false };
+        WebExtensionContentWorldType contentWorldType { WebExtensionContentWorldType::ContentScript };
 
         RetainPtr<NSArray> scriptPaths;
         RetainPtr<NSArray> styleSheetPaths;
@@ -174,7 +177,7 @@ public:
 
     struct DeclarativeNetRequestRulesetData {
         String rulesetID;
-        bool enabled;
+        bool enabled { false };
         String jsonPath;
     };
 
@@ -196,8 +199,10 @@ public:
 
     Ref<API::Data> serializeLocalization();
 
+    SecStaticCodeRef bundleStaticCode() const;
+    NSData *bundleHash() const;
+
 #if PLATFORM(MAC)
-    SecStaticCodeRef bundleStaticCode();
     bool validateResourceData(NSURL *, NSData *, NSError **);
 #endif
 
@@ -327,11 +332,8 @@ private:
 
     MatchPatternSet m_externallyConnectableMatchPatterns;
 
-#if PLATFORM(MAC)
-    RetainPtr<SecStaticCodeRef> m_bundleStaticCode;
-#endif
-
     RetainPtr<NSBundle> m_bundle;
+    mutable RetainPtr<SecStaticCodeRef> m_bundleStaticCode;
     RetainPtr<NSURL> m_resourceBaseURL;
     RetainPtr<NSDictionary> m_manifest;
     RetainPtr<NSMutableDictionary> m_resources;
@@ -360,6 +362,7 @@ private:
     RetainPtr<NSString> m_backgroundPagePath;
     RetainPtr<NSString> m_backgroundServiceWorkerPath;
     RetainPtr<NSString> m_generatedBackgroundContent;
+    Environment m_backgroundContentEnvironment { Environment::Document };
 
     RetainPtr<NSString> m_inspectorBackgroundPagePath;
 
@@ -367,7 +370,7 @@ private:
     RetainPtr<NSString> m_overrideNewTabPagePath;
 
     bool m_backgroundContentIsPersistent : 1 { false };
-    bool m_backgroundPageUsesModules : 1 { false };
+    bool m_backgroundContentUsesModules : 1 { false };
     bool m_parsedManifest : 1 { false };
     bool m_parsedManifestDisplayStrings : 1 { false };
     bool m_parsedManifestContentSecurityPolicyStrings : 1 { false };
@@ -382,13 +385,6 @@ private:
     bool m_parsedManifestDeclarativeNetRequestRulesets : 1 { false };
     bool m_parsedExternallyConnectable : 1 { false };
 };
-
-#ifdef __OBJC__
-
-NSSet<_WKWebExtensionPermission> *toAPI(const WebExtension::PermissionsSet&);
-NSSet<_WKWebExtensionMatchPattern *> *toAPI(const WebExtension::MatchPatternSet&);
-
-#endif
 
 } // namespace WebKit
 

@@ -21,10 +21,18 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 // THE POSSIBILITY OF SUCH DAMAGE.
 
+page/skia/MemoryReleaseSkia.cpp
+
+platform/graphics/filters/skia/FEColorMatrixSkiaApplier.cpp
+platform/graphics/filters/skia/FEGaussianBlurSkiaApplier.cpp
+platform/graphics/filters/skia/SourceGraphicSkiaApplier.cpp
+
 platform/graphics/skia/TransformationMatrixSkia.cpp
 platform/graphics/skia/ColorSkia.cpp
+platform/graphics/skia/ColorSpaceSkia.cpp
 platform/graphics/skia/ComplexTextControllerSkia.cpp
 platform/graphics/skia/DrawGlyphsRecorderSkia.cpp
+platform/graphics/skia/FilterImageSkia.cpp
 platform/graphics/skia/FloatRectSkia.cpp
 platform/graphics/skia/FloatRoundedRectSkia.cpp
 platform/graphics/skia/FontCacheSkia.cpp
@@ -32,6 +40,7 @@ platform/graphics/skia/FontCascadeSkia.cpp
 platform/graphics/skia/FontCustomPlatformDataSkia.cpp
 platform/graphics/skia/FontDescriptionSkia.cpp
 platform/graphics/skia/FontPlatformDataSkia.cpp
+platform/graphics/skia/FontRenderOptionsSkia.cpp
 platform/graphics/skia/FontSkia.cpp
 platform/graphics/skia/FontVariationsSkia.cpp
 platform/graphics/skia/GlyphPageSkia.cpp

@@ -27,6 +27,7 @@
 #include "DMABufVideoSinkGStreamer.h"
 #include "GLVideoSinkGStreamer.h"
 #include "GStreamerAudioMixer.h"
+#include "GStreamerQuirks.h"
 #include "GStreamerRegistryScanner.h"
 #include "GStreamerSinksWorkarounds.h"
 #include "GUniquePtrGStreamer.h"
@@ -263,7 +264,7 @@ Vector<String> extractGStreamerOptionsFromCommandLine()
         return { };
 
     Vector<String> options;
-    auto optionsString = String::fromUTF8(contents.get(), length);
+    auto optionsString = String::fromUTF8(std::span(contents.get(), length));
     optionsString.split('\0', [&options](StringView item) {
         if (item.startsWith("--gst"_s))
             options.append(item.toString());
@@ -313,19 +314,6 @@ bool ensureGStreamerInitialized()
 #if USE(GSTREAMER_MPEGTS)
         if (isGStreamerInitialized)
             gst_mpegts_initialize();
-#endif
-
-#if PLATFORM(BCM_NEXUS)
-        {
-            auto registry = gst_registry_get();
-            GRefPtr<GstPluginFeature> brcmaudfilter = adoptGRef(gst_registry_lookup_feature(registry, "brcmaudfilter"));
-            GRefPtr<GstPluginFeature> mpegaudioparse = adoptGRef(gst_registry_lookup_feature(registry, "mpegaudioparse"));
-
-            if (brcmaudfilter && mpegaudioparse) {
-                GST_INFO("overriding mpegaudioparse rank with brcmaudfilter rank + 1");
-                gst_plugin_feature_set_rank(mpegaudioparse.get(), gst_plugin_feature_get_rank(brcmaudfilter.get()) + 1);
-            }
-        }
 #endif
 
         registerAppsinkWithWorkaroundsIfNeeded();
@@ -389,19 +377,20 @@ void registerWebKitGStreamerElements()
         // We don't want autoaudiosink to autoplug our sink.
         gst_element_register(0, "webkitaudiosink", GST_RANK_NONE, WEBKIT_TYPE_AUDIO_SINK);
 
-        // If the FDK-AAC decoder is available, promote it and downrank the
-        // libav AAC decoders, due to their broken LC support, as reported in:
-        // https://ffmpeg.org/pipermail/ffmpeg-devel/2019-July/247063.html
+        // If the FDK-AAC decoder is available, promote it.
         GRefPtr<GstElementFactory> elementFactory = adoptGRef(gst_element_factory_find("fdkaacdec"));
-        if (elementFactory) {
+        if (elementFactory)
             gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE_CAST(elementFactory.get()), GST_RANK_PRIMARY);
+        else
+            g_warning("The GStreamer FDK AAC plugin is missing, AAC playback is unlikely to work.");
 
-            const char* const elementNames[] = {"avdec_aac", "avdec_aac_fixed", "avdec_aac_latm"};
-            for (unsigned i = 0; i < G_N_ELEMENTS(elementNames); i++) {
-                GRefPtr<GstElementFactory> avAACDecoderFactory = adoptGRef(gst_element_factory_find(elementNames[i]));
-                if (avAACDecoderFactory)
-                    gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE_CAST(avAACDecoderFactory.get()), GST_RANK_MARGINAL);
-            }
+        // Downrank the libav AAC decoders, due to their broken LC support, as reported in:
+        // https://ffmpeg.org/pipermail/ffmpeg-devel/2019-July/247063.html
+        const char* const elementNames[] = { "avdec_aac", "avdec_aac_fixed", "avdec_aac_latm" };
+        for (unsigned i = 0; i < G_N_ELEMENTS(elementNames); i++) {
+            GRefPtr<GstElementFactory> avAACDecoderFactory = adoptGRef(gst_element_factory_find(elementNames[i]));
+            if (avAACDecoderFactory)
+                gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE_CAST(avAACDecoderFactory.get()), GST_RANK_MARGINAL);
         }
 
         // Prevent decodebin(3) from auto-plugging hlsdemux if it was disabled. UAs should be able
@@ -440,6 +429,10 @@ void registerWebKitGStreamerElements()
             if (auto vaapiPlugin = adoptGRef(gst_registry_find_plugin(registry, "vaapi")))
                 gst_registry_remove_plugin(registry, vaapiPlugin.get());
         }
+
+        // Make sure the quirks are created as early as possible.
+        [[maybe_unused]] auto& quirksManager = GStreamerQuirksManager::singleton();
+
         registryWasUpdated = true;
     });
 
@@ -631,7 +624,7 @@ void connectSimpleBusMessageCallback(GstElement* pipeline, Function<void(GstMess
 template<>
 Vector<uint8_t> GstMappedBuffer::createVector() const
 {
-    return { data(), size() };
+    return std::span<const uint8_t> { data(), size() };
 }
 
 Ref<SharedBuffer> GstMappedOwnedBuffer::createSharedBuffer()
@@ -1139,11 +1132,16 @@ void configureVideoDecoderForHarnessing(const GRefPtr<GstElement>& element)
     if (gstObjectHasProperty(element.get(), "max-errors"))
         g_object_set(element.get(), "max-errors", 0, nullptr);
 
+    // avdec-specific:
     if (gstObjectHasProperty(element.get(), "std-compliance"))
         gst_util_set_object_arg(G_OBJECT(element.get()), "std-compliance", "strict");
 
     if (gstObjectHasProperty(element.get(), "output-corrupt"))
         g_object_set(element.get(), "output-corrupt", FALSE, nullptr);
+
+    // dav1ddec-specific:
+    if (gstObjectHasProperty(element.get(), "n-threads"))
+        g_object_set(element.get(), "n-threads", 1, nullptr);
 }
 
 void configureMediaStreamVideoDecoder(GstElement* element)

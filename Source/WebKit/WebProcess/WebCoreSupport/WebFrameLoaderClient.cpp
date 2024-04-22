@@ -173,7 +173,7 @@ void WebFrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigat
         if (navigationAction.processingUserGesture() || !linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::AsyncFragmentNavigationPolicyDecision)) {
             auto sendResult = webPage->sendSync(Messages::WebPageProxy::DecidePolicyForNavigationActionSync(*navigationActionData));
             if (!sendResult.succeeded()) {
-                WebFrameLoaderClient_RELEASE_LOG_ERROR(Network, "dispatchDecidePolicyForNavigationAction: ignoring because of failing to send sync IPC with error %" PUBLIC_LOG_STRING, IPC::errorAsString(sendResult.error()));
+                WebFrameLoaderClient_RELEASE_LOG_ERROR(Network, "dispatchDecidePolicyForNavigationAction: ignoring because of failing to send sync IPC with error %" PUBLIC_LOG_STRING, IPC::errorAsString(sendResult.error()).characters());
                 m_frame->didReceivePolicyDecision(listenerID, PolicyDecision { });
                 return;
             }
@@ -198,14 +198,6 @@ void WebFrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigat
 
         frame->didReceivePolicyDecision(listenerID, WTFMove(policyDecision));
     });
-}
-
-void WebFrameLoaderClient::broadcastFrameRemovalToOtherProcesses()
-{
-    auto* webPage = m_frame->page();
-    if (!webPage)
-        return;
-    webPage->send(Messages::WebPageProxy::BroadcastFrameRemovalToOtherProcesses(m_frame->frameID()));
 }
 
 }

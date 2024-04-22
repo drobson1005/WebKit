@@ -33,6 +33,7 @@
 #include "WebProcessCreationParameters.h"
 #include "WebProcessExtensionManager.h"
 
+#include <WebCore/FontRenderOptions.h>
 #include <WebCore/PlatformScreen.h>
 #include <WebCore/ScreenProperties.h>
 
@@ -53,7 +54,7 @@
 #endif
 
 #if USE(GBM)
-#include <WebCore/GBMDevice.h>
+#include <WebCore/DRMDeviceManager.h>
 #endif
 
 #if PLATFORM(GTK)
@@ -144,7 +145,7 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
 #endif
 
 #if USE(GBM)
-    WebCore::GBMDevice::singleton().initialize(parameters.renderDeviceFile);
+    DRMDeviceManager::singleton().initializeMainDevice(parameters.renderDeviceFile);
 #endif
 
 #if PLATFORM(WPE)
@@ -152,15 +153,15 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
         WebCore::PlatformDisplay::setUseDMABufForRendering(true);
 #endif
 
-#if PLATFORM(GTK) && USE(EGL)
+#if PLATFORM(GTK)
     m_dmaBufRendererBufferMode = parameters.dmaBufRendererBufferMode;
     if (!m_dmaBufRendererBufferMode.isEmpty()) {
 #if USE(GBM)
         if (m_dmaBufRendererBufferMode.contains(DMABufRendererBufferMode::Hardware)) {
             const char* disableGBM = getenv("WEBKIT_DMABUF_RENDERER_DISABLE_GBM");
             if (!disableGBM || !strcmp(disableGBM, "0")) {
-                if (auto* device = WebCore::GBMDevice::singleton().device(GBMDevice::Type::Render))
-                    m_displayForCompositing = WebCore::PlatformDisplayGBM::create(device);
+                if (auto* device = DRMDeviceManager::singleton().mainGBMDeviceNode(DRMDeviceManager::NodeType::Render))
+                    m_displayForCompositing = PlatformDisplayGBM::create(device);
             }
         }
 #endif
@@ -195,10 +196,8 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
     AccessibilityAtspi::singleton().connect(parameters.accessibilityBusAddress);
 #endif
 
-#if USE(CAIRO)
     if (parameters.disableFontHintingForTesting)
-        disableCairoFontHintingForTesting();
-#endif
+        FontRenderOptions::singleton().disableHintingForTesting();
 
 #if PLATFORM(GTK)
     GtkSettingsManagerProxy::singleton().applySettings(WTFMove(parameters.gtkSettings));

@@ -99,6 +99,7 @@ using namespace HTMLNames;
 #if ENABLE(DATALIST_ELEMENT)
 class ListAttributeTargetObserver final : public IdTargetObserver {
     WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(ListAttributeTargetObserver);
 public:
     ListAttributeTargetObserver(const AtomString& id, HTMLInputElement&);
 
@@ -1080,7 +1081,7 @@ void HTMLInputElement::setChecked(bool isChecked, WasSetByJavaScript wasCheckedB
 
     if (auto* buttons = radioButtonGroups())
         buttons->updateCheckedState(*this);
-    if (auto* renderer = this->renderer(); renderer && renderer->style().hasEffectiveAppearance())
+    if (auto* renderer = this->renderer(); renderer && renderer->style().hasUsedAppearance())
         renderer->repaint();
     updateValidity();
 
@@ -1089,7 +1090,7 @@ void HTMLInputElement::setChecked(bool isChecked, WasSetByJavaScript wasCheckedB
     // because of the way the code is structured.
     if (auto* renderer = this->renderer()) {
         if (auto* cache = renderer->document().existingAXObjectCache())
-            cache->checkedStateChanged(this);
+            cache->checkedStateChanged(*this);
     }
 }
 
@@ -1101,11 +1102,11 @@ void HTMLInputElement::setIndeterminate(bool newValue)
     Style::PseudoClassChangeInvalidation indeterminateInvalidation(*this, CSSSelector::PseudoClass::Indeterminate, newValue);
     m_isIndeterminate = newValue;
 
-    if (auto* renderer = this->renderer(); renderer && renderer->style().hasEffectiveAppearance())
+    if (auto* renderer = this->renderer(); renderer && renderer->style().hasUsedAppearance())
         renderer->repaint();
 
     if (auto* cache = document().existingAXObjectCache())
-        cache->valueChanged(this);
+        cache->valueChanged(*this);
 }
 
 bool HTMLInputElement::sizeShouldIncludeDecoration(int& preferredSize) const
@@ -1553,7 +1554,7 @@ void HTMLInputElement::setShowAutoFillButton(AutoFillButtonType autoFillButtonTy
     invalidateStyleForSubtree();
 
     if (auto* cache = document().existingAXObjectCache())
-        cache->autofillTypeChanged(this);
+        cache->autofillTypeChanged(*this);
 }
 
 FileList* HTMLInputElement::files()
@@ -2345,8 +2346,11 @@ String HTMLInputElement::placeholder() const
     // According to the HTML5 specification, we need to remove CR and LF from
     // the attribute value.
     String attributeValue = attributeWithoutSynchronization(placeholderAttr);
-    return attributeValue.removeCharacters([](UChar c) {
-        return c == newlineCharacter || c == carriageReturn;
+    if (LIKELY(!containsHTMLLineBreak(attributeValue)))
+        return attributeValue;
+
+    return attributeValue.removeCharacters([](UChar character) {
+        return isHTMLLineBreak(character);
     });
 }
 
@@ -2358,19 +2362,19 @@ bool HTMLInputElement::dirAutoUsesValue() const
 float HTMLInputElement::switchAnimationVisuallyOnProgress() const
 {
     ASSERT(isSwitch());
-    return checkedDowncast<CheckboxInputType>(*m_inputType).switchAnimationVisuallyOnProgress();
+    return downcast<CheckboxInputType>(*m_inputType).switchAnimationVisuallyOnProgress();
 }
 
 bool HTMLInputElement::isSwitchVisuallyOn() const
 {
     ASSERT(isSwitch());
-    return checkedDowncast<CheckboxInputType>(*m_inputType).isSwitchVisuallyOn();
+    return downcast<CheckboxInputType>(*m_inputType).isSwitchVisuallyOn();
 }
 
 float HTMLInputElement::switchAnimationPressedProgress() const
 {
     ASSERT(isSwitch());
-    return checkedDowncast<CheckboxInputType>(*m_inputType).switchAnimationPressedProgress();
+    return downcast<CheckboxInputType>(*m_inputType).switchAnimationPressedProgress();
 }
 
 } // namespace

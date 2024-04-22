@@ -164,8 +164,7 @@ RegisterID* RegExpNode::emitBytecode(BytecodeGenerator& generator, RegisterID* d
     if (regExp->isValid())
         return generator.emitNewRegExp(generator.finalDestination(dst), regExp);
 
-    const char* messageCharacters = regExp->errorMessage();
-    const Identifier& message = generator.parserArena().identifierArena().makeIdentifier(generator.vm(), bitwise_cast<const LChar*>(messageCharacters), strlen(messageCharacters));
+    auto& message = generator.parserArena().identifierArena().makeIdentifier(generator.vm(), span8(regExp->errorMessage()));
     generator.emitThrowStaticError(ErrorTypeWithExtension::SyntaxError, message);
     return generator.emitLoad(generator.finalDestination(dst), jsUndefined());
 }
@@ -550,6 +549,16 @@ RegisterID* ObjectLiteralNode::emitBytecode(BytecodeGenerator& generator, Regist
             return nullptr;
         return generator.emitNewObject(generator.finalDestination(dst));
     }
+
+    // Only one element and it is spread.
+    if (!m_list->m_next && m_list->m_node->m_type & PropertyNode::Spread) {
+        RefPtr<RegisterID> function = generator.moveLinkTimeConstant(nullptr, LinkTimeConstant::cloneObject);
+        RefPtr<RegisterID> src = generator.emitNode(static_cast<ObjectSpreadExpressionNode*>(m_list->m_node->m_assign)->expression());
+        CallArguments args(generator, nullptr, 0);
+        generator.move(args.thisRegister(), src.get());
+        return generator.emitCall(generator.finalDestination(dst, function.get()), function.get(), NoExpectedFunction, args, position(), position(), position(), DebuggableCall::No);
+    }
+
     RefPtr<RegisterID> newObj = generator.emitNewObject(generator.tempDestination(dst));
     generator.emitNode(newObj.get(), m_list);
     return generator.move(dst, newObj.get());
@@ -1723,7 +1732,7 @@ RegisterID* BytecodeIntrinsicNode::emit_intrinsic_arrayPush(BytecodeGenerator& g
 
     ASSERT(!node->m_next);
 
-    RefPtr<RegisterID> length = generator.emitDirectGetById(generator.newTemporary(), base.get(), generator.propertyNames().length);
+    RefPtr<RegisterID> length = generator.emitGetLength(generator.newTemporary(), base.get());
     return generator.move(dst, generator.emitDirectPutByVal(base.get(), length.get(), value.get()));
 }
 
@@ -2021,6 +2030,15 @@ RegisterID* BytecodeIntrinsicNode::emit_intrinsic_toObject(BytecodeGenerator& ge
         return generator.move(dst, generator.emitToObject(temp.get(), src.get(), message));
     }
     return generator.move(dst, generator.emitToObject(temp.get(), src.get(), generator.vm().propertyNames->emptyIdentifier));
+}
+
+RegisterID* BytecodeIntrinsicNode::emit_intrinsic_toThis(BytecodeGenerator& generator, RegisterID* dst)
+{
+    ArgumentListNode* node = m_args->m_listNode;
+    RefPtr<RegisterID> src = generator.emitNode(node);
+    ASSERT(!node->m_next);
+
+    return generator.move(dst, generator.emitToThis(src.get()));
 }
 
 RegisterID* BytecodeIntrinsicNode::emit_intrinsic_idWithProfile(BytecodeGenerator& generator, RegisterID* dst)
@@ -2581,7 +2599,7 @@ RegisterID* PostfixNode::emitBracket(BytecodeGenerator& generator, RegisterID* d
         // Never double-evaluate the subscript expression;
         // don't even evaluate it once if the base isn't subscriptable.
         generator.emitRequireObjectCoercible(base.get(), "Cannot access property of undefined or null"_s);
-        property = generator.emitToPropertyKey(generator.newTemporary(), property.get());
+        property = generator.emitToPropertyKeyOrNumber(generator.newTemporary(), property.get());
     }
 
     generator.emitExpressionInfo(bracketAccessor->divot(), bracketAccessor->divotStart(), bracketAccessor->divotEnd());
@@ -2877,7 +2895,7 @@ RegisterID* PrefixNode::emitBracket(BytecodeGenerator& generator, RegisterID* ds
         // Never double-evaluate the subscript expression;
         // don't even evaluate it once if the base isn't subscriptable.
         generator.emitRequireObjectCoercible(base.get(), "Cannot access property of undefined or null"_s);
-        property = generator.emitToPropertyKey(generator.newTemporary(), property.get());
+        property = generator.emitToPropertyKeyOrNumber(generator.newTemporary(), property.get());
     }
     RefPtr<RegisterID> propDst = generator.tempDestination(dst);
 
@@ -3952,6 +3970,12 @@ RegisterID* ReadModifyBracketNode::emitBytecode(BytecodeGenerator& generator, Re
 {
     RefPtr<RegisterID> base = generator.emitNodeForLeftHandSide(m_base, m_subscriptHasAssignments || m_rightHasAssignments, m_subscript->isPure(generator) && m_right->isPure(generator));
     RefPtr<RegisterID> property = generator.emitNodeForLeftHandSideForProperty(m_subscript, m_rightHasAssignments, m_right->isPure(generator));
+    if (!m_subscript->isNumber() && !m_subscript->isString()) {
+        // Never double-evaluate the subscript expression;
+        // don't even evaluate it once if the base isn't subscriptable.
+        generator.emitRequireObjectCoercible(base.get(), "Cannot access property of undefined or null"_s);
+        property = generator.emitToPropertyKeyOrNumber(generator.newTemporary(), property.get());
+    }
 
     generator.emitExpressionInfo(subexpressionDivot(), subexpressionStart(), subexpressionEnd());
     RefPtr<RegisterID> value;
@@ -3979,8 +4003,14 @@ RegisterID* ShortCircuitReadModifyBracketNode::emitBytecode(BytecodeGenerator& g
 {
     RefPtr<RegisterID> base = generator.emitNodeForLeftHandSide(m_base, m_subscriptHasAssignments || m_rightHasAssignments, m_subscript->isPure(generator) && m_right->isPure(generator));
     RefPtr<RegisterID> property = generator.emitNodeForLeftHandSideForProperty(m_subscript, m_rightHasAssignments, m_right->isPure(generator));
-    RefPtr<RegisterID> thisValue;
+    if (!m_subscript->isNumber() && !m_subscript->isString()) {
+        // Never double-evaluate the subscript expression;
+        // don't even evaluate it once if the base isn't subscriptable.
+        generator.emitRequireObjectCoercible(base.get(), "Cannot access property of undefined or null"_s);
+        property = generator.emitToPropertyKeyOrNumber(generator.newTemporary(), property.get());
+    }
 
+    RefPtr<RegisterID> thisValue;
     RefPtr<RegisterID> result = generator.tempDestination(dst);
 
     generator.emitExpressionInfo(subexpressionDivot(), subexpressionStart(), subexpressionEnd());
@@ -5685,7 +5715,7 @@ void ObjectPatternNode::bindValue(BytecodeGenerator& generator, RegisterID* rhs)
                         // And @copyDataProperties performs ToPropertyKey internally.
                         // And for Number case, passing it to GetByVal is better for performance.
                         if (!target.propertyExpression->isNumber() && !target.propertyExpression->isString())
-                            propertyName = generator.emitToPropertyKey(propertyName.get(), propertyName.get());
+                            propertyName = generator.emitToPropertyKeyOrNumber(propertyName.get(), propertyName.get());
                     } else
                         propertyName = generator.emitNodeForProperty(target.propertyExpression);
                     generator.emitGetByVal(temp.get(), rhs, propertyName.get());

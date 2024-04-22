@@ -109,6 +109,12 @@ enum TracePointCode {
     RenderTreeLayoutEnd,
     PerformOpportunisticallyScheduledTasksStart,
     PerformOpportunisticallyScheduledTasksEnd,
+    WebXRLayerStartFrameStart,
+    WebXRLayerStartFrameEnd,
+    WebXRLayerEndFrameStart,
+    WebXRLayerEndFrameEnd,
+    WebXRSessionFrameCallbacksStart,
+    WebXRSessionFrameCallbacksEnd,
 
     WebKitRange = 10000,
     WebHTMLViewPaintStart,
@@ -151,6 +157,12 @@ enum TracePointCode {
     ProcessLaunchEnd,
     InitializeSandboxStart,
     InitializeSandboxEnd,
+    WebXRCPFrameWaitStart,
+    WebXRCPFrameWaitEnd,
+    WebXRCPFrameStartSubmissionStart,
+    WebXRCPFrameStartSubmissionEnd,
+    WebXRCPFrameEndSubmissionStart,
+    WebXRCPFrameEndSubmissionEnd,
 
     GPUProcessRange = 16000,
     WakeUpAndApplyDisplayListStart,
@@ -223,6 +235,8 @@ WTF_EXTERN_C_END
     M(RegisterImportMap) \
     M(JSCJITCompiler) \
     M(JSCJSGlobalObject) \
+    M(IPCConnection) \
+    M(StreamClientConnection) \
 
 #define DECLARE_WTF_SIGNPOST_NAME_ENUM(name) WTFOSSignpostName ## name,
 

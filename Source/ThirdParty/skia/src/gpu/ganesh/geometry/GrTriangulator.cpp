@@ -7,15 +7,25 @@
 
 #include "src/gpu/ganesh/geometry/GrTriangulator.h"
 
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkRect.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkTPin.h"
+#include "src/base/SkVx.h"
+#include "src/core/SkGeometry.h"
+#include "src/core/SkPointPriv.h"
 #include "src/gpu/BufferWriter.h"
+#include "src/gpu/ganesh/GrColor.h"
 #include "src/gpu/ganesh/GrEagerVertexAllocator.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 
-#include "src/core/SkGeometry.h"
-#include "src/core/SkPointPriv.h"
-
 #include <algorithm>
+#include <cstddef>
+#include <limits>
+#include <memory>
 #include <tuple>
+#include <utility>
 
 #if !defined(SK_ENABLE_OPTIMIZE_SIZE)
 
@@ -99,7 +109,7 @@ static skgpu::VertexWriter emit_triangle(Vertex* v0, Vertex* v1, Vertex* v2,
     TESS_LOG("emit_triangle %g (%g, %g) %d\n", v0->fID, v0->fPoint.fX, v0->fPoint.fY, v0->fAlpha);
     TESS_LOG("              %g (%g, %g) %d\n", v1->fID, v1->fPoint.fX, v1->fPoint.fY, v1->fAlpha);
     TESS_LOG("              %g (%g, %g) %d\n", v2->fID, v2->fPoint.fX, v2->fPoint.fY, v2->fAlpha);
-#if TESSELLATOR_WIREFRAME
+#if TRIANGULATOR_WIREFRAME
     data = emit_vertex(v0, emitCoverage, std::move(data));
     data = emit_vertex(v1, emitCoverage, std::move(data));
     data = emit_vertex(v1, emitCoverage, std::move(data));

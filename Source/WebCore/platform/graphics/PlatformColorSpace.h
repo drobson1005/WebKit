@@ -28,9 +28,10 @@
 #if USE(CG)
 #include <wtf/RetainPtr.h>
 typedef struct CGColorSpace* CGColorSpaceRef;
+#elif USE(SKIA)
+#include <skia/core/SkColorSpace.h>
 #else
 #include <optional>
-#include <wtf/EnumTraits.h>
 #endif
 
 namespace WebCore {
@@ -40,15 +41,18 @@ namespace WebCore {
 using PlatformColorSpace = RetainPtr<CGColorSpaceRef>;
 using PlatformColorSpaceValue = CGColorSpaceRef;
 
+#elif USE(SKIA)
+
+using PlatformColorSpace = sk_sp<SkColorSpace>;
+using PlatformColorSpaceValue = sk_sp<SkColorSpace>;
+
 #else
 
 class PlatformColorSpace {
 public:
     enum class Name : uint8_t {
         SRGB
-#if ENABLE(DESTINATION_COLOR_SPACE_LINEAR_SRGB)
         , LinearSRGB
-#endif
 #if ENABLE(DESTINATION_COLOR_SPACE_DISPLAY_P3)
         , DisplayP3
 #endif

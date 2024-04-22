@@ -51,8 +51,8 @@
 #include "InspectorDOMAgent.h"
 #include "InspectorTimelineAgent.h"
 #include "InstrumentingAgents.h"
+#include "JSDOMWindowCustom.h"
 #include "JSExecState.h"
-#include "JSLocalDOMWindowCustom.h"
 #include "JSWebSocket.h"
 #include "LoaderStrategy.h"
 #include "LocalFrame.h"
@@ -103,6 +103,8 @@ namespace {
 
 class InspectorThreadableLoaderClient final : public ThreadableLoaderClient {
     WTF_MAKE_NONCOPYABLE(InspectorThreadableLoaderClient);
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Loader);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(InspectorThreadableLoaderClient);
 public:
     InspectorThreadableLoaderClient(RefPtr<LoadResourceCallback>&& callback)
         : m_callback(WTFMove(callback))
@@ -132,7 +134,7 @@ public:
         if (buffer.isEmpty())
             return;
 
-        m_responseText.append(m_decoder->decode(buffer.data(), buffer.size()));
+        m_responseText.append(m_decoder->decode(buffer.span()));
     }
 
     void didFinishLoading(ResourceLoaderIdentifier, const NetworkLoadMetrics&) override
@@ -175,8 +177,8 @@ Ref<Inspector::Protocol::Network::WebSocketFrame> buildWebSocketMessage(const We
     return Inspector::Protocol::Network::WebSocketFrame::create()
         .setOpcode(frame.opCode)
         .setMask(frame.masked)
-        .setPayloadData(frame.opCode == 1 ? String::fromUTF8WithLatin1Fallback(frame.payload, frame.payloadLength) : base64EncodeToString(frame.payload, frame.payloadLength))
-        .setPayloadLength(frame.payloadLength)
+        .setPayloadData(frame.opCode == 1 ? String::fromUTF8WithLatin1Fallback(frame.payload) : base64EncodeToString(frame.payload))
+        .setPayloadLength(frame.payload.size())
         .release();
 }
 
@@ -338,7 +340,7 @@ static Ref<Inspector::Protocol::Network::Request> buildObjectForResourceRequest(
 
     if (request.httpBody() && !request.httpBody()->isEmpty()) {
         auto bytes = request.httpBody()->flatten();
-        requestObject->setPostData(String::fromUTF8WithLatin1Fallback(bytes.data(), bytes.size()));
+        requestObject->setPostData(String::fromUTF8WithLatin1Fallback(bytes.span()));
     }
 
     if (resourceLoader) {
@@ -1296,10 +1298,8 @@ Inspector::Protocol::ErrorStringOr<void> InspectorNetworkAgent::interceptWithRes
             return makeUnexpected("Unable to decode given content"_s);
 
         overrideData = SharedBuffer::create(WTFMove(*buffer));
-    } else {
-        auto utf8Content = content.utf8();
-        overrideData = SharedBuffer::create(utf8Content.data(), utf8Content.length());
-    }
+    } else
+        overrideData = SharedBuffer::create(content.utf8().span());
 
     pendingInterceptResponse->respond(overrideResponse, overrideData);
 
@@ -1324,10 +1324,8 @@ Inspector::Protocol::ErrorStringOr<void> InspectorNetworkAgent::interceptRequest
             return makeUnexpected("Unable to decode given content"_s);
 
         data = SharedBuffer::create(WTFMove(*buffer));
-    } else {
-        auto utf8Content = content.utf8();
-        data = SharedBuffer::create(utf8Content.data(), utf8Content.length());
-    }
+    } else
+        data = SharedBuffer::create(content.utf8().span());
 
     // Mimic data URL load behavior - report didReceiveResponse & didFinishLoading.
     ResourceResponse response(pendingRequest->m_loader->url(), mimeType, data->size(), String());
@@ -1475,12 +1473,12 @@ bool InspectorNetworkAgent::cachedResourceContent(CachedResource& resource, Stri
         if (InspectorNetworkAgent::shouldTreatAsText(resource.mimeType())) {
             auto decoder = InspectorNetworkAgent::createTextDecoder(resource.mimeType(), resource.response().textEncodingName());
             *base64Encoded = false;
-            *result = decoder->decodeAndFlush(buffer->makeContiguous()->data(), buffer->size());
+            *result = decoder->decodeAndFlush(buffer->makeContiguous()->span());
             return true;
         }
 
         *base64Encoded = true;
-        *result = base64EncodeToString(buffer->makeContiguous()->data(), buffer->size());
+        *result = base64EncodeToString(buffer->makeContiguous()->span());
         return true;
     }
 }

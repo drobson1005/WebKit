@@ -23,8 +23,6 @@
 #include "RenderSVGResourceContainer.h"
 #include "SVGMarkerTypes.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-
 namespace WebCore {
 
 class GraphicsContext;
@@ -32,6 +30,7 @@ class SVGMarkerElement;
 
 class RenderSVGResourceMarker final : public RenderSVGResourceContainer {
     WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceMarker);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderSVGResourceMarker);
 public:
     RenderSVGResourceMarker(SVGMarkerElement&, RenderStyle&&);
     virtual ~RenderSVGResourceMarker();
@@ -78,5 +77,3 @@ private:
 }
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGResourceMarker, isRenderSVGResourceMarker())
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

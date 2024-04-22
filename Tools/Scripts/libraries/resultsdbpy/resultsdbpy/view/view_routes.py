@@ -1,4 +1,4 @@
-# Copyright (C) 2019, 2020 Apple Inc. All rights reserved.
+# Copyright (C) 2019-2024 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -45,6 +45,10 @@ class ViewRoutes(AuthedBlueprint):
         archive_routes=None,
         suite_types=None,
         default_architecture=None,
+        tests_limits=None,
+        suites_limits=None,
+        commits_limits=None,
+        dashboard_queries=None,
     ):
         super(ViewRoutes, self).__init__('view', import_name, url_prefix=None, auth_decorator=auth_decorator)
         self._cache = {}
@@ -57,6 +61,10 @@ class ViewRoutes(AuthedBlueprint):
 
         self.suite_types = suite_types or {}
         self.default_architecture = default_architecture
+        self.tests_limits = tests_limits or dict(max=50000, default=5000)
+        self.suites_limits = suites_limits or dict(max=10000, default=1000)
+        self.commits_limits = commits_limits or dict(max=10000, default=1000)
+        self.dashboard_queries = dashboard_queries or {}
 
         # Protecting js and css with auth doesn't make sense
         self.add_url_rule('/library/<path:path>', 'library', self.library, authed=False, methods=('GET',))
@@ -174,5 +182,9 @@ class ViewRoutes(AuthedBlueprint):
             self.environment.get_template('constants.js').render(
                 XcodeCloud=self.suite_types.get('XcodeCloud') or [],
                 default_architecture=json.dumps(self.default_architecture) if self.default_architecture else 'null',
+                tests_limits=json.dumps(self.tests_limits),
+                suites_limits=json.dumps(self.suites_limits),
+                commits_limits=json.dumps(self.commits_limits),
+                dashboard_queries=json.dumps(self.dashboard_queries),
             ), mimetype='application/javascript',
         )

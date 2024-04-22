@@ -527,11 +527,8 @@ void MediaPlayerPrivateAVFoundation::updateStates()
                     } else
                         newNetworkState = MediaPlayer::NetworkState::Idle;
                 }
-            } else {
-                // FIX ME: fetch the error associated with the @"playable" key to distinguish between format 
-                // and network errors.
-                newNetworkState = MediaPlayer::NetworkState::FormatError;
-            }
+            } else
+                newNetworkState = assetStatus == MediaPlayerAVAssetStatusNetworkError ? MediaPlayer::NetworkState::NetworkError : MediaPlayer::NetworkState::FormatError;
         }
 
         if (!hasAvailableVideoFrame())
@@ -743,9 +740,7 @@ void MediaPlayerPrivateAVFoundation::configureInbandTracks()
 {
     RefPtr<InbandTextTrackPrivateAVF> trackToEnable;
     
-#if ENABLE(AVF_CAPTIONS)
     synchronizeTextTrackState();
-#endif
 
     // AVFoundation can only emit cues for one track at a time, so enable the first track that is showing, or the first that
     // is hidden if none are showing. Otherwise disable all tracks.
@@ -798,10 +793,8 @@ void MediaPlayerPrivateAVFoundation::processNewAndRemovedTextTracks(const Vector
     for (unsigned i = 0; i < trackCount; ++i) {
         RefPtr<InbandTextTrackPrivateAVF> track = m_textTracks[i];
 
-#if ENABLE(AVF_CAPTIONS)
         if (track->textTrackCategory() == InbandTextTrackPrivateAVF::OutOfBand)
             continue;
-#endif
 
         track->setTextTrackIndex(inBandCount);
         ++inBandCount;
@@ -849,7 +842,7 @@ bool MediaPlayerPrivateAVFoundation::extractKeyURIKeyIDAndCertificateFromInitDat
     if (!keyURIArray)
         return false;
 
-    keyURI = String(reinterpret_cast<UChar*>(keyURIArray->data()), keyURILength / sizeof(unsigned short));
+    keyURI = String({ reinterpret_cast<UChar*>(keyURIArray->data()), keyURILength / sizeof(unsigned short) });
     offset += keyURILength;
 
     uint32_t keyIDLength = initDataView->get<uint32_t>(offset, true, &status);
@@ -861,7 +854,7 @@ bool MediaPlayerPrivateAVFoundation::extractKeyURIKeyIDAndCertificateFromInitDat
     if (!keyIDArray)
         return false;
 
-    keyID = String(reinterpret_cast<UChar*>(keyIDArray->data()), keyIDLength / sizeof(unsigned short));
+    keyID = String({ reinterpret_cast<UChar*>(keyIDArray->data()), keyIDLength / sizeof(unsigned short) });
     offset += keyIDLength;
 
     uint32_t certificateLength = initDataView->get<uint32_t>(offset, true, &status);

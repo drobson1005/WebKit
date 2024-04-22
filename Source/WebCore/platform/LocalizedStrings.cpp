@@ -132,7 +132,7 @@ String localizedString(const wchar_t* key)
 #else
 String localizedString(const char* key)
 {
-    return String::fromUTF8(key, strlen(key));
+    return String::fromUTF8(key);
 }
 #endif
 
@@ -756,11 +756,6 @@ String AXTimeFieldSecondText()
 String AXTimeFieldMillisecondText()
 {
     return WEB_UI_STRING("milliseconds", "accessibility label for milliseconds fields.");
-}
-
-String AXTimeFieldMeridiemText()
-{
-    return WEB_UI_STRING("meridiem", "accessibility label for meridiem fields.");
 }
 
 String AXDateTimeFieldText()

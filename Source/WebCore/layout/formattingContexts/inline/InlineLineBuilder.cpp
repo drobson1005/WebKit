@@ -101,7 +101,7 @@ static inline Vector<int32_t> computedVisualOrder(const Line::RunList& lineRuns,
     return visualOrderList;
 }
 
-static bool hasTrailingSoftWrapOpportunity(size_t softWrapOpportunityIndex, size_t layoutRangeEnd, const InlineItemList& inlineItemList)
+static bool hasTrailingSoftWrapOpportunity(size_t softWrapOpportunityIndex, size_t layoutRangeEnd, std::span<const InlineItem> inlineItemList)
 {
     if (!softWrapOpportunityIndex || softWrapOpportunityIndex == layoutRangeEnd) {
         // This candidate inline content ends because the entire content ends and not because there's a soft wrap opportunity.
@@ -230,7 +230,7 @@ inline void LineCandidate::reset()
 
 
 LineBuilder::LineBuilder(InlineFormattingContext& inlineFormattingContext, HorizontalConstraints rootHorizontalConstraints, const InlineItemList& inlineItemList)
-    : AbstractLineBuilder(inlineFormattingContext, rootHorizontalConstraints, inlineItemList)
+    : AbstractLineBuilder(inlineFormattingContext, inlineFormattingContext.root(), rootHorizontalConstraints, inlineItemList)
     , m_floatingContext(inlineFormattingContext.floatingContext())
 {
 }
@@ -267,7 +267,7 @@ LineLayoutResult LineBuilder::layoutInlineContent(const LineInput& lineInput, co
         , { WTFMove(m_placedFloats), WTFMove(m_suspendedFloats), m_lineIsConstrainedByFloat }
         , { contentLogicalLeft, result.contentLogicalWidth, contentLogicalLeft + result.contentLogicalRight, lineContent.overflowLogicalWidth }
         , { m_lineLogicalRect.topLeft(), m_lineLogicalRect.width(), m_lineInitialLogicalRect.left() + m_initialIntrusiveFloatsWidth, m_initialLetterClearGap }
-        , { !result.isHangingTrailingContentWhitespace, result.hangingTrailingContentWidth }
+        , { !result.isHangingTrailingContentWhitespace, result.hangingTrailingContentWidth, result.hangablePunctuationStartWidth }
         , { WTFMove(visualOrderList), inlineBaseDirection }
         , { isFirstFormattedLine() ? LineLayoutResult::IsFirstLast::FirstFormattedLine::WithinIFC : LineLayoutResult::IsFirstLast::FirstFormattedLine::No, isLastInlineContent }
         , { WTFMove(lineContent.rubyBaseAlignmentOffsetList), lineContent.rubyAnnotationOffset }
@@ -460,7 +460,7 @@ LineContent LineBuilder::placeInlineAndFloatContent(const InlineItemRange& needs
             currentItemIndex = needsLayoutRange.startIndex() + placedInlineItemCount;
         }
         // Looks like we've run out of content.
-        ASSERT_UNUSED(resumedFloatCount, placedInlineItemCount || resumedFloatCount);
+        ASSERT(placedInlineItemCount || resumedFloatCount);
     };
     layoutInlineAndFloatContent();
 
@@ -470,7 +470,10 @@ LineContent LineBuilder::placeInlineAndFloatContent(const InlineItemRange& needs
         if (!placedInlineItemCount)
             return;
 
-        if (placedInlineItemCount == m_placedFloats.size() || !lineContent.partialTrailingContentLength) {
+        // Layout range already includes "suspended" floats from previous line(s). See layoutPreviouslySuspendedFloats above for details.
+        ASSERT(m_placedFloats.size() >= resumedFloatCount);
+        auto onlyFloatContentPlaced = placedInlineItemCount == m_placedFloats.size() - resumedFloatCount;
+        if (onlyFloatContentPlaced || !lineContent.partialTrailingContentLength) {
             lineContent.range.end = { needsLayoutRange.startIndex() + placedInlineItemCount, { } };
             return;
         }
@@ -801,7 +804,7 @@ LineBuilder::RectAndFloatConstraints LineBuilder::adjustedLineRectWithCandidateI
         return { m_lineLogicalRect };
     // FIXME: Use InlineFormattingUtils::inlineLevelBoxAffectsLineBox instead.
     auto candidateContentHeight = InlineLayoutUnit { };
-    auto lineBoxContain = formattingContext().root().style().lineBoxContain();
+    auto lineBoxContain = rootStyle().lineBoxContain();
     for (auto& run : inlineContent.continuousContent().runs()) {
         auto& inlineItem = run.inlineItem;
         if (inlineItem.isText()) {

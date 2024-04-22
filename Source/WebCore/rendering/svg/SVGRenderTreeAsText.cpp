@@ -240,10 +240,7 @@ void writeSVGPaintingFeatures(TextStream& ts, const RenderElement& renderer, Opt
             writeSVGFillPaintingResource(ts, renderer, *fillPaintingResource);
 
         writeIfNotDefault(ts, "clip rule", svgStyle->clipRule(), WindRule::NonZero);
-    }
-
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-    else if (auto* shape = dynamicDowncast<RenderSVGShape>(renderer)) {
+    } else if (auto* shape = dynamicDowncast<RenderSVGShape>(renderer)) {
         Color fallbackColor;
         if (auto* strokePaintingResource = LegacyRenderSVGResource::strokePaintingResource(const_cast<RenderSVGShape&>(*shape), shape->style(), fallbackColor))
             writeSVGStrokePaintingResource(ts, renderer, *strokePaintingResource, shape->protectedGraphicsElement());
@@ -253,7 +250,6 @@ void writeSVGPaintingFeatures(TextStream& ts, const RenderElement& renderer, Opt
 
         writeIfNotDefault(ts, "clip rule", svgStyle->clipRule(), WindRule::NonZero);
     }
-#endif
 
     auto writeMarker = [&](const char* name, const String& value) {
         auto* element = renderer.element();
@@ -423,10 +419,8 @@ static void writeChildren(TextStream& ts, const RenderElement& parent, OptionSet
     TextStream::IndentScope indentScope(ts);
 
     for (const auto& child : childrenOfType<RenderObject>(parent)) {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (parent.document().settings().layerBasedSVGEngineEnabled() && child.hasLayer())
             continue;
-#endif
         write(ts, child, behavior);
     }
 }
@@ -610,7 +604,7 @@ void writeResources(TextStream& ts, const RenderObject& renderer, OptionSet<Rend
         AtomString id = resourceClipPath->fragment();
         if (LegacyRenderSVGResourceClipper* clipper = getRenderSVGResourceById<LegacyRenderSVGResourceClipper>(renderer.treeScopeForSVGReferences(), id)) {
             ts << indent << " ";
-            writeNameAndQuotedValue(ts, "clipPath", resourceClipPath->fragment());
+            writeNameAndQuotedValue(ts, "clipPath", id);
             ts << " ";
             writeStandardPrefix(ts, *clipper, behavior, WriteIndentOrNot::No);
             ts << " " << clipper->resourceBoundingBox(renderer, RepaintRectCalculation::Accurate) << "\n";

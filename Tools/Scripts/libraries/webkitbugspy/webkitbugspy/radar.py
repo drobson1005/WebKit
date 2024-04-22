@@ -71,7 +71,7 @@ class Tracker(GenericTracker):
         TASK
     ]
 
-    RELATIONSHIP_TYPES = ['related-to', 'blocked-by', 'blocking', 'parent-of', 'subtask-of', 'cause-of', 'caused-by', 'duplicate-of', 'original-of']
+    RELATIONSHIP_TYPES = ['related-to', 'blocked-by', 'blocking', 'parent-of', 'subtask-of', 'cause-of', 'caused-by', 'duplicate-of', 'original-of', 'clone-of', 'cloned-to']
 
     ALWAYS = 'Always'
     SOMETIMES = 'Sometimes'
@@ -196,13 +196,17 @@ class Tracker(GenericTracker):
         if not member or member == 'labels':
             return issue
 
-        radar = self.client.radar_for_id(issue.id)
+        additional_fields = []
+        if member == 'source_changes':
+            additional_fields.append('sourceChanges')
+        radar = self.client.radar_for_id(issue.id, additional_fields=additional_fields)
         if not radar:
             sys.stderr.write("Failed to fetch '{}'\n".format(issue.link))
             return issue
 
         issue._title = radar.title
         issue._timestamp = int(calendar.timegm(radar.createdAt.timetuple()))
+        issue._modified = int(calendar.timegm(radar.lastModifiedAt.timetuple()))
         issue._assignee = self.user(
             name='{} {}'.format(radar.assignee.firstName, radar.assignee.lastName),
             username=radar.assignee.dsid,
@@ -218,6 +222,11 @@ class Tracker(GenericTracker):
             email=radar.originator.email,
         )
         issue._milestone = radar.milestone.name if radar.milestone else ''
+
+        if member == 'source_changes':
+            issue._source_changes = []
+            if radar.sourceChanges is not None:
+                issue._source_changes = radar.sourceChanges.splitlines()
 
         if member == 'keywords':
             issue._keywords = [kw.name for kw in (radar.keywords() or [])]
@@ -289,14 +298,17 @@ class Tracker(GenericTracker):
 
         return issue
 
-    def set(self, issue, assignee=None, opened=None, why=None, project=None, component=None, version=None, original=None, keywords=None, **properties):
+    def set(self, issue, assignee=None, opened=None, why=None, project=None, component=None, version=None, original=None, keywords=None, source_changes=None, **properties):
         if not self.client or not self.library:
             sys.stderr.write('radarclient inaccessible on this machine\n')
             return None
         if properties:
             raise TypeError("'{}' is an invalid property".format(list(properties.keys())[0]))
 
-        radar = self.client.radar_for_id(issue.id)
+        additional_fields = []
+        if source_changes:
+            additional_fields.append('sourceChanges')
+        radar = self.client.radar_for_id(issue.id, additional_fields=additional_fields)
         if not radar:
             sys.stderr.write("Failed to fetch '{}'\n".format(issue.link))
             return None
@@ -388,6 +400,10 @@ class Tracker(GenericTracker):
                     radar.add_keyword(self._keywords[word])
             did_change = True
             issue._keywords = keywords
+
+        if source_changes:
+            did_change = True
+            radar.sourceChanges = '\n'.join(source_changes)
 
         if did_change:
             radar.commit_changes()

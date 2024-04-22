@@ -32,6 +32,7 @@
 namespace PAL {
 
 struct CryptoDigestContext;
+enum class UseCryptoKit : bool { No, Yes };
 
 class CryptoDigest {
     WTF_MAKE_NONCOPYABLE(CryptoDigest);
@@ -47,10 +48,10 @@ public:
     PAL_EXPORT static std::unique_ptr<CryptoDigest> create(Algorithm);
     PAL_EXPORT ~CryptoDigest();
 
-    PAL_EXPORT void addBytes(const void* input, size_t length);
+    PAL_EXPORT void addBytes(std::span<const uint8_t>);
     PAL_EXPORT Vector<uint8_t> computeHash();
     PAL_EXPORT String toHexString();
-    PAL_EXPORT static std::optional<Vector<uint8_t>> computeHash(Algorithm, const Vector<uint8_t>&, bool);
+    PAL_EXPORT static std::optional<Vector<uint8_t>> computeHash(Algorithm, const Vector<uint8_t>&, UseCryptoKit);
     PAL_EXPORT CryptoDigest();
 
 private:

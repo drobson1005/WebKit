@@ -127,7 +127,7 @@ public:
     using Stack = typename FunctionParser::Stack;
     using ResultList = typename FunctionParser::ResultList;
 
-    FunctionParser(Context&, const uint8_t* functionStart, size_t functionLength, const TypeDefinition&, const ModuleInformation&);
+    FunctionParser(Context&, std::span<const uint8_t> function, const TypeDefinition&, const ModuleInformation&);
 
     Result WARN_UNUSED_RETURN parse();
     Result WARN_UNUSED_RETURN parseConstantExpression();
@@ -361,14 +361,14 @@ static bool isTryOrCatch(ControlType& data)
 }
 
 template<typename Context>
-FunctionParser<Context>::FunctionParser(Context& context, const uint8_t* functionStart, size_t functionLength, const TypeDefinition& signature, const ModuleInformation& info)
-    : Parser(functionStart, functionLength)
+FunctionParser<Context>::FunctionParser(Context& context, std::span<const uint8_t> function, const TypeDefinition& signature, const ModuleInformation& info)
+    : Parser(function)
     , m_context(context)
     , m_signature(signature.expand())
     , m_info(info)
 {
     if (verbose)
-        dataLogLn("Parsing function starting at: ", (uintptr_t)functionStart, " of length: ", functionLength, " with signature: ", signature);
+        dataLogLn("Parsing function starting at: ", (uintptr_t)function.data(), " of length: ", function.size(), " with signature: ", signature);
     m_context.setParser(this);
 }
 
@@ -471,7 +471,7 @@ auto FunctionParser<Context>::parseBody() -> PartialResult
 #endif
 
         if (verbose) {
-            dataLogLn("processing op (", m_unreachableBlocks, "): ",  RawHex(op), ", ", makeString(static_cast<OpType>(op)), " at offset: ", RawHex(m_offset));
+            dataLogLn("processing op (", m_unreachableBlocks, "): ",  RawHex(m_currentOpcode), ", ", makeString(static_cast<OpType>(m_currentOpcode)), " at offset: ", RawHex(m_currentOpcodeStartingOffset));
             m_context.dump(m_controlStack, &m_expressionStack);
         }
 
@@ -1672,7 +1672,7 @@ ALWAYS_INLINE auto FunctionParser<Context>::parseNestedBlocksEagerly(bool& shoul
 
         switchToBlock(WTFMove(block), WTFMove(newStack));
 
-        if (m_offset >= length()) {
+        if (m_offset >= source().size()) {
             shouldContinue = false;
             return { };
         }

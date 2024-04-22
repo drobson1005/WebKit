@@ -304,9 +304,9 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/cookie-store/CookieStoreDeleteOptions.idl
     Modules/cookie-store/CookieStoreGetOptions.idl
     Modules/cookie-store/CookieStoreManager.idl
+    Modules/cookie-store/DOMWindow+CookieStore.idl
     Modules/cookie-store/ExtendableCookieChangeEvent.idl
     Modules/cookie-store/ExtendableCookieChangeEventInit.idl
-    Modules/cookie-store/LocalDOMWindow+CookieStore.idl
 
     Modules/credentialmanagement/BasicCredential.idl
     Modules/credentialmanagement/CredentialCreationOptions.idl
@@ -622,7 +622,7 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/screen-wake-lock/WakeLockSentinel.idl
     Modules/screen-wake-lock/WakeLockType.idl
 
-    Modules/speech/LocalDOMWindow+SpeechSynthesis.idl
+    Modules/speech/DOMWindow+SpeechSynthesis.idl
     Modules/speech/SpeechRecognitionErrorEvent.idl
     Modules/speech/SpeechRecognition.idl
     Modules/speech/SpeechRecognitionAlternative.idl
@@ -804,9 +804,9 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webcodecs/WebCodecsVideoFrame.idl
     Modules/webcodecs/WebCodecsVideoFrameOutputCallback.idl
 
+    Modules/webdatabase/DOMWindow+WebDatabase.idl
     Modules/webdatabase/Database.idl
     Modules/webdatabase/DatabaseCallback.idl
-    Modules/webdatabase/LocalDOMWindow+WebDatabase.idl
     Modules/webdatabase/SQLError.idl
     Modules/webdatabase/SQLResultSet.idl
     Modules/webdatabase/SQLResultSetRowList.idl
@@ -1093,6 +1093,7 @@ set(WebCore_NON_SVG_IDL_FILES
     dom/FocusOptions.idl
     dom/FormDataEvent.idl
     dom/FullscreenOptions.idl
+    dom/GetHTMLOptions.idl
     dom/GlobalEventHandlers+PointerEvents.idl
     dom/GlobalEventHandlers+Selection.idl
     dom/GlobalEventHandlers.idl
@@ -1125,6 +1126,7 @@ set(WebCore_NON_SVG_IDL_FILES
     dom/PageTransitionEvent.idl
     dom/ParentNode.idl
     dom/PointerEvent.idl
+    dom/PointerLockOptions.idl
     dom/PopStateEvent.idl
     dom/ProcessingInstruction.idl
     dom/ProgressEvent.idl
@@ -1356,21 +1358,20 @@ set(WebCore_NON_SVG_IDL_FILES
     page/BarProp.idl
     page/Crypto.idl
     page/DOMSelection.idl
+    page/DOMWindow+CSSOM.idl
+    page/DOMWindow+CSSOMView.idl
+    page/DOMWindow+Compat.idl
+    page/DOMWindow+DeviceMotion.idl
+    page/DOMWindow+DeviceOrientation.idl
+    page/DOMWindow+RequestIdleCallback.idl
+    page/DOMWindow+Selection.idl
+    page/DOMWindow+VisualViewport.idl
     page/DOMWindow.idl
     page/EventSource.idl
     page/History.idl
     page/IntersectionObserver.idl
     page/IntersectionObserverCallback.idl
     page/IntersectionObserverEntry.idl
-    page/LocalDOMWindow+CSSOM.idl
-    page/LocalDOMWindow+CSSOMView.idl
-    page/LocalDOMWindow+Compat.idl
-    page/LocalDOMWindow+DeviceMotion.idl
-    page/LocalDOMWindow+DeviceOrientation.idl
-    page/LocalDOMWindow+RequestIdleCallback.idl
-    page/LocalDOMWindow+Selection.idl
-    page/LocalDOMWindow+VisualViewport.idl
-    page/LocalDOMWindow.idl
     page/Location.idl
     page/NavigateEvent.idl
     page/Navigation.idl
@@ -1409,7 +1410,6 @@ set(WebCore_NON_SVG_IDL_FILES
     page/PerformanceResourceTiming.idl
     page/PerformanceServerTiming.idl
     page/PerformanceTiming.idl
-    page/RemoteDOMWindow.idl
     page/ResizeObserver.idl
     page/ResizeObserverBoxOptions.idl
     page/ResizeObserverCallback.idl
@@ -1514,7 +1514,6 @@ set(WebCore_SVG_IDL_FILES
     svg/Document+SVG.idl
     svg/SVGAElement.idl
     svg/SVGAngle.idl
-    svg/SVGAnimateColorElement.idl
     svg/SVGAnimateElement.idl
     svg/SVGAnimateMotionElement.idl
     svg/SVGAnimateTransformElement.idl
@@ -1902,7 +1901,6 @@ set(WebCore_USER_AGENT_STYLE_SHEETS
     ${WEBCORE_DIR}/css/plugIns.css
     ${WEBCORE_DIR}/css/popover.css
     ${WEBCORE_DIR}/css/quirks.css
-    ${WEBCORE_DIR}/css/ruby.css
     ${WEBCORE_DIR}/css/svg.css
     ${WEBCORE_DIR}/css/viewTransitions.css
     ${WEBCORE_DIR}/html/shadow/attachmentElementShadow.css
@@ -1958,15 +1956,13 @@ elseif (USE_LIBEPOXY)
 else ()
     list(APPEND WebCore_LIBRARIES OpenGL::GLES)
 
-    if (USE_EGL)
-        list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
-            ${EGL_INCLUDE_DIRS}
-        )
-        list(APPEND WebCore_LIBRARIES
-            ${EGL_LIBRARIES}
-        )
-        add_definitions(${EGL_DEFINITIONS})
-    endif ()
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
+        ${EGL_INCLUDE_DIRS}
+    )
+    list(APPEND WebCore_LIBRARIES
+        ${EGL_LIBRARIES}
+    )
+    add_definitions(${EGL_DEFINITIONS})
 endif ()
 
 set(WebCoreTestSupport_FRAMEWORKS ${WebCore_FRAMEWORKS})
@@ -2474,7 +2470,7 @@ set(SUPPLEMENTAL_DEPENDENCY_FILE ${WebCore_DERIVED_SOURCES_DIR}/supplemental_dep
 set(ISO_SUBSPACES_HEADER_FILE ${WebCore_DERIVED_SOURCES_DIR}/DOMIsoSubspaces.h)
 set(CLIENT_ISO_SUBSPACES_HEADER_FILE ${WebCore_DERIVED_SOURCES_DIR}/DOMClientIsoSubspaces.h)
 set(CONSTRUCTORS_HEADER_FILE ${WebCore_DERIVED_SOURCES_DIR}/DOMConstructors.h)
-set(WINDOW_CONSTRUCTORS_FILE ${WebCore_DERIVED_SOURCES_DIR}/LocalDOMWindowConstructors.idl)
+set(WINDOW_CONSTRUCTORS_FILE ${WebCore_DERIVED_SOURCES_DIR}/DOMWindowConstructors.idl)
 set(WORKERGLOBALSCOPE_CONSTRUCTORS_FILE ${WebCore_DERIVED_SOURCES_DIR}/WorkerGlobalScopeConstructors.idl)
 set(SHADOWREALMGLOBALSCOPE_CONSTRUCTORS_FILE ${WebCore_DERIVED_SOURCES_DIR}/ShadowRealmGlobalScopeConstructors.idl)
 set(DEDICATEDWORKERGLOBALSCOPE_CONSTRUCTORS_FILE ${WebCore_DERIVED_SOURCES_DIR}/DedicatedWorkerGlobalScopeConstructors.idl)
@@ -2843,8 +2839,6 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/mediastream/MDNSRegisterError.serialization.in
 
     platform/network/ProtectionSpaceBase.serialization.in
-
-    platform/network/soup/SoupNetworkProxySettings.serialization.in
 )
 
 WEBKIT_COPY_FILES(WebCore_CopyPrivateHeaders

@@ -48,6 +48,7 @@
 #include <WebCore/UserMediaRequest.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/Scope.h>
+#include <wtf/StdLibExtras.h>
 #include <wtf/WeakHashSet.h>
 
 #if ENABLE(GPU_PROCESS)
@@ -274,7 +275,7 @@ void UserMediaPermissionRequestManagerProxy::grantRequest(UserMediaPermissionReq
 
     Ref userMediaDocumentSecurityOrigin = request.userMediaDocumentSecurityOrigin();
     Ref topLevelDocumentSecurityOrigin = request.topLevelDocumentSecurityOrigin();
-    page->websiteDataStore().protectedDeviceIdHashSaltStorage()->deviceIdHashSaltForOrigin(userMediaDocumentSecurityOrigin, topLevelDocumentSecurityOrigin, [weakThis = WeakPtr { *this }, request = Ref { request }](String&&) mutable {
+    page->websiteDataStore().ensureProtectedDeviceIdHashSaltStorage()->deviceIdHashSaltForOrigin(userMediaDocumentSecurityOrigin, topLevelDocumentSecurityOrigin, [weakThis = WeakPtr { *this }, request = Ref { request }](String&&) mutable {
         if (weakThis)
             weakThis->finishGrantingRequest(request);
     });
@@ -344,8 +345,10 @@ void UserMediaPermissionRequestManagerProxy::resetAccess(std::optional<FrameIden
     ALWAYS_LOG(LOGIDENTIFIER, frameID ? frameID->object().toUInt64() : 0);
 
     if (RefPtr currentUserMediaRequest = m_currentUserMediaRequest; currentUserMediaRequest && (!frameID || m_currentUserMediaRequest->frameID() == *frameID)) {
-        currentUserMediaRequest->invalidate();
-        m_currentUserMediaRequest = nullptr;
+        // Avoid starting pending requests after denying current request.
+        auto pendingUserMediaRequests = std::exchange(m_pendingUserMediaRequests, { });
+        currentUserMediaRequest->deny(UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::OtherFailure);
+        m_pendingUserMediaRequests = std::exchange(pendingUserMediaRequests, { });
     }
 
     if (frameID) {
@@ -560,8 +563,8 @@ String UserMediaPermissionRequestManagerProxy::ephemeralDeviceHashSaltForFrame(W
     static constexpr unsigned hashSaltSize { 48 };
     static constexpr unsigned randomDataSize { hashSaltSize / 16 };
 
-    uint64_t randomData[randomDataSize];
-    cryptographicallyRandomValues(reinterpret_cast<unsigned char*>(randomData), sizeof(randomData));
+    std::array<uint64_t, randomDataSize> randomData;
+    cryptographicallyRandomValues(asWritableBytes(std::span<uint64_t> { randomData }));
 
     StringBuilder builder;
     builder.reserveCapacity(hashSaltSize);
@@ -581,7 +584,7 @@ void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionRequest()
 
     Ref userMediaDocumentSecurityOrigin = m_currentUserMediaRequest->userMediaDocumentSecurityOrigin();
     Ref topLevelDocumentSecurityOrigin = m_currentUserMediaRequest->topLevelDocumentSecurityOrigin();
-    protectedPage()->websiteDataStore().protectedDeviceIdHashSaltStorage()->deviceIdHashSaltForOrigin(userMediaDocumentSecurityOrigin, topLevelDocumentSecurityOrigin, [this, weakThis = WeakPtr { *this }, request = m_currentUserMediaRequest] (String&& deviceIDHashSalt) mutable {
+    protectedPage()->websiteDataStore().ensureProtectedDeviceIdHashSaltStorage()->deviceIdHashSaltForOrigin(userMediaDocumentSecurityOrigin, topLevelDocumentSecurityOrigin, [this, weakThis = WeakPtr { *this }, request = m_currentUserMediaRequest] (String&& deviceIDHashSalt) mutable {
         if (!weakThis)
             return;
 
@@ -942,7 +945,7 @@ void UserMediaPermissionRequestManagerProxy::enumerateMediaDevicesForFrame(Frame
         m_pendingDeviceRequests.add(requestID);
 
         callCompletionHandler.release();
-        page->websiteDataStore().protectedDeviceIdHashSaltStorage()->deviceIdHashSaltForOrigin(userMediaDocumentOrigin, topLevelDocumentOrigin, [this, weakThis = WeakPtr { *this }, requestID, frameID, userMediaDocumentOrigin, topLevelDocumentOrigin, originHasPersistentAccess, completionHandler = WTFMove(completionHandler)](String&& deviceIDHashSalt) mutable {
+        page->websiteDataStore().ensureProtectedDeviceIdHashSaltStorage()->deviceIdHashSaltForOrigin(userMediaDocumentOrigin, topLevelDocumentOrigin, [this, weakThis = WeakPtr { *this }, requestID, frameID, userMediaDocumentOrigin, topLevelDocumentOrigin, originHasPersistentAccess, completionHandler = WTFMove(completionHandler)](String&& deviceIDHashSalt) mutable {
             auto callCompletionHandler = makeScopeExit([&completionHandler] {
                 completionHandler({ }, { });
             });

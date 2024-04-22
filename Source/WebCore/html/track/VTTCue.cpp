@@ -1008,10 +1008,6 @@ void VTTCue::markFutureAndPastNodes(ContainerNode* root, const MediaTime& previo
         
         if (auto* childElement = dynamicDowncast<WebVTTElement>(*child))
             childElement->setIsPastNode(isPastNode);
-        else if (auto* childElement = dynamicDowncast<WebVTTRubyElement>(*child))
-            childElement->setIsPastNode(isPastNode);
-        else if (auto* childElement = dynamicDowncast<WebVTTRubyTextElement>(*child))
-            childElement->setIsPastNode(isPastNode);
 
         // Make an element id match a cue id for style matching purposes.
         if (auto* childElement = dynamicDowncast<Element>(*child); !id().isEmpty() && childElement)
@@ -1215,11 +1211,11 @@ void VTTCue::setCueSettings(const String& inputString)
                     if (!input.scan(','))
                         break;
 
-                    if (input.scan(startKeyword().characters8(), startKeyword().length()))
+                    if (input.scan(startKeyword().span8()))
                         alignment = LineAlignSetting::Start;
-                    else if (input.scan(centerKeyword().characters8(), centerKeyword().length()))
+                    else if (input.scan(centerKeyword().span8()))
                         alignment = LineAlignSetting::Center;
-                    else if (input.scan(endKeyword().characters8(), endKeyword().length()))
+                    else if (input.scan(endKeyword().span8()))
                         alignment = LineAlignSetting::End;
                     else {
                         ERROR_LOG(LOGIDENTIFIER, "Invalid line setting alignment");
@@ -1288,11 +1284,11 @@ void VTTCue::setCueSettings(const String& inputString)
                     return false;
 
                 // 2.2 One of the following strings: "line-left", "center", "line-right"
-                if (input.scan(lineLeftKeyword().characters8(), lineLeftKeyword().length()))
+                if (input.scan(lineLeftKeyword().span8()))
                     alignment = PositionAlignSetting::LineLeft;
-                else if (input.scan(centerKeyword().characters8(), centerKeyword().length()))
+                else if (input.scan(centerKeyword().span8()))
                     alignment = PositionAlignSetting::Center;
-                else if (input.scan(lineRightKeyword().characters8(), lineRightKeyword().length()))
+                else if (input.scan(lineRightKeyword().span8()))
                     alignment = PositionAlignSetting::LineRight;
                 else {
                     ERROR_LOG(LOGIDENTIFIER, "Invalid position setting alignment");

@@ -1,22 +1,28 @@
 /**
 * AUTO-GENERATED - DO NOT EDIT. Source: https://github.com/gpuweb/cts
-**/export const description = `Validate unpack4xU8`;import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
+**/const kFn = 'unpack4xU8';export const description = `Validate ${kFn}`;
+import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { keysOf } from '../../../../../../common/util/data_tables.js';
 import { ShaderValidationTest } from '../../../shader_validation_test.js';
 
 const kFeature = 'packed_4x8_integer_dot_product';
-const kFn = 'unpack4xU8';
-const kGoodArgs = '(1u)';
-const kBadArgs = {
-  '0args': '()',
-  '2args': '(1u,2u)',
-  '0i32': '(1i)',
-  '0f32': '(1f)',
-  '0bool': '(false)',
-  '0vec2u': '(vec2u())',
-  '0vec3u': '(vec3u())',
-  '0vec4u': '(vec4u())'
+const kArgCases = {
+  good_u32: '(1u)',
+  good_aint: '(1)',
+  bad_0args: '()',
+  bad_2args: '(1u,2u)',
+  bad_i32: '(1i)',
+  bad_f32: '(1f)',
+  bad_f16: '(1h)',
+  bad_bool: '(false)',
+  bad_vec2u: '(vec2u())',
+  bad_vec3u: '(vec3u())',
+  bad_vec4u: '(vec4u())',
+  bad_array: '(array(1))',
+  bad_struct: '(modf(1.1))'
 };
+const kGoodArgs = kArgCases['good_u32'];
+const kReturnType = 'vec4u';
 
 export const g = makeTestGroup(ShaderValidationTest);
 
@@ -40,17 +46,36 @@ fn((t) => {
   t.expectCompileResult(true, code);
 });
 
-g.test('bad_args').
-desc(`Test compilation failure of ${kFn} with bad arguments`).
-params((u) => u.combine('arg', keysOf(kBadArgs))).
+g.test('args').
+desc(`Test compilation failure of ${kFn} with various numbers of and types of arguments`).
+params((u) => u.combine('arg', keysOf(kArgCases))).
 fn((t) => {
   t.skipIfLanguageFeatureNotSupported(kFeature);
-  t.expectCompileResult(false, `const c = ${kFn}${kBadArgs[t.params.arg]};`);
+
+  let code = '';
+  if (t.params.arg === 'bad_f16') {
+    code += 'enable f16;\n';
+  }
+  code += `const c = ${kFn}${kArgCases[t.params.arg]};`;
+
+  t.expectCompileResult(t.params.arg.startsWith('good'), code);
+});
+
+g.test('return').
+desc(`Test ${kFn} return value type ${kReturnType}`).
+params((u) => u.combine('type', ['vec4u', 'vec4i', 'vec4f', 'vec3u', 'vec2u', 'u32'])).
+fn((t) => {
+  t.expectCompileResult(
+    t.params.type === kReturnType,
+    `const c: ${t.params.type} = ${kFn}${kGoodArgs};`
+  );
 });
 
 g.test('must_use').
 desc(`Result of ${kFn} must be used`).
+params((u) => u.combine('use', [true, false])).
 fn((t) => {
   t.skipIfLanguageFeatureNotSupported(kFeature);
-  t.expectCompileResult(false, `fn f() { ${kFn}${kGoodArgs}; }`);
+  const use_it = t.params.use ? '_ = ' : '';
+  t.expectCompileResult(t.params.use, `fn f() { ${use_it}${kFn}${kGoodArgs}; }`);
 });

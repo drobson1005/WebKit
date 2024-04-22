@@ -45,10 +45,12 @@
 #import "VisibleContentRectUpdateInfo.h"
 #import "WKBackForwardListItemInternal.h"
 #import "WKContentViewInteraction.h"
+#import "WKDataDetectorTypesInternal.h"
 #import "WKPasswordView.h"
 #import "WKProcessPoolPrivate.h"
 #import "WKSafeBrowsingWarning.h"
 #import "WKScrollView.h"
+#import "WKTextIndicatorStyleType.h"
 #import "WKUIDelegatePrivate.h"
 #import "WKWebViewConfigurationInternal.h"
 #import "WKWebViewContentProvider.h"
@@ -60,6 +62,7 @@
 #import "WebPage.h"
 #import "WebPageProxy.h"
 #import "WebPreferences.h"
+#import "WebProcessPool.h"
 #import "WebTextReplacementData.h"
 #import "WebUnifiedTextReplacementContextData.h"
 #import "_WKActivatedElementInfoInternal.h"
@@ -76,13 +79,13 @@
 #import <wtf/Box.h>
 #import <wtf/EnumTraits.h>
 #import <wtf/FixedVector.h>
+#import <wtf/NeverDestroyed.h>
+#import <wtf/RefCounted.h>
 #import <wtf/SystemTracing.h>
+#import <wtf/cf/TypeCastsCF.h>
+#import <wtf/cocoa/Entitlements.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
-
-#if ENABLE(DATA_DETECTION)
-#import "WKDataDetectorTypesInternal.h"
-#endif
 
 #if ENABLE(LOCKDOWN_MODE_API)
 #import "_WKSystemPreferencesInternal.h"
@@ -479,7 +482,9 @@ static CGSize roundScrollViewContentSize(const WebKit::WebPageProxy& page, CGSiz
 
 - (WKWebViewContentProviderRegistry *)_contentProviderRegistry
 {
-    return [_configuration _contentProviderRegistry];
+    if (!self->_contentProviderRegistry)
+        self->_contentProviderRegistry = adoptNS([[WKWebViewContentProviderRegistry alloc] initWithConfiguration:self.configuration]);
+    return self->_contentProviderRegistry.get();
 }
 
 - (WKSelectionGranularity)_selectionGranularity
@@ -491,7 +496,7 @@ static CGSize roundScrollViewContentSize(const WebKit::WebPageProxy& page, CGSiz
 {
     Class representationClass = nil;
     if (pageHasCustomContentView)
-        representationClass = [[_configuration _contentProviderRegistry] providerForMIMEType:mimeType];
+        representationClass = [[self _contentProviderRegistry] providerForMIMEType:mimeType];
 
     if (pageHasCustomContentView && representationClass) {
         [_customContentView removeFromSuperview];
@@ -876,6 +881,14 @@ static WebCore::Color scrollViewBackgroundColor(WKWebView *webView, AllowPageBac
 
         if (auto *findSession = dynamic_objc_cast<UITextSearchingFindSession>([_findInteraction activeFindSession]))
             findSession.searchableObject = [self _searchableObject];
+    }
+#endif
+
+#if ENABLE(PAGE_LOAD_OBSERVER)
+    URL url { _page->currentURL() };
+    if (url.isValid() && url.protocolIsInHTTPFamily()) {
+        _pendingPageLoadObserverHost = static_cast<NSString *>(url.hostAndPort());
+        [self _updatePageLoadObserverState];
     }
 #endif
 }
@@ -2450,6 +2463,10 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
 
     [_customContentView web_setMinimumSize:bounds.size];
     [self _scheduleVisibleContentRectUpdate];
+
+#if ENABLE(PAGE_LOAD_OBSERVER)
+    [self _updatePageLoadObserverState];
+#endif
 }
 
 #if HAVE(UIKIT_RESIZABLE_WINDOWS)
@@ -3353,30 +3370,69 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(UISe
 
 - (void)_updateFindOverlayPosition
 {
+    if (!_findOverlaysOutsideContentView)
+        return;
+
     UIScrollView *scrollView = _scrollView.get();
-    [_findOverlay setBounds:CGRectMake(0, 0, scrollView.bounds.size.width, scrollView.bounds.size.height)];
-    [_findOverlay setCenter:CGPointMake(scrollView.center.x + scrollView.contentOffset.x, scrollView.center.y + scrollView.contentOffset.y)];
+    CGRect contentViewBounds = [_contentView bounds];
+    CGRect contentViewFrame = [_contentView frame];
+    CGFloat minX = std::min<CGFloat>(0, scrollView.contentOffset.x);
+    CGFloat minY = std::min<CGFloat>(0, scrollView.contentOffset.y);
+    CGFloat maxX = std::max<CGFloat>(scrollView.bounds.size.width + scrollView.contentOffset.x, contentViewBounds.size.width);
+    CGFloat maxY = std::max<CGFloat>(scrollView.bounds.size.height + scrollView.contentOffset.y, contentViewBounds.size.height);
+
+    [_findOverlaysOutsideContentView->top setFrame:CGRectMake(
+        CGRectGetMinX(contentViewFrame),
+        minY,
+        std::max<CGFloat>(maxX - CGRectGetMinX(contentViewFrame), 0),
+        std::max<CGFloat>(CGRectGetMinY(contentViewFrame) - minY, 0))];
+
+    [_findOverlaysOutsideContentView->right setFrame:CGRectMake(
+        CGRectGetMaxX(contentViewFrame),
+        CGRectGetMinY(contentViewFrame),
+        std::max<CGFloat>(maxX - CGRectGetMaxX(contentViewFrame), 0),
+        std::max<CGFloat>(maxY - CGRectGetMinY(contentViewFrame), 0))];
+
+    [_findOverlaysOutsideContentView->bottom setFrame:CGRectMake(
+        minX,
+        CGRectGetMaxY(contentViewFrame),
+        std::max<CGFloat>(CGRectGetMaxX(contentViewFrame) - minX, 0),
+        std::max<CGFloat>(maxY - CGRectGetMaxY(contentViewFrame), 0))];
+
+    [_findOverlaysOutsideContentView->left setFrame:CGRectMake(
+        minX,
+        minY,
+        std::max<CGFloat>(CGRectGetMinX(contentViewFrame) - minX, 0),
+        std::max<CGFloat>(CGRectGetMaxY(contentViewFrame) - minY, 0))];
 }
 
 - (void)_showFindOverlay
 {
-    if (!_findOverlay) {
-        _findOverlay = adoptNS([[UIView alloc] init]);
-        UIColor *overlayColor = [UIColor colorWithRed:(26. / 255) green:(26. / 255) blue:(26. / 255) alpha:(64. / 255)];
-        [_findOverlay setBackgroundColor:overlayColor];
-    }
+    if (!_findOverlaysOutsideContentView) {
+        auto makeOverlay = [&]() {
+            UIColor *overlayColor = [UIColor colorWithRed:(26. / 255) green:(26. / 255) blue:(26. / 255) alpha:(64. / 255)];
+            auto newOverlay = adoptNS([[UIView alloc] init]);
+            [newOverlay setBackgroundColor:overlayColor];
+            [_scrollView insertSubview:newOverlay.get() belowSubview:_contentView.get()];
 
+            return newOverlay;
+        };
+        _findOverlaysOutsideContentView = { makeOverlay(), makeOverlay(), makeOverlay(), makeOverlay() };
+    }
     [self _updateFindOverlayPosition];
-    [_scrollView insertSubview:_findOverlay.get() belowSubview:_contentView.get()];
 
     if (CALayer *contentViewFindOverlayLayer = [self _layerForFindOverlay]) {
-        [[_findOverlay layer] removeAllAnimations];
-        [contentViewFindOverlayLayer removeAllAnimations];
+        [self _updateFindOverlaysOutsideContentView:^(UIView *view) {
+            [[view layer] removeAllAnimations];
+            [view setAlpha:1];
+        }];
 
-        [_findOverlay setAlpha:1];
+        [contentViewFindOverlayLayer removeAllAnimations];
         [contentViewFindOverlayLayer setOpacity:1];
     } else {
-        [_findOverlay setAlpha:0];
+        [self _updateFindOverlaysOutsideContentView:^(UIView *view) {
+            [view setAlpha:0];
+        }];
         [self _addLayerForFindOverlay];
     }
 }
@@ -3384,7 +3440,7 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(UISe
 - (void)_hideFindOverlay
 {
     CALayer *contentViewFindOverlayLayer = [self _layerForFindOverlay];
-    CALayer *findOverlayLayer = [_findOverlay layer];
+    CALayer *findOverlayLayer = _findOverlaysOutsideContentView ? [_findOverlaysOutsideContentView->top layer] : nil;
 
     if (!findOverlayLayer && !contentViewFindOverlayLayer)
         return;
@@ -3393,7 +3449,9 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(UISe
         return;
 
     [contentViewFindOverlayLayer removeAllAnimations];
-    [findOverlayLayer removeAllAnimations];
+    [self _updateFindOverlaysOutsideContentView:^(UIView *view) {
+        [[view layer] removeAllAnimations];
+    }];
 
     [CATransaction begin];
 
@@ -3404,22 +3462,31 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(UISe
         if (!strongSelf)
             return;
 
-        if ([strongSelf->_findOverlay alpha])
+        bool hasOverlaysOutsideContentView = strongSelf->_findOverlaysOutsideContentView.has_value();
+        if (hasOverlaysOutsideContentView && [strongSelf->_findOverlaysOutsideContentView->top alpha])
             return;
 
-        [strongSelf->_findOverlay removeFromSuperview];
-        strongSelf->_findOverlay = nil;
-
         [strongSelf _removeLayerForFindOverlay];
+
+        if (hasOverlaysOutsideContentView) {
+            [strongSelf _updateFindOverlaysOutsideContentView:^(UIView *view) {
+                [view removeFromSuperview];
+            }];
+            strongSelf->_findOverlaysOutsideContentView.reset();
+        }
     }];
 
     [contentViewFindOverlayLayer addAnimation:animation forKey:@"findOverlayFadeOut"];
-    [findOverlayLayer addAnimation:animation forKey:@"findOverlayFadeOut"];
+    [self _updateFindOverlaysOutsideContentView:^(UIView *view) {
+        [[view layer] addAnimation:animation forKey:@"findOverlayFadeOut"];
+    }];
 
     [CATransaction commit];
 
     contentViewFindOverlayLayer.opacity = 0;
-    findOverlayLayer.opacity = 0;
+    [self _updateFindOverlaysOutsideContentView:^(UIView *view) {
+        [view layer].opacity = 0;
+    }];
 }
 
 #endif // HAVE(UIFINDINTERACTION)
@@ -3543,7 +3610,7 @@ static bool isLockdownModeWarningNeeded()
 #if PLATFORM(MACCATALYST)
         return NO;
 #else
-        return [[PAL::getMCProfileConnectionClass() sharedConnection] isURLManaged:self.URL];
+        return [(MCProfileConnection *)[PAL::getMCProfileConnectionClass() sharedConnection] isURLManaged:self.URL];
 #endif
     };
 
@@ -3559,6 +3626,18 @@ static bool isLockdownModeWarningNeeded()
     return _UIDataOwnerUndefined;
 }
 
+#if HAVE(UIFINDINTERACTION)
+- (void)_updateFindOverlaysOutsideContentView:(void(^)(UIView *))updateFindOverlay
+{
+    if (!_findOverlaysOutsideContentView)
+        return;
+    updateFindOverlay(_findOverlaysOutsideContentView->top.get());
+    updateFindOverlay(_findOverlaysOutsideContentView->bottom.get());
+    updateFindOverlay(_findOverlaysOutsideContentView->left.get());
+    updateFindOverlay(_findOverlaysOutsideContentView->right.get());
+}
+#endif
+
 - (void)_didAddLayerForFindOverlay:(CALayer *)layer
 {
     _perProcessState.committedFindLayerID = std::exchange(_perProcessState.pendingFindLayerID, { });
@@ -3566,13 +3645,16 @@ static bool isLockdownModeWarningNeeded()
 
 #if HAVE(UIFINDINTERACTION)
     CABasicAnimation *animation = [self _animationForFindOverlay:YES];
-    CALayer *findOverlayLayer = [_findOverlay layer];
 
     [layer addAnimation:animation forKey:@"findOverlayFadeIn"];
-    [findOverlayLayer addAnimation:animation forKey:@"findOverlayFadeIn"];
+
+    [self _updateFindOverlaysOutsideContentView:^(UIView *view) {
+        CALayer *overlayLayer = [view layer];
+        [overlayLayer addAnimation:animation forKey:@"findOverlayFadeIn"];
+        overlayLayer.opacity = 1;
+    }];
 
     layer.opacity = 1;
-    findOverlayLayer.opacity = 1;
 #endif
 }
 
@@ -3649,6 +3731,11 @@ static bool isLockdownModeWarningNeeded()
 {
     _overriddenZoomScaleParameters = std::nullopt;
 }
+
+#if USE(APPLE_INTERNAL_SDK) && __has_include(<WebKitAdditions/WKWebViewIOSInternalAdditionsAfter.mm>)
+#import <WebKitAdditions/WKWebViewIOSInternalAdditionsAfter.mm>
+#endif
+
 @end
 
 @implementation WKWebView (WKPrivateIOS)
@@ -3857,7 +3944,7 @@ static bool isLockdownModeWarningNeeded()
 - (BOOL)_isDisplayingPDF
 {
     for (auto& type : WebCore::MIMETypeRegistry::pdfMIMETypes()) {
-        Class providerClass = [[_configuration _contentProviderRegistry] providerForMIMEType:@(type.characters())];
+        Class providerClass = [[self _contentProviderRegistry] providerForMIMEType:@(type.characters())];
         if ([_customContentView isKindOfClass:providerClass])
             return YES;
     }
@@ -4452,8 +4539,7 @@ static std::optional<WebCore::ViewportArguments> viewportArgumentsFromDictionary
 - (UIView *)_fullScreenPlaceholderView
 {
 #if ENABLE(FULLSCREEN_API)
-    if ([_fullScreenWindowController isFullScreen])
-        return [_fullScreenWindowController webViewPlaceholder];
+    return [_fullScreenWindowController webViewPlaceholder];
 #endif // ENABLE(FULLSCREEN_API)
     return nil;
 }
@@ -4688,6 +4774,21 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 #endif // PLATFORM(VISION)
 
 @end
+
+
+#if PLATFORM(VISION)
+@implementation WKWebView(WKPrivateVision)
+- (NSString *)_defaultSTSLabel
+{
+    return nsStringNilIfNull(_page->defaultSpatialTrackingLabel());
+}
+
+- (void)_setDefaultSTSLabel:(NSString *)defaultSTSLabel
+{
+    _page->setDefaultSpatialTrackingLabel(defaultSTSLabel);
+}
+@end
+#endif
 
 #endif // ENABLE(FULLSCREEN_API)
 

@@ -139,7 +139,7 @@ extern "C" AXUIElementRef NSAccessibilityCreateAXUIElementRef(id element);
 - (RetainPtr<AXTextMarkerRef>)textMarkerForFirstPositionInTextControl:(WebCore::HTMLTextFormControlElement&)textControl;
 
 // When a plugin uses a WebKit control to act as a surrogate view (e.g. PDF use WebKit to create text fields).
-- (id)associatedPluginParent;
+- (id)_associatedPluginParent;
 
 @end
 
@@ -177,5 +177,7 @@ CharacterOffset characterOffsetForTextMarker(AXObjectCache*, AXTextMarkerRef);
 AXTextMarkerRef startOrEndTextMarkerForRange(AXObjectCache*, const std::optional<SimpleRange>&, bool isStart);
 AXTextMarkerRangeRef textMarkerRangeFromRange(AXObjectCache*, const std::optional<SimpleRange>&);
 std::optional<SimpleRange> rangeForTextMarkerRange(AXObjectCache*, AXTextMarkerRangeRef);
+
+NSArray *renderWidgetChildren(const AXCoreObject&);
 
 } // namespace WebCore

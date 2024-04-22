@@ -23,7 +23,6 @@
 #include "config.h"
 #include "RenderSVGTransformableContainer.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "RenderSVGModelObjectInlines.h"
 #include "SVGContainerLayout.h"
 #include "SVGElementTypeHelpers.h"
@@ -41,6 +40,8 @@ RenderSVGTransformableContainer::RenderSVGTransformableContainer(SVGGraphicsElem
 {
     ASSERT(isRenderSVGTransformableContainer());
 }
+
+RenderSVGTransformableContainer::~RenderSVGTransformableContainer() = default;
 
 SVGGraphicsElement& RenderSVGTransformableContainer::graphicsElement() const
 {
@@ -71,7 +72,7 @@ inline SVGUseElement* associatedUseElement(SVGGraphicsElement& element)
 FloatSize RenderSVGTransformableContainer::additionalContainerTranslation() const
 {
     Ref graphicsElement = this->graphicsElement();
-    if (auto* useElement = associatedUseElement(graphicsElement)) {
+    if (RefPtr useElement = associatedUseElement(graphicsElement)) {
         SVGLengthContext lengthContext(graphicsElement.ptr());
         return { useElement->x().value(lengthContext), useElement->y().value(lengthContext) };
     }
@@ -101,5 +102,3 @@ void RenderSVGTransformableContainer::applyTransform(TransformationMatrix& trans
 }
 
 }
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

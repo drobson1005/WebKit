@@ -265,7 +265,7 @@ public:
 
     virtual String mediaPlayerElementId() const { return emptyString(); }
 
-    virtual void mediaPlayerEngineFailedToLoad() const { }
+    virtual void mediaPlayerEngineFailedToLoad() { }
 
     virtual double mediaPlayerRequestedPlaybackRate() const { return 0; }
     virtual MediaPlayerEnums::VideoFullscreenMode mediaPlayerFullscreenMode() const { return MediaPlayerEnums::VideoFullscreenModeNone; }
@@ -302,6 +302,8 @@ public:
 
     virtual FloatSize mediaPlayerVideoLayerSize() const { return { }; }
     virtual void mediaPlayerVideoLayerSizeDidChange(const FloatSize&) { }
+
+    virtual bool isGStreamerHolePunchingEnabled() const { return false; }
 
 #if !RELEASE_LOG_DISABLED
     virtual const void* mediaPlayerLogIdentifier() { return nullptr; }
@@ -630,9 +632,11 @@ public:
 #endif
 
     static void resetMediaEngines();
+    void reset();
 
 #if USE(GSTREAMER)
     void simulateAudioInterruption();
+    bool isGStreamerHolePunchingEnabled();
 #endif
 
     void beginSimulatedHDCPError();
@@ -656,9 +660,9 @@ public:
     void setShouldDisableSleep(bool);
     bool shouldDisableSleep() const;
 
-    String contentMIMEType() const { return m_contentType.containerType(); }
-    String contentTypeCodecs() const { return m_contentType.parameter(ContentType::codecsParameter()); }
-    bool contentMIMETypeWasInferredFromExtension() const { return m_contentMIMETypeWasInferredFromExtension; }
+    String contentMIMEType() const;
+    String contentTypeCodecs() const;
+    bool contentMIMETypeWasInferredFromExtension() const;
 
     const Vector<ContentType>& mediaContentTypesRequiringHardwareSupport() const;
     void setShouldCheckHardwareSupport(bool);
@@ -736,8 +740,13 @@ public:
 
     void setVideoReceiverEndpoint(const VideoReceiverEndpoint&);
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    const String& defaultSpatialTrackingLabel() const;
+    void setDefaultSpatialTrackingLabel(const String&);
+
     const String& spatialTrackingLabel() const;
-    void setSpatialTrackingLabel(String&&);
+    void setSpatialTrackingLabel(const String&);
+#endif
 
 private:
     MediaPlayer(MediaPlayerClient&);
@@ -769,8 +778,8 @@ private:
     bool m_muted { false };
     bool m_preservesPitch { true };
     bool m_inPrivateBrowsingMode { false };
+    bool m_shouldPrepareToPlay { false };
     bool m_shouldPrepareToRender { false };
-    bool m_contentMIMETypeWasInferredFromExtension { false };
     bool m_initializingMediaEngine { false };
     DynamicRangeMode m_preferredDynamicRangeMode;
     PitchCorrectionAlgorithm m_pitchCorrectionAlgorithm { PitchCorrectionAlgorithm::BestAllAround };
@@ -786,6 +795,12 @@ private:
 #endif
     bool m_isGatheringVideoFrameMetadata { false };
     bool m_requiresRemotePlayback { false };
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    String m_defaultSpatialTrackingLabel;
+    String m_spatialTrackingLabel;
+#endif
+
     String m_lastErrorMessage;
     ProcessIdentity m_processIdentity;
 };

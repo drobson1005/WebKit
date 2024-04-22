@@ -83,7 +83,7 @@ static ThreadSafeWeakHashSet<MockRealtimeVideoSource>& allMockRealtimeVideoSourc
 
 static RunLoop& takePhotoRunLoop()
 {
-    static NeverDestroyed<Ref<RunLoop>> runLoop = RunLoop::create("WebKit::MockRealtimeVideoSource takePhoto runloop");
+    static NeverDestroyed<Ref<RunLoop>> runLoop = RunLoop::create("WebKit::MockRealtimeVideoSource takePhoto runloop"_s);
     return runLoop.get();
 }
 
@@ -231,6 +231,9 @@ const RealtimeMediaSourceCapabilities& MockRealtimeVideoSource::capabilities()
             supportedConstraints.setSupportsTorch(true);
         }
 
+        capabilities.setBackgroundBlur(std::get<MockCameraProperties>(m_device.properties).hasBackgroundBlur ? RealtimeMediaSourceCapabilities::BackgroundBlur::On : RealtimeMediaSourceCapabilities::BackgroundBlur::Off);
+        supportedConstraints.setSupportsBackgroundBlur(true);
+
         capabilities.setSupportedConstraints(supportedConstraints);
     } else if (mockDisplay()) {
         capabilities.setWidth({ 72, std::get<MockDisplayProperties>(m_device.properties).defaultSize.width() });
@@ -352,6 +355,8 @@ const RealtimeMediaSourceSettings& MockRealtimeVideoSource::settings()
             settings.setTorch(torch());
         }
 
+        supportedConstraints.setSupportsBackgroundBlur(true);
+        settings.setBackgroundBlur(std::get<MockCameraProperties>(m_device.properties).hasBackgroundBlur);
     } else {
         supportedConstraints.setSupportsDisplaySurface(true);
         supportedConstraints.setSupportsLogicalSurface(true);
@@ -424,7 +429,8 @@ void MockRealtimeVideoSource::startProducingData()
     ASSERT(!m_beingConfigured);
 
 #if ENABLE(EXTENSION_CAPABILITIES)
-    ASSERT(!RealtimeMediaSourceCenter::singleton().currentMediaEnvironment().isEmpty() || !WTF::processHasEntitlement("com.apple.developer.web-browser-engine.rendering"_s));
+    if (PlatformMediaSessionManager::mediaCapabilityGrantsEnabled())
+        ASSERT(!RealtimeMediaSourceCenter::singleton().currentMediaEnvironment().isEmpty() || !WTF::processHasEntitlement("com.apple.developer.web-browser-engine.rendering"_s));
 #endif
 
     startCaptureTimer();

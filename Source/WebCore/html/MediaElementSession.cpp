@@ -628,8 +628,8 @@ bool MediaElementSession::canShowControlsManager(PlaybackControlsPurpose purpose
 
 #if ENABLE(FULLSCREEN_API)
     // Elements which are not descendants of the current fullscreen element cannot be main content.
-    if (CheckedPtr fullsreenManager = m_element.document().fullscreenManagerIfExists()) {
-        RefPtr fullscreenElement = fullsreenManager->currentFullscreenElement();
+    if (CheckedPtr fullscreenManager = m_element.document().fullscreenManagerIfExists()) {
+        RefPtr fullscreenElement = fullscreenManager->currentFullscreenElement();
         if (fullscreenElement && !m_element.isDescendantOf(*fullscreenElement)) {
             INFO_LOG(LOGIDENTIFIER, "returning FALSE: outside of full screen");
             return false;
@@ -1246,14 +1246,16 @@ void MediaElementSession::didReceiveRemoteControlCommand(RemoteControlCommandTyp
 
 bool MediaElementSession::hasNowPlayingInfo() const
 {
-#if ENABLE(MEDIA_SESSION) && ENABLE(MEDIA_STREAM)
+#if ENABLE(MEDIA_SESSION)
     if (!canShowControlsManager(MediaElementSession::PlaybackControlsPurpose::NowPlaying))
         return false;
 
+#if ENABLE(MEDIA_STREAM)
     RefPtr session = mediaSession();
-    if (isDocumentPlayingSeveralMediaStreamsAndCapturing(m_element.document()) && (!session || !session->hasActiveActionHandlers()))
+    if (m_element.hasMediaStreamSrcObject() && (!session || (!session->hasActiveActionHandlers() && !session->metadata())))
         return false;
-#endif
+#endif // ENABLE(MEDIA_STREAM)
+#endif // ENABLE(MEDIA_SESSION)
 
     return true;
 }
@@ -1283,7 +1285,22 @@ std::optional<NowPlayingInfo> MediaElementSession::computeNowPlayingInfo() const
         sourceApplicationIdentifier = presentingApplicationBundleIdentifier();
 #endif
 
-    NowPlayingInfo info { m_element.mediaSessionTitle(), emptyString(), emptyString(), sourceApplicationIdentifier, duration, currentTime, rate, supportsSeeking, m_element.mediaUniqueIdentifier(), isPlaying, allowsNowPlayingControlsVisibility, { } };
+    NowPlayingInfo info {
+        {
+            m_element.mediaSessionTitle(),
+            emptyString(),
+            emptyString(),
+            sourceApplicationIdentifier,
+            { }
+        },
+        duration,
+        currentTime,
+        rate,
+        supportsSeeking,
+        m_element.mediaUniqueIdentifier(),
+        isPlaying,
+        allowsNowPlayingControlsVisibility
+    };
 #if ENABLE(MEDIA_SESSION)
     if (RefPtr session = mediaSession())
         session->updateNowPlayingInfo(info);
@@ -1413,9 +1430,14 @@ void MediaElementSession::positionStateChanged(const std::optional<MediaPosition
     clientCharacteristicsChanged(false);
 }
 
-void MediaElementSession::playbackStateChanged(MediaSessionPlaybackState) { }
+void MediaElementSession::playbackStateChanged(MediaSessionPlaybackState)
+{
+}
 
-void MediaElementSession::actionHandlersChanged() { }
+void MediaElementSession::actionHandlersChanged()
+{
+    clientCharacteristicsChanged(false);
+}
 
 void MediaElementSession::clientCharacteristicsChanged(bool positionChanged)
 {

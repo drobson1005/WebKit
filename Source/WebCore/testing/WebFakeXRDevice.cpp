@@ -156,9 +156,14 @@ void SimulatedXRDevice::frameTimerFired()
     for (auto& layer : m_layers) {
 #if PLATFORM(COCOA)
         auto surface = IOSurface::create(nullptr, recommendedResolution(PlatformXR::SessionMode::ImmersiveVr), DestinationColorSpace::SRGB());
-        data.layers.add(layer.key, PlatformXR::FrameData::LayerData { .colorTexture = std::make_tuple(surface->createSendRight(), false) });
+        data.layers.add(layer.key, PlatformXR::FrameData::LayerData {
+            .colorTexture = std::make_tuple(surface->createSendRight(), false)
+        });
 #else
-        data.layers.add(layer.key, PlatformXR::FrameData::LayerData { .opaqueTexture = layer.value });
+        data.layers.add(layer.key, PlatformXR::FrameData::LayerData {
+            .framebufferSize = IntSize(0, 0),
+            .opaqueTexture = layer.value
+        });
 #endif
     }
 
@@ -185,14 +190,14 @@ std::optional<PlatformXR::LayerHandle> SimulatedXRDevice::createLayerProjection(
         return std::nullopt;
     PlatformXR::LayerHandle handle = ++m_layerIndex;
     auto texture = m_gl->createTexture();
-    auto colorFormat = alpha ? GL::RGBA8 : GL::RGB8;
+    auto colorFormat = alpha ? GL::RGBA : GL::RGB;
 
     m_gl->bindTexture(GL::TEXTURE_2D, texture);
     m_gl->texParameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE);
     m_gl->texParameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE);
     m_gl->texParameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::LINEAR);
     m_gl->texParameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::LINEAR);
-    m_gl->texStorage2D(GL::TEXTURE_2D, 1, colorFormat, width, height);
+    m_gl->texImage2D(GL::TEXTURE_2D, 0, colorFormat, width, height, 0, colorFormat, GL::UNSIGNED_BYTE, 0);
 
     m_layers.add(handle, texture);
     return handle;    

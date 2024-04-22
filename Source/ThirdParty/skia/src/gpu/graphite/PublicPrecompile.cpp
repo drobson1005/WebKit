@@ -61,7 +61,7 @@ void compile(const RendererProvider* rendererProvider,
             GraphicsPipelineDesc pipelineDesc(s, paintID);
 
             for (const RenderPassDesc& renderPassDesc : renderPassDescs) {
-                auto pipeline = resourceProvider->findOrCreateGraphicsPipeline(
+                sk_sp<GraphicsPipeline> pipeline = resourceProvider->findOrCreateGraphicsPipeline(
                         keyContext.rtEffectDict(),
                         pipelineDesc,
                         renderPassDesc);
@@ -77,6 +77,24 @@ void compile(const RendererProvider* rendererProvider,
 } // anonymous namespace
 
 namespace skgpu::graphite {
+
+bool Precompile(Context* context,
+                RuntimeEffectDictionary* rteDict,
+                const GraphicsPipelineDesc& pipelineDesc,
+                const RenderPassDesc& renderPassDesc) {
+    ResourceProvider* resourceProvider = context->priv().resourceProvider();
+
+    sk_sp<GraphicsPipeline> pipeline = resourceProvider->findOrCreateGraphicsPipeline(
+            rteDict,
+            pipelineDesc,
+            renderPassDesc);
+    if (!pipeline) {
+        SKGPU_LOG_W("Failed to create GraphicsPipeline in precompile!");
+        return false;
+    }
+
+    return true;
+}
 
 void Precompile(Context* context, const PaintOptions& options, DrawTypeFlags drawTypes) {
 
@@ -156,18 +174,21 @@ void Precompile(Context* context, const PaintOptions& options, DrawTypeFlags dra
 
     if (drawTypes & DrawTypeFlags::kDrawVertices) {
         for (Coverage coverage : {Coverage::kNone, Coverage::kSingleChannel, Coverage::kLCD}) {
-            options.priv().buildCombinations(
-                keyContext,
-                &gatherer,
-                /* addPrimitiveBlender= */ true,
-                coverage,
-                [&](UniquePaintParamsID uniqueID) {
-                    compile(context->priv().rendererProvider(),
-                            context->priv().resourceProvider(),
-                            keyContext, uniqueID,
-                            DrawTypeFlags::kDrawVertices,
-                            renderPassDescs, /* withPrimitiveBlender= */ true, coverage);
-                });
+            // drawVertices w/ colors use a primitiveBlender while those w/o don't
+            for (bool withPrimitiveBlender : { true, false }) {
+                options.priv().buildCombinations(
+                    keyContext,
+                    &gatherer,
+                    withPrimitiveBlender,
+                    coverage,
+                    [&](UniquePaintParamsID uniqueID) {
+                        compile(context->priv().rendererProvider(),
+                                context->priv().resourceProvider(),
+                                keyContext, uniqueID,
+                                DrawTypeFlags::kDrawVertices,
+                                renderPassDescs, withPrimitiveBlender, coverage);
+                    });
+            }
         }
     }
 }

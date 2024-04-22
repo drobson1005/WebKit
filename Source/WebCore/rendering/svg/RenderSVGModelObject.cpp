@@ -32,7 +32,6 @@
 #include "config.h"
 #include "RenderSVGModelObject.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "RenderElementInlines.h"
 #include "RenderGeometryMap.h"
 #include "RenderLayer.h"
@@ -68,6 +67,8 @@ RenderSVGModelObject::RenderSVGModelObject(Type type, SVGElement& element, Rende
     ASSERT(!isLegacyRenderSVGModelObject());
     ASSERT(isRenderSVGModelObject());
 }
+
+RenderSVGModelObject::~RenderSVGModelObject() = default;
 
 void RenderSVGModelObject::updateFromStyle()
 {
@@ -107,14 +108,14 @@ const RenderObject* RenderSVGModelObject::pushMappingToContainer(const RenderLay
     ASSERT(style().position() == PositionType::Static);
 
     bool ancestorSkipped;
-    RenderElement* container = this->container(ancestorToStopAt, ancestorSkipped);
+    CheckedPtr container = this->container(ancestorToStopAt, ancestorSkipped);
     if (!container)
         return nullptr;
 
     ASSERT_UNUSED(ancestorSkipped, !ancestorSkipped);
 
-    pushOntoGeometryMap(geometryMap, ancestorToStopAt, container, ancestorSkipped);
-    return container;
+    pushOntoGeometryMap(geometryMap, ancestorToStopAt, container.get(), ancestorSkipped);
+    return container.get();
 }
 
 LayoutRect RenderSVGModelObject::outlineBoundsForRepaint(const RenderLayerModelObject* repaintContainer, const RenderGeometryMap* geometryMap) const
@@ -154,7 +155,7 @@ void RenderSVGModelObject::styleDidChange(StyleDifference diff, const RenderStyl
     // FIXME: [LBSE] Upstream RenderElement changes
     // bool hasSVGMask = hasSVGMask();
     bool hasSVGMask = false;
-    if (hasSVGMask && hasLayer() && style().visibility() != Visibility::Visible)
+    if (hasSVGMask && hasLayer() && style().usedVisibility() != Visibility::Visible)
         layer()->setHasVisibleContent();
 }
 
@@ -220,7 +221,7 @@ static bool isGraphicsElement(const RenderElement& renderer)
 
 bool RenderSVGModelObject::checkIntersection(RenderElement* renderer, const FloatRect& rect)
 {
-    if (!renderer || renderer->style().effectivePointerEvents() == PointerEvents::None)
+    if (!renderer || renderer->style().usedPointerEvents() == PointerEvents::None)
         return false;
     if (!isGraphicsElement(*renderer))
         return false;
@@ -233,7 +234,7 @@ bool RenderSVGModelObject::checkIntersection(RenderElement* renderer, const Floa
 
 bool RenderSVGModelObject::checkEnclosure(RenderElement* renderer, const FloatRect& rect)
 {
-    if (!renderer || renderer->style().effectivePointerEvents() == PointerEvents::None)
+    if (!renderer || renderer->style().usedPointerEvents() == PointerEvents::None)
         return false;
     if (!isGraphicsElement(*renderer))
         return false;
@@ -293,5 +294,3 @@ void RenderSVGModelObject::paintSVGOutline(PaintInfo& paintInfo, const LayoutPoi
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

@@ -859,39 +859,33 @@ static const MemoryCompactLookupOnlyRobinHoodHashSet<AtomString>& trustedFontHas
     return trustedFontHashes;
 }
 
-static AtomString hashForFontData(const void* data, size_t size)
+static AtomString hashForFontData(std::span<const uint8_t> data)
 {
     auto cryptoDigest = PAL::CryptoDigest::create(PAL::CryptoDigest::Algorithm::SHA_256);
-    cryptoDigest->addBytes(data, size);
+    cryptoDigest->addBytes(data);
     auto digest = cryptoDigest->computeHash();
-    return makeAtomString(base64Encoded(digest.data(), digest.size()));
+    return makeAtomString(base64Encoded(digest.span()));
 }
 
-FontParsingPolicy fontBinaryParsingPolicy(const void* data, size_t size, DownloadableBinaryFontTrustedTypes trustedType)
+FontParsingPolicy fontBinaryParsingPolicy(std::span<const uint8_t> data, DownloadableBinaryFontTrustedTypes trustedType)
 {
     switch (trustedType) {
     case DownloadableBinaryFontTrustedTypes::Any:
         return FontParsingPolicy::LoadWithSystemFontParser;
     case DownloadableBinaryFontTrustedTypes::None:
         return FontParsingPolicy::Deny;
-    case DownloadableBinaryFontTrustedTypes::Restricted:
-    case DownloadableBinaryFontTrustedTypes::FallbackParser: {
-        auto sha = hashForFontData(data, size);
+    case DownloadableBinaryFontTrustedTypes::Restricted: {
+        auto sha = hashForFontData(data);
         if (trustedFontHashesInLockdownMode().contains(sha))
             return FontParsingPolicy::LoadWithSystemFontParser;
-        if (trustedType == DownloadableBinaryFontTrustedTypes::FallbackParser)
-            return FontParsingPolicy::LoadWithSafeFontParser;
-        RELEASE_LOG(Fonts, "[Lockdown Mode] A font with a forbidden type has been blocked.");
+        RELEASE_LOG(Fonts, "[Lockdown Mode] A font with a forbidden type has been blocked from being parsed by system font parser.");
         return FontParsingPolicy::Deny;
     }
+    case DownloadableBinaryFontTrustedTypes::FallbackParser:
+        return FontParsingPolicy::LoadWithSafeFontParser;
     }
     ASSERT_NOT_REACHED();
     return FontParsingPolicy::Deny;
-}
-
-FontParsingPolicy fontBinaryParsingPolicy(std::span<const uint8_t> data, DownloadableBinaryFontTrustedTypes trustedType)
-{
-    return fontBinaryParsingPolicy(data.data(), data.size(), trustedType);
 }
 
 }; // namespace WebCore

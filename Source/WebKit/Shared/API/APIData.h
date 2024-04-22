@@ -38,23 +38,23 @@ namespace API {
 
 class Data : public ObjectImpl<API::Object::Type::Data> {
 public:
-    using FreeDataFunction = void (*)(unsigned char*, const void* context);
+    using FreeDataFunction = void (*)(uint8_t*, const void* context);
 
-    static Ref<Data> createWithoutCopying(const unsigned char* bytes, size_t size, FreeDataFunction freeDataFunction, const void* context)
+    static Ref<Data> createWithoutCopying(std::span<const uint8_t> bytes, FreeDataFunction freeDataFunction, const void* context)
     {
-        return adoptRef(*new Data({ bytes, size }, freeDataFunction, context));
+        return adoptRef(*new Data(bytes, freeDataFunction, context));
     }
 
-    static Ref<Data> create(const unsigned char* bytes, size_t size)
+    static Ref<Data> create(std::span<const uint8_t> bytes)
     {
-        unsigned char *copiedBytes = nullptr;
+        uint8_t* copiedBytes = nullptr;
 
-        if (size) {
-            copiedBytes = static_cast<unsigned char*>(fastMalloc(size));
-            memcpy(copiedBytes, bytes, size);
+        if (bytes.size()) {
+            copiedBytes = static_cast<uint8_t*>(fastMalloc(bytes.size()));
+            memcpy(copiedBytes, bytes.data(), bytes.size());
         }
 
-        return createWithoutCopying(copiedBytes, size, [] (unsigned char* bytes, const void*) {
+        return createWithoutCopying({ copiedBytes, bytes.size() }, [] (uint8_t* bytes, const void*) {
             if (bytes)
                 fastFree(static_cast<void*>(bytes));
         }, nullptr);
@@ -62,20 +62,18 @@ public:
     
     static Ref<Data> create(const Vector<unsigned char>& buffer)
     {
-        return create(buffer.data(), buffer.size());
+        return create(buffer.span());
     }
 
     static Ref<Data> create(Vector<unsigned char>&& buffer)
     {
         auto bufferSize = buffer.size();
         auto bufferPointer = buffer.releaseBuffer().leakPtr();
-        return createWithoutCopying(bufferPointer, bufferSize, [] (unsigned char* bytes, const void*) {
+        return createWithoutCopying({ bufferPointer, bufferSize }, [] (uint8_t* bytes, const void*) {
             if (bytes)
                 WTF::VectorMalloc::free(bytes);
         }, nullptr);
     }
-
-    static Ref<Data> create(std::span<const uint8_t>);
 
 #if PLATFORM(COCOA)
     static Ref<Data> createWithoutCopying(RetainPtr<NSData>);
@@ -86,9 +84,8 @@ public:
         m_freeDataFunction(const_cast<uint8_t*>(m_span.data()), m_context);
     }
 
-    const unsigned char* bytes() const { return m_span.data(); }
     size_t size() const { return m_span.size(); }
-    std::span<const uint8_t> dataReference() const { return m_span; }
+    std::span<const uint8_t> span() const { return m_span; }
 
 private:
     Data(std::span<const uint8_t> span, FreeDataFunction freeDataFunction, const void* context)

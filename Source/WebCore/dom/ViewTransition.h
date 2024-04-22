@@ -40,6 +40,7 @@ namespace WebCore {
 
 class DOMPromise;
 class DeferredPromise;
+class RenderViewTransitionCapture;
 
 enum class ViewTransitionPhase : uint8_t {
     PendingCapture,
@@ -152,18 +153,21 @@ public:
 
     RefPtr<Document> protectedDocument() const { return m_document.get(); }
 
+    RenderViewTransitionCapture* viewTransitionNewPseudoForCapturedElement(Element&);
+
 private:
     ViewTransition(Document&, RefPtr<ViewTransitionUpdateCallback>&&);
 
-    Ref<MutableStyleProperties> copyElementBaseProperties(Element&, const LayoutSize&);
+    Ref<MutableStyleProperties> copyElementBaseProperties(Element&, LayoutSize&);
 
-    void updatePseudoElementStyles();
+    ExceptionOr<void> updatePseudoElementStyles();
     void setupDynamicStyleSheet(const AtomString&, const CapturedElement&);
 
     WeakPtr<Document, WeakPtrImplWithEventTargetData> m_document;
 
     OrderedNamedElementsMap m_namedElements;
     ViewTransitionPhase m_phase { ViewTransitionPhase::PendingCapture };
+    FloatSize m_initialLargeViewportSize;
 
     RefPtr<ViewTransitionUpdateCallback> m_updateCallback;
 
@@ -171,8 +175,7 @@ private:
     PromiseAndWrapper m_ready;
     PromiseAndWrapper m_updateCallbackDone;
     PromiseAndWrapper m_finished;
-
-    FloatSize m_initialSnapshotContainingBlockSize;
+    EventLoopTimerHandle m_updateCallbackTimeout;
 };
 
 }

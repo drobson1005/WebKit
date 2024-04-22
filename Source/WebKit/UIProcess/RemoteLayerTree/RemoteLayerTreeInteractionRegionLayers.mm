@@ -26,22 +26,17 @@
 #import "config.h"
 #import "RemoteLayerTreeInteractionRegionLayers.h"
 
-#if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
+#if ENABLE(GAZE_GLOW_FOR_INTERACTION_REGIONS)
 
 #import "PlatformCALayerRemote.h"
 #import "RemoteLayerTreeHost.h"
-
-#if PLATFORM(VISION)
-
 #import <RealitySystemSupport/RealitySystemSupport.h>
+#import <WebCore/WebActionDisablingCALayerDelegate.h>
 #import <wtf/SoftLinking.h>
+
 SOFT_LINK_PRIVATE_FRAMEWORK_OPTIONAL(RealitySystemSupport)
 SOFT_LINK_CLASS_OPTIONAL(RealitySystemSupport, RCPGlowEffectLayer)
 SOFT_LINK_CONSTANT_MAY_FAIL(RealitySystemSupport, RCPAllowedInputTypesUserInfoKey, const NSString *)
-
-#endif
-
-#import <WebCore/WebActionDisablingCALayerDelegate.h>
 
 namespace WebKit {
 using namespace WebCore;
@@ -49,7 +44,6 @@ using namespace WebCore;
 NSString *interactionRegionTypeKey = @"WKInteractionRegionType";
 NSString *interactionRegionGroupNameKey = @"WKInteractionRegionGroupName";
 
-#if PLATFORM(VISION)
 RCPRemoteEffectInputTypes interactionRegionInputTypes = RCPRemoteEffectInputTypesAll ^ RCPRemoteEffectInputTypePointer;
 
 static Class interactionRegionLayerClass()
@@ -114,15 +108,10 @@ static void configureLayerAsGuard(CALayer *layer, NSString *groupName)
     group.userInfo = interactionRegionEffectUserInfo();
     layer.remoteEffects = @[ group ];
 }
-#else
-static Class interactionRegionLayerClass() { return [CALayer class]; }
-static void configureLayerForInteractionRegion(CALayer *, NSString *) { }
-static void configureLayerAsGuard(CALayer *, NSString *) { }
-#endif // !PLATFORM(VISION)
 
 static NSString *interactionRegionGroupNameForRegion(const WebCore::PlatformLayerIdentifier& layerID, const WebCore::InteractionRegion& interactionRegion)
 {
-    return makeString("WKInteractionRegion-"_s, layerID.toString(), interactionRegion.elementIdentifier.toUInt64());
+    return makeString("WKInteractionRegion-"_s, interactionRegion.elementIdentifier.toUInt64());
 }
 
 static void configureRemoteEffect(CALayer *layer, WebCore::InteractionRegion::Type type, NSString *groupName)
@@ -210,7 +199,9 @@ static CACornerMask convertToCACornerMask(OptionSet<InteractionRegion::CornerMas
 
 void updateLayersForInteractionRegions(RemoteLayerTreeNode& node)
 {
-    if (node.eventRegion().interactionRegions().isEmpty()) {
+    ASSERT(node.uiView());
+
+    if (node.eventRegion().interactionRegions().isEmpty() || !node.uiView()) {
         node.removeInteractionRegionsContainer();
         return;
     }
@@ -289,9 +280,7 @@ void updateLayersForInteractionRegions(RemoteLayerTreeNode& node)
             [regionLayer setCornerRadius:region.cornerRadius];
             if (region.cornerRadius)
                 [regionLayer setCornerCurve:kCACornerCurveCircular];
-
             reconfigureLayerContentHint(regionLayer.get(), region.contentHint);
-
             constexpr CACornerMask allCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             if (region.maskedCorners.isEmpty())
                 [regionLayer setMaskedCorners:allCorners];
@@ -314,7 +303,10 @@ void updateLayersForInteractionRegions(RemoteLayerTreeNode& node)
         if (applyBackgroundColorForDebugging)
             applyBackgroundColorForDebuggingToLayer(regionLayer.get(), region);
 
-        if ([container.sublayers objectAtIndex:insertionPoint] != regionLayer) {
+        // Since we insert new layers as we go, insertionPoint is always <= container.sublayers.count.
+        ASSERT(insertionPoint <= container.sublayers.count);
+        bool shouldAppendLayer = insertionPoint == container.sublayers.count;
+        if (shouldAppendLayer || [container.sublayers objectAtIndex:insertionPoint] != regionLayer) {
             [regionLayer removeFromSuperlayer];
             [container insertSublayer:regionLayer.get() atIndex:insertionPoint];
         }
@@ -328,4 +320,4 @@ void updateLayersForInteractionRegions(RemoteLayerTreeNode& node)
 
 } // namespace WebKit
 
-#endif // ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
+#endif // ENABLE(GAZE_GLOW_FOR_INTERACTION_REGIONS)

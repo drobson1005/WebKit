@@ -11,7 +11,7 @@ set(WPEPlatform_SOURCES
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEEvent.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBuffer.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferDMABuf.cpp
-    ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferDMABufFormat.cpp
+    ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferDMABufFormats.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferSHM.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPECursorTheme.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEDisplay.cpp
@@ -31,7 +31,7 @@ set(WPEPlatform_INSTALLED_HEADERS
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEEvent.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBuffer.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferDMABuf.h
-    ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferDMABufFormat.h
+    ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferDMABufFormats.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEBufferSHM.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEDefines.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/WPEDisplay.h
@@ -90,13 +90,9 @@ set(WPEPlatform_LIBRARIES
 )
 
 if (USE_GBM)
-    list(APPEND WPEPlatform_SYSTEM_INCLUDE_DIRECTORIES
-        ${LIBDRM_INCLUDE_DIR}
-    )
-    list(APPEND WPEPlatform_LIBRARIES
-        GBM::GBM
-        ${LIBDRM_LIBRARIES}
-    )
+    list(APPEND WPEPlatform_LIBRARIES GBM::GBM)
+elseif (USE_LIBDRM)
+    list(APPEND WPEPlatform_LIBRARIES LibDRM::LibDRM)
 endif ()
 
 if (NOT USE_SYSTEM_MALLOC)
@@ -152,7 +148,6 @@ if (ENABLE_WPE_PLATFORM_DRM)
         OPTIONS
             -I${WEBKIT_DIR}/WPEPlatform
             -I${WPEPlatform_DERIVED_SOURCES_DIR}
-            -I${LIBDRM_INCLUDE_DIR}
         SOURCES
             ${WPEPlatformDRM_SOURCES_FOR_INTROSPECTION}
         NO_IMPLICIT_SOURCES

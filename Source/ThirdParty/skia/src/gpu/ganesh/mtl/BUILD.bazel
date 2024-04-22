@@ -18,6 +18,8 @@ skia_filegroup(
 MTL_FILES = [
     "GrMtlAttachment.h",
     "GrMtlAttachment.mm",
+    "GrMtlBackendSemaphore.mm",
+    "GrMtlBackendSurface.mm",
     "GrMtlBuffer.h",
     "GrMtlBuffer.mm",
     "GrMtlCaps.h",
@@ -26,6 +28,7 @@ MTL_FILES = [
     "GrMtlCommandBuffer.mm",
     "GrMtlDepthStencil.h",
     "GrMtlDepthStencil.mm",
+    "GrMtlDirectContext.mm",
     "GrMtlFramebuffer.h",
     "GrMtlFramebuffer.mm",
     "GrMtlGpu.h",

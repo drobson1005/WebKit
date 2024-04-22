@@ -36,6 +36,7 @@
 #include "WebExtensionControllerConfiguration.h"
 #include "WebExtensionControllerIdentifier.h"
 #include "WebExtensionDataType.h"
+#include "WebExtensionError.h"
 #include "WebExtensionFrameIdentifier.h"
 #include "WebExtensionURLSchemeHandler.h"
 #include "WebProcessProxy.h"
@@ -49,11 +50,17 @@
 OBJC_CLASS NSError;
 OBJC_CLASS NSMenu;
 OBJC_CLASS _WKWebExtensionStorageSQLiteStore;
+OBJC_CLASS _WKWebExtensionControllerHelper;
 OBJC_PROTOCOL(_WKWebExtensionControllerDelegatePrivate);
 
 #ifdef __OBJC__
 #import "_WKWebExtensionController.h"
 #endif
+
+namespace API {
+class NavigationAction;
+class WebsitePolicies;
+}
 
 namespace WebKit {
 
@@ -107,10 +114,9 @@ public:
     void getDataRecords(OptionSet<WebExtensionDataType>, CompletionHandler<void(Vector<Ref<WebExtensionDataRecord>>)>&&);
     void getDataRecord(OptionSet<WebExtensionDataType>, WebExtensionContext&, CompletionHandler<void(RefPtr<WebExtensionDataRecord>)>&&);
     void removeData(OptionSet<WebExtensionDataType>, const Vector<Ref<WebExtensionDataRecord>>&, CompletionHandler<void()>&&);
-    void removeData(OptionSet<WebExtensionDataType>, const WebExtensionContextSet&, CompletionHandler<void()>&&);
 
-    void calculateStorageSize(_WKWebExtensionStorageSQLiteStore *, WebExtensionDataType, CompletionHandler<void(size_t)>&&);
-    void removeStorage(_WKWebExtensionStorageSQLiteStore *, WebExtensionDataType, CompletionHandler<void()>&&);
+    void calculateStorageSize(_WKWebExtensionStorageSQLiteStore *, WebExtensionDataType, CompletionHandler<void(Expected<size_t, WebExtensionError>&&)>&&);
+    void removeStorage(_WKWebExtensionStorageSQLiteStore *, WebExtensionDataType, CompletionHandler<void(Expected<void, WebExtensionError>&&)>&&);
 
     bool hasLoadedContexts() const { return !m_extensionContexts.isEmpty(); }
     bool isFreshlyCreated() const { return m_freshlyCreated; }
@@ -159,6 +165,8 @@ public:
     void inspectorWillClose(WebInspectorUIProxy&, WebPageProxy&);
 #endif
 
+    void updateWebsitePoliciesForNavigation(API::WebsitePolicies&, API::NavigationAction&);
+
     void resourceLoadDidSendRequest(WebPageProxyIdentifier, const ResourceLoadInfo&, const WebCore::ResourceRequest&);
     void resourceLoadDidPerformHTTPRedirection(WebPageProxyIdentifier, const ResourceLoadInfo&, const WebCore::ResourceResponse&, const WebCore::ResourceRequest&);
     void resourceLoadDidReceiveChallenge(WebPageProxyIdentifier, const ResourceLoadInfo&, const WebCore::AuthenticationChallenge&);
@@ -174,6 +182,8 @@ private:
     // IPC::MessageReceiver
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
+    void initializePlatform();
+
     void addProcessPool(WebProcessPool&);
     void removeProcessPool(WebProcessPool&);
 
@@ -187,7 +197,7 @@ private:
     String storageDirectory(WebExtensionContext&) const;
 
     String stateFilePath(const String& uniqueIdentifier) const;
-    _WKWebExtensionStorageSQLiteStore* sqliteStore(const String& storageDirectory, WebExtensionDataType, std::optional<RefPtr<WebExtensionContext>>);
+    _WKWebExtensionStorageSQLiteStore* sqliteStore(const String& storageDirectory, WebExtensionDataType, RefPtr<WebExtensionContext>);
 
     void didStartProvisionalLoadForFrame(WebPageProxyIdentifier, WebExtensionFrameIdentifier, WebExtensionFrameIdentifier parentFrameID, const URL&, WallTime);
     void didCommitLoadForFrame(WebPageProxyIdentifier, WebExtensionFrameIdentifier, WebExtensionFrameIdentifier parentFrameID, const URL&, WallTime);
@@ -226,6 +236,7 @@ private:
 
     Ref<WebExtensionControllerConfiguration> m_configuration;
 
+    RetainPtr<_WKWebExtensionControllerHelper> m_webExtensionControllerHelper;
     WebExtensionContextSet m_extensionContexts;
     WebExtensionContextBaseURLMap m_extensionContextBaseURLMap;
     WebPageProxySet m_pages;

@@ -107,6 +107,7 @@ Ref<HTMLImageElement> HTMLImageElement::create(const QualifiedName& tagName, Doc
 
 HTMLImageElement::~HTMLImageElement()
 {
+    disconnectFromIntersectionObservers();
     document().removeDynamicMediaQueryDependentImage(*this);
     setForm(nullptr);
 #if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
@@ -301,7 +302,10 @@ ImageCandidate HTMLImageElement::bestFitSourceFromPictureElement()
 
         auto sourceSize = sizesParser.length();
 
-        candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), nullAtom(), srcset, sourceSize);
+        candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), nullAtom(), srcset, sourceSize, [&](auto& candidate) {
+            return m_imageLoader->shouldIgnoreCandidateWhenLoadingFromArchive(candidate);
+        });
+
         if (!candidate.isEmpty()) {
             setSourceElement(source);
             break;
@@ -352,7 +356,9 @@ void HTMLImageElement::selectImageSource(RelevantMutation relevantMutation)
             SizesAttributeParser sizesParser(attributeWithoutSynchronization(sizesAttr).string(), document());
             m_dynamicMediaQueryResults.appendVector(sizesParser.dynamicMediaQueryResults());
             auto sourceSize = sizesParser.length();
-            candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), srcAttribute, srcsetAttribute, sourceSize);
+            candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), srcAttribute, srcsetAttribute, sourceSize, [&](auto& candidate) {
+                return m_imageLoader->shouldIgnoreCandidateWhenLoadingFromArchive(candidate);
+            });
         }
     }
     setBestFitURLAndDPRFromImageCandidate(candidate);
@@ -812,6 +818,7 @@ void HTMLImageElement::addCandidateSubresourceURLs(ListHashSet<URL>& urls) const
 
 void HTMLImageElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
+    ActiveDOMObject::didMoveToNewDocument(newDocument);
     oldDocument.removeDynamicMediaQueryDependentImage(*this);
 
     selectImageSource(RelevantMutation::No);
@@ -959,7 +966,7 @@ bool HTMLImageElement::isMultiRepresentationHEIC() const
 void HTMLImageElement::copyNonAttributePropertiesFromElement(const Element& source)
 {
 #if ENABLE(ATTACHMENT_ELEMENT)
-    auto& sourceImage = checkedDowncast<HTMLImageElement>(source);
+    auto& sourceImage = downcast<HTMLImageElement>(source);
     copyAttachmentAssociatedPropertiesFromElement(sourceImage);
 #endif
     Element::copyNonAttributePropertiesFromElement(source);
@@ -1112,6 +1119,18 @@ bool HTMLImageElement::originClean(const SecurityOrigin& origin) const
     ASSERT(cachedImage->origin());
     ASSERT(origin.toString() == cachedImage->origin()->toString());
     return true;
+}
+
+IntersectionObserverData& HTMLImageElement::ensureIntersectionObserverData()
+{
+    if (!m_intersectionObserverData)
+        m_intersectionObserverData = makeUnique<IntersectionObserverData>();
+    return *m_intersectionObserverData;
+}
+
+IntersectionObserverData* HTMLImageElement::intersectionObserverDataIfExists()
+{
+    return m_intersectionObserverData.get();
 }
 
 }

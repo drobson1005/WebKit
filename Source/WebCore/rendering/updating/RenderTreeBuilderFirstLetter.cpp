@@ -28,7 +28,6 @@
 #include "RenderBlock.h"
 #include "RenderButton.h"
 #include "RenderInline.h"
-#include "RenderRubyRun.h"
 #include "RenderSVGText.h"
 #include "RenderStyleSetters.h"
 #include "RenderTable.h"
@@ -115,8 +114,6 @@ static bool supportsFirstLetter(RenderBlock& block)
         return false;
     if (is<RenderSVGText>(block))
         return false;
-    if (is<RenderRubyRun>(block))
-        return false;
     return block.canHaveGeneratedChildren();
 }
 
@@ -195,7 +192,7 @@ void RenderTreeBuilder::FirstLetter::updateStyle(RenderBlock& firstLetterBlock, 
         while (RenderObject* child = firstLetter->firstChild()) {
             if (is<RenderText>(*child))
                 downcast<RenderText>(*child).removeAndDestroyTextBoxes();
-            auto toMove = m_builder.detach(*firstLetter, *child);
+            auto toMove = m_builder.detach(*firstLetter, *child, WillBeDestroyed::No);
             m_builder.attach(*newFirstLetter, WTFMove(toMove));
         }
 

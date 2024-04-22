@@ -43,6 +43,8 @@ RenderDetailsMarker::RenderDetailsMarker(DetailsMarkerControl& element, RenderSt
     ASSERT(isRenderDetailsMarker());
 }
 
+RenderDetailsMarker::~RenderDetailsMarker() = default;
+
 static Path createPath(const FloatPoint* path)
 {
     Path result;
@@ -121,7 +123,7 @@ Path RenderDetailsMarker::getPath(const LayoutPoint& origin) const
 
 void RenderDetailsMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (paintInfo.phase != PaintPhase::Foreground || style().visibility() != Visibility::Visible) {
+    if (paintInfo.phase != PaintPhase::Foreground || style().usedVisibility() != Visibility::Visible) {
         RenderBlockFlow::paint(paintInfo, paintOffset);
         return;
     }

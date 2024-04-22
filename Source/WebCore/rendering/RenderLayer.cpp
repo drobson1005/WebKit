@@ -280,13 +280,8 @@ private:
 
 void makeMatrixRenderable(TransformationMatrix& matrix, bool has3DRendering)
 {
-#if !ENABLE(3D_TRANSFORMS)
-    UNUSED_PARAM(has3DRendering);
-    matrix.makeAffine();
-#else
     if (!has3DRendering)
         matrix.makeAffine();
-#endif
 }
 
 #if !LOG_DISABLED
@@ -363,17 +358,15 @@ RenderLayer::RenderLayer(RenderLayerModelObject& renderer)
     if (isRenderViewLayer())
         m_boxScrollingScope = m_contentsScrollingScope = nextScrollingScope();
 
-    auto needsvisibleContentStatusUpdate = [&]() {
+    auto needsVisibleContentStatusUpdate = [&]() {
         if (renderer.firstChild())
             return false;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         // Leave m_visibleContentStatusDirty = true in any case. The associated renderer needs to be inserted into the
         // render tree, before we can determine the visible content status. The visible content status of a SVG renderer
         // depends on its ancestors (all children of RenderSVGHiddenContainer are recursively invisible, no matter what).
         if (renderer.isSVGLayerAwareRenderer() && renderer.document().settings().layerBasedSVGEngineEnabled())
             return false;
-#endif
 
         //  We need the parent to know if we have skipped content or content-visibility root.
         if (renderer.style().hasSkippedContent() && !renderer.parent())
@@ -381,9 +374,9 @@ RenderLayer::RenderLayer(RenderLayerModelObject& renderer)
         return true;
     }();
 
-    if (needsvisibleContentStatusUpdate) {
+    if (needsVisibleContentStatusUpdate) {
         m_visibleContentStatusDirty = false;
-        m_hasVisibleContent = renderer.style().visibility() == Visibility::Visible;
+        m_hasVisibleContent = renderer.style().usedVisibility() == Visibility::Visible;
     }
 }
 
@@ -483,7 +476,7 @@ void RenderLayer::removeChild(RenderLayer& oldChild)
 
     if (oldChild.hasBlendMode() || (oldChild.hasNotIsolatedBlendingDescendants() && !oldChild.isolatesBlending()))
         dirtyAncestorChainHasBlendingDescendants();
-    if (renderer().style().visibility() != Visibility::Visible)
+    if (renderer().style().usedVisibility() != Visibility::Visible)
         dirtyVisibleContentStatus();
 }
 
@@ -575,7 +568,7 @@ static bool canCreateStackingContext(const RenderLayer& layer)
         || renderer.hasBackdropFilter()
         || renderer.hasBlendMode()
         || renderer.isTransparent()
-        || renderer.hasViewTransitionName()
+        || renderer.requiresRenderingConsolidationForViewTransition()
         || renderer.isViewTransitionPseudo()
         || renderer.isPositioned() // Note that this only creates stacking context in conjunction with explicit z-index.
         || renderer.hasReflection()
@@ -602,7 +595,7 @@ bool RenderLayer::shouldBeNormalFlowOnly() const
 
 bool RenderLayer::shouldBeCSSStackingContext() const
 {
-    return !renderer().style().hasAutoUsedZIndex() || renderer().shouldApplyLayoutOrPaintContainment() || renderer().hasViewTransitionName() || renderer().isViewTransitionPseudo() || isRenderViewLayer();
+    return !renderer().style().hasAutoUsedZIndex() || renderer().shouldApplyLayoutOrPaintContainment() || renderer().requiresRenderingConsolidationForViewTransition() || renderer().isViewTransitionPseudo() || isRenderViewLayer();
 }
 
 bool RenderLayer::computeCanBeBackdropRoot() const
@@ -610,14 +603,18 @@ bool RenderLayer::computeCanBeBackdropRoot() const
     if (!renderer().settings().cssUnprefixedBackdropFilterEnabled())
         return false;
 
-    return renderer().isTransparent()
+    // In order to match other impls and not the spec, the document element should
+    // only be a backdrop root (and be isolated from the base background color) if
+    // another group rendering effect is present.
+    // https://github.com/w3c/fxtf-drafts/issues/557
+    return isRenderViewLayer()
+        || renderer().isTransparent()
         || renderer().hasBackdropFilter()
         || renderer().hasClipPath()
         || renderer().hasFilter()
         || renderer().hasBlendMode()
         || renderer().hasMask()
-        || renderer().hasViewTransitionName()
-        || renderer().isDocumentElementRenderer()
+        || (renderer().requiresRenderingConsolidationForViewTransition() && !renderer().isDocumentElementRenderer())
         || (renderer().style().willChange() && renderer().style().willChange()->canBeBackdropRoot());
 }
 
@@ -898,7 +895,11 @@ bool RenderLayer::canRender3DTransforms() const
 
 bool RenderLayer::paintsWithFilters() const
 {
-    if (!hasFilter())
+    const auto& filter = renderer().style().filter();
+    if (filter.isEmpty())
+        return false;
+
+    if (renderer().isRenderOrLegacyRenderSVGRoot() && filter.isReferenceFilter())
         return false;
 
     if (RenderLayerFilters::isIdentity(renderer()))
@@ -996,7 +997,6 @@ void RenderLayer::recursiveUpdateLayerPositions(OptionSet<UpdateLayerPositionsFl
     else
         m_enclosingPaginationLayer = nullptr;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (renderer().isSVGLayerAwareRenderer() && renderer().document().settings().layerBasedSVGEngineEnabled()) {
         if (!is<RenderSVGRoot>(renderer())) {
             ASSERT(!renderer().isFixedPositioned());
@@ -1006,7 +1006,6 @@ void RenderLayer::recursiveUpdateLayerPositions(OptionSet<UpdateLayerPositionsFl
         // Only the outermost <svg> and / <foreignObject> are potentially scrollable.
         ASSERT_IMPLIES(is<RenderSVGModelObject>(renderer()) || is<RenderSVGText>(renderer()) || is<RenderSVGInline>(renderer()), !m_scrollableArea);
     }
-#endif
 
     auto repaintIfNecessary = [&](bool checkForRepaint) {
         if (!m_hasVisibleContent || !isSelfPaintingLayer()) {
@@ -1289,11 +1288,9 @@ FloatRect RenderLayer::referenceBoxRectForClipPath(CSSBoxType boxType, const Lay
 {
     bool isReferenceBox = false;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (renderer().document().settings().layerBasedSVGEngineEnabled() && renderer().isSVGLayerAwareRenderer())
         isReferenceBox = true;
     else
-#endif
         isReferenceBox = renderer().isRenderBox();
 
     // FIXME: Support different reference boxes for inline content.
@@ -1535,7 +1532,6 @@ void RenderLayer::dirtyAncestorChainVisibleDescendantStatus()
 
 void RenderLayer::updateAncestorDependentState()
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     m_enclosingSVGHiddenOrResourceContainer = nullptr;
     auto determineSVGAncestors = [&] (const RenderElement& renderer) {
         for (auto* ancestor = renderer.parent(); ancestor; ancestor = ancestor->parent()) {
@@ -1547,16 +1543,13 @@ void RenderLayer::updateAncestorDependentState()
     };
     if (renderer().document().settings().layerBasedSVGEngineEnabled())
         determineSVGAncestors(renderer());
-#endif
 
     bool insideSVGForeignObject = false;
     if (renderer().document().mayHaveRenderedSVGForeignObjects()) {
         if (ancestorsOfType<LegacyRenderSVGForeignObject>(renderer()).first())
             insideSVGForeignObject = true;
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         else if (renderer().document().settings().layerBasedSVGEngineEnabled() && ancestorsOfType<RenderSVGForeignObject>(renderer()).first())
             insideSVGForeignObject = true;
-#endif
     }
 
     if (insideSVGForeignObject == m_insideSVGForeignObject)
@@ -1614,23 +1607,22 @@ void RenderLayer::updateDescendantDependentFlags()
 
 bool RenderLayer::computeHasVisibleContent() const
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (renderer().isAnonymous() && is<RenderSVGViewportContainer>(renderer()))
         return false;
-#endif
+
     if (m_isHiddenByOverflowTruncation)
         return false;
 
     if (renderer().isSkippedContent())
         return false;
 
-    if (renderer().style().visibility() == Visibility::Visible)
+    if (renderer().style().usedVisibility() == Visibility::Visible)
         return true;
 
     // Layer's renderer has visibility:hidden, but some non-layer child may have visibility:visible.
     RenderObject* r = renderer().firstChild();
     while (r) {
-        if (r->style().visibility() == Visibility::Visible && !r->hasLayer())
+        if (r->style().usedVisibility() == Visibility::Visible && !r->hasLayer())
             return true;
 
         RenderObject* child = nullptr;
@@ -1662,12 +1654,10 @@ static LayoutRect computeLayerPositionAndIntegralSize(const RenderLayerModelObje
         return { boxRenderer->topLeftLocation(), snappedIntSize(frameRect.size(), frameRect.location()) };
     }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (auto* svgModelObjectRenderer = dynamicDowncast<RenderSVGModelObject>(renderer)) {
         const auto& frameRect = svgModelObjectRenderer->frameRectEquivalent();
         return { svgModelObjectRenderer->topLeftLocationEquivalent(), enclosingIntRect(frameRect).size() };
     }
-#endif
 
     ASSERT_NOT_REACHED();
     return { };
@@ -1974,14 +1964,12 @@ RenderLayer* RenderLayer::enclosingTransformedAncestor() const
 
 bool RenderLayer::shouldRepaintAfterLayout() const
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // The SVG containers themselves never trigger repaints, only their contents are allowed to.
     // SVG container sizes/positions are only ever determined by their children, so they will
     // change as a reaction on a re-position/re-sizing of the children - which already properly
     // trigger repaints.
     if (is<RenderSVGContainer>(renderer()) && !paintsWithFilters())
         return false;
-#endif
 
     if (m_repaintStatus == RepaintStatus::NeedsNormalRepaint || m_repaintStatus == RepaintStatus::NeedsFullRepaint)
         return true;
@@ -2199,10 +2187,10 @@ enum TransparencyClipBoxMode {
     RootOfTransparencyClipBox
 };
 
-static LayoutRect transparencyClipBox(const RenderLayer&, const RenderLayer* rootLayer, TransparencyClipBoxBehavior, TransparencyClipBoxMode, OptionSet<PaintBehavior> = { });
+static LayoutRect transparencyClipBox(const RenderLayer&, const RenderLayer* rootLayer, TransparencyClipBoxBehavior, TransparencyClipBoxMode, OptionSet<PaintBehavior> = { }, const LayoutRect* paintDirtyRect = nullptr);
 
 static void expandClipRectForDescendantsAndReflection(LayoutRect& clipRect, const RenderLayer& layer, const RenderLayer* rootLayer,
-    TransparencyClipBoxBehavior transparencyBehavior, OptionSet<PaintBehavior> paintBehavior)
+    TransparencyClipBoxBehavior transparencyBehavior, OptionSet<PaintBehavior> paintBehavior, const LayoutRect* paintDirtyRect)
 {
     // If we have a mask, then the clip is limited to the border box area (and there is
     // no need to examine child layers).
@@ -2211,7 +2199,7 @@ static void expandClipRectForDescendantsAndReflection(LayoutRect& clipRect, cons
         // a stacking container. This means we can just walk the layer tree directly.
         for (RenderLayer* curr = layer.firstChild(); curr; curr = curr->nextSibling()) {
             if (!layer.isReflectionLayer(*curr))
-                clipRect.unite(transparencyClipBox(*curr, rootLayer, transparencyBehavior, DescendantsOfTransparencyClipBox, paintBehavior));
+                clipRect.unite(transparencyClipBox(*curr, rootLayer, transparencyBehavior, DescendantsOfTransparencyClipBox, paintBehavior, paintDirtyRect));
         }
     }
 
@@ -2228,7 +2216,7 @@ static void expandClipRectForDescendantsAndReflection(LayoutRect& clipRect, cons
 }
 
 static LayoutRect transparencyClipBox(const RenderLayer& layer, const RenderLayer* rootLayer, TransparencyClipBoxBehavior transparencyBehavior,
-    TransparencyClipBoxMode transparencyMode, OptionSet<PaintBehavior> paintBehavior)
+    TransparencyClipBoxMode transparencyMode, OptionSet<PaintBehavior> paintBehavior, const LayoutRect* paintDirtyRect)
 {
     // FIXME: Although this function completely ignores CSS-imposed clipping, we did already intersect with the
     // paintDirtyRect, and that should cut down on the amount we have to paint.  Still it
@@ -2250,33 +2238,36 @@ static LayoutRect transparencyClipBox(const RenderLayer& layer, const RenderLaye
         // We don't use fragment boxes when collecting a transformed layer's bounding box, since it always
         // paints unfragmented.
         LayoutRect clipRect = layer.boundingBox(&layer);
-        expandClipRectForDescendantsAndReflection(clipRect, layer, &layer, transparencyBehavior, paintBehavior);
+        expandClipRectForDescendantsAndReflection(clipRect, layer, &layer, transparencyBehavior, paintBehavior, paintDirtyRect);
         clipRect.expand(toLayoutBoxExtent(layer.filterOutsets()));
         LayoutRect result = transform.mapRect(clipRect);
-        if (!paginationLayer)
+        if (!paginationLayer) {
+            if (paintDirtyRect)
+                result = intersection(result, *paintDirtyRect);
             return result;
-        
+        }
+
         // We have to break up the transformed extent across our columns.
         // Split our box up into the actual fragment boxes that render in the columns/pages and unite those together to
         // get our true bounding box.
         auto& enclosingFragmentedFlow = downcast<RenderFragmentedFlow>(paginationLayer->renderer());
         result = enclosingFragmentedFlow.fragmentsBoundingBox(result);
         result.move(paginationLayer->offsetFromAncestor(rootLayer));
+        if (paintDirtyRect)
+            result = intersection(result, *paintDirtyRect);
         return result;
     }
 
     OptionSet<RenderLayer::CalculateLayerBoundsFlag> flags = transparencyBehavior == HitTestingTransparencyClipBox ? RenderLayer::UseFragmentBoxesIncludingCompositing : RenderLayer::UseFragmentBoxesExcludingCompositing;
     flags.add(RenderLayer::IncludeRootBackgroundPaintingArea);
     auto clipRect = layer.boundingBox(rootLayer, layer.offsetFromAncestor(rootLayer), flags);
-    expandClipRectForDescendantsAndReflection(clipRect, layer, rootLayer, transparencyBehavior, paintBehavior);
+    expandClipRectForDescendantsAndReflection(clipRect, layer, rootLayer, transparencyBehavior, paintBehavior, paintDirtyRect);
     clipRect.expand(toLayoutBoxExtent(layer.filterOutsets()));
 
-    return clipRect;
-}
+    if (paintDirtyRect)
+        clipRect = intersection(clipRect, *paintDirtyRect);
 
-static LayoutRect paintingExtent(const RenderLayer& currentLayer, const RenderLayer* rootLayer, const LayoutRect& paintDirtyRect, OptionSet<PaintBehavior> paintBehavior)
-{
-    return intersection(transparencyClipBox(currentLayer, rootLayer, PaintingTransparencyClipBox, RootOfTransparencyClipBox, paintBehavior), paintDirtyRect);
+    return clipRect;
 }
 
 void RenderLayer::beginTransparencyLayers(GraphicsContext& context, const LayerPaintingInfo& paintingInfo, const LayoutRect& dirtyRect)
@@ -2297,7 +2288,7 @@ void RenderLayer::beginTransparencyLayers(GraphicsContext& context, const LayerP
             return;
         }
         context.save();
-        LayoutRect adjustedClipRect = paintingExtent(*this, paintingInfo.rootLayer, dirtyRect, paintingInfo.paintBehavior);
+        LayoutRect adjustedClipRect = transparencyClipBox(*this, paintingInfo.rootLayer, PaintingTransparencyClipBox, RootOfTransparencyClipBox, paintingInfo.paintBehavior, &dirtyRect);
         adjustedClipRect.move(paintingInfo.subpixelOffset);
         auto snappedClipRect = snapRectToDevicePixelsIfNeeded(adjustedClipRect, renderer());
         context.clip(snappedClipRect);
@@ -2485,11 +2476,9 @@ LayoutPoint RenderLayer::convertToLayerCoords(const RenderLayer* ancestorLayer, 
     while (currLayer && currLayer != ancestorLayer)
         currLayer = accumulateOffsetTowardsAncestor(currLayer, ancestorLayer, locationInLayerCoords, adjustForColumns);
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // Pixel snap the whole SVG subtree as one "block" -- not individual layers down the SVG render tree.
     if (renderer().isRenderSVGRoot())
         return LayoutPoint(roundPointToDevicePixels(locationInLayerCoords, renderer().document().deviceScaleFactor()));
-#endif
 
     return locationInLayerCoords;
 }
@@ -2561,7 +2550,7 @@ void RenderLayer::resize(const PlatformMouseEvent& evt, const LayoutSize& oldOff
     if (!document.frame()->eventHandler().mousePressed())
         return;
 
-    float zoomFactor = renderer->style().effectiveZoom();
+    float zoomFactor = renderer->style().usedZoom();
 
     auto absolutePoint = document.view()->windowToContents(evt.position());
     auto localPoint = roundedIntPoint(absoluteToContents(absolutePoint));
@@ -2848,7 +2837,6 @@ static inline bool shouldSuppressPaintingLayer(RenderLayer* layer)
 
 void RenderLayer::paintSVGResourceLayer(GraphicsContext& context, const AffineTransform& layerContentTransform)
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     bool wasPaintingSVGResourceLayer = m_isPaintingSVGResourceLayer;
     m_isPaintingSVGResourceLayer = true;
     context.concatCTM(layerContentTransform);
@@ -2873,10 +2861,6 @@ void RenderLayer::paintSVGResourceLayer(GraphicsContext& context, const AffineTr
     paintLayer(context, paintingInfo, flags);
 
     m_isPaintingSVGResourceLayer = wasPaintingSVGResourceLayer;
-#else
-    UNUSED_PARAM(context);
-    UNUSED_PARAM(layerContentTransform);
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)
 }
 
 static inline bool paintForFixedRootBackground(const RenderLayer* layer, OptionSet<RenderLayer::PaintLayerFlag> paintFlags)
@@ -2971,7 +2955,6 @@ void RenderLayer::paintLayerWithEffects(GraphicsContext& context, const LayerPai
             if (paintFlags.contains(PaintLayerFlag::PaintingOverflowContents))
                 paintBehavior.add(PaintBehavior::CompositedOverflowScrollContent);
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
             // Always apply SVG viewport clipping in coordinate system before the SVG viewBox transformation is applied.
             if (CheckedPtr svgRoot = dynamicDowncast<RenderSVGRoot>(renderer())) {
                 if (svgRoot->shouldApplyViewportClip()) {
@@ -2985,7 +2968,6 @@ void RenderLayer::paintLayerWithEffects(GraphicsContext& context, const LayerPai
                     clipRect.intersect(newRect);
                 }
             }
-#endif
 
             // Push the parent coordinate space's clip.
             parent()->clipToRect(context, stateSaver, regionContextStateSaver, paintingInfo, paintBehavior, clipRect);
@@ -3071,7 +3053,6 @@ void RenderLayer::setupClipPath(GraphicsContext& context, GraphicsContextStateSa
     if (is<LegacyRenderSVGRoot>(renderer()))
         return;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // Applying clip-path on <clipPath> enforces us to use mask based clipping, so return false here to disable path based clipping.
     // Furthermore if we're the child of a resource container (<clipPath> / <mask> / ...) disabled path based clipping.
     if (is<RenderSVGResourceClipper>(m_enclosingSVGHiddenOrResourceContainer)) {
@@ -3080,7 +3061,6 @@ void RenderLayer::setupClipPath(GraphicsContext& context, GraphicsContextStateSa
         paintFlags.set(PaintLayerFlag::PaintingSVGClippingMask, !m_isPaintingSVGResourceLayer);
         return;
     }
-#endif
 
     auto clippedContentBounds = calculateLayerBounds(paintingInfo.rootLayer, offsetFromRoot, { UseLocalClipRectIfPossible });
 
@@ -3102,7 +3082,6 @@ void RenderLayer::setupClipPath(GraphicsContext& context, GraphicsContextStateSa
     }
 
     if (RefPtr referenceClipPathOperation = dynamicDowncast<ReferencePathOperation>(style.clipPath())) {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (auto* svgClipper = renderer().svgClipperResourceFromStyle()) {
             RefPtr graphicsElement = svgClipper->shouldApplyPathClipping();
             if (!graphicsElement) {
@@ -3132,7 +3111,6 @@ void RenderLayer::setupClipPath(GraphicsContext& context, GraphicsContextStateSa
                 context.translate(-coordinateSystemOriginTranslation);
             return;
         }
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)
 
         if (auto* clipperRenderer = ReferencedSVGResources::referencedClipperRenderer(renderer().treeScopeForSVGReferences(), *referenceClipPathOperation)) {
             // Use the border box as the reference box, even though this is not clearly specified: https://github.com/w3c/csswg-drafts/issues/5786.
@@ -3146,7 +3124,7 @@ void RenderLayer::setupClipPath(GraphicsContext& context, GraphicsContextStateSa
 
             stateSaver.save();
             context.translate(offset);
-            clipperRenderer->applyClippingToContext(context, renderer(), { { }, referenceBox.size() }, snappedClippingBounds, renderer().style().effectiveZoom());
+            clipperRenderer->applyClippingToContext(context, renderer(), { { }, referenceBox.size() }, snappedClippingBounds, renderer().style().usedZoom());
             context.translate(-offset);
             
             // FIXME: Support event regions.
@@ -3247,7 +3225,6 @@ void RenderLayer::paintLayerContents(GraphicsContext& context, const LayerPainti
         if (!m_hasVisibleContent)
             return false;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (!m_enclosingSVGHiddenOrResourceContainer)
             return true;
 
@@ -3258,9 +3235,6 @@ void RenderLayer::paintLayerContents(GraphicsContext& context, const LayerPainti
         // SVG resource layers and their children are only painted indirectly, via paintSVGResourceLayer().
         ASSERT(m_enclosingSVGHiddenOrResourceContainer->hasLayer());
         return m_enclosingSVGHiddenOrResourceContainer->layer()->isPaintingSVGResourceLayer();
-#else
-        return true;
-#endif
     };
 
     bool shouldPaintContent = hasVisibleContent() && isSelfPaintingLayer && !isPaintingOverlayScrollbars && !isCollectingEventRegion && !isCollectingAccessibilityRegion;
@@ -3811,7 +3785,6 @@ void RenderLayer::paintForegroundForFragments(const LayerFragments& layerFragmen
     bool selectionOnly = localPaintingInfo.paintBehavior.contains(PaintBehavior::SelectionOnly);
     bool selectionAndBackgroundsOnly = localPaintingInfo.paintBehavior.contains(PaintBehavior::SelectionAndBackgroundsOnly);
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (is<RenderSVGModelObject>(renderer()) && !is<RenderSVGContainer>(renderer())) {
         // SVG containers need to propagate paint phases. This could be saved if we remember somewhere if a SVG subtree
         // contains e.g. LegacyRenderSVGForeignObject objects that do need the individual paint phases. For SVG shapes & SVG images
@@ -3822,7 +3795,6 @@ void RenderLayer::paintForegroundForFragments(const LayerFragments& layerFragmen
         paintForegroundForFragmentsWithPhase(PaintPhase::Foreground, layerFragments, context, localPaintingInfo, localPaintBehavior, subtreePaintRootForRenderer);
         return;
     }
-#endif
 
     if (!selectionOnly)
         paintForegroundForFragmentsWithPhase(PaintPhase::ChildBlockBackgrounds, layerFragments, context, localPaintingInfo, localPaintBehavior, subtreePaintRootForRenderer);
@@ -4103,7 +4075,7 @@ Ref<HitTestingTransformState> RenderLayer::createLocalTransformState(RenderLayer
     RenderObject* containerRenderer = containerLayer ? &containerLayer->renderer() : nullptr;
     if (renderer().shouldUseTransformFromContainer(containerRenderer)) {
         TransformationMatrix containerTransform;
-        renderer().getTransformFromContainer(containerRenderer, offset, containerTransform);
+        renderer().getTransformFromContainer(offset, containerTransform);
         transformState->applyTransform(containerTransform, HitTestingTransformState::AccumulateTransform);
     } else {
         transformState->translate(offset.width(), offset.height(), HitTestingTransformState::AccumulateTransform);
@@ -4112,42 +4084,20 @@ Ref<HitTestingTransformState> RenderLayer::createLocalTransformState(RenderLayer
     return transformState.releaseNonNull();
 }
 
-static bool parentLayerIsDOMParent(const RenderLayer& layer)
+bool RenderLayer::ancestorLayerIsDOMParent(const RenderLayer* ancestor) const
 {
-    if (!layer.parent())
+    if (!ancestor)
         return false;
-    if (!layer.renderer().element() || !layer.renderer().element()->parentElementInComposedTree())
-        return false;
-    return layer.parent()->renderer().element() == layer.renderer().element()->parentElementInComposedTree();
-}
-
-static bool isHitCandidateLegacy(const RenderLayer* hitLayer, bool canDepthSort, double* zOffset, const HitTestingTransformState* transformState)
-{
-    if (!hitLayer)
-        return false;
-
-    // The hit layer is depth-sorting with other layers, so just say that it was hit.
-    if (canDepthSort)
+    if (renderer().element() && ancestor->renderer().element() == renderer().element()->parentElementInComposedTree())
         return true;
 
-    // We need to look at z-depth to decide if this layer was hit.
-    if (zOffset) {
-        ASSERT(transformState);
-        // This is actually computing our z, but that's OK because the hitLayer is coplanar with us.
-        double childZOffset = computeZOffset(*transformState);
-        if (childZOffset > *zOffset) {
-            *zOffset = childZOffset;
-            return true;
-        }
-        return false;
-    }
-
-    return true;
+    std::optional<PseudoId> parentPseudoId = parentPseudoElement(renderer().style().pseudoElementType());
+    return parentPseudoId && *parentPseudoId == ancestor->renderer().style().pseudoElementType();
 }
 
 bool RenderLayer::participatesInPreserve3D() const
 {
-    return parentLayerIsDOMParent(*this) && parent()->preserves3D() && (transform() || renderer().style().backfaceVisibility() == BackfaceVisibility::Hidden || preserves3D());
+    return ancestorLayerIsDOMParent(parent()) && parent()->preserves3D() && (transform() || renderer().style().backfaceVisibility() == BackfaceVisibility::Hidden || preserves3D());
 }
 
 // hitTestLocation and hitTestRect are relative to rootLayer.
@@ -4167,7 +4117,6 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
     if (!isSelfPaintingLayer() && !hasSelfPaintingLayerDescendant())
         return { nullptr };
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // If we're hit testing 'SVG clip content' (aka. RenderSVGResourceClipper) do not early exit.
     if (!request.svgClipContent()) {
         // SVG resource layers and their children are never hit tested.
@@ -4178,7 +4127,6 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
         if (is<RenderSVGHiddenContainer>(renderer()))
             return { nullptr };
     }
-#endif
 
     // The natural thing would be to keep HitTestingTransformState on the stack, but it's big, so we heap-allocate.
 
@@ -4220,32 +4168,18 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
             return { nullptr, 0 };
     }
 
-    bool using3DTransformsInterop = renderer().settings().css3DTransformInteroperabilityEnabled();
-    RefPtr<HitTestingTransformState> unflattenedTransformState = localTransformState;
-    if (!using3DTransformsInterop && localTransformState && !preserves3D()) {
-        // Keep a copy of the pre-flattening state, for computing z-offsets for the container
-        unflattenedTransformState = HitTestingTransformState::create(*localTransformState);
-        // This layer is flattening, so flatten the state passed to descendants.
-        localTransformState->flatten();
-    }
-
     // The following are used for keeping track of the z-depth of the hit point of 3d-transformed
     // descendants.
     double localZOffset = -std::numeric_limits<double>::infinity();
     double* zOffsetForDescendantsPtr = nullptr;
-    double* zOffsetForContentsPtr = nullptr;
 
     bool depthSortDescendants = false;
     if (preserves3D()) {
         depthSortDescendants = true;
         // Our layers can depth-test with our container, so share the z depth pointer with the container, if it passed one down.
         zOffsetForDescendantsPtr = zOffset ? zOffset : &localZOffset;
-        zOffsetForContentsPtr = zOffset ? zOffset : &localZOffset;
-    } else if (zOffset) {
+    } else if (zOffset)
         zOffsetForDescendantsPtr = nullptr;
-        // Container needs us to give back a z offset for the hit layer.
-        zOffsetForContentsPtr = zOffset;
-    }
 
     double selfZOffset = localTransformState ? computeZOffset(*localTransformState) : 0;
 
@@ -4261,27 +4195,24 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
         return { nullptr };
 
     // Begin by walking our list of positive layers from highest z-index down to the lowest z-index.
-    auto hitLayer = hitTestList(positiveZOrderLayers(), rootLayer, request, result, hitTestRect, hitTestLocation, localTransformState.get(), zOffsetForDescendantsPtr, zOffset, unflattenedTransformState.get(), depthSortDescendants);
+    auto hitLayer = hitTestList(positiveZOrderLayers(), rootLayer, request, result, hitTestRect, hitTestLocation, localTransformState.get(), zOffsetForDescendantsPtr, depthSortDescendants);
     if (hitLayer.layer) {
         if (!depthSortDescendants)
             return hitLayer;
-        if (using3DTransformsInterop) {
-            if (hitLayer.zOffset > candidateLayer.zOffset)
-                candidateLayer = hitLayer;
-        } else
+        if (hitLayer.zOffset > candidateLayer.zOffset)
             candidateLayer = hitLayer;
     }
 
     // Now check our overflow objects.
     {
         HitTestResult tempResult(result.hitTestLocation());
-        hitLayer = hitTestList(normalFlowLayers(), rootLayer, request, tempResult, hitTestRect, hitTestLocation, localTransformState.get(), zOffsetForDescendantsPtr, zOffset, unflattenedTransformState.get(), depthSortDescendants);
+        hitLayer = hitTestList(normalFlowLayers(), rootLayer, request, tempResult, hitTestRect, hitTestLocation, localTransformState.get(), zOffsetForDescendantsPtr, depthSortDescendants);
 
         if (request.resultIsElementList())
             result.append(tempResult, request);
 
         if (hitLayer.layer) {
-            if (!depthSortDescendants || !using3DTransformsInterop || hitLayer.zOffset > candidateLayer.zOffset) {
+            if (!depthSortDescendants || hitLayer.zOffset > candidateLayer.zOffset) {
                 if (!request.resultIsElementList())
                     result = tempResult;
 
@@ -4304,10 +4235,7 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
     }
 
     auto isHitCandidate = [&]() {
-        if (using3DTransformsInterop)
-            return !depthSortDescendants || selfZOffset > candidateLayer.zOffset;
-
-        return isHitCandidateLegacy(this, false, zOffsetForContentsPtr, unflattenedTransformState.get());
+        return !depthSortDescendants || selfZOffset > candidateLayer.zOffset;
     };
 
     // Next we want to see if the mouse pos is inside the child RenderObjects of the layer. Check
@@ -4334,13 +4262,13 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
     // Now check our negative z-index children.
     {
         HitTestResult tempResult(result.hitTestLocation());
-        hitLayer = hitTestList(negativeZOrderLayers(), rootLayer, request, tempResult, hitTestRect, hitTestLocation, localTransformState.get(), zOffsetForDescendantsPtr, zOffset, unflattenedTransformState.get(), depthSortDescendants);
+        hitLayer = hitTestList(negativeZOrderLayers(), rootLayer, request, tempResult, hitTestRect, hitTestLocation, localTransformState.get(), zOffsetForDescendantsPtr, depthSortDescendants);
 
         if (request.resultIsElementList())
             result.append(tempResult, request);
 
         if (hitLayer.layer) {
-            if (!depthSortDescendants || !using3DTransformsInterop || hitLayer.zOffset > candidateLayer.zOffset) {
+            if (!depthSortDescendants || hitLayer.zOffset > candidateLayer.zOffset) {
                 if (!request.resultIsElementList())
                     result = tempResult;
 
@@ -4353,7 +4281,7 @@ RenderLayer::HitLayer RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderLa
     }
 
     // If we found a layer, return. Child layers, and foreground always render in front of background.
-    if (candidateLayer.layer && (!depthSortDescendants || !using3DTransformsInterop))
+    if (candidateLayer.layer && !depthSortDescendants)
         return candidateLayer;
 
     if (isSelfPaintingLayer()) {
@@ -4491,7 +4419,7 @@ bool RenderLayer::hitTestContents(const HitTestRequest& request, HitTestResult& 
     return true;
 }
 
-RenderLayer::HitLayer RenderLayer::hitTestList(LayerList layerIterator, RenderLayer* rootLayer, const HitTestRequest& request, HitTestResult& result, const LayoutRect& hitTestRect, const HitTestLocation& hitTestLocation, const HitTestingTransformState* transformState, double* zOffsetForDescendants, double* zOffset, const HitTestingTransformState* unflattenedTransformState, bool depthSortDescendants)
+RenderLayer::HitLayer RenderLayer::hitTestList(LayerList layerIterator, RenderLayer* rootLayer, const HitTestRequest& request, HitTestResult& result, const LayoutRect& hitTestRect, const HitTestLocation& hitTestLocation, const HitTestingTransformState* transformState, double* zOffsetForDescendants, bool depthSortDescendants)
 {
     if (layerIterator.begin() == layerIterator.end())
         return { nullptr };
@@ -4509,7 +4437,7 @@ RenderLayer::HitLayer RenderLayer::hitTestList(LayerList layerIterator, RenderLa
         // If we're about to cross a flattening boundary, then pass the (lazily-initialized)
         // flattened transfomState to the child layer.
         auto* transformStateForChild = transformState;
-        if (transformState && !childLayer->participatesInPreserve3D() && renderer().settings().css3DTransformInteroperabilityEnabled()) {
+        if (transformState && !childLayer->participatesInPreserve3D()) {
             if (!flattenedTransformState) {
                 flattenedTransformState = HitTestingTransformState::create(*transformState);
                 flattenedTransformState->flatten();
@@ -4527,23 +4455,13 @@ RenderLayer::HitLayer RenderLayer::hitTestList(LayerList layerIterator, RenderLa
         if (request.resultIsElementList())
             result.append(tempResult, request);
 
-        if (renderer().settings().css3DTransformInteroperabilityEnabled()) {
-            if (hitLayer.layer) {
-                // If the child was flattened, then override the returned depth with the depth of the
-                // plane we flattened into (ourselves) instead.
-                if (transformStateForChild == flattenedTransformState)
-                    hitLayer.zOffset = unflattenedZOffset;
+        if (hitLayer.layer) {
+            // If the child was flattened, then override the returned depth with the depth of the
+            // plane we flattened into (ourselves) instead.
+            if (transformStateForChild == flattenedTransformState)
+                hitLayer.zOffset = unflattenedZOffset;
 
-                if (!depthSortDescendants || hitLayer.zOffset > resultLayer.zOffset) {
-                    resultLayer = hitLayer;
-                    if (!request.resultIsElementList())
-                        result = tempResult;
-                    if (!depthSortDescendants)
-                        break;
-                }
-            }
-        } else {
-            if (isHitCandidateLegacy(hitLayer.layer, depthSortDescendants, zOffset, unflattenedTransformState)) {
+            if (!depthSortDescendants || hitLayer.zOffset > resultLayer.zOffset) {
                 resultLayer = hitLayer;
                 if (!request.resultIsElementList())
                     result = tempResult;
@@ -4945,10 +4863,8 @@ LayoutRect RenderLayer::localBoundingBox(OptionSet<CalculateLayerBoundsFlag> fla
     LayoutRect result;
     if (CheckedPtr renderInline = dynamicDowncast<RenderInline>(renderer()); renderInline && renderer().isInline())
         result = renderInline->linesVisualOverflowBoundingBox();
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     else if (CheckedPtr modelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
         result = modelObject->visualOverflowRectEquivalent();
-#endif
     else if (CheckedPtr tableRow = dynamicDowncast<RenderTableRow>(renderer())) {
         // Our bounding box is just the union of all of our cells' border/overflow rects.
         for (RenderTableCell* cell = tableRow->firstCell(); cell; cell = cell->nextCell()) {
@@ -5095,7 +5011,7 @@ LayoutRect RenderLayer::calculateLayerBounds(const RenderLayer* ancestorLayer, c
     }
 
     // FIXME: should probably just pass 'flags' down to descendants.
-    auto descendantFlags = defaultCalculateLayerBoundsFlags() | (flags & ExcludeHiddenDescendants) | (flags & IncludeCompositedDescendants);
+    auto descendantFlags = (flags & PreserveAncestorFlags) ? flags : defaultCalculateLayerBoundsFlags() | (flags & ExcludeHiddenDescendants) | (flags & IncludeCompositedDescendants);
 
     const_cast<RenderLayer*>(this)->updateLayerListsIfNeeded();
 
@@ -5242,7 +5158,7 @@ bool RenderLayer::backgroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect)
 
     // We can't use hasVisibleContent(), because that will be true if our renderer is hidden, but some child
     // is visible and that child doesn't cover the entire rect.
-    if (renderer().style().visibility() != Visibility::Visible)
+    if (renderer().style().usedVisibility() != Visibility::Visible)
         return false;
 
     if (paintsWithFilters() && renderer().style().filter().hasFilterThatAffectsOpacity())
@@ -5530,8 +5446,8 @@ void RenderLayer::styleChanged(StyleDifference diff, const RenderStyle* oldStyle
     // FIXME: RenderLayer already handles visibility changes through our visibility dirty bits. This logic could
     // likely be folded along with the rest.
     if (oldStyle) {
-        bool visibilityChanged = oldStyle->visibility() != renderer().style().visibility();
-        if (oldStyle->usedZIndex() != renderer().style().usedZIndex() || oldStyle->effectiveContentVisibility() != renderer().style().effectiveContentVisibility() || visibilityChanged) {
+        bool visibilityChanged = oldStyle->usedVisibility() != renderer().style().usedVisibility();
+        if (oldStyle->usedZIndex() != renderer().style().usedZIndex() || oldStyle->usedContentVisibility() != renderer().style().usedContentVisibility() || visibilityChanged) {
             dirtyStackingContextZOrderLists();
             if (isStackingContext())
                 dirtyZOrderLists();
@@ -5692,15 +5608,12 @@ void RenderLayer::clearLayerScrollableArea()
 
 void RenderLayer::updateFiltersAfterStyleChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
-    if (!paintsWithFilters()) {
-        clearLayerFilters();
-        return;
-    }
-
     if (renderer().style().filter().hasReferenceFilter()) {
         ensureLayerFilters();
         m_filters->updateReferenceFilterClients(renderer().style().filter());
-    } else if (m_filters)
+    } else if (!paintsWithFilters())
+        clearLayerFilters();
+    else if (m_filters)
         m_filters->removeReferenceFilterClients();
 
     if (diff >= StyleDifference::RepaintLayer && oldStyle && oldStyle->filter() != renderer().style().filter())

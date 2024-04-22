@@ -39,7 +39,7 @@
 
 namespace WebCore {
 
-using PutBytesCallback = size_t(const void*, size_t);
+using PutBytesCallback = size_t(std::span<const uint8_t>);
 
 uint8_t verifyImageBufferIsBigEnough(const void* buffer, size_t bufferSize)
 {
@@ -121,7 +121,7 @@ static bool encode(CGImageRef image, const String& mimeType, std::optional<doubl
     CGDataConsumerCallbacks callbacks {
         [](void* context, const void* buffer, size_t count) -> size_t {
             auto functor = *static_cast<const ScopedLambda<PutBytesCallback>*>(context);
-            return functor(buffer, count);
+            return functor(std::span { static_cast<const uint8_t*>(buffer), count });
         },
         nullptr
     };
@@ -144,7 +144,7 @@ static bool encode(const PixelBuffer& source, const String& mimeType, std::optio
     CGImageAlphaInfo dataAlphaInfo = kCGImageAlphaLast;
     
     auto data = source.bytes();
-    auto dataSize = source.sizeInBytes();
+    auto dataSize = data.size();
 
     Vector<uint8_t> premultipliedData;
 
@@ -171,12 +171,12 @@ static bool encode(const PixelBuffer& source, const String& mimeType, std::optio
         }
 
         dataAlphaInfo = kCGImageAlphaNoneSkipLast; // Ignore the alpha channel.
-        data = premultipliedData.data();
+        data = premultipliedData.mutableSpan();
     }
 
-    verifyImageBufferIsBigEnough(data, dataSize);
+    verifyImageBufferIsBigEnough(data.data(), dataSize);
 
-    auto dataProvider = adoptCF(CGDataProviderCreateWithData(nullptr, data, dataSize, nullptr));
+    auto dataProvider = adoptCF(CGDataProviderCreateWithData(nullptr, data.data(), dataSize, nullptr));
     if (!dataProvider)
         return false;
 
@@ -186,7 +186,7 @@ static bool encode(const PixelBuffer& source, const String& mimeType, std::optio
     return encode(image.get(), mimeType, quality, function);
 }
 
-static bool encode(const std::span<const uint8_t>& data, const String& mimeType, std::optional<double> quality, const ScopedLambda<PutBytesCallback>& function)
+static bool encode(std::span<const uint8_t> data, const String& mimeType, std::optional<double> quality, const ScopedLambda<PutBytesCallback>& function)
 {
     if (data.empty())
         return false;
@@ -206,7 +206,7 @@ static bool encode(const std::span<const uint8_t>& data, const String& mimeType,
     CGDataConsumerCallbacks callbacks {
         [](void* context, const void* buffer, size_t count) -> size_t {
             auto functor = *static_cast<const ScopedLambda<PutBytesCallback>*>(context);
-            return functor(buffer, count);
+            return functor(std::span { static_cast<const uint8_t*>(buffer), count });
         },
         nullptr
     };
@@ -224,9 +224,9 @@ template<typename Source> static Vector<uint8_t> encodeToVector(Source&& source,
 {
     Vector<uint8_t> result;
 
-    bool success = encode(std::forward<Source>(source), mimeType, quality, scopedLambdaRef<PutBytesCallback>([&] (const void* data, size_t length) {
-        result.append(static_cast<const uint8_t*>(data), length);
-        return length;
+    bool success = encode(std::forward<Source>(source), mimeType, quality, scopedLambdaRef<PutBytesCallback>([&] (std::span<const uint8_t> data) {
+        result.append(data);
+        return data.size();
     }));
     if (!success)
         return { };
@@ -255,7 +255,7 @@ Vector<uint8_t> encodeData(const PixelBuffer& pixelBuffer, const String& mimeTyp
     return encodeToVector(pixelBuffer, mimeType, quality);
 }
 
-Vector<uint8_t> encodeData(const std::span<const uint8_t>& data, const String& mimeType, std::optional<double> quality)
+Vector<uint8_t> encodeData(std::span<const uint8_t> data, const String& mimeType, std::optional<double> quality)
 {
     return encodeToVector(data, mimeType, quality);
 }

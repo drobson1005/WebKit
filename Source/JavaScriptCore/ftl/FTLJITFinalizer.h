@@ -28,7 +28,6 @@
 #if ENABLE(FTL_JIT)
 
 #include "DFGFinalizer.h"
-#include "FTLGeneratedFunction.h"
 #include "FTLJITCode.h"
 #include "LinkBuffer.h"
 #include "MacroAssembler.h"
@@ -46,9 +45,9 @@ public:
     bool finalize() final;
     bool isFailed() final { return false; };
 
-    Vector<CCallHelpers::Jump> lazySlowPathGeneratorJumps;
-    GeneratedFunction function;
-    RefPtr<FTL::JITCode> jitCode;
+    RefPtr<JSC::JITCode> jitCode() final { return m_jitCode; }
+
+    RefPtr<FTL::JITCode> m_jitCode;
     size_t m_codeSize { 0 };
 };
 

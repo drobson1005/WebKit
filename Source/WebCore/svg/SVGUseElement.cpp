@@ -182,12 +182,14 @@ void SVGUseElement::svgAttributeChanged(const QualifiedName& attrName)
                 transferSizeAttributesToTargetClone(*targetClone);
         }
         updateSVGRendererForElementChange();
+        invalidateResourceImageBuffersIfNeeded();
         return;
     }
 
     if (SVGURIReference::isKnownAttribute(attrName)) {
         updateExternalDocument();
         invalidateShadowTree();
+        invalidateResourceImageBuffersIfNeeded();
         return;
     }
 
@@ -299,10 +301,8 @@ RefPtr<SVGElement> SVGUseElement::targetClone() const
 
 RenderPtr<RenderElement> SVGUseElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (document().settings().layerBasedSVGEngineEnabled())
         return createRenderer<RenderSVGTransformableContainer>(*this, WTFMove(style));
-#endif
     return createRenderer<LegacyRenderSVGTransformableContainer>(*this, WTFMove(style));
 }
 
@@ -320,9 +320,7 @@ static bool isDirectReference(const SVGElement& element)
 
 Path SVGUseElement::toClipPath()
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     RELEASE_ASSERT(!document().settings().layerBasedSVGEngineEnabled());
-#endif
 
     RefPtr targetClone = dynamicDowncast<SVGGraphicsElement>(this->targetClone());
     if (!targetClone)

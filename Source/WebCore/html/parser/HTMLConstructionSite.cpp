@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 Google, Inc. All Rights Reserved.
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -328,8 +328,17 @@ void HTMLConstructionSite::mergeAttributesFromTokenIntoElement(AtomHTMLToken&& t
     if (!scriptingContentIsAllowed(m_parserContentPolicy))
         element.stripScriptingAttributes(token.attributes());
 
-    for (auto& tokenAttribute : token.attributes())
-        element.setAttributeWithoutOverwriting(tokenAttribute.name(), tokenAttribute.value());
+    for (auto& tokenAttribute : token.attributes()) {
+        auto& attributeName = tokenAttribute.name();
+        if (UNLIKELY(attributeName == nonceAttr)) {
+            if (element.hasAttributeWithoutSynchronization(nonceAttr) || !element.nonce().isEmpty())
+                continue;
+            // Make sure the nonce attribute remains hidden.
+            element.setAttribute(attributeName, tokenAttribute.value());
+            element.hideNonce();
+        } else
+            element.setAttributeWithoutOverwriting(attributeName, tokenAttribute.value());
+    }
 }
 
 void HTMLConstructionSite::insertHTMLHtmlStartTagInBody(AtomHTMLToken&& token)
@@ -542,10 +551,11 @@ void HTMLConstructionSite::insertHTMLElement(AtomHTMLToken&& token)
 
 void HTMLConstructionSite::insertHTMLTemplateElement(AtomHTMLToken&& token)
 {
-    if (document().settings().declarativeShadowRootsEnabled() && m_parserContentPolicy.contains(ParserContentPolicy::AllowDeclarativeShadowRoots)) {
+    if (m_parserContentPolicy.contains(ParserContentPolicy::AllowDeclarativeShadowRoots)) {
         std::optional<ShadowRootMode> mode;
-        bool clonable = false;
-        bool delegatesFocus = false;
+        auto delegatesFocus = ShadowRootDelegatesFocus::No;
+        auto clonable = ShadowRootClonable::No;
+        auto serializable = ShadowRootSerializable::No;
         for (auto& attribute : token.attributes()) {
             if (attribute.name() == HTMLNames::shadowrootmodeAttr) {
                 if (equalLettersIgnoringASCIICase(attribute.value(), "closed"_s))
@@ -553,16 +563,18 @@ void HTMLConstructionSite::insertHTMLTemplateElement(AtomHTMLToken&& token)
                 else if (equalLettersIgnoringASCIICase(attribute.value(), "open"_s))
                     mode = ShadowRootMode::Open;
             } else if (attribute.name() == HTMLNames::shadowrootdelegatesfocusAttr)
-                delegatesFocus = true;
+                delegatesFocus = ShadowRootDelegatesFocus::Yes;
             else if (attribute.name() == HTMLNames::shadowrootclonableAttr)
-                clonable = true;
+                clonable = ShadowRootClonable::Yes;
+            else if (attribute.name() == HTMLNames::shadowrootserializableAttr)
+                serializable = ShadowRootSerializable::Yes;
         }
         if (mode && is<Element>(currentNode())) {
-            auto exceptionOrShadowRoot = currentElement().attachDeclarativeShadow(*mode, delegatesFocus, clonable);
+            auto exceptionOrShadowRoot = currentElement().attachDeclarativeShadow(*mode, delegatesFocus, clonable, serializable);
             if (!exceptionOrShadowRoot.hasException()) {
                 Ref shadowRoot = exceptionOrShadowRoot.releaseReturnValue();
                 auto element = createHTMLElement(token);
-                checkedDowncast<HTMLTemplateElement>(element.get()).setDeclarativeShadowRoot(shadowRoot);
+                downcast<HTMLTemplateElement>(element.get()).setDeclarativeShadowRoot(shadowRoot);
                 m_openElements.push(HTMLStackItem(WTFMove(element), WTFMove(token)));
                 return;
             }
@@ -647,7 +659,7 @@ static NEVER_INLINE unsigned findBreakIndexSlow(const String& string, unsigned c
     // see <https://bugs.webkit.org/show_bug.cgi?id=29092>.
     // We need at least two characters look-ahead to account for UTF-16 surrogates.
     unsigned breakSearchLength = std::min(proposedBreakIndex - currentPosition + 2, stringLength - currentPosition);
-    NonSharedCharacterBreakIterator it(StringView(string.characters16(), stringLength).substring(currentPosition, breakSearchLength));
+    NonSharedCharacterBreakIterator it(StringView(string).substring(currentPosition, breakSearchLength));
 
     unsigned stringLengthLimit = proposedBreakIndex - currentPosition;
     if (ubrk_isBoundary(it, stringLengthLimit))

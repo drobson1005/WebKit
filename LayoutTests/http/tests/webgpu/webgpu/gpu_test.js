@@ -283,6 +283,26 @@ export class GPUTestSubcaseBatchState extends SubcaseBatchState {
       );
     }
   }
+
+  /** Skips this test case if the `langFeature` is *not* supported. */
+  skipIfLanguageFeatureNotSupported(langFeature) {
+    if (!this.hasLanguageFeature(langFeature)) {
+      this.skip(`WGSL language feature '${langFeature}' is not supported`);
+    }
+  }
+
+  /** Skips this test case if the `langFeature` is supported. */
+  skipIfLanguageFeatureSupported(langFeature) {
+    if (this.hasLanguageFeature(langFeature)) {
+      this.skip(`WGSL language feature '${langFeature}' is supported`);
+    }
+  }
+
+  /** returns true iff the `langFeature` is supported  */
+  hasLanguageFeature(langFeature) {
+    const lf = getGPU(this.recorder).wgslLanguageFeatures;
+    return lf !== undefined && lf.has(langFeature);
+  }
 }
 
 /**
@@ -1174,11 +1194,17 @@ export class GPUTest extends GPUTestBase {
     this.mismatchedProvider = await this.sharedState.acquireMismatchedProvider();
   }
 
+  /** GPUAdapter that the device was created from. */
+  get adapter() {
+    assert(this.provider !== undefined, 'internal error: DeviceProvider missing');
+    return this.provider.adapter;
+  }
+
   /**
    * GPUDevice for the test to use.
    */
   get device() {
-    assert(this.provider !== undefined, 'internal error: GPUDevice missing?');
+    assert(this.provider !== undefined, 'internal error: DeviceProvider missing');
     return this.provider.device;
   }
 

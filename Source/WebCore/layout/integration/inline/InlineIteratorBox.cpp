@@ -109,6 +109,9 @@ FloatRect Box::visualRect() const
 
 RenderObject::HighlightState Box::selectionState() const
 {
+    if (!hasRenderer())
+        return { };
+
     if (auto* text = dynamicDowncast<TextBox>(*this)) {
         auto& renderer = text->renderer();
         return renderer.view().selection().highlightStateForTextBox(renderer, text->selectableRange());
@@ -162,14 +165,14 @@ LeafBoxIterator boxFor(const RenderLineBreak& renderer)
 {
     if (auto* lineLayout = LayoutIntegration::LineLayout::containing(renderer))
         return lineLayout->boxFor(renderer);
-    return { BoxLegacyPath(renderer.inlineBoxWrapper()) };
+    return { };
 }
 
 LeafBoxIterator boxFor(const RenderBox& renderer)
 {
     if (auto* lineLayout = LayoutIntegration::LineLayout::containing(renderer))
         return lineLayout->boxFor(renderer);
-    return { BoxLegacyPath(renderer.inlineBoxWrapper()) };
+    return { };
 }
 
 LeafBoxIterator boxFor(const LayoutIntegration::InlineContent& content, size_t boxIndex)

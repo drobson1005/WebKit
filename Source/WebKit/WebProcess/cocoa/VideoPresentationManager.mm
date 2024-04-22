@@ -281,7 +281,7 @@ bool VideoPresentationManager::supportsVideoFullscreen(WebCore::HTMLMediaElement
 
 bool VideoPresentationManager::supportsVideoFullscreenStandby() const
 {
-#if PLATFORM(IOS_FAMILY)
+#if PLATFORM(IOS_FAMILY) && !PLATFORM(VISION)
     return true;
 #else
     return false;
@@ -474,6 +474,44 @@ void VideoPresentationManager::exitVideoFullscreenToModeWithoutAnimation(HTMLVid
     setCurrentlyInFullscreen(interface, false);
 
     m_page->send(Messages::VideoPresentationManagerProxy::ExitFullscreenWithoutAnimationToMode(contextId, targetMode));
+}
+
+void VideoPresentationManager::setVideoFullscreenMode(HTMLVideoElement& videoElement, WebCore::HTMLMediaElementEnums::VideoFullscreenMode mode)
+{
+    INFO_LOG(LOGIDENTIFIER);
+
+    ASSERT(m_page);
+
+    if (!m_videoElements.contains(videoElement))
+        return;
+
+    auto contextId = m_videoElements.get(videoElement);
+    if (!contextId.isValid()) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    if (m_page)
+        m_page->send(Messages::VideoPresentationManagerProxy::SetVideoFullscreenMode(contextId, mode));
+}
+
+void VideoPresentationManager::clearVideoFullscreenMode(HTMLVideoElement& videoElement, WebCore::HTMLMediaElementEnums::VideoFullscreenMode mode)
+{
+    INFO_LOG(LOGIDENTIFIER);
+
+    ASSERT(m_page);
+
+    if (!m_videoElements.contains(videoElement))
+        return;
+
+    auto contextId = m_videoElements.get(videoElement);
+    if (!contextId.isValid()) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    if (m_page)
+        m_page->send(Messages::VideoPresentationManagerProxy::ClearVideoFullscreenMode(contextId, mode));
 }
 
 #pragma mark Interface to VideoPresentationInterfaceContext:
@@ -692,9 +730,11 @@ void VideoPresentationManager::didCleanupFullscreen(PlaybackSessionContextIdenti
     if (videoElement)
         videoElement->didExitFullscreenOrPictureInPicture();
 
-    interface->setFullscreenMode(HTMLMediaElementEnums::VideoFullscreenModeNone);
     interface->setFullscreenStandby(false);
-    removeClientForContext(contextId);
+    if (interface->fullscreenMode() != HTMLMediaElementEnums::VideoFullscreenModeInWindow) {
+        interface->setFullscreenMode(HTMLMediaElementEnums::VideoFullscreenModeNone);
+        removeClientForContext(contextId);
+    }
 
     if (!videoElement || !targetIsFullscreen || mode == HTMLMediaElementEnums::VideoFullscreenModeNone) {
         setCurrentlyInFullscreen(*interface, false);

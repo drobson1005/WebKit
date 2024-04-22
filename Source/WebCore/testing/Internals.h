@@ -44,6 +44,7 @@
 #include "TextIndicator.h"
 #include "VP9Utilities.h"
 #include <JavaScriptCore/Forward.h>
+#include <wtf/CheckedRef.h>
 
 #if ENABLE(VIDEO)
 #include "MediaElementSession.h"
@@ -78,7 +79,7 @@ class DOMRect;
 class DOMRectList;
 class DOMRectReadOnly;
 class DOMURL;
-class LocalDOMWindow;
+class DOMWindow;
 class Document;
 class Element;
 class EventListener;
@@ -180,13 +181,20 @@ template<typename IDLType> class DOMPromiseDeferred;
 
 struct MockWebAuthenticationConfiguration;
 
-class Internals final : public RefCounted<Internals>, private ContextDestructionObserver
+class Internals final
+    : public RefCounted<Internals>
+    , private ContextDestructionObserver
 #if ENABLE(MEDIA_STREAM)
+    , public CanMakeCheckedPtr<Internals>
     , public RealtimeMediaSource::Observer
     , private RealtimeMediaSource::AudioSampleObserver
     , private RealtimeMediaSource::VideoFrameObserver
 #endif
     {
+    WTF_MAKE_FAST_ALLOCATED;
+#if ENABLE(MEDIA_STREAM)
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(Internals);
+#endif
 public:
     static Ref<Internals> create(Document&);
     virtual ~Internals();
@@ -243,6 +251,7 @@ public:
     unsigned imagePendingDecodePromisesCountForTesting(HTMLImageElement&);
     void setClearDecoderAfterAsyncFrameRequestForTesting(HTMLImageElement&, bool enabled);
     unsigned imageDecodeCount(HTMLImageElement&);
+    AtomString imageLastDecodingOptions(HTMLImageElement&);
     unsigned imageCachedSubimageCreateCount(HTMLImageElement&);
     unsigned remoteImagesCountForTesting() const;
     void setAsyncDecodingEnabledForTesting(HTMLImageElement&, bool enabled);
@@ -409,6 +418,7 @@ public:
 
     ExceptionOr<unsigned> wheelEventHandlerCount();
     ExceptionOr<unsigned> touchEventHandlerCount();
+    ExceptionOr<unsigned> scrollableAreaWidth(Node&);
 
     ExceptionOr<Ref<DOMRectList>> touchEventRectsForEvent(const String&);
     ExceptionOr<Ref<DOMRectList>> passiveTouchEventListenerRects();
@@ -759,6 +769,8 @@ public:
     double elementEffectivePlaybackRate(const HTMLMediaElement&);
 
     ExceptionOr<void> setOverridePreferredDynamicRangeMode(HTMLMediaElement&, const String&);
+
+    void enableGStreamerHolePunching(HTMLVideoElement&);
 #endif
 
     ExceptionOr<void> setIsPlayingToBluetoothOverride(std::optional<bool>);
@@ -1178,6 +1190,7 @@ public:
     String ongoingLoadsDescriptions() const;
 
     void reloadWithoutContentExtensions();
+    void disableContentExtensionsChecks();
 
     void setUseSystemAppearance(bool);
 
@@ -1317,7 +1330,7 @@ public:
         
     String highlightPseudoElementColor(const AtomString& highlightName, Element&);
 
-    String windowLocationHost(LocalDOMWindow&);
+    String windowLocationHost(DOMWindow&);
 
     String systemColorForCSSValue(const String& cssValue, bool useDarkModeAppearance, bool useElevatedUserInterfaceLevel);
 
@@ -1441,8 +1454,31 @@ public:
 
     bool hasScopeBreakingHasSelectors() const;
 
+
+    struct PDFAnnotationRect {
+        float x;
+        float y;
+        float width;
+        float height;
+    };
+
+    Vector<PDFAnnotationRect> pdfAnnotationRectsForTesting(Element& pluginElement) const;
+    void setPDFDisplayModeForTesting(Element&, const String&) const;
+    void registerPDFTest(Ref<VoidCallback>&&, Element&);
+
+    const String& defaultSpatialTrackingLabel() const;
+
 private:
     explicit Internals(Document&);
+
+#if ENABLE(MEDIA_STREAM)
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    uint32_t ptrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::ptrCountWithoutThreadCheck(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
+#endif // ENABLE(MEDIA_STREAM)
+
     Document* contextDocument() const;
     LocalFrame* frame() const;
 

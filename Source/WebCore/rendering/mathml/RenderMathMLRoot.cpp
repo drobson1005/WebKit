@@ -54,6 +54,8 @@ RenderMathMLRoot::RenderMathMLRoot(MathMLRootElement& element, RenderStyle&& sty
     ASSERT(isRenderMathMLRoot());
 }
 
+RenderMathMLRoot::~RenderMathMLRoot() = default;
+
 MathMLRootElement& RenderMathMLRoot::element() const
 {
     return static_cast<MathMLRootElement&>(nodeForNonAnonymous());
@@ -272,7 +274,7 @@ void RenderMathMLRoot::paint(PaintInfo& info, const LayoutPoint& paintOffset)
 {
     RenderMathMLRow::paint(info, paintOffset);
 
-    if (!firstChild() || info.context().paintingDisabled() || style().visibility() != Visibility::Visible || !isValid())
+    if (!firstChild() || info.context().paintingDisabled() || style().usedVisibility() != Visibility::Visible || !isValid())
         return;
 
     // We draw the radical operator.

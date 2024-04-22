@@ -54,6 +54,8 @@ public:
 
     void resourceChanged(SVGElement&) final;
 
+    const RenderElement& renderer() const final { return m_clientRenderer; }
+
 private:
     RenderElement& m_clientRenderer;
 };
@@ -65,7 +67,6 @@ void CSSSVGResourceElementClient::resourceChanged(SVGElement& element)
     if (m_clientRenderer.renderTreeBeingDestroyed())
         return;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (!m_clientRenderer.document().settings().layerBasedSVGEngineEnabled()) {
         m_clientRenderer.repaint();
         return;
@@ -79,9 +80,6 @@ void CSSSVGResourceElementClient::resourceChanged(SVGElement& element)
         pathClientRenderer->updateMarkerPositions();
 
     m_clientRenderer.repaintOldAndNewPositionsForSVGRenderer();
-#else
-    m_clientRenderer.repaint();
-#endif
 }
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(ReferencedSVGResources);
@@ -134,7 +132,6 @@ ReferencedSVGResources::SVGElementIdentifierAndTagPairs ReferencedSVGResources::
         }
     }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (!document.settings().layerBasedSVGEngineEnabled())
         return referencedResources;
 
@@ -182,7 +179,6 @@ ReferencedSVGResources::SVGElementIdentifierAndTagPairs ReferencedSVGResources::
         if (!resourceID.isEmpty())
             referencedResources.append({ resourceID, { SVGNames::linearGradientTag, SVGNames::radialGradientTag, SVGNames::patternTag } });
     }
-#endif
 
     return referencedResources;
 }
@@ -231,8 +227,6 @@ RefPtr<SVGElement> ReferencedSVGResources::elementForResourceIDs(TreeScope& tree
     return nullptr;
 }
 
-
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 RefPtr<SVGClipPathElement> ReferencedSVGResources::referencedClipPathElement(TreeScope& treeScope, const ReferencePathOperation& clipPath)
 {
     if (clipPath.fragment().isEmpty())
@@ -273,7 +267,6 @@ RefPtr<SVGElement> ReferencedSVGResources::referencedPaintServerElement(TreeScop
 
     return elementForResourceIDs(treeScope, resourceID, { SVGNames::linearGradientTag, SVGNames::radialGradientTag, SVGNames::patternTag });
 }
-#endif
 
 RefPtr<SVGFilterElement> ReferencedSVGResources::referencedFilterElement(TreeScope& treeScope, const ReferenceFilterOperation& referenceFilter)
 {

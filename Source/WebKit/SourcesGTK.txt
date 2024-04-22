@@ -74,6 +74,8 @@ Shared/API/glib/WebKitURIRequest.cpp @no-unify
 Shared/API/glib/WebKitURIResponse.cpp @no-unify
 Shared/API/glib/WebKitUserMessage.cpp @no-unify
 
+Shared/API/c/skia/WKImageSkia.cpp
+
 Shared/CoordinatedGraphics/CoordinatedGraphicsScene.cpp
 Shared/CoordinatedGraphics/SimpleViewportController.cpp
 
@@ -89,7 +91,6 @@ Shared/glib/UserMessage.cpp
 Shared/glib/WebContextMenuItemGlib.cpp
 
 Shared/gtk/ArgumentCodersGtk.cpp
-Shared/gtk/GtkSettingsState.cpp
 Shared/gtk/NativeWebKeyboardEventGtk.cpp
 Shared/gtk/NativeWebMouseEventGtk.cpp
 Shared/gtk/NativeWebTouchEventGtk.cpp
@@ -100,7 +101,6 @@ Shared/gtk/WebEventFactory.cpp
 
 Shared/linux/WebMemorySamplerLinux.cpp
 
-Shared/soup/WebCoreArgumentCodersSoup.cpp
 Shared/soup/WebErrorsSoup.cpp
 
 Shared/skia/WebCoreArgumentCodersSkia.cpp
@@ -227,8 +227,8 @@ UIProcess/API/gtk/WebKitWebViewGtk4.cpp @no-unify
 UIProcess/API/soup/HTTPCookieStoreSoup.cpp
 
 UIProcess/Automation/cairo/WebAutomationSessionCairo.cpp
-
-UIProcess/Automation/gtk/WebAutomationSessionGtk.cpp
+UIProcess/Automation/gtk/WebAutomationSessionGtk.cpp @no-unify
+UIProcess/Automation/skia/WebAutomationSessionSkia.cpp
 
 UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.cpp
 

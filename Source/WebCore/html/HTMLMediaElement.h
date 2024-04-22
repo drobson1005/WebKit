@@ -41,6 +41,7 @@
 #include "MediaElementSession.h"
 #include "MediaPlayer.h"
 #include "MediaProducer.h"
+#include "MediaResourceSniffer.h"
 #include "MediaUniqueIdentifier.h"
 #include "ReducedResolutionSeconds.h"
 #include "TextTrackClient.h"
@@ -488,7 +489,6 @@ public:
     WEBCORE_EXPORT void enterFullscreen() override;
     WEBCORE_EXPORT void exitFullscreen();
     WEBCORE_EXPORT void prepareForVideoFullscreenStandby();
-    WEBCORE_EXPORT void setVideoFullscreenStandby(bool);
 
     bool hasClosedCaptions() const override;
     bool closedCaptionsVisible() const override;
@@ -670,8 +670,13 @@ public:
 
     LayoutRect contentBoxRect() const { return mediaPlayerContentBoxRect(); }
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    void updateSpatialTrackingLabel();
+    void defaultSpatialTrackingLabelChanged(const String&);
+
     const String& spatialTrackingLabel() const;
-    void setSpatialTrackingLabel(String&&);
+    void setSpatialTrackingLabel(const String&);
+#endif
 
     void mediaSourceWasDetached();
 
@@ -732,6 +737,9 @@ protected:
     void mediaPlayerReloadAndResumePlaybackIfNeeded() final;
     void mediaPlayerQueueTaskOnEventLoop(Function<void()>&&) final;
     void mediaPlayerCharacteristicChanged() final;
+
+    bool videoFullscreenStandby() const { return m_videoFullscreenStandby; }
+    void setVideoFullscreenStandbyInternal(bool videoFullscreenStandby) { m_videoFullscreenStandby = videoFullscreenStandby; }
 
 private:
     friend class Internals;
@@ -828,7 +836,7 @@ private:
     void mediaPlayerGetRawCookies(const URL&, MediaPlayerClient::GetRawCookiesCallback&&) const final;
 #endif
 
-    void mediaPlayerEngineFailedToLoad() const final;
+    void mediaPlayerEngineFailedToLoad() final;
 
     double mediaPlayerRequestedPlaybackRate() const final;
     VideoFullscreenMode mediaPlayerFullscreenMode() const final { return fullscreenMode(); }
@@ -873,7 +881,8 @@ private:
     virtual void scheduleResizeEventIfSizeChanged(const FloatSize&) { }
 
     void selectMediaResource();
-    void loadResource(const URL&, ContentType&, const String& keySystem);
+    void queueLoadMediaResourceTask();
+    void loadResource(const URL&, const ContentType&, const String& keySystem);
     void scheduleNextSourceChild();
     void loadNextSourceChild();
     void userCancelledLoad();
@@ -1050,6 +1059,11 @@ private:
     void setInActiveDocument(bool);
 
     void checkForAudioAndVideo();
+
+    bool needsContentTypeToPlay() const;
+    using SnifferPromise = MediaResourceSniffer::Promise;
+    Ref<SnifferPromise> sniffForContentType(const URL&);
+    void cancelSniffer();
 
     void playPlayer();
     void pausePlayer();
@@ -1237,7 +1251,8 @@ private:
     bool m_shouldVideoPlaybackRequireUserGesture : 1;
     bool m_volumeLocked : 1;
 
-    enum class ControlsState : uint8_t { None, Initializing, Ready };
+    enum class ControlsState : uint8_t { None, Initializing, Ready, PartiallyDeinitialized };
+    friend String convertEnumerationToString(HTMLMediaElement::ControlsState enumerationValue);
     ControlsState m_controlsState { ControlsState::None };
 
     AutoplayEventPlaybackState m_autoplayEventPlaybackState { AutoplayEventPlaybackState::None };
@@ -1346,6 +1361,15 @@ private:
     bool m_changingSynthesisState { false };
 
     FloatSize m_videoLayerSize { };
+    RefPtr<MediaResourceSniffer> m_sniffer;
+    bool m_networkErrorOccured { false };
+    std::optional<ContentType> m_lastContentTypeUsed;
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    using DefaultSpatialTrackingLabelChangedObserver = WTF::Observer<void(String&&)>;
+    DefaultSpatialTrackingLabelChangedObserver m_defaultSpatialTrackingLabelChangedObserver;
+    String m_spatialTrackingLabel;
+#endif
 
 #if !RELEASE_LOG_DISABLED
     RefPtr<Logger> m_logger;

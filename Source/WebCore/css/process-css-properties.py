@@ -2601,8 +2601,7 @@ class GenerateCSSPropertyNames:
                     }
                     *nextCharacter++ = character;
                 }
-                unsigned length = nextCharacter - characters;
-                return { characters, length };
+                return std::span<const LChar> { characters, nextCharacter };
             }
 
             """)
@@ -3969,6 +3968,18 @@ class GenerateCSSPropertyParsing:
                     "CSSParserContext.h",
                     "CSSParserIdioms.h",
                     "CSSPropertyParser.h",
+                    "CSSPropertyParserConsumer+Angle.h",
+                    "CSSPropertyParserConsumer+Color.h",
+                    "CSSPropertyParserConsumer+Ident.h",
+                    "CSSPropertyParserConsumer+Integer.h",
+                    "CSSPropertyParserConsumer+Length.h",
+                    "CSSPropertyParserConsumer+List.h",
+                    "CSSPropertyParserConsumer+None.h",
+                    "CSSPropertyParserConsumer+Number.h",
+                    "CSSPropertyParserConsumer+Percent.h",
+                    "CSSPropertyParserConsumer+Primitives.h",
+                    "CSSPropertyParserConsumer+Resolution.h",
+                    "CSSPropertyParserConsumer+Time.h",
                     "CSSPropertyParserWorkerSafe.h",
                     "CSSValuePool.h",
                     "DeprecatedGlobalSettings.h",

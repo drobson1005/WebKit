@@ -47,6 +47,7 @@ Ref<AccessibilityController> AccessibilityController::create()
 
 AccessibilityController::AccessibilityController()
 {
+    platformInitialize();
 }
 
 AccessibilityController::~AccessibilityController()
@@ -174,6 +175,12 @@ void AccessibilityController::announce(JSStringRef message)
     WKAccessibilityAnnounce(page, toWK(message).get());
 }
 
+#if !PLATFORM(MAC)
+void AccessibilityController::platformInitialize()
+{
+}
+#endif
+
 #if PLATFORM(COCOA)
 
 // AXThread implementation
@@ -219,7 +226,7 @@ void AXThread::createThreadIfNeeded()
     Locker lock { m_initializeRunLoopMutex };
 
     if (!m_thread) {
-        m_thread = Thread::create("WKTR: AccessibilityController", [this] {
+        m_thread = Thread::create("WKTR: AccessibilityController"_s, [this] {
             WTF::Thread::setCurrentThreadIsUserInteractive();
             initializeRunLoop();
         });

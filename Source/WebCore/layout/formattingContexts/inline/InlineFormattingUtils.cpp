@@ -284,7 +284,7 @@ InlineLayoutUnit InlineFormattingUtils::horizontalAlignmentOffset(const RenderSt
     return { };
 }
 
-InlineItemPosition InlineFormattingUtils::leadingInlineItemPositionForNextLine(InlineItemPosition lineContentEnd, std::optional<InlineItemPosition> previousLineContentEnd, bool lineHasIntrusiveFloat, InlineItemPosition layoutRangeEnd)
+InlineItemPosition InlineFormattingUtils::leadingInlineItemPositionForNextLine(InlineItemPosition lineContentEnd, std::optional<InlineItemPosition> previousLineContentEnd, bool lineHasIntrusiveOrNewlyPlacedFloat, InlineItemPosition layoutRangeEnd)
 {
     if (!previousLineContentEnd)
         return lineContentEnd;
@@ -292,7 +292,7 @@ InlineItemPosition InlineFormattingUtils::leadingInlineItemPositionForNextLine(I
         // Either full or partial advancing.
         return lineContentEnd;
     }
-    if (lineContentEnd == *previousLineContentEnd && lineHasIntrusiveFloat) {
+    if (lineContentEnd == *previousLineContentEnd && lineHasIntrusiveOrNewlyPlacedFloat) {
         // Couldn't manage to put any content on line due to floats.
         return lineContentEnd;
     }
@@ -440,6 +440,11 @@ bool InlineFormattingUtils::isAtSoftWrapOpportunity(const InlineItem& previous, 
             return true;
         }
         // Both previous and next items are non-whitespace text.
+        // [text][text] : is a continuous content.
+        // [text-][text] : after [hyphen] position is a soft wrap opportunity.
+        auto previousAndNextHaveSameParent = &previousInlineTextItem.layoutBox().parent() == &nextInlineTextItem.layoutBox().parent();
+        if (previousAndNextHaveSameParent && !TextUtil::isWrappingAllowed(previousInlineTextItem.style()))
+            return false;
         // For soft wrap opportunities defined by the boundary between two characters, the white-space property on the nearest common ancestor of the two characters controls breaking.
         if (!endsWithSoftWrapOpportunity(previousInlineTextItem, nextInlineTextItem))
             return false;
@@ -463,7 +468,7 @@ bool InlineFormattingUtils::isAtSoftWrapOpportunity(const InlineItem& previous, 
     return true;
 }
 
-size_t InlineFormattingUtils::nextWrapOpportunity(size_t startIndex, const InlineItemRange& layoutRange, const InlineItemList& inlineItemList) const
+size_t InlineFormattingUtils::nextWrapOpportunity(size_t startIndex, const InlineItemRange& layoutRange, std::span<const InlineItem> inlineItemList) const
 {
     // 1. Find the start candidate by skipping leading non-content items e.g "<span><span>start". Opportunity is after "<span><span>".
     // 2. Find the end candidate by skipping non-content items inbetween e.g. "<span><span>start</span>end". Opportunity is after "</span>".

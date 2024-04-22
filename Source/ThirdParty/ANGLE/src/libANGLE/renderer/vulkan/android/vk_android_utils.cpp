@@ -10,7 +10,7 @@
 
 #include "common/android_util.h"
 #include "libANGLE/renderer/vulkan/ContextVk.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 #include "libANGLE/renderer/vulkan/vk_utils.h"
 
 #if defined(ANGLE_PLATFORM_ANDROID)
@@ -23,13 +23,24 @@ namespace rx
 {
 namespace vk
 {
+namespace
+{
+#if defined(ANGLE_PLATFORM_ANDROID)
+DisplayVkAndroid *GetDisplayVkAndroid(Renderer *renderer)
+{
+    DisplayVk *displayVk = static_cast<DisplayVk *>(renderer->getGlobalOps());
+    return static_cast<DisplayVkAndroid *>(displayVk);
+}
+#endif
+}  // anonymous namespace
+
 angle::Result GetClientBufferMemoryRequirements(Context *context,
                                                 const AHardwareBuffer *hardwareBuffer,
                                                 VkMemoryRequirements &memRequirements)
 {
 #if defined(ANGLE_PLATFORM_ANDROID)
     const AHBFunctions &ahbFunctions =
-        GetImplAs<DisplayVkAndroid>(context->getRenderer()->getDisplay())->getAHBFunctions();
+        GetDisplayVkAndroid(context->getRenderer())->getAHBFunctions();
     ASSERT(ahbFunctions.valid());
 
     AHardwareBuffer_Desc aHardwareBufferDescription = {};
@@ -71,8 +82,7 @@ angle::Result InitAndroidExternalMemory(Context *context,
                                         VkDeviceSize *sizeOut)
 {
 #if defined(ANGLE_PLATFORM_ANDROID)
-    const AHBFunctions &functions =
-        GetImplAs<DisplayVkAndroid>(context->getRenderer()->getDisplay())->getAHBFunctions();
+    const AHBFunctions &functions = GetDisplayVkAndroid(context->getRenderer())->getAHBFunctions();
     ASSERT(functions.valid());
 
     struct AHardwareBuffer *hardwareBuffer =
@@ -102,11 +112,10 @@ angle::Result InitAndroidExternalMemory(Context *context,
 #endif
 }
 
-void ReleaseAndroidExternalMemory(RendererVk *rendererVk, EGLClientBuffer clientBuffer)
+void ReleaseAndroidExternalMemory(Renderer *renderer, EGLClientBuffer clientBuffer)
 {
 #if defined(ANGLE_PLATFORM_ANDROID)
-    const AHBFunctions &functions =
-        GetImplAs<DisplayVkAndroid>(rendererVk->getDisplay())->getAHBFunctions();
+    const AHBFunctions &functions = GetDisplayVkAndroid(renderer)->getAHBFunctions();
     ASSERT(functions.valid());
     struct AHardwareBuffer *hardwareBuffer =
         angle::android::ClientBufferToAHardwareBuffer(clientBuffer);

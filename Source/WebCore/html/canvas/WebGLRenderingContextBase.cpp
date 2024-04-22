@@ -92,6 +92,7 @@
 #include "OESTextureHalfFloatLinear.h"
 #include "OESVertexArrayObject.h"
 #include "Page.h"
+#include "PermissionsPolicy.h"
 #include "RenderBox.h"
 #include "Settings.h"
 #include "WebCodecsVideoFrame.h"
@@ -814,9 +815,12 @@ WebGLTexture::TextureExtensionFlag WebGLRenderingContextBase::textureExtensionFl
     return static_cast<WebGLTexture::TextureExtensionFlag>((m_oesTextureFloatLinear ? WebGLTexture::TextureExtensionFloatLinearEnabled : 0) | (m_oesTextureHalfFloatLinear ? WebGLTexture::TextureExtensionHalfFloatLinearEnabled : 0));
 }
 
-void WebGLRenderingContextBase::reshape(int width, int height)
+void WebGLRenderingContextBase::reshape(int width, int height, int oldWidth, int oldHeight)
 {
     if (isContextLost())
+        return;
+
+    if (width == oldWidth && height == oldHeight)
         return;
 
     // This is an approximation because at WebGLRenderingContext level we don't
@@ -1144,7 +1148,7 @@ void WebGLRenderingContextBase::bufferData(GCGLenum target, std::optional<Buffer
         return;
 
     std::visit([&](auto& data) {
-        m_context->bufferData(target, std::span(static_cast<const uint8_t*>(data->data()), data->byteLength()), usage);
+        m_context->bufferData(target, data->span(), usage);
     }, data.value());
 }
 
@@ -1161,7 +1165,7 @@ void WebGLRenderingContextBase::bufferSubData(GCGLenum target, long long offset,
     }
 
     std::visit([&](auto& data) {
-        m_context->bufferSubData(target, static_cast<GCGLintptr>(offset), std::span(static_cast<const uint8_t*>(data->data()), data->byteLength()));
+        m_context->bufferSubData(target, static_cast<GCGLintptr>(offset), data->span());
     }, data);
 }
 
@@ -1248,7 +1252,7 @@ void WebGLRenderingContextBase::compressedTexImage2D(GCGLenum target, GCGLint le
         return;
     if (!validateCompressedTexFormat("compressedTexImage2D", internalformat))
         return;
-    m_context->compressedTexImage2D(target, level, internalformat, width, height, border, data.byteLength(), std::span(static_cast<const uint8_t*>(data.baseAddress()), data.byteLength()));
+    m_context->compressedTexImage2D(target, level, internalformat, width, height, border, data.byteLength(), data.span());
 }
 
 void WebGLRenderingContextBase::compressedTexSubImage2D(GCGLenum target, GCGLint level, GCGLint xoffset, GCGLint yoffset, GCGLsizei width, GCGLsizei height, GCGLenum format, ArrayBufferView& data)
@@ -1259,7 +1263,7 @@ void WebGLRenderingContextBase::compressedTexSubImage2D(GCGLenum target, GCGLint
         return;
     if (!validateCompressedTexFormat("compressedTexSubImage2D", format))
         return;
-    m_context->compressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, data.byteLength(), std::span(static_cast<const uint8_t*>(data.baseAddress()), data.byteLength()));
+    m_context->compressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, data.byteLength(), data.span());
 }
 
 bool WebGLRenderingContextBase::validateSettableTexInternalFormat(const char* functionName, GCGLenum internalFormat)
@@ -1737,7 +1741,7 @@ RefPtr<WebGLActiveInfo> WebGLRenderingContextBase::getActiveUniform(WebGLProgram
     return WebGLActiveInfo::create(info.name, info.type, info.size);
 }
 
-std::optional<Vector<RefPtr<WebGLShader>>> WebGLRenderingContextBase::getAttachedShaders(WebGLProgram& program)
+std::optional<Vector<Ref<WebGLShader>>> WebGLRenderingContextBase::getAttachedShaders(WebGLProgram& program)
 {
     if (isContextLost())
         return std::nullopt;
@@ -1748,10 +1752,11 @@ std::optional<Vector<RefPtr<WebGLShader>>> WebGLRenderingContextBase::getAttache
         GraphicsContextGL::VERTEX_SHADER,
         GraphicsContextGL::FRAGMENT_SHADER
     };
-    Vector<RefPtr<WebGLShader>> shaderObjects;
+
+    Vector<Ref<WebGLShader>> shaderObjects;
     for (auto shaderType : shaderTypes) {
         if (RefPtr shader = program.getAttachedShader(shaderType))
-            shaderObjects.append(WTFMove(shader));
+            shaderObjects.append(shader.releaseNonNull());
     }
     return shaderObjects;
 }
@@ -1989,8 +1994,6 @@ WebGLAny WebGLRenderingContextBase::getParameter(GCGLenum pname)
     case GraphicsContextGL::SCISSOR_TEST:
         return getBooleanParameter(pname);
     case GraphicsContextGL::SHADING_LANGUAGE_VERSION:
-        if (!scriptExecutionContext()->settingsValues().maskWebGLStringsEnabled)
-            return makeString("WebGL GLSL ES 1.0 (", m_context->getString(GraphicsContextGL::SHADING_LANGUAGE_VERSION), ')');
         return "WebGL GLSL ES 1.0 (1.0)"_str;
     case GraphicsContextGL::STENCIL_BACK_FAIL:
         return getUnsignedIntParameter(pname);
@@ -2054,23 +2057,13 @@ WebGLAny WebGLRenderingContextBase::getParameter(GCGLenum pname)
         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "getParameter", "invalid parameter name, OES_standard_derivatives not enabled");
         return nullptr;
     case WebGLDebugRendererInfo::UNMASKED_RENDERER_WEBGL:
-        if (m_webglDebugRendererInfo) {
-#if !PLATFORM(IOS_FAMILY)
-            if (!scriptExecutionContext()->settingsValues().maskWebGLStringsEnabled)
-                return m_context->getString(GraphicsContextGL::RENDERER);
-#endif
+        if (m_webglDebugRendererInfo)
             return "Apple GPU"_str;
-        }
         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "getParameter", "invalid parameter name, WEBGL_debug_renderer_info not enabled");
         return nullptr;
     case WebGLDebugRendererInfo::UNMASKED_VENDOR_WEBGL:
-        if (m_webglDebugRendererInfo) {
-#if !PLATFORM(IOS_FAMILY)
-            if (!scriptExecutionContext()->settingsValues().maskWebGLStringsEnabled)
-                return m_context->getString(GraphicsContextGL::VENDOR);
-#endif
+        if (m_webglDebugRendererInfo)
             return "Apple Inc."_str;
-        }
         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "getParameter", "invalid parameter name, WEBGL_debug_renderer_info not enabled");
         return nullptr;
     case GraphicsContextGL::VERTEX_ARRAY_BINDING_OES: // OES_vertex_array_object
@@ -2863,9 +2856,16 @@ void WebGLRenderingContextBase::makeXRCompatible(MakeXRCompatiblePromise&& promi
         return;
     }
 
-    // 1. Let promise be a new Promise.
-    // 2. Let context be the target WebGLRenderingContextBase object.
-    // 3. Ensure an immersive XR device is selected.
+    // 1. If the requesting document’s origin is not allowed to use the "xr-spatial-tracking"
+    // permissions policy, resolve promise and return it.
+    if (!isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::XRSpatialTracking, canvas->document(), LogPermissionsPolicyFailure::Yes)) {
+        promise.resolve();
+        return;
+    }
+
+    // 2. Let promise be a new Promise.
+    // 3. Let context be the target WebGLRenderingContextBase object.
+    // 4. Ensure an immersive XR device is selected.
     auto& xrSystem = NavigatorWebXR::xr(window->navigator());
     xrSystem.ensureImmersiveXRDeviceIsSelected([this, protectedThis = Ref { *this }, promise = WTFMove(promise), protectedXrSystem = Ref { xrSystem }]() mutable {
         auto rejectPromiseWithInvalidStateError = makeScopeExit([&]() {
@@ -3911,7 +3911,7 @@ std::optional<std::span<const uint8_t>> WebGLRenderingContextBase::validateTexFu
         return std::nullopt;
     }
     ASSERT(!offset.hasOverflowed()); // Checked already as part of `total.hasOverflowed()` check.
-    return std::span(static_cast<const uint8_t*>(pixels->baseAddress()) + offset.value(), dataLength);
+    return pixels->span().subspan(offset.value(), dataLength);
 }
 
 bool WebGLRenderingContextBase::validateTexFuncParameters(TexImageFunctionID functionID,

@@ -20,7 +20,6 @@
 
 #pragma once
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "AffineTransform.h"
 #include "LinearGradientAttributes.h"
 #include "RenderSVGResourceGradient.h"
@@ -33,6 +32,7 @@ class SVGLinearGradientElement;
 
 class RenderSVGResourceLinearGradient final : public RenderSVGResourceGradient {
     WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceLinearGradient);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderSVGResourceLinearGradient);
 public:
     RenderSVGResourceLinearGradient(SVGLinearGradientElement&, RenderStyle&&);
     virtual ~RenderSVGResourceLinearGradient();
@@ -63,5 +63,3 @@ private:
 }
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGResourceLinearGradient, isRenderSVGResourceLinearGradient())
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

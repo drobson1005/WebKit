@@ -228,11 +228,8 @@ RefPtr<AXIsolatedTree> AXIsolatedTree::treeForPageID(PageIdentifier pageID)
 
 RefPtr<AXIsolatedObject> AXIsolatedTree::objectForID(const AXID axID) const
 {
-    // In isolated tree mode, only access m_readerThreadNodeMap on the AX thread.
-    if (isMainThread()) {
-        ASSERT_NOT_REACHED();
-        return nullptr;
-    }
+    ASSERT(!isMainThread());
+
     return axID.isValid() ? m_readerThreadNodeMap.get(axID) : nullptr;
 }
 
@@ -707,7 +704,8 @@ void AXIsolatedTree::updateNodeProperties(AXCoreObject& axObject, const AXProper
             propertyMap.set(AXPropertyName::KeyShortcuts, axObject.keyShortcuts().isolatedCopy());
             break;
         case AXPropertyName::SelectedChildren:
-            propertyMap.set(AXPropertyName::SelectedChildren, axIDs(axObject.selectedChildren()));
+            if (auto selectedChildren = axObject.selectedChildren())
+                propertyMap.set(AXPropertyName::SelectedChildren, axIDs(*selectedChildren));
             break;
         case AXPropertyName::SupportsARIAOwns:
             propertyMap.set(AXPropertyName::SupportsARIAOwns, axObject.supportsARIAOwns());
@@ -773,7 +771,7 @@ void AXIsolatedTree::updateDependentProperties(AccessibilityObject& axObject)
     auto updateLabeledObjects = [this] (const AccessibilityObject& label) {
         auto labeledObjects = label.labelForObjects();
         for (const auto& labeledObject : labeledObjects) {
-            if (RefPtr axObject = checkedDowncast<AccessibilityObject>(labeledObject.get()))
+            if (RefPtr axObject = downcast<AccessibilityObject>(labeledObject.get()))
                 queueNodeUpdate(axObject->objectID(), NodeUpdateOptions::nodeUpdate());
         }
     };
@@ -943,7 +941,7 @@ void AXIsolatedTree::updateChildren(AccessibilityObject& axObject, ResolveNodeCh
         queueRemovals(WTFMove(oldChildrenIDs));
 }
 
-void AXIsolatedTree::updateChildrenForObjects(const ListHashSet<RefPtr<AccessibilityObject>>& axObjects)
+void AXIsolatedTree::updateChildrenForObjects(const ListHashSet<Ref<AccessibilityObject>>& axObjects)
 {
     AXTRACE("AXIsolatedTree::updateChildrenForObjects"_s);
 
@@ -952,7 +950,7 @@ void AXIsolatedTree::updateChildrenForObjects(const ListHashSet<RefPtr<Accessibi
 
     AXAttributeCacheEnabler enableCache(axObjectCache());
     for (auto& axObject : axObjects)
-        updateChildren(*axObject, ResolveNodeChanges::No);
+        updateChildren(axObject.get(), ResolveNodeChanges::No);
 
     queueRemovalsAndUnresolvedChanges({ });
 }
@@ -1097,7 +1095,7 @@ void AXIsolatedTree::removeNode(const AccessibilityObject& axObject)
     if (labeledObjectIDs) {
         // Update the labeled objects since axObject is one of their labels and it is being removed.
         for (AXID labeledObjectID : *labeledObjectIDs) {
-            // The label/title of an isolated object is computed based on its AccessibilityText propperty, thus update it.
+            // The label/title of an isolated object is computed based on its AccessibilityText property, thus update it.
             queueNodeUpdate(labeledObjectID, { AXPropertyName::AccessibilityText });
         }
     }
@@ -1169,12 +1167,7 @@ std::optional<ListHashSet<AXID>> AXIsolatedTree::relatedObjectIDsFor(const AXIso
 void AXIsolatedTree::applyPendingChanges()
 {
     AXTRACE("AXIsolatedTree::applyPendingChanges"_s);
-
-    // In isolated tree mode, only apply pending changes on the AX thread.
-    if (isMainThread()) {
-        ASSERT_NOT_REACHED();
-        return;
-    }
+    ASSERT(!isMainThread());
 
     Locker locker { m_changeLogLock };
 

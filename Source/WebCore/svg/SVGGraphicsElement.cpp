@@ -27,8 +27,11 @@
 #include "RenderAncestorIterator.h"
 #include "RenderElementInlines.h"
 #include "RenderLayer.h"
+#include "RenderLayerInlines.h"
 #include "RenderSVGHiddenContainer.h"
 #include "RenderSVGPath.h"
+#include "RenderSVGResourceMasker.h"
+#include "RenderSVGResourcePattern.h"
 #include "SVGMatrix.h"
 #include "SVGNames.h"
 #include "SVGPathData.h"
@@ -84,14 +87,12 @@ Ref<const SVGTransformList> SVGGraphicsElement::protectedTransform() const
 
 AffineTransform SVGGraphicsElement::animatedLocalTransform() const
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // LBSE handles transforms via RenderLayer, no need to handle CSS transforms here.
     if (document().settings().layerBasedSVGEngineEnabled()) {
         if (m_supplementalTransform)
             return *m_supplementalTransform * transform().concatenate();
         return protectedTransform()->concatenate();
     }
-#endif
 
     AffineTransform matrix;
 
@@ -110,7 +111,7 @@ AffineTransform SVGGraphicsElement::animatedLocalTransform() const
         matrix = transform.toAffineTransform();
         // CSS bakes the zoom factor into lengths, including translation components.
         // In order to align CSS & SVG transforms, we need to invert this operation.
-        float zoom = style->effectiveZoom();
+        float zoom = style->usedZoom();
         if (zoom != 1) {
             matrix.setE(matrix.e() / zoom);
             matrix.setF(matrix.f() / zoom);
@@ -152,13 +153,11 @@ void SVGGraphicsElement::svgAttributeChanged(const QualifiedName& attrName)
         ASSERT(attrName == SVGNames::transformAttr);
         InstanceInvalidationGuard guard(*this);
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (document().settings().layerBasedSVGEngineEnabled()) {
             if (CheckedPtr layerRenderer = dynamicDowncast<RenderLayerModelObject>(renderer()))
                 layerRenderer->repaintOrRelayoutAfterSVGTransformChange();
             return;
         }
-#endif
 
         if (CheckedPtr renderer = this->renderer())
             renderer->setNeedsTransformUpdate();
@@ -192,35 +191,43 @@ FloatRect SVGGraphicsElement::getBBox(StyleUpdateStrategy styleUpdateStrategy)
 
 RenderPtr<RenderElement> SVGGraphicsElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (document().settings().layerBasedSVGEngineEnabled())
         return createRenderer<RenderSVGPath>(*this, WTFMove(style));
-#endif
     return createRenderer<LegacyRenderSVGPath>(*this, WTFMove(style));
 }
 
 void SVGGraphicsElement::didAttachRenderers()
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (document().settings().layerBasedSVGEngineEnabled()) {
         if (CheckedPtr svgRenderer = dynamicDowncast<RenderLayerModelObject>(renderer()); svgRenderer && lineageOfType<RenderSVGHiddenContainer>(*svgRenderer).first()) {
             if (CheckedPtr layer = svgRenderer->layer())
                 layer->dirtyVisibleContentStatus();
         }
     }
-#endif
 }
 
 Path SVGGraphicsElement::toClipPath()
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     RELEASE_ASSERT(!document().settings().layerBasedSVGEngineEnabled());
-#endif
 
     Path path = pathFromGraphicsElement(*this);
     // FIXME: How do we know the element has done a layout?
     path.transform(animatedLocalTransform());
     return path;
+}
+
+void SVGGraphicsElement::invalidateResourceImageBuffersIfNeeded()
+{
+    if (!document().settings().layerBasedSVGEngineEnabled())
+        return;
+    if (CheckedPtr svgRenderer = dynamicDowncast<RenderLayerModelObject>(renderer())) {
+        if (CheckedPtr container = svgRenderer->enclosingLayer()->enclosingSVGHiddenOrResourceContainer()) {
+            if (auto* maskRenderer = dynamicDowncast<RenderSVGResourceMasker>(container.get()))
+                maskRenderer->invalidateMask();
+            if (auto* patternRenderer = dynamicDowncast<RenderSVGResourcePattern>(container.get()))
+                patternRenderer->invalidatePattern(RenderSVGResourcePattern::SuppressRepaint::Yes);
+        }
+    }
 }
 
 }

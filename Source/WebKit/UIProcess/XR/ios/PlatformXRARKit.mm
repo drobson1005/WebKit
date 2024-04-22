@@ -115,6 +115,9 @@ void ARKitCoordinator::startSession(WebPageProxy& page, WeakPtr<SessionEventClie
         [&](Idle&) {
             createSessionIfNeeded();
 
+            // FIXME: When in element fullscreen, UIClient::presentingViewController() may not return the
+            // WKFullScreenViewController even though that is the presenting view controller of the WKWebView.
+            // We should call PageClientImpl::presentingViewController() instead.
             auto* presentingViewController = page.uiClient().presentingViewController();
             if (!presentingViewController) {
                 RELEASE_LOG_ERROR(XR, "ARKitCoordinator: failed to obtain presenting ViewController from page.");
@@ -134,7 +137,7 @@ void ARKitCoordinator::startSession(WebPageProxy& page, WeakPtr<SessionEventClie
                 .sessionEventClient = WTFMove(sessionEventClient),
                 .pageIdentifier = page.webPageID(),
                 .renderState = renderState,
-                .renderThread = Thread::create("ARKitCoordinator session renderer", [this, renderState] { renderLoop(renderState); }),
+                .renderThread = Thread::create("ARKitCoordinator session renderer"_s, [this, renderState] { renderLoop(renderState); }),
             };
         },
         [&](Active&) {

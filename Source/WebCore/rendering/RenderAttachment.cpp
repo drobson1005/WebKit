@@ -55,6 +55,8 @@ RenderAttachment::RenderAttachment(HTMLAttachmentElement& element, RenderStyle&&
 #endif
 }
 
+RenderAttachment::~RenderAttachment() = default;
+
 HTMLAttachmentElement& RenderAttachment::attachmentElement() const
 {
     return downcast<HTMLAttachmentElement>(nodeForNonAnonymous());
@@ -121,7 +123,7 @@ bool RenderAttachment::shouldDrawBorder() const
 
 void RenderAttachment::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& offset)
 {
-    if (paintInfo.phase != PaintPhase::Selection || !hasVisibleBoxDecorations() || !style().hasEffectiveAppearance())
+    if (paintInfo.phase != PaintPhase::Selection || !hasVisibleBoxDecorations() || !style().hasUsedAppearance())
         return;
 
     auto paintRect = borderBoxRect();

@@ -23,10 +23,21 @@
 * THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#if swift(>=5.9)
+
 import CryptoKit
 import Foundation
 
-@objc(WebCryptoErrorCodes)
+import PALSwift
+
+public typealias VectorUInt8 = Cpp.VectorUInt8
+public typealias SpanConstUInt8 = Cpp.SpanConstUInt8
+public typealias OptionalVectorUInt8 = Cpp.OptionalVectorUInt8
+
+private enum LocalErrors: Error {
+    case invalidArgument
+}
+
 public enum ErrorCodes: Int {
     case success = 0
     case wrongTagSize = 1
@@ -36,260 +47,477 @@ public enum ErrorCodes: Int {
     case tooBigArguments = 5
     case decryptionFailed = 6
     case hashingFailed = 7
+    case publicKeyProvidedToSign = 8
+    case failedToSign = 9
+    case failedToVerify = 10
+    case privateKeyProvidedForVerification = 11
+    case failedToImport = 12
+    case failedToDerive = 13
+    case failedToExport = 14
+    case defaultValue = 15
+    case unsupportedAlgorithm = 16
 }
 
-private final class Utils {
+private class Utils {
     static let zeroArray = [UInt8](repeating: 0, count: 0)
 }
-@objc(WebCryptoAesGcm)
-public final class AesGcm: NSObject {
+public struct AesGcmRV {
+    public var cipherText: OptionalVectorUInt8 = OptionalVectorUInt8()
+    public var errorCode: ErrorCodes = .success
+}
 
-    @objc public static func encrypt(
-        _ key: UnsafePointer<UInt8>,
-        keySize: UInt,
-        iv: UnsafePointer<UInt8>,
-        ivSize: UInt,
-        additionalData: UnsafePointer<UInt8>,
-        additionalDataSize: UInt,
-        plainText: UnsafePointer<UInt8>,
-        plainTextSize: UInt,
-        cipherText: UnsafeMutablePointer<UInt8>
-    ) -> ErrorCodes {
+public class AesGcm {
+    public static func encrypt(
+        key: SpanConstUInt8, iv: SpanConstUInt8, ad: SpanConstUInt8, message: SpanConstUInt8,
+        desiredTagLengthInBytes: Int
+    ) -> AesGcmRV {
+        var rv = AesGcmRV()
         do {
-            if keySize > Int.max
-                || ivSize > Int.max
-                || plainTextSize > Int.max
-                || additionalDataSize > Int.max
-            {
-                return .tooBigArguments
+            if iv.size() == 0 {
+                rv.errorCode = .invalidArgument
+                return rv
             }
-            if ivSize == 0 {
-                return .invalidArgument
+            let sealedBox: AES.GCM.SealedBox = try AES.GCM.seal(message, key: key, iv: iv, ad: ad)
+            if desiredTagLengthInBytes > sealedBox.tag.count {
+                rv.errorCode = .invalidArgument
+                return rv
             }
-            let nonce = try AES.GCM.Nonce(data: UnsafeBufferPointer(start: iv, count: Int(ivSize)))
-            var message = UnsafeBufferPointer(start: plainText, count: Int(plainTextSize))
-            if plainTextSize == 0 {
-                Utils.zeroArray.withUnsafeBufferPointer { ptr in
-                    message = ptr
-                }
-            }
-            let symKey = SymmetricKey(
-                data: UnsafeBufferPointer(start: key, count: Int(keySize)))
-            let sealedBox: AES.GCM.SealedBox
-            if additionalDataSize > 0 {
-                sealedBox = try AES.GCM.seal(
-                    message,
-                    using: symKey,
-                    nonce: nonce,
-                    authenticating: UnsafeBufferPointer(
-                        start: additionalData, count: Int(additionalDataSize))
-                )
-            } else {
-                sealedBox = try AES.GCM.seal(
-                    message,
-                    using: symKey,
-                    nonce: nonce
-                )
-            }
-            sealedBox.ciphertext.copyBytes(to: cipherText, count: Int(plainTextSize))
-            sealedBox.tag.copyBytes(to: cipherText + Int(plainTextSize), count: sealedBox.tag.count)
+            var result = sealedBox.ciphertext
+            result.append(
+                sealedBox.tag[
+                    sealedBox.tag.startIndex..<(sealedBox.tag.startIndex + desiredTagLengthInBytes)]
+            )
+            rv.errorCode = .success
+            rv.cipherText = Cpp.makeOptional(result.copyToVectorUInt8())
+            return rv
         } catch {
-            return .encryptionFailed
+            rv.errorCode = .encryptionFailed
         }
-        return .success
+        return rv
     }
 }
 
-@objc(WebCryptoAesKwReturnValue)
-public final class AesKwReturnValue: NSObject {
-    @objc public var errCode: ErrorCodes = ErrorCodes.success
-    @objc public var outputSize: UInt64 = 0
+public struct AesKwRV {
+    public var errCode: ErrorCodes = ErrorCodes.success
+    public var result: OptionalVectorUInt8 = OptionalVectorUInt8()
 }
 
-@objc(WebCryptoAesKw)
-public final class AesKw: NSObject {
-    @objc public static func wrap(
-        _ key: UnsafePointer<UInt8>,
-        keySize: UInt,
-        data: UnsafePointer<UInt8>,
-        dataSize: UInt,
-        cipherText: UnsafeMutablePointer<UInt8>,
-        cipherTextSize: UInt64
-    ) -> AesKwReturnValue {
-        let rv = AesKwReturnValue()
-        rv.errCode = .success
-        if keySize > Int.max
-            || dataSize > Int.max
-            || cipherTextSize > Int.max
-            || keySize == 0
-            || dataSize == 0
-            || cipherTextSize == 0
-        {
-            rv.errCode = .invalidArgument
-            return rv
-        }
+public class AesKw {
+    public static func wrap(keyToWrap: SpanConstUInt8, using: SpanConstUInt8) -> AesKwRV {
+        var rv = AesKwRV()
         do {
-            let cipher = try AES.KeyWrap.wrap(
-                SymmetricKey(data: UnsafeBufferPointer(start: data, count: Int(dataSize))),
-                using: SymmetricKey(data: UnsafeBufferPointer(start: key, count: Int(keySize))))
-            if cipher.count > Int(cipherTextSize) {
-                rv.errCode = .encryptionFailed
-                return rv
-            }
-            cipher.copyBytes(to: cipherText, count: cipher.count)
+            let result = try AES.KeyWrap.wrap(keyToWrap, using: using)
             rv.errCode = .success
-            rv.outputSize = UInt64(cipher.count)
+            rv.result = Cpp.makeOptional(
+                result)
         } catch {
             rv.errCode = .encryptionFailed
-            return rv
         }
         return rv
     }
 
-    @objc public static func unwrap(
-        _ key: UnsafePointer<UInt8>,
-        keySize: UInt,
-        cipherText: UnsafePointer<UInt8>,
-        cipherTextSize: UInt,
-        data: UnsafeMutablePointer<UInt8>,
-        dataSize: UInt64
-    ) -> AesKwReturnValue {
-        let rv = AesKwReturnValue()
-        rv.errCode = ErrorCodes.success
-        if keySize > Int.max
-            || dataSize > Int.max
-            || cipherTextSize > Int.max
-            || keySize == 0
-            || dataSize == 0
-            || cipherTextSize == 0
-        {
-            rv.errCode = .invalidArgument
-            return rv
-        }
+    public static func unwrap(wrappedKey: SpanConstUInt8, using: SpanConstUInt8) -> AesKwRV {
+        var rv = AesKwRV()
         do {
-            let unwrappedKey = try AES.KeyWrap.unwrap(
-                UnsafeBufferPointer(start: cipherText, count: Int(cipherTextSize)),
-                using: SymmetricKey(data: UnsafeBufferPointer(start: key, count: Int(keySize))))
-            if (unwrappedKey.bitCount / 8) > Int(dataSize) {
-                rv.errCode = .encryptionFailed
-                return rv
-            }
-            unwrappedKey.withUnsafeBytes { buf in
-                let mutable = UnsafeMutableRawBufferPointer(start: data, count: Int(dataSize))
-                mutable.copyBytes(from: buf)
-            }
+            let result = try AES.KeyWrap.unwrap(
+                wrappedKey, using: using)
             rv.errCode = .success
-            rv.outputSize = UInt64(unwrappedKey.bitCount / 8)
+            rv.result = Cpp.makeOptional(
+                result.copyToVectorUInt8())
         } catch {
-            rv.errCode = .decryptionFailed
-            return rv
+            rv.errCode = .encryptionFailed
         }
         return rv
     }
+
 }  // AesKw
 
-@objc(WebCryptoDigestSize)
-public enum DigestSize: Int {
-    case sha1 = 20
-    case sha256 = 32
-    case sha384 = 48
-    case sha512 = 64
+public enum HashFunction {
+    case sha1
+    case sha256
+    case sha384
+    case sha512
 }
 
-@objc(WebCryptoDigest)
-public final class Digest: NSObject {
-    @objc public static func sha1(
-        _ data: UnsafePointer<UInt8>, dataSize: UInt, digest: UnsafeMutablePointer<UInt8>,
-        digestSize: UInt
-    ) -> ErrorCodes {
-        guard
-            checkInputs(dataSize: dataSize, digestSize: digestSize, Insecure.SHA1.self) == .success
-                && digestSize == Insecure.SHA1.byteCount
-        else {
-            return .invalidArgument
-        }
-        var d = UnsafeMutableRawBufferPointer(start: digest, count: Int(digestSize))
-        return Self.digest(
-            data: UnsafeBufferPointer(start: data, count: Int(dataSize)),
-            out: &d,
-            Insecure.SHA1.self
-        )
+public class Digest {
+    public static func sha1(_ data: SpanConstUInt8) -> VectorUInt8 {
+        return digest(data, t: Insecure.SHA1.self)
     }
-    @objc public static func sha256(
-        _ data: UnsafePointer<UInt8>, dataSize: UInt, digest: UnsafeMutablePointer<UInt8>,
-        digestSize: UInt
-    ) -> ErrorCodes {
-        guard
-            checkInputs(dataSize: dataSize, digestSize: digestSize, SHA256.self) == .success
-                && digestSize == SHA256.byteCount
-        else {
-            return .invalidArgument
-        }
-        var d = UnsafeMutableRawBufferPointer(start: digest, count: Int(digestSize))
-        return Self.digest(
-            data: UnsafeBufferPointer(start: data, count: Int(dataSize)), out: &d, SHA256.self)
+    public static func sha256(_ data: SpanConstUInt8) -> VectorUInt8 {
+        return digest(data, t: SHA256.self)
     }
-    @objc public static func sha384(
-        _ data: UnsafePointer<UInt8>, dataSize: UInt, digest: UnsafeMutablePointer<UInt8>,
-        digestSize: UInt
-    ) -> ErrorCodes {
-        guard
-            checkInputs(dataSize: dataSize, digestSize: digestSize, SHA384.self) == .success
-                && digestSize == SHA384.byteCount
-        else {
-            return .invalidArgument
-        }
-
-        var d = UnsafeMutableRawBufferPointer(start: digest, count: Int(digestSize))
-        return Self.digest(
-            data: UnsafeBufferPointer(start: data, count: Int(dataSize)), out: &d, SHA384.self)
+    public static func sha384(_ data: SpanConstUInt8) -> VectorUInt8 {
+        return digest(data, t: SHA384.self)
     }
-    @objc public static func sha512(
-        _ data: UnsafePointer<UInt8>, dataSize: UInt, digest: UnsafeMutablePointer<UInt8>,
-        digestSize: UInt
-    ) -> ErrorCodes {
-        guard
-            checkInputs(dataSize: dataSize, digestSize: digestSize, SHA512.self) == .success
-                && digestSize == SHA512.byteCount
-        else {
-            return .invalidArgument
-        }
-
-        var d = UnsafeMutableRawBufferPointer(start: digest, count: Int(digestSize))
-        return Self.digest(
-            data: UnsafeBufferPointer(start: data, count: Int(dataSize)), out: &d, SHA512.self)
+    public static func sha512(_ data: SpanConstUInt8) -> VectorUInt8 {
+        return digest(data, t: SHA512.self)
     }
-    private static func digest<T: HashFunction>(
-        data: UnsafeBufferPointer<UInt8>, out: inout UnsafeMutableRawBufferPointer, _: T.Type
-    ) -> ErrorCodes {
-        var hasher = T()
-        var inputData = data
-        if data.count == 0 {
-            Utils.zeroArray.withUnsafeBufferPointer { buf in
-                inputData = buf
-            }
-        }
-        hasher.update(
-            bufferPointer: UnsafeRawBufferPointer(
-                start: inputData.baseAddress, count: inputData.count))
-        let result = hasher.finalize()
-        return result.withUnsafeBytes { buf in
-            if buf.count != out.count {
-                return ErrorCodes.hashingFailed
-            }
-            out.copyBytes(from: buf)
-            return .success
-        }
-    }
-    private static func checkInputs<T: HashFunction>(dataSize: UInt, digestSize: UInt, _: T.Type)
-        -> ErrorCodes
+    fileprivate static func digest<T: CryptoKit.HashFunction>(_ data: SpanConstUInt8, _: T.Type)
+        -> T.Digest
     {
-        if dataSize > Int.max
-            || digestSize == 0
-            || digestSize > Int.max
-        {
-            return .invalidArgument
+        var hasher = T()
+        hasher.update(data: data)
+        return hasher.finalize()
+    }
+
+    fileprivate static func digest<T: CryptoKit.HashFunction>(_ data: SpanConstUInt8, t: T.Type)
+        -> VectorUInt8
+    {
+        return Self.digest(data, t).copyToVectorUInt8()
+    }
+
+    fileprivate static func digest(_ data: SpanConstUInt8, hashFunction: HashFunction)
+        -> any CryptoKit.Digest
+    {
+        switch hashFunction {
+        case .sha256:
+            return digest(data, SHA256.self)
+        case .sha384:
+            return digest(data, SHA384.self)
+        case .sha512:
+            return digest(data, SHA512.self)
+        case .sha1:
+            return digest(data, Insecure.SHA1.self)
         }
-        return .success
     }
 }
+
+public enum ECCurve {
+    case p256
+    case p384
+    case p521
+}
+
+enum ECPrivateKey {
+    case p256(P256.Signing.PrivateKey)
+    case p384(P384.Signing.PrivateKey)
+    case p521(P521.Signing.PrivateKey)
+}
+
+enum ECPublicKey {
+    case p256(P256.Signing.PublicKey)
+    case p384(P384.Signing.PublicKey)
+    case p521(P521.Signing.PublicKey)
+}
+enum ECKeyInternal {
+    case priv(ECPrivateKey)
+    case pub(ECPublicKey)
+}
+
+public struct ECRv {
+    public var errCode: ErrorCodes = .defaultValue
+    public var signature: OptionalVectorUInt8 = OptionalVectorUInt8()
+    public var keyBytes: OptionalVectorUInt8 = OptionalVectorUInt8()
+    public var key: ECKey? = nil
+}
+
+public struct ECKey {
+    let key: ECKeyInternal
+    public init(curve: ECCurve) {
+        switch curve {
+        case .p256:
+            key = .priv(.p256(P256.Signing.PrivateKey(compactRepresentable: true)))
+        case .p384:
+            key = .priv(.p384(P384.Signing.PrivateKey(compactRepresentable: true)))
+        case .p521:
+            key = .priv(.p521(P521.Signing.PrivateKey(compactRepresentable: true)))
+        }
+    }
+    private init(pub: ECPublicKey) {
+        key = .pub(pub)
+    }
+    private init(priv: ECPrivateKey) {
+        key = .priv(priv)
+    }
+    private init(internalKey: ECKeyInternal) {
+        key = internalKey
+    }
+    public func toPub() -> ECKey {
+        switch key {
+        case .pub:
+            return self
+        case let .priv(v):
+            switch v {
+            case let .p256(u):
+                return ECKey(pub: .p256(u.publicKey))
+            case let .p384(u):
+                return ECKey(pub: .p384(u.publicKey))
+            case let .p521(u):
+                return ECKey(pub: .p521(u.publicKey))
+            }
+        }
+    }
+
+    public static func importX963Pub(data: SpanConstUInt8, curve: ECCurve) -> ECRv {
+        var rv = ECRv()
+        do {
+            switch curve {
+            case .p256:
+                rv.key = ECKey(internalKey: .pub(.p256(try P256.Signing.PublicKey(span: data))))
+            case .p384:
+                rv.key = ECKey(internalKey: .pub(.p384(try P384.Signing.PublicKey(span: data))))
+            case .p521:
+                rv.key = ECKey(internalKey: .pub(.p521(try P521.Signing.PublicKey(span: data))))
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToImport
+        }
+        return rv
+    }
+
+    public func exportX963Pub() -> ECRv {
+        var rv = ECRv()
+        do {
+            switch try getInternalPublic() {
+            case .p256(let k):
+                rv.keyBytes = Cpp.makeOptional(k.x963Representation.copyToVectorUInt8())
+            case .p384(let k):
+                rv.keyBytes = Cpp.makeOptional(k.x963Representation.copyToVectorUInt8())
+            case .p521(let k):
+                rv.keyBytes = Cpp.makeOptional(k.x963Representation.copyToVectorUInt8())
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToExport
+        }
+        return rv
+    }
+    public static func importCompressedPub(data: SpanConstUInt8, curve: ECCurve) -> ECRv {
+        var rv = ECRv()
+        do {
+            switch curve {
+            case .p256:
+                rv.key = ECKey(pub: .p256(try P256.Signing.PublicKey(spanCompressed: data)))
+            case .p384:
+                rv.key = ECKey(pub: .p384(try P384.Signing.PublicKey(spanCompressed: data)))
+            case .p521:
+                rv.key = ECKey(pub: .p521(try P521.Signing.PublicKey(spanCompressed: data)))
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToImport
+        }
+        return rv
+    }
+    public static func importX963Private(data: SpanConstUInt8, curve: ECCurve) -> ECRv {
+        var rv = ECRv()
+        do {
+            switch curve {
+            case .p256:
+                rv.key = ECKey(priv: .p256(try P256.Signing.PrivateKey(span: data)))
+            case .p384:
+                rv.key = ECKey(priv: .p384(try P384.Signing.PrivateKey(span: data)))
+            case .p521:
+                rv.key = ECKey(priv: .p521(try P521.Signing.PrivateKey(span: data)))
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToImport
+        }
+        return rv
+    }
+    public func exportX963Private() -> ECRv {
+        var rv = ECRv()
+        do {
+            switch try getInternalPrivate() {
+            case .p256(let k):
+                rv.keyBytes = Cpp.makeOptional(k.x963Representation.copyToVectorUInt8())
+            case .p384(let k):
+                rv.keyBytes = Cpp.makeOptional(k.x963Representation.copyToVectorUInt8())
+            case .p521(let k):
+                rv.keyBytes = Cpp.makeOptional(k.x963Representation.copyToVectorUInt8())
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToExport
+        }
+        return rv
+    }
+    public func sign(message: SpanConstUInt8, hashFunction: HashFunction) -> ECRv {
+        var rv = ECRv()
+        do {
+            switch try getInternalPrivate() {
+            case .p256(let cryptoKey):
+                rv.signature = Cpp.makeOptional(
+                    try cryptoKey.signature(for: Digest.digest(message, hashFunction: hashFunction))
+                        .rawRepresentation.copyToVectorUInt8())
+            case .p384(let cryptoKey):
+                rv.signature = Cpp.makeOptional(
+                    try cryptoKey.signature(for: Digest.digest(message, hashFunction: hashFunction))
+                        .rawRepresentation.copyToVectorUInt8())
+            case .p521(let cryptoKey):
+                rv.signature = Cpp.makeOptional(
+                    try cryptoKey.signature(for: Digest.digest(message, hashFunction: hashFunction))
+                        .rawRepresentation.copyToVectorUInt8())
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToSign
+        }
+        return rv
+    }
+
+    public func verify(
+        message: SpanConstUInt8, signature: SpanConstUInt8, hashFunction: HashFunction
+    ) -> ECRv {
+        var rv = ECRv()
+        do {
+            let internalPublic = try getInternalPublic()
+            switch internalPublic {
+            case .p256(let cryptoKey):
+                rv.errCode =
+                    cryptoKey.isValidSignature(
+                        try P256.Signing.ECDSASignature(span: signature),
+                        for: Digest.digest(message, hashFunction: hashFunction))
+                    ? .success : .failedToVerify
+            case .p384(let cryptoKey):
+                rv.errCode =
+                    cryptoKey.isValidSignature(
+                        try P384.Signing.ECDSASignature(span: signature),
+                        for: Digest.digest(message, hashFunction: hashFunction))
+                    ? .success : .failedToVerify
+            case .p521(let cryptoKey):
+                rv.errCode =
+                    cryptoKey.isValidSignature(
+                        try P521.Signing.ECDSASignature(span: signature),
+                        for: Digest.digest(message, hashFunction: hashFunction))
+                    ? .success : .failedToVerify
+            }
+        } catch {
+            rv.errCode = .failedToVerify
+        }
+        return rv
+    }
+    private func getInternalPrivate() throws -> ECPrivateKey {
+        switch key {
+        case .pub:
+            throw LocalErrors.invalidArgument
+        case .priv(let priv):
+            return priv
+        }
+    }
+    private func getInternalPublic() throws -> ECPublicKey {
+        switch key {
+        case .priv:
+            throw LocalErrors.invalidArgument
+        case .pub(let pub):
+            return pub
+        }
+    }
+
+    public func deriveBits(pub: ECKey) -> ECRv {
+        var rv = ECRv()
+        do {
+            let internalPrivate = try getInternalPrivate()
+            let internalPub = try pub.getInternalPublic()
+            switch internalPrivate {
+            case .p256(let signing):
+                let scalar = try P256.KeyAgreement.PrivateKey(
+                    rawRepresentation: signing.rawRepresentation)
+                if case let .p256(publicKey) = internalPub {
+                    let derived = try scalar.sharedSecretFromKeyAgreement(
+                        with: try P256.KeyAgreement.PublicKey(
+                            rawRepresentation: publicKey.rawRepresentation))
+                    rv.keyBytes = Cpp.makeOptional(derived.copyToVectorUInt8())
+                    break
+                }
+                rv.errCode = .invalidArgument
+            case .p384(let signing):
+                let scalar = try P384.KeyAgreement.PrivateKey(
+                    rawRepresentation: signing.rawRepresentation)
+                if case let .p384(publicKey) = internalPub {
+                    let derived = try scalar.sharedSecretFromKeyAgreement(
+                        with: try P384.KeyAgreement.PublicKey(
+                            rawRepresentation: publicKey.rawRepresentation))
+                    rv.keyBytes = Cpp.makeOptional(derived.copyToVectorUInt8())
+                    break
+                }
+                rv.errCode = .invalidArgument
+            case .p521(let signing):
+                let scalar = try P521.KeyAgreement.PrivateKey(
+                    rawRepresentation: signing.rawRepresentation)
+                if case let .p521(publicKey) = internalPub {
+                    let derived = try scalar.sharedSecretFromKeyAgreement(
+                        with: try P521.KeyAgreement.PublicKey(
+                            rawRepresentation: publicKey.rawRepresentation))
+                    rv.keyBytes = Cpp.makeOptional(derived.copyToVectorUInt8())
+                    break
+                }
+                rv.errCode = .invalidArgument
+            }
+            rv.errCode = .success
+        } catch {
+            rv.errCode = .failedToDerive
+        }
+        return rv
+    }
+}
+
+public enum EdSigningAlgorithm {
+    case ed25519
+    case ed448
+}
+
+public enum EdKeyAgreementAlgorithm {
+    case x25519
+    case x448
+}
+
+public struct EdRv {
+    public var errCode: ErrorCodes = .defaultValue
+    public var signature: OptionalVectorUInt8 = OptionalVectorUInt8()
+    public var keyBytes: OptionalVectorUInt8 = OptionalVectorUInt8()
+}
+
+public class EdKey {
+    public static func sign(algo: EdSigningAlgorithm, key: SpanConstUInt8, data: SpanConstUInt8) -> EdRv {
+        var rv = EdRv()
+        do {
+            switch algo {
+            case .ed25519:
+                let priv = try Curve25519.Signing.PrivateKey(span: key)
+                rv.signature = Cpp.makeOptional(try priv.signature(span: data))
+                rv.errCode = .success
+            case .ed448:
+                rv.errCode = .unsupportedAlgorithm
+            }
+        } catch {
+            rv.errCode = .failedToSign
+        }
+        return rv
+    }
+    public static func verify(algo: EdSigningAlgorithm, key: SpanConstUInt8, signature: SpanConstUInt8, data: SpanConstUInt8) -> EdRv {
+        var rv = EdRv()
+        do {
+            switch algo {
+            case .ed25519:
+                let pub = try Curve25519.Signing.PublicKey(span: key)
+                rv.errCode = pub.isValidSignature(signature: signature, data: data) ? .success : .failedToVerify
+            case .ed448:
+                rv.errCode = .unsupportedAlgorithm
+            }
+        } catch {
+            rv.errCode = .failedToSign
+        }
+        return rv       
+    }
+    
+    public static func deriveBits(algo: EdKeyAgreementAlgorithm, priv: SpanConstUInt8, pub: SpanConstUInt8) -> EdRv {
+        var rv = EdRv()
+        do {
+            switch algo {
+            case .x25519:
+                let priv = try Curve25519.KeyAgreement.PrivateKey(span: priv)
+                rv.keyBytes = Cpp.makeOptional(try priv.sharedSecretFromKeyAgreement(pubSpan: pub))
+            case .x448:
+                rv.errCode = .unsupportedAlgorithm
+            }
+        } catch {
+            rv.errCode = .failedToDerive
+        }
+        return rv
+        
+    }
+}
+#endif

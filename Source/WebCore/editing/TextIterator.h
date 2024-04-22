@@ -73,7 +73,7 @@ private:
 
 class TextIteratorCopyableText {
 public:
-    StringView text() const { return m_singleCharacter ? StringView(&m_singleCharacter, 1) : StringView(m_string).substring(m_offset, m_length); }
+    StringView text() const { return m_singleCharacter ? StringView(span(m_singleCharacter)) : StringView(m_string).substring(m_offset, m_length); }
     void appendToStringBuilder(StringBuilder&) const;
 
     void reset();
@@ -110,6 +110,10 @@ public:
 
     const TextIteratorCopyableText& copyableText() const { ASSERT(!atEnd()); return m_copyableText; }
     void appendTextToStringBuilder(StringBuilder& builder) const { copyableText().appendToStringBuilder(builder); }
+
+#if ENABLE(TREE_DEBUGGING)
+    void showTreeForThis() const;
+#endif
 
 private:
     void init();
@@ -302,7 +306,7 @@ private:
 constexpr TextIteratorBehaviors findIteratorOptions(FindOptions options = { })
 {
     TextIteratorBehaviors iteratorOptions { TextIteratorBehavior::EntersTextControls, TextIteratorBehavior::ClipsToFrameAncestors, TextIteratorBehavior::EntersImageOverlays };
-    if (!options.contains(DoNotTraverseFlatTree))
+    if (!options.contains(FindOption::DoNotTraverseFlatTree))
         iteratorOptions.add(TextIteratorBehavior::TraversesFlatTree);
     return iteratorOptions;
 }
@@ -323,3 +327,9 @@ inline BoundaryPoint resolveCharacterLocation(const SimpleRange& scope, uint64_t
 }
 
 } // namespace WebCore
+
+#if ENABLE(TREE_DEBUGGING)
+// Outside the WebCore namespace for ease of invocation from the debugger.
+void showTree(const WebCore::TextIterator&);
+void showTree(const WebCore::TextIterator*);
+#endif

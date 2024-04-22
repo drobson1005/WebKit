@@ -36,6 +36,7 @@
 #import <wtf/RefPtr.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/WeakObjCPtr.h>
+#import <wtf/spi/cocoa/NSObjCRuntimeSPI.h>
 
 #if PLATFORM(IOS_FAMILY)
 #import "DynamicViewportSizeUpdate.h"
@@ -85,6 +86,7 @@ enum class WheelScrollGestureState : uint8_t;
 
 namespace WebKit {
 enum class ContinueUnsafeLoad : bool;
+enum class WebTextReplacementDataState : uint8_t;
 class IconLoadingDelegate;
 class NavigationState;
 class ResourceLoadDelegate;
@@ -117,6 +119,14 @@ class ViewGestureController;
 
 #if PLATFORM(MAC)
 @class WKTextFinderClient;
+#endif
+
+#if USE(APPLE_INTERNAL_SDK)
+#import <WebKitAdditions/UnifiedTextReplacementAdditions.h>
+#endif
+
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+@class WKWebTextReplacementSession;
 #endif
 
 @protocol _WKTextManipulationDelegate;
@@ -227,6 +237,10 @@ struct PerWebProcessState {
     CocoaEdgeInsets _minimumViewportInset;
     CocoaEdgeInsets _maximumViewportInset;
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    RetainPtr<NSMapTable<NSUUID *, WKWebTextReplacementSession *>> _unifiedTextReplacementSessions;
+#endif
+
 #if PLATFORM(MAC)
     std::unique_ptr<WebKit::WebViewImpl> _impl;
     RetainPtr<WKTextFinderClient> _textFinderClient;
@@ -240,14 +254,20 @@ struct PerWebProcessState {
     RetainPtr<WKContentView> _contentView;
     std::unique_ptr<WebKit::ViewGestureController> _gestureController;
     Vector<BlockPtr<void ()>> _visibleContentRectUpdateCallbacks;
-
+    RetainPtr<WKWebViewContentProviderRegistry> _contentProviderRegistry;
 #if ENABLE(FULLSCREEN_API)
     RetainPtr<WKFullScreenWindowController> _fullScreenWindowController;
 #endif
 
     BOOL _findInteractionEnabled;
 #if HAVE(UIFINDINTERACTION)
-    RetainPtr<UIView> _findOverlay;
+    struct FindOverlays {
+        RetainPtr<UIView> top;
+        RetainPtr<UIView> right;
+        RetainPtr<UIView> bottom;
+        RetainPtr<UIView> left;
+    };
+    std::optional<FindOverlays> _findOverlaysOutsideContentView;
     RetainPtr<UIFindInteraction> _findInteraction;
 #endif
 
@@ -336,6 +356,16 @@ struct PerWebProcessState {
 
     RetainPtr<NSArray<NSNumber *>> _scrollViewDefaultAllowedTouchTypes;
 #endif
+
+#if PLATFORM(VISION)
+    String _defaultSTSLabel;
+#endif
+
+    BOOL _didAccessBackForwardList;
+
+#if ENABLE(PAGE_LOAD_OBSERVER)
+    RetainPtr<NSString> _pendingPageLoadObserverHost;
+#endif
 }
 
 - (BOOL)_isValid;
@@ -355,6 +385,13 @@ struct PerWebProcessState {
 - (void)_storeAppHighlight:(const WebCore::AppHighlight&)info;
 #endif
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+- (void)_textReplacementSession:(NSUUID *)sessionUUID showInformationForReplacementWithUUID:(NSUUID *)replacementUUID relativeToRect:(CGRect)rect;
+
+- (void)_textReplacementSession:(NSUUID *)sessionUUID updateState:(WebKit::WebTextReplacementDataState)state forReplacementWithUUID:(NSUUID *)replacementUUID;
+- (void)_removeTextIndicatorStyleForID:(NSUUID *)uuid;
+#endif
+
 - (void)_internalDoAfterNextPresentationUpdate:(void (^)(void))updateBlock withoutWaitingForPainting:(BOOL)withoutWaitingForPainting withoutWaitingForAnimatedResize:(BOOL)withoutWaitingForAnimatedResize;
 
 - (void)_doAfterNextVisibleContentRectAndPresentationUpdate:(void (^)(void))updateBlock;
@@ -366,6 +403,8 @@ struct PerWebProcessState {
 - (void)_clearSafeBrowsingWarningIfForMainFrameNavigation;
 
 - (std::optional<BOOL>)_resolutionForShareSheetImmediateCompletionForTesting;
+
+- (void)_didAccessBackForwardList NS_DIRECT;
 
 - (WKPageRef)_pageForTesting;
 - (NakedPtr<WebKit::WebPageProxy>)_page;

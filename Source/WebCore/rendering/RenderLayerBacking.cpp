@@ -74,6 +74,7 @@
 #include "RenderSVGModelObject.h"
 #include "RenderVideo.h"
 #include "RenderView.h"
+#include "RenderViewTransitionCapture.h"
 #include "SVGGraphicsElement.h"
 #include "ScrollingCoordinator.h"
 #include "Settings.h"
@@ -361,10 +362,8 @@ Ref<GraphicsLayer> RenderLayerBacking::createGraphicsLayer(const String& name, G
     graphicsLayer->setAcceleratesDrawing(compositor().acceleratedDrawingEnabled());
 #endif
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (renderer().isSVGLayerAwareRenderer() && renderer().document().settings().layerBasedSVGEngineEnabled())
         graphicsLayer->setShouldUpdateRootRelativeScaleFactor(true);
-#endif
     
     return graphicsLayer;
 }
@@ -633,10 +632,8 @@ static LayoutRect clippingLayerBox(const RenderLayerModelObject& renderer)
     if (renderer.hasNonVisibleOverflow()) {
         if (CheckedPtr box = dynamicDowncast<RenderBox>(renderer))
             result = box->overflowClipRect({ }, 0); // FIXME: Incorrect for CSS regions.
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         else if (CheckedPtr modelObject = dynamicDowncast<RenderSVGModelObject>(renderer))
             result = modelObject->overflowClipRect({ }, 0); // FIXME: Incorrect for CSS regions.
-#endif
     }
 
     if (renderer.hasClip()) {
@@ -659,15 +656,13 @@ void RenderLayerBacking::updateOpacity(const RenderStyle& style)
 
 void RenderLayerBacking::updateTransform(const RenderStyle& style)
 {
-    if (renderer().capturedInViewTransition()) {
-        if (m_contentsContainmentLayer)
-            m_contentsContainmentLayer->setTransform({ });
-        m_graphicsLayer->setTransform({ });
-        return;
-    }
-
     TransformationMatrix t;
-    if (m_owningLayer.isTransformed())
+    if (renderer().capturedInViewTransition() && renderer().element()) {
+        if (RefPtr activeViewTransition = renderer().document().activeViewTransition()) {
+            if (CheckedPtr viewTransitionCapture = activeViewTransition->viewTransitionNewPseudoForCapturedElement(*renderer().element()))
+                t.scaleNonUniform(viewTransitionCapture->scale().width(), viewTransitionCapture->scale().height());
+        }
+    } else if (m_owningLayer.isTransformed())
         m_owningLayer.updateTransformFromStyle(t, style, RenderStyle::individualTransformOperations());
     
     if (m_contentsContainmentLayer) {
@@ -681,7 +676,7 @@ void RenderLayerBacking::updateChildrenTransformAndAnchorPoint(const LayoutRect&
 {
     auto defaultAnchorPoint = FloatPoint3D { 0.5, 0.5, 0 };
 
-    if (m_owningLayer.isRenderViewLayer())
+    if (m_owningLayer.isRenderViewLayer() || renderer().capturedInViewTransition())
         defaultAnchorPoint = { };
 
     if (!renderer().hasTransformRelatedProperty()) {
@@ -804,9 +799,12 @@ void RenderLayerBacking::updateBackdropFiltersGeometry()
 
 bool RenderLayerBacking::updateBackdropRoot()
 {
-    if (m_graphicsLayer->isBackdropRoot() == m_owningLayer.isBackdropRoot())
+    // Don't try to make the RenderView's layer a backdrop root if it's going to
+    // paint into the window since it won't work (WebKitLegacy only).
+    bool willBeBackdropRoot = m_owningLayer.isBackdropRoot() && !paintsIntoWindow();
+    if (m_graphicsLayer->isBackdropRoot() == willBeBackdropRoot)
         return false;
-    m_graphicsLayer->setIsBackdropRoot(m_owningLayer.isBackdropRoot());
+    m_graphicsLayer->setIsBackdropRoot(willBeBackdropRoot);
     return true;
 }
 
@@ -1199,8 +1197,10 @@ bool RenderLayerBacking::updateConfiguration(const RenderLayer* compositingAnces
         if (element->usesPlatformLayer())
             m_graphicsLayer->setContentsToPlatformLayer(element->platformLayer(), GraphicsLayer::ContentsLayerPurpose::Model);
 #if ENABLE(MODEL_PROCESS)
-        else if (auto contextID = element->layerHostingContextIdentifier(); contextID && element->document().settings().modelProcessEnabled())
+        else if (auto contextID = element->layerHostingContextIdentifier(); contextID && element->document().settings().modelProcessEnabled()) {
             m_graphicsLayer->setContentsToRemotePlatformContext(contextID.value(), GraphicsLayer::ContentsLayerPurpose::HostedModel);
+            element->applyBackgroundColor(rendererBackgroundColor());
+        }
 #endif
         else if (auto model = element->model())
             m_graphicsLayer->setContentsToModel(WTFMove(model), element->isInteractive() ? GraphicsLayer::ModelInteraction::Enabled : GraphicsLayer::ModelInteraction::Disabled);
@@ -1211,9 +1211,11 @@ bool RenderLayerBacking::updateConfiguration(const RenderLayer* compositingAnces
     }
 #endif // ENABLE(MODEL_ELEMENT)
     // FIXME: Why do we do this twice?
-    if (CheckedPtr widget = dynamicDowncast<RenderWidget>(renderer()); widget && compositor.attachWidgetContentLayers(*widget)) {
-        m_owningLayer.setNeedsCompositingGeometryUpdate();
-        layerConfigChanged = true;
+    if (CheckedPtr widget = dynamicDowncast<RenderWidget>(renderer())) {
+        if (compositor.attachWidgetContentLayersIfNecessary(*widget).layerHierarchyChanged) {
+            m_owningLayer.setNeedsCompositingGeometryUpdate();
+            layerConfigChanged = true;
+        }
     }
 
     if (RenderLayerCompositor::hasCompositedWidgetContents(renderer())) {
@@ -1416,9 +1418,13 @@ void RenderLayerBacking::updateGeometry(const RenderLayer* compositedAncestor)
     // is handled using a synthesized 'transform' property on the wrapping
     // ::view-transition-new element. Move the parent graphics layer rect to our
     // position so that layer positions are computed relative to our origin.
-    if (renderer().capturedInViewTransition()) {
-        ComputedOffsets computedOffsets(m_owningLayer, compositedAncestor, compositedBounds(), { }, { });
-        parentGraphicsLayerRect.move(computedOffsets.fromParentGraphicsLayer());
+    if (renderer().capturedInViewTransition() && renderer().element()) {
+        if (RefPtr activeViewTransition = renderer().document().activeViewTransition()) {
+            if (CheckedPtr viewTransitionCapture = activeViewTransition->viewTransitionNewPseudoForCapturedElement(*renderer().element())) {
+                ComputedOffsets computedOffsets(m_owningLayer, compositedAncestor, viewTransitionCapture->captureOverflowRect(), { }, { });
+                parentGraphicsLayerRect.move(computedOffsets.fromParentGraphicsLayer());
+            }
+        }
     }
 
     if (m_ancestorClippingStack)
@@ -1693,7 +1699,7 @@ void RenderLayerBacking::updateAfterDescendants()
 
     m_graphicsLayer->setContentsVisible(m_owningLayer.hasVisibleContent() || hasVisibleNonCompositedDescendants());
     if (m_scrollContainerLayer) {
-        m_scrollContainerLayer->setContentsVisible(renderer().style().visibility() == Visibility::Visible);
+        m_scrollContainerLayer->setContentsVisible(renderer().style().usedVisibility() == Visibility::Visible);
 
         bool userInteractive = renderer().visibleToHitTesting();
         m_scrollContainerLayer->setUserInteractionEnabled(userInteractive);
@@ -2380,15 +2386,6 @@ void RenderLayerBacking::positionOverflowControlsLayers()
     }
 }
 
-static bool ancestorLayerIsDOMParent(RenderLayer& layer, const RenderLayer* compositingAncestor)
-{
-    if (!compositingAncestor)
-        return false;
-    if (!layer.renderer().element() || !layer.renderer().element()->parentElementInComposedTree())
-        return false;
-    return compositingAncestor->renderer().element() == layer.renderer().element()->parentElementInComposedTree();
-}
-
 static bool ancestorLayerWillCombineTransform(const RenderLayer* compositingAncestor)
 {
     if (!compositingAncestor)
@@ -2400,7 +2397,7 @@ bool RenderLayerBacking::updateTransformFlatteningLayer(const RenderLayer* compo
 {
     bool needsFlatteningLayer = false;
     // If our parent layer has preserve-3d or perspective, and it's not our DOM parent, then we need a flattening layer to block that from being applied in 3d.
-    if (useCSS3DTransformInteroperability() && ancestorLayerWillCombineTransform(compositingAncestor) && !ancestorLayerIsDOMParent(m_owningLayer, compositingAncestor))
+    if (ancestorLayerWillCombineTransform(compositingAncestor) && !m_owningLayer.ancestorLayerIsDOMParent(compositingAncestor))
         needsFlatteningLayer = true;
 
     bool layerChanged = false;
@@ -2702,7 +2699,7 @@ float RenderLayerBacking::compositingOpacity(float rendererOpacity) const
 // FIXME: Code is duplicated in RenderLayer. Also, we should probably not consider filters a box decoration here.
 static inline bool hasVisibleBoxDecorations(const RenderStyle& style)
 {
-    return style.hasVisibleBorder() || style.hasBorderRadius() || style.hasOutline() || style.hasEffectiveAppearance() || style.boxShadow() || style.hasFilter();
+    return style.hasVisibleBorder() || style.hasBorderRadius() || style.hasOutline() || style.hasUsedAppearance() || style.boxShadow() || style.hasFilter();
 }
 
 static bool canDirectlyCompositeBackgroundBackgroundImage(const RenderElement& renderer)
@@ -2927,7 +2924,6 @@ bool RenderLayerBacking::paintsContent(RenderLayer::PaintedContentRequest& reque
     if (request.isSatisfied())
         return paintsContent;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (is<RenderSVGModelObject>(m_owningLayer.renderer())) {
         // FIXME: [LBSE] Eventually cache if we're part of a RenderSVGHiddenContainer subtree to avoid tree walks.
         // FIXME: [LBSE] Eventually refine the logic to end up with a narrower set of conditions (webkit.org/b/243417).
@@ -2937,7 +2933,6 @@ bool RenderLayerBacking::paintsContent(RenderLayer::PaintedContentRequest& reque
 
     if (request.isSatisfied())
         return paintsContent;
-#endif
 
     if (request.hasPaintedContent == RequestState::Unknown)
         request.hasPaintedContent = RequestState::False;
@@ -3122,7 +3117,7 @@ bool RenderLayerBacking::isDirectlyCompositedImage() const
         if (!image)
             return false;
 
-        if (image->orientationForCurrentFrame() != ImageOrientation::Orientation::None)
+        if (image->currentFrameOrientation() != ImageOrientation::Orientation::None)
             return false;
 
 #if (PLATFORM(GTK) || PLATFORM(WPE))
@@ -3169,7 +3164,7 @@ bool RenderLayerBacking::isUnscaledBitmapOnly() const
             if (!image)
                 return false;
 
-            if (image->orientationForCurrentFrame() != ImageOrientation::Orientation::None)
+            if (image->currentFrameOrientation() != ImageOrientation::Orientation::None)
                 return false;
 
             return contents.size() == image->size();
@@ -3814,7 +3809,7 @@ void RenderLayerBacking::paintContents(const GraphicsLayer* graphicsLayer, Graph
         paintIntoLayer(graphicsLayer, context, dirtyRect, behavior);
 
         auto visibleDebugOverlayRegions = OptionSet<DebugOverlayRegions>::fromRaw(renderer().settings().visibleDebugOverlayRegions());
-        if (visibleDebugOverlayRegions.containsAny({ DebugOverlayRegions::TouchActionRegion, DebugOverlayRegions::EditableElementRegion, DebugOverlayRegions::WheelEventHandlerRegion, DebugOverlayRegions::InteractionRegion }))
+        if (visibleDebugOverlayRegions.containsAny({ DebugOverlayRegions::TouchActionRegion, DebugOverlayRegions::EditableElementRegion, DebugOverlayRegions::WheelEventHandlerRegion, DebugOverlayRegions::InteractionRegion, DebugOverlayRegions::SiteIsolationRegion }))
             paintDebugOverlays(graphicsLayer, context);
 
     } else if (graphicsLayer == layerForHorizontalScrollbar()) {
@@ -3956,9 +3951,9 @@ bool RenderLayerBacking::useGiantTiles() const
     return renderer().settings().useGiantTiles();
 }
 
-bool RenderLayerBacking::useCSS3DTransformInteroperability() const
+bool RenderLayerBacking::cssUnprefixedBackdropFilterEnabled() const
 {
-    return renderer().settings().css3DTransformInteroperabilityEnabled();
+    return renderer().settings().cssUnprefixedBackdropFilterEnabled();
 }
 
 void RenderLayerBacking::logFilledVisibleFreshTile(unsigned blankPixelCount)

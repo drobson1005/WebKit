@@ -18,8 +18,8 @@
 #include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/RecordingPriv.h"
 #include "src/gpu/graphite/Surface_Graphite.h"
-#include "src/gpu/graphite/Task.h"
 #include "src/gpu/graphite/UploadBufferManager.h"
+#include "src/gpu/graphite/task/Task.h"
 
 namespace skgpu::graphite {
 
@@ -84,6 +84,9 @@ bool QueueManager::addRecording(const InsertRecordingInfo& info, Context* contex
         uint32_t* recordingID = fLastAddedRecordingIDs.find(info.fRecording->priv().recorderID());
         if (recordingID &&
             info.fRecording->priv().uniqueID() != *recordingID+1) {
+            if (callback) {
+                callback->setFailureResult();
+            }
             SKGPU_LOG_E("Recordings are expected to be replayed in order");
             return false;
         }
@@ -250,7 +253,7 @@ void QueueManager::checkForFinishedWork(SyncToCpu sync) {
         // wait for the last submission to finish
         OutstandingSubmission* back = (OutstandingSubmission*)fOutstandingSubmissions.back();
         if (back) {
-            (*back)->waitUntilFinished();
+            (*back)->waitUntilFinished(fSharedContext);
         }
     }
 
@@ -260,7 +263,7 @@ void QueueManager::checkForFinishedWork(SyncToCpu sync) {
     // Repeat till we find a submission that has not finished yet (and all others afterwards are
     // also guaranteed to not have finished).
     OutstandingSubmission* front = (OutstandingSubmission*)fOutstandingSubmissions.front();
-    while (front && (*front)->isFinished()) {
+    while (front && (*front)->isFinished(fSharedContext)) {
         // Make sure we remove before deleting as deletion might try to kick off another submit
         // (though hopefully *not* in Graphite).
         fOutstandingSubmissions.pop_front();

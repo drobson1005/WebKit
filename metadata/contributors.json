@@ -367,6 +367,14 @@
    },
    {
       "emails" : [
+         "aleksei@apple.com",
+         "titan.vl@gmail.com"
+      ],
+      "github" : "amarchenko",
+      "name" : "Aleksei Marchenko"
+   },
+   {
+      "emails" : [
          "alexandera_22@apple.com"
       ],
       "expertise" : "Python, Services, Kubernetes",
@@ -1462,13 +1470,14 @@
    },
    {
       "emails" : [
+         "cadubentzen@igalia.com",
          "cadubentzen@gmail.com",
          "cramalho@igalia.com"
       ],
-      "name" : "Carlos Eduardo Ramalho",
+      "github" : "cadubentzen",
+      "name" : "Carlos Bentzen",
       "nicks" : [
-         "cadubentzen",
-         "cramalho"
+         "cadubentzen"
       ]
    },
    {
@@ -2552,7 +2561,8 @@
          "eddydas@gmail.com"
       ],
       "github" : "eddydas",
-      "name" : "Eddy Wong"
+      "name" : "Eddy Wong",
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -2743,7 +2753,8 @@
          "lerica@apple.com"
       ],
       "github" : "lericaa",
-      "name" : "Erica Li"
+      "name" : "Erica Li",
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -3069,7 +3080,8 @@
       "name" : "Georges Basile Stavracas Neto",
       "nicks" : [
          "feaneron"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -3705,6 +3717,14 @@
    },
    {
       "emails" : [
+         "jahoward@nvidia.com",
+         "jameshoward@mac.com"
+      ],
+      "github" : "james-howard",
+      "name" : "James Howard"
+   },
+   {
+      "emails" : [
          "james_e_kim@apple.com"
       ],
       "github" : "james-e-kim",
@@ -3759,6 +3779,16 @@
       "name" : "Jan Alonzo",
       "nicks" : [
          "janm"
+      ]
+   },
+   {
+      "emails" : [
+         "jani@igalia.com"
+      ],
+      "github" : "zhani",
+      "name" : "Jani Hautakangas",
+      "nicks" : [
+         "zhani"
       ]
    },
    {
@@ -4465,7 +4495,6 @@
    },
    {
       "emails" : [
-         "justin_michaud@apple.com",
          "justin@justinmichaud.com"
       ],
       "expertise" : "JavaScriptCore",
@@ -4590,7 +4619,8 @@
       "name" : "Keith Cirkel",
       "nicks" : [
          "keithamus"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -5479,7 +5509,7 @@
       "nicks" : [
          "sysrqb"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -5604,7 +5634,8 @@
       "name" : "Michael[tm] Smith",
       "nicks" : [
          "sideshowbarker"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -5945,6 +5976,13 @@
    },
    {
       "emails" : [
+         "nicole@stubbornella.org"
+      ],
+      "github" : "stubbornella",
+      "name" : "Nicole Sullivan"
+   },
+   {
+      "emails" : [
          "nvasilyev@apple.com",
          "me@elv1s.ru"
       ],
@@ -6011,6 +6049,18 @@
       ],
       "github" : "nishajain61",
       "name" : "Nisha Jain"
+   },
+   {
+      "emails" : [
+         "nitinmahendru@apple.com",
+         "nitin.mahendru88@gmail.com"
+      ],
+      "expertise" : "Applied Cryptography",
+      "github" : "nmahendru",
+      "name" : "Nitin Mahendru",
+      "nicks" : [
+         "Nitin"
+      ]
    },
    {
       "emails" : [
@@ -6186,6 +6236,18 @@
       "name" : "Pavel Podivilov",
       "nicks" : [
          "podivilov"
+      ]
+   },
+   {
+      "emails" : [
+         "pawel.lampe@gmail.com",
+         "plampe@igalia.com"
+      ],
+      "github" : "Scony",
+      "name" : "Pawel Lampe",
+      "nicks" : [
+         "Scony",
+         "plampe"
       ]
    },
    {
@@ -6367,7 +6429,8 @@
       "name" : "Przemyslaw Gorszkowski",
       "nicks" : [
          "pgorszkowski"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -6747,7 +6810,7 @@
       "nicks" : [
          "rreno"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -7289,6 +7352,15 @@
    },
    {
       "emails" : [
+         "tpanigrahi@apple.com",
+         "tanmoy.panigrahi2@gmail.com",
+         "hello.tanmoy@icloud.com"
+      ],
+      "github" : "TanmoyPanigrahi",
+      "name" : "Tanmoy Panigrahi"
+   },
+   {
+      "emails" : [
          "tdanderson@chromium.org"
       ],
       "name" : "Terry Anderson",
@@ -7733,7 +7805,7 @@
       "nicks" : [
          "vitorroriz"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [

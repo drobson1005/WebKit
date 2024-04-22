@@ -30,6 +30,7 @@
 #include "PageLoadState.h"
 #include "RemotePageProxy.h"
 #include "WebFrameProxy.h"
+#include "WebPageProxy.h"
 #include "WebProcessProxy.h"
 
 namespace WebKit {
@@ -40,13 +41,30 @@ BrowsingContextGroup::~BrowsingContextGroup() = default;
 
 Ref<FrameProcess> BrowsingContextGroup::ensureProcessForDomain(const WebCore::RegistrableDomain& domain, WebProcessProxy& process, const WebPreferences& preferences)
 {
-    if (preferences.siteIsolationEnabled() || preferences.processSwapOnCrossSiteWindowOpenEnabled()) {
+    if (!domain.isEmpty() && (preferences.siteIsolationEnabled() || preferences.processSwapOnCrossSiteWindowOpenEnabled())) {
         if (auto* existingProcess = processForDomain(domain)) {
-            ASSERT(existingProcess->process().coreProcessIdentifier() == process.coreProcessIdentifier());
-            return *existingProcess;
+            if (existingProcess->process().coreProcessIdentifier() == process.coreProcessIdentifier())
+                return *existingProcess;
+
+            // In the case of WebsiteDataStore swap during navigation, the process may be different from existing process.
+            ASSERT(existingProcess->process().websiteDataStore() != process.websiteDataStore());
         }
     }
+
     return FrameProcess::create(process, *this, domain, preferences);
+}
+
+Ref<FrameProcess> BrowsingContextGroup::ensureProcessForConnection(IPC::Connection& connection, WebPageProxy& page, const WebPreferences& preferences)
+{
+    if (preferences.siteIsolationEnabled() || preferences.processSwapOnCrossSiteWindowOpenEnabled()) {
+        for (auto& process : m_processMap.values()) {
+            if (!process)
+                continue;
+            if (process->process().hasConnection(connection))
+                return *process;
+        }
+    }
+    return FrameProcess::create(page.process(), *this, WebCore::RegistrableDomain(URL(page.currentURL())), preferences);
 }
 
 FrameProcess* BrowsingContextGroup::processForDomain(const WebCore::RegistrableDomain& domain)
@@ -62,7 +80,7 @@ FrameProcess* BrowsingContextGroup::processForDomain(const WebCore::RegistrableD
 void BrowsingContextGroup::addFrameProcess(FrameProcess& process)
 {
     auto& domain = process.domain();
-    ASSERT(!m_processMap.get(domain) || m_processMap.get(domain)->process().state() == WebProcessProxy::State::Terminated || m_processMap.get(domain) == &process);
+    ASSERT(domain.isEmpty() || !m_processMap.get(domain) || m_processMap.get(domain)->process().state() == WebProcessProxy::State::Terminated || m_processMap.get(domain) == &process);
     m_processMap.set(domain, process);
     for (auto& page : m_pages) {
         if (domain == WebCore::RegistrableDomain(URL(page.currentURL())))
@@ -111,7 +129,7 @@ void BrowsingContextGroup::addPage(WebPageProxy& page)
             return true;
         }
 
-        if (domain == page.mainFrameOrOpenerDomain())
+        if (process->process().coreProcessIdentifier() == page.process().coreProcessIdentifier())
             return false;
         auto newRemotePage = makeUnique<RemotePageProxy>(page, process->process(), domain);
         newRemotePage->injectPageIntoNewProcess();
@@ -128,7 +146,6 @@ void BrowsingContextGroup::addPage(WebPageProxy& page)
 
 void BrowsingContextGroup::removePage(WebPageProxy& page)
 {
-    ASSERT(m_pages.contains(page));
     m_pages.remove(page);
 
     m_remotePages.take(page);
@@ -189,6 +206,12 @@ void BrowsingContextGroup::transitionPageToRemotePage(WebPageProxy& page, const 
     }
 #endif
     set.add(WTFMove(newRemotePage));
+}
+
+bool BrowsingContextGroup::hasRemotePages(const WebPageProxy& page)
+{
+    auto it = m_remotePages.find(page);
+    return it != m_remotePages.end() && !it->value.isEmpty();
 }
 
 } // namespace WebKit

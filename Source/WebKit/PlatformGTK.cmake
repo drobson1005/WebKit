@@ -67,9 +67,13 @@ list(APPEND WebKit_SERIALIZATION_IN_FILES
     Shared/glib/DMABufRendererBufferMode.serialization.in
     Shared/glib/InputMethodState.serialization.in
     Shared/glib/UserMessage.serialization.in
-)
 
-list(APPEND WebCore_SERIALIZATION_IN_FILES SoupNetworkProxySettings.serialization.in)
+    Shared/gtk/ArgumentCodersGtk.serialization.in
+
+    Shared/skia/CoreIPCSkColorSpace.serialization.in
+
+    Shared/soup/WebCoreArgumentCodersSoup.serialization.in
+)
 
 list(APPEND WebKit_DERIVED_SOURCES
     ${WebKitGTK_DERIVED_SOURCES_DIR}/InspectorGResourceBundle.c
@@ -279,6 +283,7 @@ list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBKIT_DIR}/Shared/glib"
     "${WEBKIT_DIR}/Shared/gtk"
     "${WEBKIT_DIR}/Shared/linux"
+    "${WEBKIT_DIR}/Shared/skia"
     "${WEBKIT_DIR}/Shared/soup"
     "${WEBKIT_DIR}/UIProcess/API/C/cairo"
     "${WEBKIT_DIR}/UIProcess/API/C/glib"
@@ -338,15 +343,6 @@ list(APPEND GPUProcess_SOURCES
     GPUProcess/EntryPoint/unix/GPUProcessMain.cpp
 )
 
-if (USE_LIBDRM)
-    list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
-        ${LIBDRM_INCLUDE_DIR}
-    )
-    list(APPEND WebKit_LIBRARIES
-        ${LIBDRM_LIBRARIES}
-    )
-endif ()
-
 if (GTK_UNIX_PRINT_FOUND)
     list(APPEND WebKit_LIBRARIES GTK::UnixPrint)
 endif ()
@@ -369,6 +365,12 @@ if (ENABLE_MEDIA_STREAM)
     )
 endif ()
 
+if (GI_VERSION VERSION_GREATER_EQUAL 1.79.2)
+    set(USE_GI_FINISH_FUNC_ANNOTATION 1)
+else ()
+    set(USE_GI_FINISH_FUNC_ANNOTATION 0)
+endif ()
+
 GENERATE_GLIB_API_HEADERS(WebKit WebKitGTK_HEADER_TEMPLATES
     ${WebKitGTK_DERIVED_SOURCES_DIR}/webkit
     WebKitGTK_INSTALLED_HEADERS
@@ -376,7 +378,9 @@ GENERATE_GLIB_API_HEADERS(WebKit WebKitGTK_HEADER_TEMPLATES
     "-DWTF_PLATFORM_WPE=0"
     "-DUSE_GTK4=$<BOOL:${USE_GTK4}>"
     "-DENABLE_2022_GLIB_API=$<BOOL:${ENABLE_2022_GLIB_API}>"
+    "-DUSE_GI_FINISH_FUNC_ANNOTATION=${USE_GI_FINISH_FUNC_ANNOTATION}"
 )
+unset(USE_GI_FINISH_FUNC_ANNOTATION)
 
 GENERATE_GLIB_API_HEADERS(WebKit WebKitWebProcessExtension_HEADER_TEMPLATES
     ${WebKitGTK_DERIVED_SOURCES_DIR}/webkit
@@ -457,12 +461,12 @@ file(WRITE ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
     "</gresources>\n"
 )
 
-add_custom_command(
-    OUTPUT ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.deps
-    DEPENDS ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
-    DEPFILE ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.deps
-    COMMAND glib-compile-resources --generate --sourcedir=${CMAKE_SOURCE_DIR}/Source/WebCore/Resources --sourcedir=${CMAKE_SOURCE_DIR}/Source/WebCore/platform/audio/resources --sourcedir=${CMAKE_SOURCE_DIR}/Source/WebKit/Resources/gtk --target=${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c --dependency-file=${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.deps ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
-    VERBATIM
+GLIB_COMPILE_RESOURCES(
+    OUTPUT        ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c
+    SOURCE_XML    ${WebKitGTK_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
+    RESOURCE_DIRS ${CMAKE_SOURCE_DIR}/Source/WebCore/Resources
+                  ${CMAKE_SOURCE_DIR}/Source/WebCore/platform/audio/resources
+                  ${CMAKE_SOURCE_DIR}/Source/WebKit/Resources/gtk
 )
 
 if (ENABLE_WAYLAND_TARGET)

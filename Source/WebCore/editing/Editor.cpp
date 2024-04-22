@@ -96,6 +96,7 @@
 #include "RenderBlock.h"
 #include "RenderBlockFlow.h"
 #include "RenderImage.h"
+#include "RenderInline.h"
 #include "RenderLayer.h"
 #include "RenderTextControl.h"
 #include "RenderedDocumentMarker.h"
@@ -124,6 +125,7 @@
 #include "TypingCommand.h"
 #include "UserTypingGestureIndicator.h"
 #include "VisibleUnits.h"
+#include "WritingSuggestionData.h"
 #include "markup.h"
 #include <pal/FileSizeFormatter.h>
 #include <pal/text/KillRing.h>
@@ -528,18 +530,6 @@ bool Editor::canCopy() const
         return true;
     const VisibleSelection& selection = document().selection().selection();
     return selection.isRange() && (!selection.isInPasswordField() || selection.isInAutoFilledAndViewableField());
-}
-
-bool Editor::canPaste() const
-{
-    RefPtr localFrame = dynamicDowncast<LocalFrame>(document().frame()->mainFrame());
-    if (!localFrame)
-        return false;
-
-    if (localFrame->loader().shouldSuppressTextInputFromEditing())
-        return false;
-
-    return canEdit();
 }
 
 bool Editor::canDelete() const
@@ -983,8 +973,6 @@ RefPtr<Element> Editor::findEventTargetFrom(const VisibleSelection& selection) c
     RefPtr target { selection.start().anchorElementAncestor() };
     if (!target)
         target = document().bodyOrFrameset();
-    if (!target)
-        return nullptr;
 
     return target;
 }
@@ -1608,7 +1596,7 @@ void Editor::paste(Pasteboard& pasteboard, FromMenuOrKeyBinding fromMenuOrKeyBin
 
     if (!dispatchClipboardEvent(findEventTargetFromSelection(), ClipboardEventKind::Paste))
         return; // DHTML did the whole operation
-    if (!canPaste())
+    if (!canEdit())
         return;
     updateMarkersForWordsAffectedByEditing(false);
     ResourceCacheValidationSuppressor validationSuppressor(document().cachedResourceLoader());
@@ -1624,7 +1612,7 @@ void Editor::pasteAsPlainText(FromMenuOrKeyBinding fromMenuOrKeyBinding)
 
     if (!dispatchClipboardEvent(findEventTargetFromSelection(), ClipboardEventKind::PasteAsPlainText))
         return;
-    if (!canPaste())
+    if (!canEdit())
         return;
     updateMarkersForWordsAffectedByEditing(false);
     pasteAsPlainTextWithPasteboard(*Pasteboard::createForCopyAndPaste(PagePasteboardContext::create(document().pageID())));
@@ -1636,7 +1624,7 @@ void Editor::pasteAsQuotation(FromMenuOrKeyBinding fromMenuOrKeyBinding)
 
     if (!dispatchClipboardEvent(findEventTargetFromSelection(), ClipboardEventKind::PasteAsQuotation))
         return;
-    if (!canPaste())
+    if (!canEdit())
         return;
     updateMarkersForWordsAffectedByEditing(false);
     Ref document = protectedDocument();
@@ -1654,7 +1642,7 @@ void Editor::pasteFont(FromMenuOrKeyBinding fromMenuOrKeyBinding)
 
     if (!dispatchClipboardEvent(findEventTargetFromSelection(), ClipboardEventKind::PasteFont))
         return;
-    if (!canPaste())
+    if (!canEdit())
         return;
     updateMarkersForWordsAffectedByEditing(false);
     ResourceCacheValidationSuppressor validationSuppressor(document().cachedResourceLoader());
@@ -2107,8 +2095,55 @@ void Editor::selectComposition()
     document().selection().setSelection(selection, { });
 }
 
+Node* Editor::nodeBeforeWritingSuggestions() const
+{
+    Ref document = protectedDocument();
+    if (!document->selection().isCaret())
+        return nullptr;
+
+    auto position = document->selection().selection().end();
+    RefPtr container = position.containerNode();
+    if (!container)
+        return nullptr;
+
+    if (RefPtr text = dynamicDowncast<Text>(container))
+        return text.get();
+
+    return position.computeNodeBeforePosition();
+}
+
+Element* Editor::writingSuggestionsContainerElement() const
+{
+    RefPtr node = nodeBeforeWritingSuggestions();
+    if (!node)
+        return nullptr;
+
+    return node->parentElement();
+}
+
+void Editor::removeWritingSuggestionIfNeeded()
+{
+    Ref document = protectedDocument();
+    document->updateStyleIfNeeded();
+
+    m_customCompositionAnnotations = { };
+    m_isHandlingAcceptedCandidate = false;
+
+    RefPtr selectedElement = writingSuggestionsContainerElement();
+    if (!selectedElement)
+        return;
+
+    m_writingSuggestionData = nullptr;
+    selectedElement->invalidateStyleAndRenderersForSubtree();
+}
+
 void Editor::confirmComposition()
 {
+    if (m_isHandlingAcceptedCandidate) {
+        removeWritingSuggestionIfNeeded();
+        return;
+    }
+
     if (!m_compositionNode)
         return;
     setComposition(m_compositionNode->data().substring(m_compositionStart, m_compositionEnd - m_compositionStart), ConfirmComposition);
@@ -2137,6 +2172,11 @@ void Editor::confirmOrCancelCompositionAndNotifyClient()
 
 void Editor::cancelComposition()
 {
+    if (m_isHandlingAcceptedCandidate) {
+        removeWritingSuggestionIfNeeded();
+        return;
+    }
+
     if (!m_compositionNode)
         return;
     setComposition(emptyString(), CancelComposition);
@@ -2218,7 +2258,59 @@ void Editor::setComposition(const String& text, SetCompositionMode mode)
     }
 }
 
-void Editor::setComposition(const String& text, const Vector<CompositionUnderline>& underlines, const Vector<CompositionHighlight>& highlights, const HashMap<String, Vector<CharacterRange>>& annotations, unsigned selectionStart, unsigned selectionEnd)
+RenderInline* Editor::writingSuggestionRenderer() const
+{
+    return m_writingSuggestionRenderer.get();
+}
+
+void Editor::setWritingSuggestionRenderer(RenderInline& renderer)
+{
+    m_writingSuggestionRenderer = renderer;
+}
+
+void Editor::setWritingSuggestion(const String& fullTextWithPrediction, const CharacterRange& selection)
+{
+    Ref document = protectedDocument();
+    document->updateStyleIfNeeded();
+
+    RefPtr selectedElement = writingSuggestionsContainerElement();
+    if (!selectedElement)
+        return;
+
+    if (!selectedElement->hasEditableStyle())
+        return;
+
+    m_isHandlingAcceptedCandidate = true;
+
+    auto newText = fullTextWithPrediction.substring(0, selection.location);
+    auto suggestionText = fullTextWithPrediction.substring(selection.location);
+
+    auto currentText = m_writingSuggestionData ? m_writingSuggestionData->currentText() : emptyString();
+
+    ASSERT(newText.startsWith(currentText));
+    auto textDelta = newText.substring(currentText.length());
+
+    auto range = document->selection().selection().firstRange();
+    if (!range)
+        return;
+
+    range->start.offset = 0;
+    auto offset = WebCore::characterCount(*range);
+    auto offsetWithDelta = currentText.isEmpty() ? offset : offset + textDelta.length();
+
+    if (!suggestionText.isEmpty())
+        m_writingSuggestionData = makeUnique<WritingSuggestionData>(WTFMove(suggestionText), WTFMove(newText), WTFMove(offsetWithDelta));
+    else
+        m_writingSuggestionData = nullptr;
+
+    if (!currentText.isEmpty()) {
+        SetForScope isInsertingTextForWritingSuggestionScope { m_isInsertingTextForWritingSuggestion, true };
+        insertText(textDelta, nullptr, TextEventInputKeyboard);
+    } else
+        selectedElement->invalidateStyleAndRenderersForSubtree();
+}
+
+void Editor::setComposition(const String& text, const Vector<CompositionUnderline>& underlines, const Vector<CompositionHighlight>& highlights, unsigned selectionStart, unsigned selectionEnd)
 {
     Ref document = protectedDocument();
     SetCompositionScope setCompositionScope(document.copyRef());
@@ -2271,9 +2363,6 @@ void Editor::setComposition(const String& text, const Vector<CompositionUnderlin
             // We should send a compositionstart event only when the given text is not empty because this
             // function doesn't create a composition node when the text is empty.
             if (!text.isEmpty()) {
-                // When an inline predicition is being offered, there will be text and a non-zero amount of highlights.
-                m_isHandlingAcceptedCandidate = !highlights.isEmpty();
-
                 target->dispatchEvent(CompositionEvent::create(eventNames().compositionstartEvent, document->windowProxy(), originalText));
                 event = CompositionEvent::create(eventNames().compositionupdateEvent, document->windowProxy(), text);
             }
@@ -2287,9 +2376,6 @@ void Editor::setComposition(const String& text, const Vector<CompositionUnderlin
     // If text is empty, then delete the old composition here.  If text is non-empty, InsertTextCommand::input
     // will delete the old composition with an optimized replace operation.
     if (text.isEmpty()) {
-        // The absence of text implies that there are currently no inline predicitions being offered.
-        m_isHandlingAcceptedCandidate = false;
-
         TypingCommand::deleteSelection(document.copyRef(), TypingCommand::Option::PreventSpellChecking, TypingCommand::TextCompositionType::Pending);
         if (target)
             target->dispatchEvent(CompositionEvent::create(eventNames().compositionendEvent, document->windowProxy(), text));
@@ -2325,11 +2411,6 @@ void Editor::setComposition(const String& text, const Vector<CompositionUnderlin
             for (auto& highlight : m_customCompositionHighlights) {
                 highlight.startOffset += baseOffset;
                 highlight.endOffset += baseOffset;
-            }
-            m_customCompositionAnnotations = annotations;
-            for (auto it = m_customCompositionAnnotations.begin(); it != m_customCompositionAnnotations.end(); ++it) {
-                for (auto& range : it->value)
-                    range.location += baseOffset;
             }
 
             if (auto renderer = baseNode->renderer())
@@ -3576,7 +3657,7 @@ static inline void collapseCaretWidth(IntRect& rect)
 
 IntRect Editor::firstRectForRange(const SimpleRange& range) const
 {
-    range.start.document().updateLayout();
+    range.start.protectedDocument()->updateLayout();
 
     VisiblePosition start(makeDeprecatedLegacyPosition(range.start));
 
@@ -3698,10 +3779,10 @@ bool Editor::findString(const String& target, FindOptions options)
     if (!resultRange)
         return false;
 
-    if (!options.contains(DoNotSetSelection))
+    if (!options.contains(FindOption::DoNotSetSelection))
         document->selection().setSelection(VisibleSelection(*resultRange));
 
-    if (!(options.contains(DoNotRevealSelection)))
+    if (!(options.contains(FindOption::DoNotRevealSelection)))
         document->selection().revealSelection();
 
     return true;
@@ -3709,22 +3790,22 @@ bool Editor::findString(const String& target, FindOptions options)
 
 template<typename T> static auto& start(T& range, FindOptions options)
 {
-    return options.contains(Backwards) ? range.end : range.start;
+    return options.contains(FindOption::Backwards) ? range.end : range.start;
 }
 
 template<typename T> static auto& end(T& range, FindOptions options)
 {
-    return options.contains(Backwards) ? range.start : range.end;
+    return options.contains(FindOption::Backwards) ? range.start : range.end;
 }
 
 static BoundaryPoint makeBoundaryPointAfterNodeContents(Node& node, FindOptions options)
 {
-    return options.contains(Backwards) ? makeBoundaryPointBeforeNodeContents(node) : makeBoundaryPointAfterNodeContents(node);
+    return options.contains(FindOption::Backwards) ? makeBoundaryPointBeforeNodeContents(node) : makeBoundaryPointAfterNodeContents(node);
 }
 
 static std::optional<BoundaryPoint> makeBoundaryPointAfterNode(Node& node, FindOptions options)
 {
-    return options.contains(Backwards) ? makeBoundaryPointBeforeNode(node) : makeBoundaryPointAfterNode(node);
+    return options.contains(FindOption::Backwards) ? makeBoundaryPointBeforeNode(node) : makeBoundaryPointAfterNode(node);
 }
 
 static SimpleRange collapseIfRootsDiffer(SimpleRange&& range)
@@ -3742,7 +3823,7 @@ std::optional<SimpleRange> Editor::rangeOfString(const String& target, const std
     // Start from an edge of the reference range, if there's a reference range that's not in shadow content. Which edge
     // is used depends on whether we're searching forward or backward, and whether startInSelection is set.
 
-    bool startInReferenceRange = referenceRange && options.contains(StartInSelection);
+    bool startInReferenceRange = referenceRange && options.contains(FindOption::StartInSelection);
     auto shadowTreeRoot = referenceRange ? referenceRange->startContainer().containingShadowRoot() : nullptr;
 
     Ref document = protectedDocument();
@@ -3774,7 +3855,7 @@ std::optional<SimpleRange> Editor::rangeOfString(const String& target, const std
 
     // If we didn't find anything and we're wrapping, search again in the entire document (this will
     // redundantly re-search the area already searched in some cases).
-    if (resultRange.collapsed() && options.contains(WrapAround)) {
+    if (resultRange.collapsed() && options.contains(FindOption::WrapAround)) {
         resultRange = collapseIfRootsDiffer(findPlainText(makeRangeSelectingNodeContents(document), target, options));
         // We used to return false here if we ended up with the same range that we started with
         // (e.g., the reference range was already the only instance of this text). But we decided that
@@ -3813,7 +3894,7 @@ unsigned Editor::countMatchesForText(const String& target, const std::optional<S
 
     unsigned matchCount = 0;
     do {
-        auto resultRange = findPlainText(*searchRange, target, options - Backwards);
+        auto resultRange = findPlainText(*searchRange, target, options - FindOption::Backwards);
         if (resultRange.collapsed()) {
             if (!resultRange.start.container->isInShadowTree())
                 break;
@@ -3913,15 +3994,15 @@ static Vector<SimpleRange> scanForTelephoneNumbers(const SimpleRange& range)
 
     auto text = plainText(range);
     Vector<SimpleRange> result;
-    unsigned length = text.length();
-    unsigned scannerPosition = 0;
     int relativeStartPosition = 0;
     int relativeEndPosition = 0;
     auto characters = StringView { text }.upconvertedCharacters();
-    while (scannerPosition < length && TelephoneNumberDetector::find(&characters[scannerPosition], length - scannerPosition, &relativeStartPosition, &relativeEndPosition)) {
-        ASSERT(scannerPosition + relativeEndPosition <= length);
+    auto span = characters.span();
+    while (!span.empty() && TelephoneNumberDetector::find(span, &relativeStartPosition, &relativeEndPosition)) {
+        auto scannerPosition = span.data() - characters.span().data();
+        ASSERT(scannerPosition + relativeEndPosition <= text.length());
         result.append(resolveCharacterRange(range, CharacterRange(scannerPosition + relativeStartPosition, relativeEndPosition - relativeStartPosition)));
-        scannerPosition += relativeEndPosition;
+        span = span.subspan(relativeEndPosition);
     }
     return result;
 }

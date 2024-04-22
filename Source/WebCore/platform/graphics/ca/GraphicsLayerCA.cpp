@@ -1221,7 +1221,7 @@ void GraphicsLayerCA::setContentsToSolidColor(const Color& color)
 void GraphicsLayerCA::setContentsToImage(Image* image)
 {
     if (image) {
-        auto newImage = image->nativeImageForCurrentFrame();
+        auto newImage = image->currentNativeImage();
         if (!newImage)
             return;
 
@@ -1455,7 +1455,7 @@ FloatPoint GraphicsLayerCA::computePositionRelativeToBase(float& pageScale) cons
 
 void GraphicsLayerCA::flushCompositingState(const FloatRect& visibleRect)
 {
-    TransformState state(client().useCSS3DTransformInteroperability(), TransformState::UnapplyInverseTransformDirection, FloatQuad(visibleRect));
+    TransformState state(TransformState::UnapplyInverseTransformDirection, FloatQuad(visibleRect));
     state.setSecondaryQuad(FloatQuad { visibleRect });
 
     CommitState commitState;
@@ -1539,7 +1539,7 @@ bool GraphicsLayerCA::recursiveVisibleRectChangeRequiresFlush(const CommitState&
 
 bool GraphicsLayerCA::visibleRectChangeRequiresFlush(const FloatRect& clipRect) const
 {
-    TransformState state(client().useCSS3DTransformInteroperability(), TransformState::UnapplyInverseTransformDirection, FloatQuad(clipRect));
+    TransformState state(TransformState::UnapplyInverseTransformDirection, FloatQuad(clipRect));
     CommitState commitState;
     return recursiveVisibleRectChangeRequiresFlush(commitState, state);
 }
@@ -1974,9 +1974,9 @@ bool GraphicsLayerCA::platformCALayerUseGiantTiles() const
     return client().useGiantTiles();
 }
 
-bool GraphicsLayerCA::platformCALayerUseCSS3DTransformInteroperability() const
+bool GraphicsLayerCA::platformCALayerCSSUnprefixedBackdropFilterEnabled() const
 {
-    return client().useCSS3DTransformInteroperability();
+    return client().cssUnprefixedBackdropFilterEnabled();
 }
 
 void GraphicsLayerCA::platformCALayerLogFilledVisibleFreshTile(unsigned blankPixelCount)
@@ -4117,6 +4117,9 @@ void GraphicsLayerCA::updateContentsScale(float pageScaleFactor)
         tiledBacking()->setZoomedOutContentsScale(zoomedOutScale);
     }
 
+    if (auto customScale = client().customContentsScale(this))
+        contentsScale = *customScale;
+
     if (contentsScale == m_layer->contentsScale())
         return;
 
@@ -4955,66 +4958,6 @@ double GraphicsLayerCA::backingStoreMemoryEstimate() const
 
     return m_layer->backingStoreBytesPerPixel() * size().width() * m_layer->contentsScale() * size().height() * m_layer->contentsScale();
 }
-
-static String animatedPropertyIDAsString(AnimatedProperty property)
-{
-    switch (property) {
-    case AnimatedProperty::Translate:
-    case AnimatedProperty::Scale:
-    case AnimatedProperty::Rotate:
-    case AnimatedProperty::Transform:
-        return "transform"_s;
-    case AnimatedProperty::Opacity:
-        return "opacity"_s;
-    case AnimatedProperty::BackgroundColor:
-        return "background-color"_s;
-    case AnimatedProperty::Filter:
-        return "filter"_s;
-    case AnimatedProperty::WebkitBackdropFilter:
-        return "backdrop-filter"_s;
-    case AnimatedProperty::Invalid:
-        return "invalid"_s;
-    }
-    ASSERT_NOT_REACHED();
-    return ""_s;
-}
-
-#if ENABLE(THREADED_ANIMATION_RESOLUTION)
-static String acceleratedEffectPropertyIDAsString(AcceleratedEffectProperty property)
-{
-    switch (property) {
-    case AcceleratedEffectProperty::Opacity:
-        return "opacity"_s;
-    case AcceleratedEffectProperty::Transform:
-        return "transform"_s;
-    case AcceleratedEffectProperty::Translate:
-        return "translate"_s;
-    case AcceleratedEffectProperty::Rotate:
-        return "rotate"_s;
-    case AcceleratedEffectProperty::Scale:
-        return "scale"_s;
-    case AcceleratedEffectProperty::OffsetPath:
-        return "offset-path"_s;
-    case AcceleratedEffectProperty::OffsetDistance:
-        return "offset-distance"_s;
-    case AcceleratedEffectProperty::OffsetPosition:
-        return "offset-position"_s;
-    case AcceleratedEffectProperty::OffsetAnchor:
-        return "offset-anchor"_s;
-    case AcceleratedEffectProperty::OffsetRotate:
-        return "offset-rotate"_s;
-    case AcceleratedEffectProperty::Filter:
-        return "filter"_s;
-    case AcceleratedEffectProperty::BackdropFilter:
-        return "backdrop-filter"_s;
-    default:
-        ASSERT_NOT_REACHED();
-        return "invalid"_s;
-    }
-    ASSERT_NOT_REACHED();
-    return ""_s;
-}
-#endif
 
 Vector<std::pair<String, double>> GraphicsLayerCA::acceleratedAnimationsForTesting(const Settings& settings) const
 {

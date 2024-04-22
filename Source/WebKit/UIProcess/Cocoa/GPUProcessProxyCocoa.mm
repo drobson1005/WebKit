@@ -33,6 +33,7 @@
 #include "GPUProcessMessages.h"
 #include "MediaPermissionUtilities.h"
 #include "WebProcessProxy.h"
+#include <wtf/cocoa/SpanCocoa.h>
 
 #if HAVE(POWERLOG_TASK_MODE_QUERY)
 #include <pal/spi/mac/PowerLogSPI.h>
@@ -88,6 +89,18 @@ Vector<SandboxExtension::Handle> GPUProcessProxy::createGPUToolsSandboxExtension
 
     return SandboxExtension::createHandlesForMachLookup({ "com.apple.gputools.service"_s, }, std::nullopt);
 }
+
+#if USE(EXTENSIONKIT)
+void GPUProcessProxy::sendBookmarkDataForCacheDirectory()
+{
+    NSError *error = nil;
+    NSURL *directoryURL = [[NSFileManager defaultManager] URLForDirectory:NSLibraryDirectory inDomain:NSUserDomainMask appropriateForURL:nil create:NO error:&error];
+    auto url = adoptNS([[NSURL alloc] initFileURLWithPath:@"Caches/com.apple.WebKit.GPU/" relativeToURL:directoryURL]);
+    error = nil;
+    NSData* bookmark = [url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+    send(Messages::GPUProcess::ResolveBookmarkDataForCacheDirectory(span(bookmark)), 0);
+}
+#endif
 
 }
 

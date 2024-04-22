@@ -88,11 +88,10 @@ AffineTransform SVGLocatable::computeCTM(SVGElement* element, CTMScope mode, Sty
 {
     ASSERT(element);
     if (styleUpdateStrategy == AllowStyleUpdate)
-        element->document().updateLayoutIgnorePendingStylesheets({ LayoutOptions::ContentVisibilityForceLayout }, element);
+        element->protectedDocument()->updateLayoutIgnorePendingStylesheets({ LayoutOptions::ContentVisibilityForceLayout }, element);
 
     RefPtr stopAtElement = mode == NearestViewportScope ? nearestViewportElement(element) : nullptr;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (element->document().settings().layerBasedSVGEngineEnabled()) {
         // Rudimentary support for operations on "detached" elements.
         CheckedPtr renderer = dynamicDowncast<RenderLayerModelObject>(element->renderer());
@@ -103,7 +102,6 @@ AffineTransform SVGLocatable::computeCTM(SVGElement* element, CTMScope mode, Sty
         CheckedPtr stopAtRenderer = dynamicDowncast<RenderLayerModelObject>(stopAtElement ? stopAtElement->renderer() : nullptr);
         return SVGLayerTransformComputation(*renderer).computeAccumulatedTransform(stopAtRenderer.get(), trackingMode);
     }
-#endif
 
     AffineTransform ctm;
 

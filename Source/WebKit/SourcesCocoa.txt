@@ -79,8 +79,9 @@ GPUProcess/webrtc/RemoteAudioMediaStreamTrackRendererInternalUnitManager.cpp
 
 ModelProcess/EntryPoint/Cocoa/XPCService/ModelServiceEntryPoint.mm
 ModelProcess/cocoa/ModelProcessCocoa.mm
-ModelProcess/ios/ModelProcessIOS.mm
+ModelProcess/cocoa/WKModelProcessModelLayer.mm
 ModelProcess/cocoa/ModelProcessModelPlayerProxy.mm
+ModelProcess/ios/ModelProcessIOS.mm
 
 Platform/classifier/cocoa/ResourceLoadStatisticsClassifierCocoa.cpp
 Platform/classifier/ResourceLoadStatisticsClassifier.cpp
@@ -172,6 +173,7 @@ Shared/Cocoa/SandboxInitialiationParametersCocoa.mm
 Shared/Cocoa/SandboxUtilities.mm
 Shared/Cocoa/SharedCARingBuffer.cpp
 Shared/Cocoa/TCCSoftLink.mm @no-unify
+Shared/Cocoa/UnifiedTextReplacementSoftLink.mm
 Shared/Cocoa/WebCoreArgumentCodersCocoa.mm
 Shared/Cocoa/WebErrorsCocoa.mm
 Shared/Cocoa/WebKit2InitializeCocoa.mm
@@ -294,6 +296,8 @@ UIProcess/API/Cocoa/_WKRemoteWebInspectorViewController.mm
 UIProcess/API/Cocoa/_WKResourceLoadInfo.mm
 UIProcess/API/Cocoa/_WKSessionState.mm
 UIProcess/API/Cocoa/_WKSystemPreferences.mm
+UIProcess/API/Cocoa/_WKTargetedElementInfo.mm
+UIProcess/API/Cocoa/_WKTargetedElementRequest.mm
 UIProcess/API/Cocoa/_WKTextInputContext.mm
 UIProcess/API/Cocoa/_WKTextManipulationConfiguration.mm
 UIProcess/API/Cocoa/_WKTextManipulationExclusionRule.mm
@@ -313,6 +317,7 @@ UIProcess/API/Cocoa/_WKWebsiteDataStoreConfiguration.mm
 UIProcess/API/Cocoa/APIAttachmentCocoa.mm
 UIProcess/API/Cocoa/APIContentRuleListStoreCocoa.mm
 UIProcess/API/Cocoa/APISerializedScriptValueCocoa.mm
+UIProcess/API/Cocoa/APIPageConfigurationCocoa.mm
 UIProcess/API/Cocoa/LegacyBundleForClass.mm
 UIProcess/API/Cocoa/NSAttributedString.mm
 UIProcess/API/Cocoa/WKBackForwardList.mm
@@ -420,6 +425,7 @@ UIProcess/Cocoa/UserMediaPermissionRequestManagerProxy.mm
 UIProcess/Cocoa/VideoPresentationManagerProxy.mm
 UIProcess/Cocoa/WebGeolocationManagerProxyCocoa.cpp
 UIProcess/Cocoa/WebKitSwiftSoftLink.mm @no-unify
+UIProcess/Cocoa/WebPagePreferencesLockdownModeObserver.mm
 UIProcess/Cocoa/WebPageProxyCocoa.mm
 UIProcess/Cocoa/WebPasteboardProxyCocoa.mm
 UIProcess/Cocoa/WebPreferencesCocoa.mm
@@ -557,6 +563,7 @@ UIProcess/mac/WKQuickLookPreviewController.mm
 UIProcess/mac/WKRevealItemPresenter.mm
 UIProcess/mac/WKSharingServicePickerDelegate.mm
 UIProcess/mac/WKTextFinderClient.mm
+UIProcess/mac/WKTextIndicatorStyleManager.mm
 UIProcess/mac/WKTextInputWindowController.mm
 UIProcess/mac/WKViewLayoutStrategy.mm
 UIProcess/mac/WebViewImpl.mm
@@ -700,6 +707,8 @@ WebProcess/Plugins/PDF/PDFPluginTextAnnotation.mm
 WebProcess/Plugins/PDF/PDFScriptEvaluator.mm
 WebProcess/Plugins/PDF/WKAccessibilityPDFDocumentObject.mm
 WebProcess/Plugins/PDF/UnifiedPDF/AsyncPDFRenderer.mm
+WebProcess/Plugins/PDF/UnifiedPDF/PDFDataDetectorItem.mm
+WebProcess/Plugins/PDF/UnifiedPDF/PDFDataDetectorOverlayController.mm
 WebProcess/Plugins/PDF/UnifiedPDF/PDFDocumentLayout.mm
 WebProcess/Plugins/PDF/UnifiedPDF/PDFPageCoverage.mm
 WebProcess/Plugins/PDF/UnifiedPDF/UnifiedPDFPlugin.mm
@@ -786,6 +795,7 @@ RemoteImageBufferSetProxyMessageReceiver.cpp
 RemoteImageBufferSetMessageReceiver.cpp
 RemoteRenderingBackendMessageReceiver.cpp
 RemoteRenderingBackendProxyMessageReceiver.cpp
+RemoteSharedResourceCacheMessageReceiver.cpp
 RemoteSampleBufferDisplayLayerManagerMessageReceiver.cpp
 RemoteSampleBufferDisplayLayerMessageReceiver.cpp
 SampleBufferDisplayLayerMessageReceiver.cpp

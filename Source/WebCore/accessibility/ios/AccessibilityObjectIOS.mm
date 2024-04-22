@@ -94,16 +94,14 @@ void AccessibilityObject::overrideAttachmentParent(AccessibilityObject*)
 }
     
 // In iPhone only code for now. It's debateable whether this is desired on all platforms.
-int AccessibilityObject::accessibilitySecureFieldLength()
+unsigned AccessibilityObject::accessibilitySecureFieldLength()
 {
-    if (!isSecureField())
+    CheckedPtr renderer = this->renderer();
+    // Only consider secure fields that are rendered (i.e. have a non-null renderer).
+    if (!renderer || !isSecureField())
         return 0;
 
-    auto* renderObject = downcast<AccessibilityRenderObject>(*this).renderer();
-    if (!renderObject)
-        return 0;
-
-    auto* inputElement = dynamicDowncast<HTMLInputElement>(renderObject->node());
+    auto* inputElement = dynamicDowncast<HTMLInputElement>(renderer->node());
     return inputElement ? inputElement->value().length() : 0;
 }
 
@@ -179,7 +177,7 @@ static void attributeStringSetLanguage(NSMutableAttributedString *attrString, Re
     if (!renderer)
         return;
 
-    RefPtr object = renderer->document().axObjectCache()->getOrCreate(renderer);
+    RefPtr object = renderer->document().axObjectCache()->getOrCreate(*renderer);
     NSString *language = object->language();
     if (language.length)
         [attrString addAttribute:AccessibilityTokenLanguage value:language range:range];
@@ -226,7 +224,7 @@ static void attributeStringSetStyle(NSMutableAttributedString *attrString, Rende
         attributedStringSetNumber(attrString, AccessibilityTokenUnderline, @YES, range);
 
     // Add code context if this node is within a <code> block.
-    RefPtr object = renderer->document().axObjectCache()->getOrCreate(renderer);
+    RefPtr object = renderer->document().axObjectCache()->getOrCreate(*renderer);
     auto matchFunc = [] (const auto& axObject) {
         return axObject.isCode();
     };
@@ -241,7 +239,7 @@ static void attributedStringSetCompositionAttributes(NSMutableAttributedString *
     if (!renderer)
         return;
 
-    RefPtr object = renderer->document().axObjectCache()->getOrCreate(renderer);
+    RefPtr object = renderer->document().axObjectCache()->getOrCreate(*renderer);
 
     if (!object)
         return;

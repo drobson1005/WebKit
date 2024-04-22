@@ -7,6 +7,7 @@
 
 #include "src/gpu/graphite/dawn/DawnTexture.h"
 
+#include "include/core/SkTraceMemoryDump.h"
 #include "include/gpu/MutableTextureState.h"
 #include "include/gpu/graphite/dawn/DawnTypes.h"
 #include "include/private/gpu/graphite/DawnTypesPriv.h"
@@ -18,10 +19,8 @@
 
 namespace skgpu::graphite {
 namespace {
-
 const char* texture_info_to_label(const TextureInfo& info,
                                   const DawnTextureSpec& dawnSpec) {
-#ifdef SK_DEBUG
     if (dawnSpec.fUsage & wgpu::TextureUsage::RenderAttachment) {
         if (DawnFormatIsDepthOrStencil(dawnSpec.fFormat)) {
             return "DepthStencil";
@@ -44,11 +43,7 @@ const char* texture_info_to_label(const TextureInfo& info,
         SkASSERT(dawnSpec.fUsage & wgpu::TextureUsage::TextureBinding);
         return "SampledTexture";
     }
-#else
-    return nullptr;
-#endif
 }
-
 }
 
 wgpu::Texture DawnTexture::MakeDawnTexture(const DawnSharedContext* sharedContext,
@@ -83,7 +78,9 @@ wgpu::Texture DawnTexture::MakeDawnTexture(const DawnSharedContext* sharedContex
     }
 
     wgpu::TextureDescriptor desc;
+#ifdef SK_DEBUG
     desc.label                      = texture_info_to_label(info, dawnSpec);
+#endif
     desc.usage                      = dawnSpec.fUsage;
     desc.dimension                  = wgpu::TextureDimension::e2D;
     desc.size.width                 = dimensions.width();
@@ -111,13 +108,20 @@ DawnTexture::DawnTexture(const DawnSharedContext* sharedContext,
                          wgpu::TextureView renderTextureView,
                          Ownership ownership,
                          skgpu::Budgeted budgeted)
-        : Texture(sharedContext, dimensions, info, /*mutableState=*/nullptr, ownership, budgeted)
+        : Texture(sharedContext,
+                  dimensions,
+                  info,
+                  /*mutableState=*/nullptr,
+                  ownership,
+                  budgeted)
         , fTexture(std::move(texture))
         , fSampleTextureView(std::move(sampleTextureView))
         , fRenderTextureView(std::move(renderTextureView)) {}
 
-std::pair<wgpu::TextureView, wgpu::TextureView> create_texture_views(
-        const wgpu::Texture& texture, const TextureInfo& info, const wgpu::TextureAspect aspect) {
+// static
+std::pair<wgpu::TextureView, wgpu::TextureView> DawnTexture::CreateTextureViews(
+        const wgpu::Texture& texture, const TextureInfo& info) {
+    const auto aspect = info.dawnTextureSpec().fAspect;
     if (aspect == wgpu::TextureAspect::All) {
         wgpu::TextureView sampleTextureView = texture.CreateView();
         wgpu::TextureView renderTextureView;
@@ -141,6 +145,7 @@ std::pair<wgpu::TextureView, wgpu::TextureView> create_texture_views(
              aspect == wgpu::TextureAspect::Plane2Only);
     wgpu::TextureView planeTextureView;
     wgpu::TextureViewDescriptor planeViewDesc = {};
+    planeViewDesc.format = info.dawnTextureSpec().fViewFormat;
     planeViewDesc.aspect = aspect;
     planeTextureView = texture.CreateView(&planeViewDesc);
     return {planeTextureView, planeTextureView};
@@ -155,8 +160,7 @@ sk_sp<Texture> DawnTexture::Make(const DawnSharedContext* sharedContext,
     if (!texture) {
         return {};
     }
-    auto [sampleTextureView, renderTextureView] =
-            create_texture_views(texture, info, wgpu::TextureAspect::All);
+    auto [sampleTextureView, renderTextureView] = CreateTextureViews(texture, info);
     return sk_sp<Texture>(new DawnTexture(sharedContext,
                                           dimensions,
                                           info,
@@ -176,8 +180,7 @@ sk_sp<Texture> DawnTexture::MakeWrapped(const DawnSharedContext* sharedContext,
         return {};
     }
 
-    const wgpu::TextureAspect aspect = info.dawnTextureSpec().fAspect;
-    auto [sampleTextureView, renderTextureView] = create_texture_views(texture, info, aspect);
+    auto [sampleTextureView, renderTextureView] = CreateTextureViews(texture, info);
     return sk_sp<Texture>(new DawnTexture(sharedContext,
                                           dimensions,
                                           info,
@@ -216,6 +219,15 @@ void DawnTexture::freeGpuData() {
     fTexture = nullptr;
     fSampleTextureView = nullptr;
     fRenderTextureView = nullptr;
+}
+
+void DawnTexture::onDumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump,
+                                         const char* dumpName) const {
+    Texture::onDumpMemoryStatistics(traceMemoryDump, dumpName);
+    traceMemoryDump->dumpStringValue(
+            dumpName,
+            "backend_label",
+            texture_info_to_label(this->textureInfo(), this->textureInfo().dawnTextureSpec()));
 }
 
 } // namespace skgpu::graphite

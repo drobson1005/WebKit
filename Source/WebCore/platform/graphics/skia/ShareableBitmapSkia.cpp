@@ -27,9 +27,13 @@
 #include "ShareableBitmap.h"
 
 #include "BitmapImage.h"
+#include "FontRenderOptions.h"
 #include "GraphicsContextSkia.h"
 #include "NotImplemented.h"
+
+IGNORE_CLANG_WARNINGS_BEGIN("cast-align")
 #include <skia/core/SkSurface.h>
+IGNORE_CLANG_WARNINGS_END
 
 namespace WebCore {
 
@@ -38,23 +42,29 @@ std::optional<DestinationColorSpace> ShareableBitmapConfiguration::validateColor
     return colorSpace;
 }
 
-CheckedUint32 ShareableBitmapConfiguration::calculateBytesPerPixel(const DestinationColorSpace&)
+CheckedUint32 ShareableBitmapConfiguration::calculateBytesPerPixel(const DestinationColorSpace& colorSpace)
 {
-    return 4;
+    return SkImageInfo::MakeN32Premul(1, 1, colorSpace.platformColorSpace()).bytesPerPixel();
 }
 
-CheckedUint32 ShareableBitmapConfiguration::calculateBytesPerRow(const IntSize& size, const DestinationColorSpace&)
+CheckedUint32 ShareableBitmapConfiguration::calculateBytesPerRow(const IntSize& size, const DestinationColorSpace& colorSpace)
 {
-    return SkImageInfo::MakeN32Premul(size.width(), size.height()).minRowBytes();
+    return SkImageInfo::MakeN32Premul(size.width(), size.height(), colorSpace.platformColorSpace()).minRowBytes();
 }
 
 std::unique_ptr<GraphicsContext> ShareableBitmap::createGraphicsContext()
 {
     ref();
+    SkSurfaceProps properties = { 0, FontRenderOptions::singleton().subpixelOrder() };
     auto surface = SkSurfaces::WrapPixels(m_configuration.imageInfo(), data(), bytesPerRow(), [](void*, void* context) {
         static_cast<ShareableBitmap*>(context)->deref();
-    }, this);
-    return makeUnique<GraphicsContextSkia>(WTFMove(surface), RenderingMode::Unaccelerated, RenderingPurpose::ShareableSnapshot);
+    }, this, &properties);
+
+    auto* canvas = surface->getCanvas();
+    if (!canvas)
+        return nullptr;
+
+    return makeUnique<GraphicsContextSkia>(*canvas, RenderingMode::Unaccelerated, RenderingPurpose::ShareableSnapshot, [surface = WTFMove(surface)] { });
 }
 
 void ShareableBitmap::paint(GraphicsContext& context, const IntPoint& dstPoint, const IntRect& srcRect)
@@ -62,9 +72,14 @@ void ShareableBitmap::paint(GraphicsContext& context, const IntPoint& dstPoint, 
     paint(context, 1, dstPoint, srcRect);
 }
 
-void ShareableBitmap::paint(GraphicsContext&, float /*scaleFactor*/, const IntPoint&, const IntRect&)
+void ShareableBitmap::paint(GraphicsContext& context, float scaleFactor, const IntPoint& dstPoint, const IntRect& srcRect)
 {
-    notImplemented();
+    FloatRect scaledSrcRect(srcRect);
+    scaledSrcRect.scale(scaleFactor);
+    FloatRect scaledDestRect(dstPoint, srcRect.size());
+    scaledDestRect.scale(scaleFactor);
+    auto image = createPlatformImage(BackingStoreCopy::DontCopyBackingStore);
+    context.platformContext()->drawImageRect(image.get(), scaledSrcRect, scaledDestRect, { }, nullptr, { });
 }
 
 RefPtr<Image> ShareableBitmap::createImage()

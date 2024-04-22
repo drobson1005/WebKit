@@ -24,7 +24,6 @@
 #include "config.h"
 #include "RenderSVGResourceClipper.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "ElementIterator.h"
 #include "Frame.h"
 #include "FrameView.h"
@@ -105,7 +104,7 @@ void RenderSVGResourceClipper::applyPathClipping(GraphicsContext& context, const
         clipPathTransform.scale(objectBoundingBox.size());
     } else if (!targetRenderer.isSVGLayerAwareRenderer()) {
         clipPathTransform.translate(objectBoundingBox.x(), objectBoundingBox.y());
-        clipPathTransform.scale(targetRenderer.style().effectiveZoom());
+        clipPathTransform.scale(targetRenderer.style().usedZoom());
     }
     if (layer()->isTransformed())
         clipPathTransform.multiply(layer()->transform()->toAffineTransform());
@@ -144,7 +143,7 @@ void RenderSVGResourceClipper::applyMaskClipping(PaintInfo& paintInfo, const Ren
     auto& context = paintInfo.context();
     GraphicsContextStateSaver stateSaver(context);
 
-    if (auto* referencedClipperRenderer = svgClipperResourceFromStyle())
+    if (CheckedPtr referencedClipperRenderer = svgClipperResourceFromStyle())
         referencedClipperRenderer->applyMaskClipping(paintInfo, targetRenderer, objectBoundingBox);
 
     AffineTransform contentTransform;
@@ -154,7 +153,7 @@ void RenderSVGResourceClipper::applyMaskClipping(PaintInfo& paintInfo, const Ren
         contentTransform.scale(objectBoundingBox.width(), objectBoundingBox.height());
     } else if (!targetRenderer.isSVGLayerAwareRenderer()) {
         contentTransform.translate(objectBoundingBox.x(), objectBoundingBox.y());
-        contentTransform.scale(targetRenderer.style().effectiveZoom());
+        contentTransform.scale(targetRenderer.style().usedZoom());
     }
 
     // Figure out if we need to push a transparency layer to render our mask.
@@ -179,7 +178,7 @@ void RenderSVGResourceClipper::applyMaskClipping(PaintInfo& paintInfo, const Ren
         context.setCompositeOperation(CompositeOperator::SourceOver);
     }
 
-    layer()->paintSVGResourceLayer(context, contentTransform);
+    checkedLayer()->paintSVGResourceLayer(context, contentTransform);
 
     if (pushTransparencyLayer)
         context.endTransparencyLayer();
@@ -250,6 +249,14 @@ bool RenderSVGResourceClipper::needsHasSVGTransformFlags() const
     return protectedClipPathElement()->hasTransformRelatedAttributes();
 }
 
+void RenderSVGResourceClipper::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+{
+    RenderSVGHiddenContainer::styleDidChange(diff, oldStyle);
+
+    // Ensure that descendants with layers are rooted within our layer.
+    if (hasLayer())
+        layer()->setIsOpportunisticStackingContext(true);
 }
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)
+}
+

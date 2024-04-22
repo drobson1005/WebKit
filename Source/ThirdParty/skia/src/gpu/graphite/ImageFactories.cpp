@@ -68,6 +68,7 @@ sk_sp<SkImage> WrapTexture(Recorder* recorder,
                            SkAlphaType at,
                            sk_sp<SkColorSpace> cs,
                            skgpu::Origin origin,
+                           GenerateMipmapsFromBase genMipmaps,
                            TextureReleaseProc releaseP,
                            ReleaseContext releaseC) {
     auto releaseHelper = skgpu::RefCntedCallback::Make(releaseP, releaseC);
@@ -96,7 +97,39 @@ sk_sp<SkImage> WrapTexture(Recorder* recorder,
 
     skgpu::Swizzle swizzle = caps->getReadSwizzle(ct, backendTex.info());
     TextureProxyView view(std::move(proxy), swizzle, origin);
+
+    if (genMipmaps == GenerateMipmapsFromBase::kYes) {
+        if (view.proxy()->mipmapped() == skgpu::Mipmapped::kNo) {
+            SKGPU_LOG_W("Failed SkImage:::WrapTexture because asked to generate mipmaps for "
+                        "nonmipmapped texture");
+            return nullptr;
+        }
+        if (!GenerateMipmaps(recorder, view.refProxy(), info)) {
+            SKGPU_LOG_W("Failed SkImage::WrapTexture. Could not generate mipmaps.");
+            return nullptr;
+        }
+    }
+
     return sk_make_sp<skgpu::graphite::Image>(kNeedNewImageUniqueID, view, info);
+}
+
+sk_sp<SkImage> WrapTexture(Recorder* recorder,
+                           const BackendTexture& backendTex,
+                           SkColorType ct,
+                           SkAlphaType at,
+                           sk_sp<SkColorSpace> cs,
+                           skgpu::Origin origin,
+                           TextureReleaseProc releaseP,
+                           ReleaseContext releaseC) {
+    return WrapTexture(recorder,
+                       backendTex,
+                       ct,
+                       at,
+                       std::move(cs),
+                       origin,
+                       SkImages::GenerateMipmapsFromBase::kNo,
+                       releaseP,
+                       releaseC);
 }
 
 sk_sp<SkImage> WrapTexture(Recorder* recorder,
@@ -112,6 +145,7 @@ sk_sp<SkImage> WrapTexture(Recorder* recorder,
                        at,
                        std::move(cs),
                        skgpu::Origin::kTopLeft,
+                       SkImages::GenerateMipmapsFromBase::kNo,
                        releaseP,
                        releaseC);
 }
@@ -238,7 +272,7 @@ sk_sp<SkImage> PromiseTextureFromYUVA(skgpu::graphite::Recorder* recorder,
         }
     }
 
-    YUVATextureProxies yuvaTextureProxies(recorder,
+    YUVATextureProxies yuvaTextureProxies(recorder->priv().caps(),
                                           backendTextureInfo.yuvaInfo(),
                                           SkSpan<sk_sp<TextureProxy>>(proxies));
     SkASSERT(yuvaTextureProxies.isValid());
@@ -437,7 +471,7 @@ sk_sp<SkImage> TextureFromYUVAPixmaps(Recorder* recorder,
         }
     }
 
-    YUVATextureProxies yuvaProxies(recorder,
+    YUVATextureProxies yuvaProxies(recorder->priv().caps(),
                                    pixmapsToUpload->yuvaInfo(),
                                    SkSpan<TextureProxyView>(views));
     SkASSERT(yuvaProxies.isValid());
@@ -470,7 +504,7 @@ sk_sp<SkImage> TextureFromYUVATextures(Recorder* recorder,
         SkASSERT(proxy);
         textureProxyViews[plane] = TextureProxyView(std::move(proxy));
     }
-    YUVATextureProxies yuvaProxies(recorder,
+    YUVATextureProxies yuvaProxies(recorder->priv().caps(),
                                    yuvaTextures.yuvaInfo(),
                                    SkSpan<TextureProxyView>(textureProxyViews));
     SkASSERT(yuvaProxies.isValid());
@@ -482,27 +516,9 @@ sk_sp<SkImage> TextureFromYUVAImages(Recorder* recorder,
                                      const SkYUVAInfo& yuvaInfo,
                                      SkSpan<const sk_sp<SkImage>> images,
                                      sk_sp<SkColorSpace> imageColorSpace) {
-    int numPlanes = yuvaInfo.numPlanes();
-    if ((size_t) numPlanes > images.size()) {
-        return nullptr;
-    }
-    TextureProxyView textureProxyViews[SkYUVAInfo::kMaxPlanes];
-    for (int plane = 0; plane < numPlanes; ++plane) {
-        if (as_IB(images[plane])->type() != SkImage_Base::Type::kGraphite) {
-            return nullptr;
-        }
-
-        textureProxyViews[plane] = static_cast<Image*>(images[plane].get())->textureProxyView();
-        // YUVATextureProxies expects to sample from the red channel for single-channel textures, so
-        // reset the swizzle for alpha-only textures to compensate for that
-        if (images[plane]->isAlphaOnly()) {
-            textureProxyViews[plane] = textureProxyViews[plane].makeSwizzle(skgpu::Swizzle("aaaa"));
-        }
-    }
-    YUVATextureProxies yuvaProxies(recorder, yuvaInfo, SkSpan<TextureProxyView>(textureProxyViews));
-    SkASSERT(yuvaProxies.isValid());
-    return sk_make_sp<Image_YUVA>(
-            kNeedNewImageUniqueID, std::move(yuvaProxies), std::move(imageColorSpace));
+    // This factory is just a view of the images, so does not actually trigger any work on the
+    // recorder. It is just used to provide the Caps.
+    return Image_YUVA::MakeView(recorder->priv().caps(), yuvaInfo, images, imageColorSpace);
 }
 
 }  // namespace SkImages

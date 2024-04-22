@@ -85,8 +85,8 @@
 #include "InstrumentingAgents.h"
 #include "IntRect.h"
 #include "JSDOMBindingSecurity.h"
+#include "JSDOMWindowCustom.h"
 #include "JSEventListener.h"
-#include "JSLocalDOMWindowCustom.h"
 #include "JSMediaControlsHost.h"
 #include "JSNode.h"
 #include "JSVideoColorPrimaries.h"
@@ -1905,7 +1905,7 @@ static String computeContentSecurityPolicySHA256Hash(const Element& element)
     const PAL::TextEncoding& encodingToUse = documentEncoding.isValid() ? documentEncoding : PAL::UTF8Encoding();
     auto content = encodingToUse.encode(TextNodeTraversal::contentsAsString(element), PAL::UnencodableHandling::Entities);
     auto cryptoDigest = PAL::CryptoDigest::create(PAL::CryptoDigest::Algorithm::SHA_256);
-    cryptoDigest->addBytes(content.data(), content.size());
+    cryptoDigest->addBytes(content.span());
     auto digest = cryptoDigest->computeHash();
     return makeString("sha256-", base64Encoded(digest.data(), digest.size()));
 }
@@ -2223,7 +2223,7 @@ Ref<Inspector::Protocol::DOM::AccessibilityProperties> InspectorDOMAgent::buildO
     unsigned level = 0;
 
     if (auto* axObjectCache = node.document().axObjectCache()) {
-        if (auto* axObject = axObjectCache->getOrCreate(&node)) {
+        if (auto* axObject = axObjectCache->getOrCreate(node)) {
 
             if (AXCoreObject* activeDescendant = axObject->activeDescendant())
                 activeDescendantNode = activeDescendant->node();
@@ -2391,16 +2391,16 @@ Ref<Inspector::Protocol::DOM::AccessibilityProperties> InspectorDOMAgent::buildO
             selected = axObject->isSelected();
 
             auto selectedChildren = axObject->selectedChildren();
-            if (selectedChildren.size()) {
+            if (selectedChildren && selectedChildren->size()) {
                 selectedChildNodeIds = JSON::ArrayOf<Inspector::Protocol::DOM::NodeId>::create();
-                for (auto& selectedChildObject : selectedChildren) {
+                for (auto& selectedChildObject : *selectedChildren) {
                     if (Node* selectedChildNode = selectedChildObject->node()) {
                         if (auto selectedChildNodeId = pushNodePathToFrontend(selectedChildNode))
                             selectedChildNodeIds->addItem(selectedChildNodeId);
                     }
                 }
             }
-            
+
             headingLevel = axObject->headingLevel();
             hierarchicalLevel = axObject->hierarchicalLevel();
             
@@ -3100,6 +3100,7 @@ Inspector::Protocol::ErrorStringOr<void> InspectorDOMAgent::setAllowEditingUserA
 
 Inspector::Protocol::ErrorStringOr<Ref<Inspector::Protocol::DOM::MediaStats>> InspectorDOMAgent::getMediaStats(Inspector::Protocol::DOM::NodeId nodeId)
 {
+#if ENABLE(VIDEO)
     Inspector::Protocol::ErrorString errorString;
 
     auto* element = assertElement(errorString, nodeId);
@@ -3176,6 +3177,10 @@ Inspector::Protocol::ErrorStringOr<Ref<Inspector::Protocol::DOM::MediaStats>> In
     }
 
     return stats;
+#else
+    UNUSED_PARAM(nodeId);
+    return makeUnexpected("no media support"_s);
+#endif
 }
 
 } // namespace WebCore

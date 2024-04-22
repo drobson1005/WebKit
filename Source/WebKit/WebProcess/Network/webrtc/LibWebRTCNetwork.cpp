@@ -119,10 +119,10 @@ void LibWebRTCNetwork::signalReadPacket(WebCore::LibWebRTCSocketIdentifier ident
 {
     ASSERT(!WTF::isMainRunLoop());
     if (auto* socket = m_socketFactory.socket(identifier))
-        socket->signalReadPacket(data.data(), data.size(), rtc::SocketAddress(address.rtcAddress(), port), timestamp);
+        socket->signalReadPacket(data, rtc::SocketAddress(address.rtcAddress(), port), timestamp);
 }
 
-void LibWebRTCNetwork::signalSentPacket(WebCore::LibWebRTCSocketIdentifier identifier, int rtcPacketID, int64_t sendTimeMs)
+void LibWebRTCNetwork::signalSentPacket(WebCore::LibWebRTCSocketIdentifier identifier, int64_t rtcPacketID, int64_t sendTimeMs)
 {
     ASSERT(!WTF::isMainRunLoop());
     if (auto* socket = m_socketFactory.socket(identifier))

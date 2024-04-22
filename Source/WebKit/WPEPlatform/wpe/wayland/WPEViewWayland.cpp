@@ -26,6 +26,7 @@
 #include "config.h"
 #include "WPEViewWayland.h"
 
+#include "WPEBufferDMABufFormats.h"
 #include "WPEDisplayWaylandPrivate.h"
 #include "WPEWaylandSHMPool.h"
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
@@ -47,6 +48,10 @@
 #include <wayland-client-protocol.h>
 #include <wayland-egl.h>
 #include <epoxy/egl.h>
+
+#if USE(LIBDRM)
+#include <xf86drm.h>
+#endif
 
 #ifndef EGL_WL_create_wayland_buffer_from_image
 typedef struct wl_buffer *(EGLAPIENTRYP PFNEGLCREATEWAYLANDBUFFERFROMIMAGEWL)(EGLDisplay dpy, EGLImageKHR image);
@@ -100,12 +105,67 @@ struct DMABufFeedback {
     explicit DMABufFeedback(FormatTable&& table)
         : formatTable(WTFMove(table))
     {
+#if USE(LIBDRM)
+        memset(&mainDevice, 0, sizeof(dev_t));
+#endif
     }
 
     ~DMABufFeedback() = default;
 
+    DMABufFeedback(const DMABufFeedback&) = delete;
+    DMABufFeedback& operator=(const DMABufFeedback&) = delete;
+
+    DMABufFeedback(DMABufFeedback&& other)
+        : formatTable(WTFMove(other.formatTable))
+        , pendingTranche(WTFMove(other.pendingTranche))
+        , tranches(WTFMove(other.tranches))
+    {
+#if USE(LIBDRM)
+        memcpy(&mainDevice, &other.mainDevice, sizeof(dev_t));
+        memset(&other.mainDevice, 0, sizeof(dev_t));
+#endif
+    }
+
+#if USE(LIBDRM)
+    static CString drmDeviceForUsage(const dev_t* device, bool isScanout)
+    {
+        drmDevicePtr drmDevice;
+        if (drmGetDeviceFromDevId(*device, 0, &drmDevice))
+            return { };
+
+        CString returnValue;
+        if (isScanout) {
+            if (drmDevice->available_nodes & (1 << DRM_NODE_PRIMARY))
+                returnValue = drmDevice->nodes[DRM_NODE_PRIMARY];
+        } else {
+            if (drmDevice->available_nodes & (1 << DRM_NODE_RENDER))
+                returnValue = drmDevice->nodes[DRM_NODE_RENDER];
+            else if (drmDevice->available_nodes & (1 << DRM_NODE_PRIMARY))
+                returnValue = drmDevice->nodes[DRM_NODE_PRIMARY];
+        }
+
+        drmFreeDevice(&drmDevice);
+
+        return returnValue;
+    }
+#endif
+
+    CString drmDevice() const
+    {
+#if USE(LIBDRM)
+        return drmDeviceForUsage(&mainDevice, false);
+#else
+        return { };
+#endif
+    }
+
     struct Tranche {
-        Tranche() = default;
+        Tranche()
+        {
+#if USE(LIBDRM)
+            memset(&targetDevice, 0, sizeof(dev_t));
+#endif
+        }
         ~Tranche() = default;
         Tranche(const Tranche&) = delete;
         Tranche& operator=(const Tranche&) = delete;
@@ -114,10 +174,26 @@ struct DMABufFeedback {
             , formats(WTFMove(other.formats))
         {
             other.flags = 0;
+#if USE(LIBDRM)
+            memcpy(&targetDevice, &other.targetDevice, sizeof(dev_t));
+            memset(&other.targetDevice, 0, sizeof(dev_t));
+#endif
+        }
+
+        CString drmDevice() const
+        {
+#if USE(LIBDRM)
+            return drmDeviceForUsage(&targetDevice, flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SCANOUT);
+#else
+            return { };
+#endif
         }
 
         uint32_t flags { 0 };
         Vector<uint16_t> formats;
+#if USE(LIBDRM)
+        dev_t targetDevice;
+#endif
     };
 
     std::pair<uint32_t, uint64_t> format(uint16_t index)
@@ -128,6 +204,9 @@ struct DMABufFeedback {
     FormatTable formatTable;
     Tranche pendingTranche;
     Vector<Tranche> tranches;
+#if USE(LIBDRM)
+    dev_t mainDevice;
+#endif
 };
 
 /**
@@ -141,6 +220,7 @@ struct _WPEViewWaylandPrivate {
     struct zwp_linux_dmabuf_feedback_v1* dmabufFeedback;
     std::unique_ptr<DMABufFeedback> pendingDMABufFeedback;
     std::unique_ptr<DMABufFeedback> committedDMABufFeedback;
+    GRefPtr<WPEBufferDMABufFormats> preferredDMABufFormats;
 
     Vector<GRefPtr<WPEMonitor>, 1> monitors;
     GRefPtr<WPEMonitor> currentMonitor;
@@ -197,10 +277,10 @@ const struct xdg_surface_listener xdgSurfaceListener = {
         if (width.has_value() && height.has_value()) {
             if (!useSavedSize)
                 wpeViewWaylandSaveSize(view);
-            wpe_view_resize(view, width.value(), height.value());
+            wpe_view_resized(view, width.value(), height.value());
         }
 
-        wpe_view_set_state(view, priv->pendingState.state);
+        wpe_view_state_changed(view, priv->pendingState.state);
         priv->pendingState = { };
         xdg_surface_ack_configure(surface, serial);
     },
@@ -265,7 +345,7 @@ static void wpeViewWaylandUpdateScale(WPEViewWayland* view)
     if (wl_surface_get_version(view->priv->wlSurface) >= WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION)
         wl_surface_set_buffer_scale(view->priv->wlSurface, scale);
 
-    wpe_view_set_scale(WPE_VIEW(view), scale);
+    wpe_view_scale_changed(WPE_VIEW(view), scale);
 }
 
 static const struct wl_surface_listener surfaceListener = {
@@ -327,6 +407,7 @@ static const struct zwp_linux_dmabuf_feedback_v1_listener linuxDMABufFeedbackLis
     {
         auto* view = WPE_VIEW_WAYLAND(data);
         view->priv->committedDMABufFeedback = WTFMove(view->priv->pendingDMABufFeedback);
+        view->priv->preferredDMABufFormats = nullptr;
         g_signal_emit_by_name(view, "preferred-dma-buf-formats-changed");
     },
     // format_table
@@ -337,14 +418,16 @@ static const struct zwp_linux_dmabuf_feedback_v1_listener linuxDMABufFeedbackLis
         close(fd);
     },
     // main_device
-    [](void* data, struct zwp_linux_dmabuf_feedback_v1*, struct wl_array*)
+    [](void* data, struct zwp_linux_dmabuf_feedback_v1*, struct wl_array* device)
     {
         auto* priv = WPE_VIEW_WAYLAND(data)->priv;
         // Compositor might not re-send the format table. In that case, try to reuse the previous one.
         if (!priv->pendingDMABufFeedback && priv->committedDMABufFeedback)
             priv->pendingDMABufFeedback = makeUnique<DMABufFeedback>(WTFMove(priv->committedDMABufFeedback->formatTable));
 
-        // FIXME: handle main device.
+#if USE(LIBDRM)
+        memcpy(&priv->pendingDMABufFeedback->mainDevice, device->data, sizeof(dev_t));
+#endif
     },
     // tranche_done
     [](void* data, struct zwp_linux_dmabuf_feedback_v1*)
@@ -356,8 +439,15 @@ static const struct zwp_linux_dmabuf_feedback_v1_listener linuxDMABufFeedbackLis
         priv->pendingDMABufFeedback->tranches.append(WTFMove(priv->pendingDMABufFeedback->pendingTranche));
     },
     // tranche_target_device
-    [](void*, struct zwp_linux_dmabuf_feedback_v1*, struct wl_array*)
+    [](void* data, struct zwp_linux_dmabuf_feedback_v1*, struct wl_array* device)
     {
+#if USE(LIBDRM)
+        auto* priv = WPE_VIEW_WAYLAND(data)->priv;
+        if (!priv->pendingDMABufFeedback)
+            return;
+
+        memcpy(&priv->pendingDMABufFeedback->pendingTranche.targetDevice, device->data, sizeof(dev_t));
+#endif
     },
     // tranche_formats
     [](void* data, struct zwp_linux_dmabuf_feedback_v1*, struct wl_array* indices)
@@ -414,7 +504,7 @@ static void wpeViewWaylandConstructed(GObject* object)
         auto scale = wpe_monitor_get_scale(priv->currentMonitor.get());
         if (wl_surface_get_version(priv->wlSurface) >= WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION)
             wl_surface_set_buffer_scale(priv->wlSurface, scale);
-        wpe_view_set_scale(view, scale);
+        wpe_view_scale_changed(view, scale);
     }
 
     // The web view default background color is opaque white, so set the whole view region as opaque initially.
@@ -436,10 +526,19 @@ static void wpeViewWaylandDispose(GObject* object)
     G_OBJECT_CLASS(wpe_view_wayland_parent_class)->dispose(object);
 }
 
-static struct wl_buffer* createWaylandBufferFromEGLImage(WPEBuffer* buffer, GError** error)
+static const struct wl_buffer_listener bufferListener = {
+    // release
+    [](void* userData, struct wl_buffer*)
+    {
+        auto* buffer = WPE_BUFFER(userData);
+        wpe_view_buffer_released(wpe_buffer_get_view(buffer), buffer);
+    }
+};
+
+static struct wl_buffer* createWaylandBufferFromEGLImage(WPEView* view, WPEBuffer* buffer, GError** error)
 {
     GUniqueOutPtr<GError> bufferError;
-    auto* eglDisplay = wpe_display_get_egl_display(wpe_buffer_get_display(buffer), &bufferError.outPtr());
+    auto* eglDisplay = wpe_display_get_egl_display(wpe_view_get_display(view), &bufferError.outPtr());
     if (!eglDisplay) {
         g_set_error(error, WPE_VIEW_ERROR, WPE_VIEW_ERROR_RENDER_FAILED, "Failed to render buffer: can't create Wayland buffer because failed to get EGL display: %s", bufferError->message);
         return nullptr;
@@ -468,13 +567,13 @@ static struct wl_buffer* createWaylandBufferFromEGLImage(WPEBuffer* buffer, GErr
     return nullptr;
 }
 
-static struct wl_buffer* createWaylandBufferFromDMABuf(WPEBuffer* buffer, GError** error)
+static struct wl_buffer* createWaylandBufferFromDMABuf(WPEView* view, WPEBuffer* buffer, GError** error)
 {
     if (auto* wlBuffer = static_cast<struct wl_buffer*>(wpe_buffer_get_user_data(buffer)))
         return wlBuffer;
 
     struct wl_buffer* wlBuffer = nullptr;
-    if (auto* dmabuf = wpeDisplayWaylandGetLinuxDMABuf(WPE_DISPLAY_WAYLAND(wpe_buffer_get_display(buffer)))) {
+    if (auto* dmabuf = wpeDisplayWaylandGetLinuxDMABuf(WPE_DISPLAY_WAYLAND(wpe_view_get_display(view)))) {
         auto* bufferDMABuf = WPE_BUFFER_DMA_BUF(buffer);
         auto modifier = wpe_buffer_dma_buf_get_modifier(bufferDMABuf);
         auto* params = zwp_linux_dmabuf_v1_create_params(dmabuf);
@@ -492,10 +591,12 @@ static struct wl_buffer* createWaylandBufferFromDMABuf(WPEBuffer* buffer, GError
             return nullptr;
         }
     } else {
-        wlBuffer = createWaylandBufferFromEGLImage(buffer, error);
+        wlBuffer = createWaylandBufferFromEGLImage(view, buffer, error);
         if (!wlBuffer)
             return nullptr;
     }
+
+    wl_buffer_add_listener(wlBuffer, &bufferListener, buffer);
 
     wpe_buffer_set_user_data(buffer, wlBuffer, reinterpret_cast<GDestroyNotify>(wl_buffer_destroy));
     return wlBuffer;
@@ -533,7 +634,7 @@ static SharedMemoryBuffer* sharedMemoryBufferCreate(WPEDisplayWayland* display, 
     return sharedMemoryBuffer;
 }
 
-static struct wl_buffer* createWaylandBufferSHM(WPEBuffer* buffer, GError** error)
+static struct wl_buffer* createWaylandBufferSHM(WPEView* view, WPEBuffer* buffer, GError** error)
 {
     if (auto* sharedMemoryBuffer = static_cast<SharedMemoryBuffer*>(wpe_buffer_get_user_data(buffer))) {
         GBytes* bytes = wpe_buffer_shm_get_data(WPE_BUFFER_SHM(buffer));
@@ -547,7 +648,7 @@ static struct wl_buffer* createWaylandBufferSHM(WPEBuffer* buffer, GError** erro
         return nullptr;
     }
 
-    auto* display = WPE_DISPLAY_WAYLAND(wpe_buffer_get_display(buffer));
+    auto* display = WPE_DISPLAY_WAYLAND(wpe_view_get_display(view));
     auto* sharedMemoryBuffer = sharedMemoryBufferCreate(display, wpe_buffer_shm_get_data(bufferSHM),
         wpe_buffer_get_width(buffer), wpe_buffer_get_height(buffer), wpe_buffer_shm_get_stride(bufferSHM));
     if (!sharedMemoryBuffer) {
@@ -555,17 +656,19 @@ static struct wl_buffer* createWaylandBufferSHM(WPEBuffer* buffer, GError** erro
         return nullptr;
     }
 
+    wl_buffer_add_listener(sharedMemoryBuffer->wlBuffer, &bufferListener, buffer);
+
     wpe_buffer_set_user_data(buffer, sharedMemoryBuffer, reinterpret_cast<GDestroyNotify>(sharedMemoryBufferDestroy));
     return sharedMemoryBuffer->wlBuffer;
 }
 
-static struct wl_buffer* createWaylandBuffer(WPEBuffer* buffer, GError** error)
+static struct wl_buffer* createWaylandBuffer(WPEView* view, WPEBuffer* buffer, GError** error)
 {
     struct wl_buffer* wlBuffer = nullptr;
     if (WPE_IS_BUFFER_DMA_BUF(buffer))
-        wlBuffer = createWaylandBufferFromDMABuf(buffer, error);
+        wlBuffer = createWaylandBufferFromDMABuf(view, buffer, error);
     else if (WPE_IS_BUFFER_SHM(buffer))
-        wlBuffer = createWaylandBufferSHM(buffer, error);
+        wlBuffer = createWaylandBufferSHM(view, buffer, error);
     else
         RELEASE_ASSERT_NOT_REACHED();
 
@@ -588,7 +691,7 @@ const struct wl_callback_listener frameListener = {
 
 static gboolean wpeViewWaylandRenderBuffer(WPEView* view, WPEBuffer* buffer, GError** error)
 {
-    auto* wlBuffer = createWaylandBuffer(buffer, error);
+    auto* wlBuffer = createWaylandBuffer(view, buffer, error);
     if (!wlBuffer)
         return FALSE;
 
@@ -632,6 +735,16 @@ static WPEMonitor* wpeViewWaylandGetMonitor(WPEView* view)
     return priv->currentMonitor.get();
 }
 
+static gboolean wpeViewWaylandResize(WPEView* view, int width, int height)
+{
+    auto* priv = WPE_VIEW_WAYLAND(view)->priv;
+    if (!priv->xdgToplevel)
+        return FALSE;
+
+    wpe_view_resized(view, width, height);
+    return TRUE;
+}
+
 static gboolean wpeViewWaylandSetFullscreen(WPEView* view, gboolean fullscreen)
 {
     auto* priv = WPE_VIEW_WAYLAND(view)->priv;
@@ -664,31 +777,30 @@ static gboolean wpeViewWaylandSetMaximized(WPEView* view, gboolean maximized)
     return TRUE;
 }
 
-static GList* wpeViewWaylandGetPreferredDMABufFormats(WPEView* view)
+static WPEBufferDMABufFormats* wpeViewWaylandGetPreferredDMABufFormats(WPEView* view)
 {
     auto* priv = WPE_VIEW_WAYLAND(view)->priv;
+    if (priv->preferredDMABufFormats)
+        return priv->preferredDMABufFormats.get();
+
     if (!priv->committedDMABufFeedback)
         return nullptr;
 
-    GList* preferredFormats = nullptr;
+    auto mainDevice = priv->committedDMABufFeedback->drmDevice();
+    auto* builder = wpe_buffer_dma_buf_formats_builder_new(mainDevice.data());
     for (const auto& tranche : priv->committedDMABufFeedback->tranches) {
-        uint32_t previousFormat = 0;
-        GRefPtr<GArray> modifiers = adoptGRef(g_array_new(FALSE, TRUE, sizeof(guint64)));
         WPEBufferDMABufFormatUsage usage = tranche.flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SCANOUT ? WPE_BUFFER_DMA_BUF_FORMAT_USAGE_SCANOUT : WPE_BUFFER_DMA_BUF_FORMAT_USAGE_RENDERING;
-        auto formatsLength = tranche.formats.size();
-        for (size_t i = 0; i < formatsLength; ++i) {
-            auto [format, modifier] = priv->committedDMABufFeedback->format(tranche.formats[i]);
-            g_array_append_val(modifiers.get(), modifier);
-            if (i && format != previousFormat) {
-                preferredFormats = g_list_prepend(preferredFormats, wpe_buffer_dma_buf_format_new(usage, previousFormat, modifiers.get()));
-                modifiers = adoptGRef(g_array_new(FALSE, TRUE, sizeof(guint64)));
-            }
-            previousFormat = format;
+        auto targetDevice = tranche.drmDevice();
+        wpe_buffer_dma_buf_formats_builder_append_group(builder, targetDevice.data(), usage);
+
+        for (const auto& format : tranche.formats) {
+            auto [fourcc, modifier] = priv->committedDMABufFeedback->format(format);
+            wpe_buffer_dma_buf_formats_builder_append_format(builder, fourcc, modifier);
         }
-        if (previousFormat)
-            preferredFormats = g_list_prepend(preferredFormats, wpe_buffer_dma_buf_format_new(usage, previousFormat, modifiers.get()));
     }
-    return g_list_reverse(preferredFormats);
+
+    priv->preferredDMABufFormats = adoptGRef(wpe_buffer_dma_buf_formats_builder_end(builder));
+    return priv->preferredDMABufFormats.get();
 }
 
 static void wpeViewWaylandSetCursorFromName(WPEView* view, const char* name)
@@ -741,6 +853,7 @@ static void wpe_view_wayland_class_init(WPEViewWaylandClass* viewWaylandClass)
     WPEViewClass* viewClass = WPE_VIEW_CLASS(viewWaylandClass);
     viewClass->render_buffer = wpeViewWaylandRenderBuffer;
     viewClass->get_monitor = wpeViewWaylandGetMonitor;
+    viewClass->resize = wpeViewWaylandResize;
     viewClass->set_fullscreen = wpeViewWaylandSetFullscreen;
     viewClass->set_maximized = wpeViewWaylandSetMaximized;
     viewClass->get_preferred_dma_buf_formats = wpeViewWaylandGetPreferredDMABufFormats;

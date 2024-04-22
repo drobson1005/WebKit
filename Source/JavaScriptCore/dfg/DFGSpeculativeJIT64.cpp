@@ -3773,11 +3773,13 @@ void SpeculativeJIT::compile(Node* node)
             scratch2.emplace(this);
             scratch2GPR = scratch2->gpr();
         }
-        
-        emitTypedArrayBoundsCheck(node, baseGPR, indexGPR, scratchGPR, scratch2GPR);
-        
+
+        Jump outOfBounds = jumpForTypedArrayOutOfBounds(node, baseGPR, indexGPR, scratchGPR, scratch2GPR);
+        if (outOfBounds.isSet())
+            speculationCheck(OutOfBounds, JSValueRegs(), nullptr, outOfBounds);
+
         GPRTemporary args[2];
-        
+
         bool ok = true;
         for (unsigned i = numExtraArgs; i--;) {
             if (!getIntTypedArrayStoreOperandForAtomics(args[i], indexGPR, argEdges[i])) {
@@ -3906,7 +3908,7 @@ void SpeculativeJIT::compile(Node* node)
         }
         constexpr bool canSpeculate = false;
         constexpr bool shouldBox = false;
-        setIntTypedArrayLoadResult(node, JSValueRegs(resultGPR), type, canSpeculate, shouldBox, resultFPR);
+        setIntTypedArrayLoadResult(node, JSValueRegs(resultGPR), type, canSpeculate, shouldBox, resultFPR, { });
         break;
     }
         
@@ -4212,6 +4214,11 @@ void SpeculativeJIT::compile(Node* node)
 
     case ToPropertyKey: {
         compileToPropertyKey(node);
+        break;
+    }
+
+    case ToPropertyKeyOrNumber: {
+        compileToPropertyKeyOrNumber(node);
         break;
     }
 
@@ -4606,6 +4613,7 @@ void SpeculativeJIT::compile(Node* node)
         break;
 
     case GetArrayLength:
+    case GetUndetachedTypeArrayLength:
         compileGetArrayLength(node);
         break;
 
@@ -7292,7 +7300,7 @@ void SpeculativeJIT::compileCreateClonedArguments(Node* node)
             static_assert((1U << 3) == sizeof(JSValue));
             lshift32(sizeGPR, TrustedImm32(3), scratchGPR);
             add32(TrustedImm32(sizeof(IndexingHeader) + outOfLineCapacity * sizeof(JSValue)), scratchGPR, scratch2GPR);
-            emitAllocateVariableSized(storageGPR, vm().jsValueGigacageAuxiliarySpace(), scratch2GPR, scratchGPR, resultGPR, slowCases);
+            emitAllocateVariableSized(storageGPR, vm().auxiliarySpace(), scratch2GPR, scratchGPR, resultGPR, slowCases);
             addPtr(TrustedImm32(sizeof(IndexingHeader) + outOfLineCapacity * sizeof(JSValue)), storageGPR);
             ASSERT(Butterfly::offsetOfPublicLength() + static_cast<ptrdiff_t>(sizeof(uint32_t)) == Butterfly::offsetOfVectorLength());
             storePair32(sizeGPR, sizeGPR, storageGPR, TrustedImm32(Butterfly::offsetOfPublicLength()));

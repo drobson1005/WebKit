@@ -65,6 +65,8 @@ WTF_WEAK_LINK_FORCE_IMPORT(EGL_GetPlatformDisplayEXT);
 
 namespace WebCore {
 
+using GL = GraphicsContextGL;
+
 // In isCurrentContextPredictable() == true case this variable is accessed in single-threaded manner.
 // In isCurrentContextPredictable() == false case this variable is accessed from multiple threads but always sequentially
 // and it always contains nullptr and nullptr is always written to it.
@@ -429,6 +431,14 @@ GraphicsContextGLANGLE::~GraphicsContextGLANGLE()
             GL_DeleteFramebuffers(1, &m_preserveDrawingBufferFBO);
     }
     if (m_contextObj) {
+        for (auto* image : m_eglImages.values()) {
+            bool result = EGL_DestroyImageKHR(m_displayObj, image);
+            ASSERT_UNUSED(result, !!result);
+        }
+        for (auto* sync : m_eglSyncs.values()) {
+            bool result = EGL_DestroySync(m_displayObj, sync);
+            ASSERT_UNUSED(result, !!result);
+        }
         makeCurrent(m_displayObj, EGL_NO_CONTEXT);
         EGL_DestroyContext(m_displayObj, m_contextObj);
     }
@@ -616,15 +626,20 @@ void GraphicsContextGLCocoa::destroyPbufferAndDetachIOSurface(void* handle)
     WebCore::destroyPbufferAndDetachIOSurface(m_displayObj, handle);
 }
 
-GCEGLImage GraphicsContextGLCocoa::createAndBindEGLImage(GCGLenum target, EGLImageSource source, GCGLint layer)
+#if ENABLE(WEBXR)
+GCGLExternalImage GraphicsContextGLCocoa::createExternalImage(ExternalImageSource&& source, GCGLenum internalFormat, GCGLint layer)
 {
     EGLDeviceEXT eglDevice = EGL_NO_DEVICE_EXT;
-    if (!EGL_QueryDisplayAttribEXT(platformDisplay(), EGL_DEVICE_EXT, reinterpret_cast<EGLAttrib*>(&eglDevice)))
-        return nullptr;
+    if (!EGL_QueryDisplayAttribEXT(platformDisplay(), EGL_DEVICE_EXT, reinterpret_cast<EGLAttrib*>(&eglDevice))) {
+        addError(GCGLErrorCode::InvalidOperation);
+        return { };
+    }
 
     id<MTLDevice> mtlDevice = nil;
-    if (!EGL_QueryDeviceAttribEXT(eglDevice, EGL_METAL_DEVICE_ANGLE, reinterpret_cast<EGLAttrib*>(&mtlDevice)))
-        return nullptr;
+    if (!EGL_QueryDeviceAttribEXT(eglDevice, EGL_METAL_DEVICE_ANGLE, reinterpret_cast<EGLAttrib*>(&mtlDevice))) {
+        addError(GCGLErrorCode::InvalidOperation);
+        return { };
+    }
 
     RetainPtr<id<MTLTexture>> texture = WTF::switchOn(WTFMove(source),
     [&](EGLImageSourceIOSurfaceHandle&& ioSurface) -> RetainPtr<id> {
@@ -661,22 +676,70 @@ GCEGLImage GraphicsContextGLCocoa::createAndBindEGLImage(GCGLenum target, EGLIma
 #endif
     });
 
-    if (!texture)
-        return nullptr;
+    if (!texture) {
+        addError(GCGLErrorCode::InvalidOperation);
+        return { };
+    }
 
     // Create an EGLImage out of the MTLTexture
+#if PLATFORM(IOS_FAMILY_SIMULATOR)
+    UNUSED_VARIABLE(internalFormat);
     const EGLint attributes[] = { EGL_METAL_TEXTURE_ARRAY_SLICE_ANGLE, layer, EGL_NONE };
+#else
+    const EGLint attributes[] = {
+        EGL_METAL_TEXTURE_ARRAY_SLICE_ANGLE, layer,
+        EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, static_cast<EGLint>(internalFormat),
+        EGL_NONE
+    };
+#endif
     auto eglImage = EGL_CreateImageKHR(platformDisplay(), EGL_NO_CONTEXT, EGL_METAL_TEXTURE_ANGLE, reinterpret_cast<EGLClientBuffer>(texture.get()), attributes);
-    if (!eglImage)
-        return nullptr;
+    if (!eglImage) {
+        addError(GCGLErrorCode::InvalidOperation);
+        return { };
+    }
+    auto newName = ++m_nextExternalImageName;
+    m_eglImages.add(newName, eglImage);
+    return newName;
+}
 
-    // Tell the currently bound texture to use the EGLImage.
+void GraphicsContextGLCocoa::bindExternalImage(GCGLenum target, GCGLExternalImage image)
+{
+    EGLImage eglImage = EGL_NO_IMAGE_KHR;
+    if (image) {
+        eglImage = m_eglImages.get(image);
+        if (!eglImage) {
+            addError(GCGLErrorCode::InvalidOperation);
+            return;
+        }
+    }
     if (target == RENDERBUFFER)
         GL_EGLImageTargetRenderbufferStorageOES(RENDERBUFFER, eglImage);
     else
         GL_EGLImageTargetTexture2DOES(target, eglImage);
+}
 
-    return eglImage;
+bool GraphicsContextGLCocoa::addFoveation(IntSize physicalSizeLeft, IntSize physicalSizeRight, IntSize screenSize, std::span<const GCGLfloat> horizontalSamplesLeft, std::span<const GCGLfloat> verticalSamplesLeft, std::span<const GCGLfloat> horizontalSamplesRight)
+{
+    m_rasterizationRateMap[PlatformXR::Layout::Shared] = newRasterizationRateMap(m_displayObj, physicalSizeLeft, physicalSizeRight, screenSize, horizontalSamplesLeft, verticalSamplesLeft, horizontalSamplesRight);
+    return m_rasterizationRateMap[PlatformXR::Layout::Shared];
+}
+
+void GraphicsContextGLCocoa::enableFoveation(GCGLuint fbo)
+{
+#if !PLATFORM(IOS_FAMILY_SIMULATOR)
+    GL_BindMetalRasterizationRateMapANGLE(fbo, m_rasterizationRateMap[PlatformXR::Layout::Shared].get());
+    GL_Enable(GL::VARIABLE_RASTERIZATION_RATE_ANGLE);
+#else
+    UNUSED_PARAM(fbo);
+#endif
+}
+
+void GraphicsContextGLCocoa::disableFoveation()
+{
+#if !PLATFORM(IOS_FAMILY_SIMULATOR)
+    GL_Disable(GL::VARIABLE_RASTERIZATION_RATE_ANGLE);
+    GL_BindMetalRasterizationRateMapANGLE(0, nullptr);
+#endif
 }
 
 RetainPtr<id> GraphicsContextGLCocoa::newSharedEventWithMachPort(mach_port_t sharedEventSendRight)
@@ -684,41 +747,42 @@ RetainPtr<id> GraphicsContextGLCocoa::newSharedEventWithMachPort(mach_port_t sha
     return WebCore::newSharedEventWithMachPort(m_displayObj, sharedEventSendRight);
 }
 
-GCEGLSync GraphicsContextGLCocoa::createEGLSync(ExternalEGLSyncEvent syncEvent)
+GCGLExternalSync GraphicsContextGLCocoa::createExternalSync(ExternalSyncSource&& syncEvent)
 {
     auto [syncEventHandle, signalValue] = WTFMove(syncEvent);
     auto sharedEvent = newSharedEventWithMachPort(syncEventHandle.sendRight());
     if (!sharedEvent) {
         LOG(WebGL, "Unable to create a MTLSharedEvent from the syncEvent in createEGLSync.");
-        return nullptr;
+        addError(GCGLErrorCode::InvalidOperation);
+        return { };
     }
-
-    return createEGLSync(sharedEvent.get(), signalValue);
+    return createExternalSync(sharedEvent.get(), signalValue);
 }
 
 bool GraphicsContextGLCocoa::enableRequiredWebXRExtensions()
 {
-#if ENABLE(WEBXR)
     if (!makeContextCurrent())
         return false;
     if (enableRequiredWebXRExtensionsImpl())
         return true;
-#endif
     return false;
 }
 
-#if ENABLE(WEBXR)
 bool GraphicsContextGLCocoa::enableRequiredWebXRExtensionsImpl()
 {
     return enableExtension("GL_ANGLE_framebuffer_multisample"_s)
         && enableExtension("GL_ANGLE_framebuffer_blit"_s)
         && enableExtension("GL_EXT_sRGB"_s)
         && enableExtension("GL_OES_EGL_image"_s)
-        && enableExtension("GL_OES_rgb8_rgba8"_s);
+        && enableExtension("GL_OES_rgb8_rgba8"_s)
+#if !PLATFORM(IOS_FAMILY_SIMULATOR)
+        && enableExtension("GL_ANGLE_variable_rasterization_rate_metal"_s)
+#endif
+        && enableExtension("GL_NV_framebuffer_blit"_s);
 }
 #endif
 
-GCEGLSync GraphicsContextGLCocoa::createEGLSync(id sharedEvent, uint64_t signalValue)
+GCGLExternalSync GraphicsContextGLCocoa::createExternalSync(id sharedEvent, uint64_t signalValue)
 {
     COMPILE_ASSERT(sizeof(EGLAttrib) == sizeof(void*), "EGLAttrib not pointer-sized!");
     auto signalValueLo = static_cast<EGLAttrib>(signalValue);
@@ -732,7 +796,14 @@ GCEGLSync GraphicsContextGLCocoa::createEGLSync(id sharedEvent, uint64_t signalV
         EGL_SYNC_METAL_SHARED_EVENT_SIGNAL_VALUE_HI_ANGLE, signalValueHi,
         EGL_NONE
     };
-    return EGL_CreateSync(display, EGL_SYNC_METAL_SHARED_EVENT_ANGLE, syncAttributes);
+    auto* eglSync = EGL_CreateSync(display, EGL_SYNC_METAL_SHARED_EVENT_ANGLE, syncAttributes);
+    if (!eglSync) {
+        addError(GCGLErrorCode::InvalidOperation);
+        return { };
+    }
+    auto newName = ++m_nextExternalSyncName;
+    m_eglSyncs.add(newName, eglSync);
+    return newName;
 }
 
 void GraphicsContextGLCocoa::waitUntilWorkScheduled()
@@ -926,13 +997,13 @@ void GraphicsContextGLCocoa::insertFinishedSignalOrInvoke(Function<void()> signa
     [event notifyListener:m_finishedMetalSharedEventListener.get() atValue:signalValue block:^(id<MTLSharedEvent>, uint64_t) {
         blockSignal();
     }];
-    auto* sync = createEGLSync(event, signalValue);
+    auto sync = createExternalSync(event, signalValue);
     if (UNLIKELY(!sync)) {
         event.signaledValue = signalValue;
         ASSERT_NOT_REACHED();
         return;
     }
-    destroyEGLSync(sync);
+    deleteExternalSync(sync);
 }
 
 }

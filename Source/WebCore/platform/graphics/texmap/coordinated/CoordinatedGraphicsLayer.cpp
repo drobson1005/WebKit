@@ -630,7 +630,7 @@ void CoordinatedGraphicsLayer::setShowRepaintCounter(bool show)
 
 void CoordinatedGraphicsLayer::setContentsToImage(Image* image)
 {
-    auto nativeImage = image ? image->nativeImageForCurrentFrame() : nullptr;
+    auto nativeImage = image ? image->currentNativeImage() : nullptr;
     if (m_compositedImage == image && m_compositedNativeImage == nativeImage)
         return;
 
@@ -1514,6 +1514,16 @@ void CoordinatedGraphicsLayer::dumpAdditionalProperties(TextStream& textStream, 
 double CoordinatedGraphicsLayer::backingStoreMemoryEstimate() const
 {
     return 0.0;
+}
+
+Vector<std::pair<String, double>> CoordinatedGraphicsLayer::acceleratedAnimationsForTesting(const Settings&) const
+{
+    Vector<std::pair<String, double>> animations;
+
+    for (auto& animation : m_animations.animations())
+        animations.append({ animatedPropertyIDAsString(animation.keyframes().property()), animation.state() == Nicosia::Animation::AnimationState::Playing ? 1 : 0 });
+
+    return animations;
 }
 
 } // namespace WebCore

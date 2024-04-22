@@ -29,7 +29,6 @@
 #include <optional>
 #include <variant>
 #include <vector>
-#include <wtf/EnumTraits.h>
 #include <wtf/Hasher.h>
 #include <wtf/Markable.h>
 
@@ -477,16 +476,3 @@ enum class ColorGlyphType : uint8_t {
 };
 
 } // namespace WebCore
-
-namespace WTF {
-
-template<> struct EnumTraits<WebCore::ResolvedEmojiPolicy> {
-    using values = EnumValues<
-        WebCore::ResolvedEmojiPolicy,
-        WebCore::ResolvedEmojiPolicy::NoPreference,
-        WebCore::ResolvedEmojiPolicy::RequireText,
-        WebCore::ResolvedEmojiPolicy::RequireEmoji
-    >;
-};
-
-} // namespace WTF

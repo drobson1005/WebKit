@@ -206,8 +206,9 @@ class Tracker(GenericTracker):
         issue._link = '{}/show_bug.cgi?id={}'.format(self.url, issue.id)
         issue._labels = []
         issue._classification = ''  # Bugzilla doesn't have a concept of "classification"
+        issue._source_changes = []  # We need to parse the bug to find any source changes
 
-        if member in ('title', 'timestamp', 'creator', 'opened', 'assignee', 'watchers', 'project', 'component', 'version', 'keywords', 'related'):
+        if member in ('title', 'timestamp', 'modified', 'creator', 'opened', 'assignee', 'watchers', 'project', 'component', 'version', 'keywords', 'related'):
             response = self.session.get(
                 '{}/rest/bug/{}{}'.format(self.url, issue.id, self._login_arguments(required=False)),
                 timeout=self.timeout,
@@ -222,6 +223,7 @@ class Tracker(GenericTracker):
                 response = response[0]
                 issue._title = response['summary']
                 issue._timestamp = int(calendar.timegm(datetime.strptime(response['creation_time'], '%Y-%m-%dT%H:%M:%SZ').timetuple()))
+                issue._modified = int(calendar.timegm(datetime.strptime(response['last_change_time'], '%Y-%m-%dT%H:%M:%SZ').timetuple()))
                 if response.get('creator_detail'):
                     issue._creator = self.user(
                         name=response['creator_detail'].get('real_name'),
@@ -349,7 +351,7 @@ class Tracker(GenericTracker):
 
         return issue
 
-    def set(self, issue, assignee=None, opened=None, why=None, project=None, component=None, version=None, original=None, keywords=None, **properties):
+    def set(self, issue, assignee=None, opened=None, why=None, project=None, component=None, version=None, original=None, keywords=None, source_changes=None, **properties):
         update_dict = dict()
 
         if properties:
@@ -438,6 +440,10 @@ class Tracker(GenericTracker):
                 issue._version = version
             if keywords is not None:
                 issue._keywords = keywords
+
+        if source_changes:
+            sys.stderr.write('Bugzilla does not support source changes at this time\n')
+            return None
 
         return issue
 

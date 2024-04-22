@@ -514,7 +514,7 @@ void GPUProcessProxy::gpuProcessExited(ProcessTerminationReason reason)
     case ProcessTerminationReason::IdleExit:
     case ProcessTerminationReason::Unresponsive:
     case ProcessTerminationReason::Crash:
-        RELEASE_LOG_ERROR(Process, "%p - GPUProcessProxy::gpuProcessExited: reason=%" PUBLIC_LOG_STRING, this, processTerminationReasonToString(reason));
+        RELEASE_LOG_ERROR(Process, "%p - GPUProcessProxy::gpuProcessExited: reason=%" PUBLIC_LOG_STRING, this, processTerminationReasonToString(reason).characters());
         break;
     case ProcessTerminationReason::ExceededProcessCountLimit:
     case ProcessTerminationReason::NavigationSwap:
@@ -609,6 +609,10 @@ void GPUProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Connect
         });
     }).get());
 #endif
+
+#if USE(EXTENSIONKIT)
+    sendBookmarkDataForCacheDirectory();
+#endif
 }
 
 void GPUProcessProxy::updateProcessAssertion()
@@ -644,7 +648,8 @@ static inline GPUProcessSessionParameters gpuProcessSessionParameters(const Webs
 {
     GPUProcessSessionParameters parameters;
 
-    parameters.mediaCacheDirectory = store.resolvedMediaCacheDirectory();
+    auto& resolvedDirectories = const_cast<WebsiteDataStore&>(store).resolvedDirectories();
+    parameters.mediaCacheDirectory = resolvedDirectories.mediaCacheDirectory;
     SandboxExtension::Handle mediaCacheDirectoryExtensionHandle;
     if (!parameters.mediaCacheDirectory.isEmpty()) {
         if (auto handle = SandboxExtension::createHandleWithoutResolvingPath(parameters.mediaCacheDirectory, SandboxExtension::Type::ReadWrite))
@@ -652,7 +657,7 @@ static inline GPUProcessSessionParameters gpuProcessSessionParameters(const Webs
     }
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
-    parameters.mediaKeysStorageDirectory = store.resolvedMediaKeysDirectory();
+    parameters.mediaKeysStorageDirectory = resolvedDirectories.mediaKeysStorageDirectory;
     SandboxExtension::Handle mediaKeysStorageDirectorySandboxExtensionHandle;
     if (!parameters.mediaKeysStorageDirectory.isEmpty()) {
         if (auto handle = SandboxExtension::createHandleWithoutResolvingPath(parameters.mediaKeysStorageDirectory, SandboxExtension::Type::ReadWrite))

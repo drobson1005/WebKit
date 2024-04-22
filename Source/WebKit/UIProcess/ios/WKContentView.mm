@@ -72,7 +72,9 @@
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <wtf/Condition.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/UUID.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
+#import <wtf/cocoa/SpanCocoa.h>
 #import <wtf/text/TextStream.h>
 #import <wtf/threads/BinarySemaphore.h>
 #import "AppKitSoftLink.h"
@@ -171,6 +173,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     RetainPtr<WKInspectorIndicationView> _inspectorIndicationView;
     RetainPtr<WKInspectorHighlightView> _inspectorHighlightView;
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    String _spatialTrackingLabel;
+    RetainPtr<UIView> _spatialTrackingView;
+#endif
+
 #if HAVE(VISIBILITY_PROPAGATION_VIEW)
 #if USE(EXTENSIONKIT)
     RetainPtr<UIView> _visibilityPropagationViewForWebProcess;
@@ -260,6 +267,17 @@ static NSArray *keyCommandsPlaceholderHackForEvernote(id self, SEL _cmd)
 
 #if HAVE(VISIBILITY_PROPAGATION_VIEW)
     [self _installVisibilityPropagationViews];
+#endif
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    _spatialTrackingView = adoptNS([[UIView alloc] init]);
+    [_spatialTrackingView layer].separatedState = kCALayerSeparatedStateTracked;
+    _spatialTrackingLabel = makeString("WKContentView Label: "_s, createVersion4UUIDString());
+    [[_spatialTrackingView layer] setValue:(NSString *)_spatialTrackingLabel forKeyPath:@"separatedOptions.STSLabel"];
+    [_spatialTrackingView setAutoresizingMask:UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin];
+    [_spatialTrackingView setFrame:CGRectMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds), 0, 0)];
+    [_spatialTrackingView setUserInteractionEnabled:NO];
+    [self addSubview:_spatialTrackingView.get()];
 #endif
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applicationWillResignActive:) name:UIApplicationWillResignActiveNotification object:[UIApplication sharedApplication]];
@@ -713,6 +731,13 @@ static WebCore::FloatBoxExtent floatBoxExtent(UIEdgeInsets insets)
     return self.window.windowScene.interfaceOrientation;
 }
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+- (const String&)spatialTrackingLabel
+{
+    return _spatialTrackingLabel;
+}
+#endif
+
 - (BOOL)canBecomeFocused
 {
     auto delegate = static_cast<id <WKUIDelegatePrivate>>(self.webView.UIDelegate);
@@ -791,7 +816,7 @@ static void storeAccessibilityRemoteConnectionInformation(id element, pid_t pid,
         [self _updateRemoteAccessibilityRegistration:YES];
         storeAccessibilityRemoteConnectionInformation(self, _page->process().processID(), uuid);
 
-        std::span<const uint8_t> elementToken(reinterpret_cast<const uint8_t*>([remoteElementToken bytes]), [remoteElementToken length]);
+        auto elementToken = span(remoteElementToken);
         _page->registerUIProcessAccessibilityTokens(elementToken, elementToken);
     }
 }

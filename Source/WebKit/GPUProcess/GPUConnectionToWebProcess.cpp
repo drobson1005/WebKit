@@ -61,6 +61,8 @@
 #include "RemoteSampleBufferDisplayLayerManagerMessages.h"
 #include "RemoteSampleBufferDisplayLayerMessages.h"
 #include "RemoteScrollingCoordinatorTransaction.h"
+#include "RemoteSharedResourceCache.h"
+#include "RemoteSharedResourceCacheMessages.h"
 #include "ScopedRenderingResourcesRequest.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebErrors.h"
@@ -183,10 +185,10 @@ public:
     }
 
 private:
-    Logger& logger() final { return m_process.logger(); }
+    Logger& logger() final { return m_process.get()->logger(); }
     void addMessageReceiver(IPC::ReceiverName, IPC::MessageReceiver&) final { }
     void removeMessageReceiver(IPC::ReceiverName messageReceiverName) final { }
-    IPC::Connection& connection() final { return m_process.connection(); }
+    IPC::Connection& connection() final { return m_process.get()->connection(); }
     bool willStartCapture(CaptureDevice::DeviceType type) const final
     {
         switch (type) {
@@ -195,9 +197,9 @@ private:
         case CaptureDevice::DeviceType::Speaker:
             return false;
         case CaptureDevice::DeviceType::Microphone:
-            return m_process.allowsAudioCapture();
+            return m_process.get()->allowsAudioCapture();
         case CaptureDevice::DeviceType::Camera:
-            if (!m_process.allowsVideoCapture())
+            if (!m_process.get()->allowsVideoCapture())
                 return false;
 #if PLATFORM(IOS) || PLATFORM(VISION)
             MediaSessionManageriOS::providePresentingApplicationPID();
@@ -205,28 +207,28 @@ private:
             return true;
             break;
         case CaptureDevice::DeviceType::Screen:
-            return m_process.allowsDisplayCapture();
+            return m_process.get()->allowsDisplayCapture();
         case CaptureDevice::DeviceType::Window:
-            return m_process.allowsDisplayCapture();
+            return m_process.get()->allowsDisplayCapture();
         }
     }
     
     bool setCaptureAttributionString() final
     {
-        return m_process.setCaptureAttributionString();
+        return m_process.get()->setCaptureAttributionString();
     }
 
 #if ENABLE(APP_PRIVACY_REPORT)
     void setTCCIdentity() final
     {
-        m_process.setTCCIdentity();
+        m_process.get()->setTCCIdentity();
     }
 #endif
 
 #if ENABLE(EXTENSION_CAPABILITIES)
     bool setCurrentMediaEnvironment(WebCore::PageIdentifier pageIdentifier) final
     {
-        auto mediaEnvironment = m_process.mediaEnvironment(pageIdentifier);
+        auto mediaEnvironment = m_process.get()->mediaEnvironment(pageIdentifier);
         bool result = !mediaEnvironment.isEmpty();
         WebCore::RealtimeMediaSourceCenter::singleton().setCurrentMediaEnvironment(WTFMove(mediaEnvironment));
         return result;
@@ -236,21 +238,21 @@ private:
     void startProducingData(CaptureDevice::DeviceType type) final
     {
         if (type == CaptureDevice::DeviceType::Microphone)
-            m_process.startCapturingAudio();
+            m_process.get()->startCapturingAudio();
 #if PLATFORM(IOS)
         else if (type == CaptureDevice::DeviceType::Camera)
-            m_process.overridePresentingApplicationPIDIfNeeded();
+            m_process.get()->overridePresentingApplicationPIDIfNeeded();
 #endif
     }
 
     const ProcessIdentity& resourceOwner() const final
     {
-        return m_process.webProcessIdentity();
+        return m_process.get()->webProcessIdentity();
     }
 
-    RemoteVideoFrameObjectHeap* remoteVideoFrameObjectHeap() final { return &m_process.videoFrameObjectHeap(); }
+    RemoteVideoFrameObjectHeap* remoteVideoFrameObjectHeap() final { return &m_process.get()->videoFrameObjectHeap(); }
 
-    GPUConnectionToWebProcess& m_process;
+    ThreadSafeWeakPtr<GPUConnectionToWebProcess> m_process;
 };
 
 #endif
@@ -347,6 +349,13 @@ GPUConnectionToWebProcess::~GPUConnectionToWebProcess()
 #endif
 
     --gObjectCountForTesting;
+}
+
+Ref<RemoteSharedResourceCache> GPUConnectionToWebProcess::sharedResourceCache()
+{
+    if (!m_sharedResourceCache)
+        m_sharedResourceCache = RemoteSharedResourceCache::create();
+    return *m_sharedResourceCache;
 }
 
 uint64_t GPUConnectionToWebProcess::gObjectCountForTesting = 0;
@@ -480,7 +489,7 @@ bool GPUConnectionToWebProcess::allowsExitUnderMemoryPressure() const
     if (!m_sampleBufferDisplayLayerManager->allowsExitUnderMemoryPressure())
         return false;
 #endif
-#if PLATFORM(COCOA) && ENABLE(MEDIA_STREAM)
+#if PLATFORM(COCOA) && ENABLE(MEDIA_RECORDER)
     if (m_remoteMediaRecorderManager && !m_remoteMediaRecorderManager->allowsExitUnderMemoryPressure())
         return false;
 #endif
@@ -519,7 +528,7 @@ void GPUConnectionToWebProcess::didReceiveInvalidMessage(IPC::Connection& connec
     if (connection.ignoreInvalidMessageForTesting())
         return;
 #endif
-    RELEASE_LOG_FAULT(IPC, "Received an invalid message '%" PUBLIC_LOG_STRING "' from WebContent process %" PRIu64 ", requesting for it to be terminated.", description(messageName), m_webProcessIdentifier.toUInt64());
+    RELEASE_LOG_FAULT(IPC, "Received an invalid message '%" PUBLIC_LOG_STRING "' from WebContent process %" PRIu64 ", requesting for it to be terminated.", description(messageName).characters(), m_webProcessIdentifier.toUInt64());
     terminateWebProcess();
 }
 
@@ -579,7 +588,7 @@ RemoteAudioMediaStreamTrackRendererInternalUnitManager& GPUConnectionToWebProces
 }
 #endif
 
-#if PLATFORM(COCOA) && ENABLE(MEDIA_STREAM)
+#if PLATFORM(COCOA) && ENABLE(MEDIA_RECORDER)
 RemoteMediaRecorderManager& GPUConnectionToWebProcess::mediaRecorderManager()
 {
     if (!m_remoteMediaRecorderManager)
@@ -642,11 +651,6 @@ void GPUConnectionToWebProcess::releaseRenderingBackend(RenderingBackendIdentifi
     bool found = m_remoteRenderingBackendMap.remove(renderingBackendIdentifier);
     ASSERT_UNUSED(found, found);
     gpuProcess().tryExitIfUnusedAndUnderMemoryPressure();
-}
-
-void GPUConnectionToWebProcess::releaseSerializedImageBuffer(WebCore::RenderingResourceIdentifier identifier)
-{
-    m_remoteSerializedImageBufferObjectHeap.remove({ { identifier, 0 }, 0 });
 }
 
 #if ENABLE(WEBGL)
@@ -838,6 +842,16 @@ void GPUConnectionToWebProcess::releaseRemoteCommandListener(RemoteRemoteCommand
 
 void GPUConnectionToWebProcess::setMediaOverridesForTesting(MediaOverridesForTesting overrides)
 {
+    if (!allowTestOnlyIPC()) {
+        MESSAGE_CHECK(!overrides.systemHasAC && !overrides.systemHasBattery && !overrides.vp9HardwareDecoderDisabled && !overrides.vp9DecoderDisabled && !overrides.vp9ScreenSizeAndScale);
+#if PLATFORM(COCOA)
+#if ENABLE(VP9)
+        VP9TestingOverrides::singleton().resetOverridesToDefaultValues();
+#endif
+        SystemBatteryStatusTestingOverrides::singleton().resetOverridesToDefaultValues();
+#endif
+        return;
+    }
 #if ENABLE(VP9) && PLATFORM(COCOA)
     VP9TestingOverrides::singleton().setHardwareDecoderDisabled(WTFMove(overrides.vp9HardwareDecoderDisabled));
     VP9TestingOverrides::singleton().setVP9DecoderDisabled(WTFMove(overrides.vp9DecoderDisabled));
@@ -882,7 +896,7 @@ bool GPUConnectionToWebProcess::dispatchMessage(IPC::Connection& connection, IPC
         return true;
     }
 #endif
-#if PLATFORM(COCOA) && ENABLE(MEDIA_STREAM)
+#if PLATFORM(COCOA) && ENABLE(MEDIA_RECORDER)
     if (decoder.messageReceiverName() == Messages::RemoteMediaRecorderManager::messageReceiverName()) {
         mediaRecorderManager().didReceiveMessageFromWebProcess(connection, decoder);
         return true;
@@ -957,10 +971,13 @@ bool GPUConnectionToWebProcess::dispatchMessage(IPC::Connection& connection, IPC
         return true;
     }
 #endif
-
     if (decoder.messageReceiverName() == Messages::RemoteRemoteCommandListenerProxy::messageReceiverName()) {
         if (m_remoteRemoteCommandListener)
             m_remoteRemoteCommandListener->didReceiveMessage(connection, decoder);
+        return true;
+    }
+    if (decoder.messageReceiverName() == Messages::RemoteSharedResourceCache::messageReceiverName()) {
+        sharedResourceCache()->didReceiveMessage(connection, decoder);
         return true;
     }
 #if ENABLE(IPC_TESTING_API)

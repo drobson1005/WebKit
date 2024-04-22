@@ -58,6 +58,7 @@
 #include "tools/trace/SkDebugfTracer.h"
 
 #if defined(SK_ENABLE_SVG)
+#include "modules/skshaper/utils/FactoryHelpers.h"
 #include "modules/svg/include/SkSVGDOM.h"
 #include "modules/svg/include/SkSVGNode.h"
 #endif
@@ -87,8 +88,7 @@ extern bool gSkForceRasterPipelineBlitter;
 extern bool gForceHighPrecisionRasterPipeline;
 
 #ifndef SK_BUILD_FOR_WIN
-    #include <unistd.h>
-
+#include <unistd.h>
 #endif
 
 #include "include/gpu/GrDirectContext.h"
@@ -316,7 +316,12 @@ struct GraphiteTarget : public Target {
     skgpu::graphite::Context* context;
     std::unique_ptr<skgpu::graphite::Recorder> recorder;
 
-    ~GraphiteTarget() override {}
+    ~GraphiteTarget() override {
+        // For Vulkan we need to release all our refs before we destroy the vulkan context which
+        // happens at the end of this destructor. Thus we need to release the surface here which
+        // holds a ref to the Graphite device
+        surface.reset();
+    }
 
     void setup() override {}
 
@@ -869,8 +874,10 @@ public:
 
 #if defined(SK_ENABLE_SVG)
         SkMemoryStream stream(std::move(data));
-        sk_sp<SkSVGDOM> svgDom =
-                SkSVGDOM::Builder().setFontManager(ToolUtils::TestFontMgr()).make(stream);
+        sk_sp<SkSVGDOM> svgDom = SkSVGDOM::Builder()
+                                         .setFontManager(ToolUtils::TestFontMgr())
+                                         .setTextShapingFactory(SkShapers::BestAvailable())
+                                         .make(stream);
         if (!svgDom) {
             SkDebugf("Could not parse %s.\n", path);
             return nullptr;

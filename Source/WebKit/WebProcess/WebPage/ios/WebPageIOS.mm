@@ -75,6 +75,7 @@
 #import <WebCore/DataDetectionResultsStorage.h>
 #import <WebCore/DiagnosticLoggingClient.h>
 #import <WebCore/DiagnosticLoggingKeys.h>
+#import <WebCore/Document.h>
 #import <WebCore/DocumentLoader.h>
 #import <WebCore/DocumentMarkerController.h>
 #import <WebCore/DragController.h>
@@ -111,6 +112,7 @@
 #import <WebCore/HandleUserInputEventResult.h>
 #import <WebCore/HistoryItem.h>
 #import <WebCore/HitTestResult.h>
+#import <WebCore/HitTestSource.h>
 #import <WebCore/Image.h>
 #import <WebCore/ImageOverlay.h>
 #import <WebCore/InputMode.h>
@@ -154,6 +156,7 @@
 #import <WebCore/TextPlaceholderElement.h>
 #import <WebCore/UserAgent.h>
 #import <WebCore/UserGestureIndicator.h>
+#import <WebCore/ViewportArguments.h>
 #import <WebCore/VisibleUnits.h>
 #import <WebCore/WebEvent.h>
 #import <pal/system/ios/UserInterfaceIdiom.h>
@@ -162,6 +165,7 @@
 #import <wtf/Scope.h>
 #import <wtf/SetForScope.h>
 #import <wtf/cocoa/Entitlements.h>
+#import <wtf/cocoa/SpanCocoa.h>
 #import <wtf/text/StringToIntegerConversion.h>
 #import <wtf/text/TextBreakIterator.h>
 #import <wtf/text/TextStream.h>
@@ -214,7 +218,7 @@ static void adjustCandidateAutocorrectionInFrame(const String& correction, Local
     if (!referenceRange)
         return;
 
-    auto correctedRange = findPlainText(*referenceRange, correction, { Backwards });
+    auto correctedRange = findPlainText(*referenceRange, correction, { FindOption::Backwards });
     if (correctedRange.collapsed())
         return;
 
@@ -264,10 +268,7 @@ RetainPtr<NSData> WebPage::accessibilityRemoteTokenData() const
 
 void WebPage::relayAccessibilityNotification(const String& notificationName, const RetainPtr<NSData>& notificationData)
 {
-    std::span<const uint8_t> dataToken;
-    if ([notificationData length])
-        dataToken = { reinterpret_cast<const uint8_t*>([notificationData bytes]), [notificationData length] };
-    send(Messages::WebPageProxy::RelayAccessibilityNotification(notificationName, dataToken));
+    send(Messages::WebPageProxy::RelayAccessibilityNotification(notificationName, span(notificationData.get())));
 }
 
 static void computeEditableRootHasContentAndPlainText(const VisibleSelection& selection, EditorState::PostLayoutData& data)
@@ -454,6 +455,7 @@ FloatSize WebPage::overrideScreenSize() const
 
 void WebPage::didReceiveMobileDocType(bool isMobileDoctype)
 {
+    m_isMobileDoctype = isMobileDoctype;
     resetViewportDefaultConfiguration(m_mainFrame.ptr(), isMobileDoctype);
 }
 
@@ -824,12 +826,11 @@ void WebPage::handleSyntheticClick(Node& nodeRespondingToClick, const WebCore::F
     {
         LOG_WITH_STREAM(ContentObservation, stream << "handleSyntheticClick: node(" << &nodeRespondingToClick << ") " << location);
         ContentChangeObserver::MouseMovedScope observingScope(respondingDocument);
-        auto* localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
+        RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
         if (!localMainFrame)
             return;
-        auto& mainFrame = *localMainFrame;
-        dispatchSyntheticMouseMove(mainFrame, location, modifiers, pointerId);
-        mainFrame.document()->updateStyleIfNeeded();
+        dispatchSyntheticMouseMove(*localMainFrame, location, modifiers, pointerId);
+        localMainFrame->protectedDocument()->updateStyleIfNeeded();
         if (m_isClosed)
             return;
     }
@@ -1012,6 +1013,20 @@ void WebPage::requestFocusedElementInformation(CompletionHandler<void(const std:
         information = focusedElementInformation();
 
     completionHandler(information);
+}
+
+void WebPage::updateFocusedElementInformation()
+{
+    m_updateFocusedElementInformationTimer.stop();
+
+    if (!m_focusedElement)
+        return;
+
+    auto information = focusedElementInformation();
+    if (!information)
+        return;
+
+    send(Messages::WebPageProxy::UpdateFocusedElementInformation(*information));
 }
 
 #if ENABLE(DRAG_SUPPORT)
@@ -2759,8 +2774,12 @@ bool WebPage::applyAutocorrectionInternal(const String& correction, const String
         // forward such that it matches the original selection as much as possible.
         if (foldQuoteMarks(textForRange) != originalTextWithFoldedQuoteMarks) {
             // Search for the original text near the selection caret.
-            if (auto searchRange = rangeExpandedAroundPositionByCharacters(position, numGraphemeClusters(originalText))) {
-                if (auto foundRange = findPlainText(*searchRange, originalTextWithFoldedQuoteMarks, { DoNotSetSelection, DoNotRevealSelection }); !foundRange.collapsed()) {
+            auto characterCount = numGraphemeClusters(originalText);
+            if (!characterCount) {
+                textForRange = emptyString();
+                range = makeSimpleRange(position);
+            } else if (auto searchRange = rangeExpandedAroundPositionByCharacters(position, characterCount)) {
+                if (auto foundRange = findPlainText(*searchRange, originalTextWithFoldedQuoteMarks, { FindOption::DoNotSetSelection, FindOption::DoNotRevealSelection }); !foundRange.collapsed()) {
                     textForRange = plainTextForContext(foundRange);
                     range = foundRange;
                 }
@@ -3262,7 +3281,7 @@ static void selectionPositionInformation(WebPage& page, const InteractionInforma
     }
 #if PLATFORM(MACCATALYST)
     bool isInsideFixedPosition;
-    VisiblePosition caretPosition(renderer->positionForPoint(request.point, nullptr));
+    VisiblePosition caretPosition(renderer->positionForPoint(request.point, HitTestSource::User, nullptr));
     info.caretRect = caretPosition.absoluteCaretBounds(&isInsideFixedPosition);
 #endif
 }
@@ -4101,6 +4120,10 @@ void WebPage::resetViewportDefaultConfiguration(WebFrame* frame, bool hasMobileD
     }
 
     auto parametersForStandardFrame = [&] {
+#if ENABLE(FULLSCREEN_API)
+        if (m_isInFullscreenMode == IsInFullscreenMode::Yes)
+            return m_viewportConfiguration.nativeWebpageParameters();
+#endif
         if (shouldIgnoreMetaViewport())
             return m_viewportConfiguration.nativeWebpageParameters();
         return ViewportConfiguration::webpageParameters();
@@ -4111,18 +4134,40 @@ void WebPage::resetViewportDefaultConfiguration(WebFrame* frame, bool hasMobileD
         return;
     }
 
-    if (hasMobileDocType) {
+    RefPtr document = frame->coreLocalFrame()->document();
+
+    auto updateViewportConfigurationForMobileDocType = [this, document] {
         m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::xhtmlMobileParameters());
-        return;
+
+        // Do not update the viewport arguments if they are already configured from, say, a meta tag.
+        if (m_viewportConfiguration.viewportArguments().type >= ViewportArguments::Type::CSSDeviceAdaptation)
+            return;
+
+        if (!document || !document->isViewportDocument())
+            return;
+
+        auto viewportArguments = ViewportArguments { ViewportArguments::Type::CSSDeviceAdaptation };
+        document->setViewportArguments(viewportArguments);
+        viewportPropertiesDidChange(viewportArguments);
+    };
+
+    if (hasMobileDocType) {
+        return updateViewportConfigurationForMobileDocType();
     }
 
-    auto* document = frame->coreLocalFrame()->document();
-    if (document->isImageDocument())
-        m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::imageDocumentParameters());
-    else if (document->isTextDocument())
-        m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::textDocumentParameters());
-    else
-        m_viewportConfiguration.setDefaultConfiguration(parametersForStandardFrame());
+    bool configureWithParametersForStandardFrame = !document;
+
+    if (document) {
+        if (document->isImageDocument())
+            m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::imageDocumentParameters());
+        else if (document->isTextDocument())
+            m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::textDocumentParameters());
+        else
+            configureWithParametersForStandardFrame = true;
+    }
+
+    if (configureWithParametersForStandardFrame)
+        return m_viewportConfiguration.setDefaultConfiguration(parametersForStandardFrame());
 }
 
 #if ENABLE(TEXT_AUTOSIZING)
@@ -4687,7 +4732,9 @@ void WebPage::drawToImage(WebCore::FrameIdentifier frameID, const PrintInfo& pri
         return;
     }
 
-    for (size_t pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+    for (size_t pageIndex = 0; pageIndex < pageCount; ++pageIndex) {
+        if (pageIndex >= m_printContext->pageCount())
+            break;
         graphicsContext->save();
         graphicsContext->translate(0, pageHeight * static_cast<int>(pageIndex));
         m_printContext->spoolPage(*graphicsContext, pageIndex, pageWidth);
@@ -4847,7 +4894,7 @@ void WebPage::removeTextPlaceholder(const ElementContext& placeholder, Completio
 {
     if (auto element = elementForContext(placeholder)) {
         if (RefPtr frame = element->document().frame())
-            frame->editor().removeTextPlaceholder(checkedDowncast<TextPlaceholderElement>(*element));
+            frame->editor().removeTextPlaceholder(downcast<TextPlaceholderElement>(*element));
     }
     completionHandler();
 }
@@ -4900,10 +4947,8 @@ static VisiblePosition moveByGranularityRespectingWordBoundary(const VisiblePosi
         if (atBoundaryOfGranularity(currentPosition, granularity, direction))
             --granularityCount;
     } while (granularityCount);
-    if (granularity == TextGranularity::SentenceGranularity) {
-        ASSERT(atBoundaryOfGranularity(currentPosition, TextGranularity::SentenceGranularity, direction));
+    if (granularity == TextGranularity::SentenceGranularity)
         return currentPosition;
-    }
     // Note that this rounds to the nearest word, which may cross a line boundary when using line granularity.
     // For example, suppose the text is laid out as follows and the insertion point is at |:
     //     |This is the first sen
@@ -4943,7 +4988,7 @@ void WebPage::requestDocumentEditingContext(DocumentEditingContextRequest&& requ
     if (!frame)
         return completionHandler({ });
 
-    RefPtr { frame->document() }->updateLayout(LayoutOptions::IgnorePendingStylesheets);
+    frame->protectedDocument()->updateLayout(LayoutOptions::IgnorePendingStylesheets);
 
     VisibleSelection selection = frame->selection().selection();
 
@@ -5201,7 +5246,7 @@ void WebPage::focusTextInputContextAndPlaceCaret(const ElementContext& elementCo
     ASSERT(target->document().frame());
     Ref targetFrame = *target->document().frame();
 
-    targetFrame->document()->updateLayout(LayoutOptions::IgnorePendingStylesheets);
+    targetFrame->protectedDocument()->updateLayout(LayoutOptions::IgnorePendingStylesheets);
 
     // Performing layout could have could torn down the element's renderer. Check that we still
     // have one. Otherwise, bail out as this function only focuses elements that have a visual

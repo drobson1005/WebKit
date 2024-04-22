@@ -240,7 +240,7 @@ static AccessibilityObjectWrapper* AccessibilityUnignoredAncestor(AccessibilityO
 
 @implementation WebAccessibilityObjectWrapper
 
-- (id)initWithAccessibilityObject:(AccessibilityObject*)axObject
+- (id)initWithAccessibilityObject:(AccessibilityObject&)axObject
 {
     self = [super initWithAccessibilityObject:axObject];
     if (!self)
@@ -1546,9 +1546,9 @@ static void appendStringToResult(NSMutableString *result, NSString *string)
 
     // rdar://8131388 WebKit should expose the same info as UIKit for its password fields.
     if (backingObject->isSecureField() && ![self _accessibilityIsStrongPasswordField]) {
-        int secureTextLength = backingObject->accessibilitySecureFieldLength();
+        unsigned secureTextLength = backingObject->accessibilitySecureFieldLength();
         NSMutableString* string = [NSMutableString string];
-        for (int k = 0; k < secureTextLength; ++k)
+        for (unsigned k = 0; k < secureTextLength; ++k)
             [string appendString:@"•"];
         return string;
     }
@@ -2051,7 +2051,7 @@ static RenderObject* rendererForView(WAKView* view)
     if (!renderer)
         return nil;
     
-    AccessibilityObject* obj = renderer->document().axObjectCache()->getOrCreate(renderer);
+    AccessibilityObject* obj = renderer->document().axObjectCache()->getOrCreate(*renderer);
     if (obj)
         return obj->parentObjectUnignored()->wrapper();
     return nil;

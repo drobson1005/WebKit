@@ -220,15 +220,18 @@ private:
         void setRate(double);
         Lock& lock() const { return m_lock; };
         MediaTime currentTimeWithLockHeld() const;
+        MediaTime cachedTimeWithLockHeld() const;
     private:
         mutable Lock m_lock;
-        bool m_timeIsProgressing WTF_GUARDED_BY_LOCK(m_lock) { false };
+        std::atomic<bool> m_timeIsProgressing { false };
         MediaTime m_cachedMediaTime WTF_GUARDED_BY_LOCK(m_lock);
         MonotonicTime m_cachedMediaTimeQueryTime WTF_GUARDED_BY_LOCK(m_lock);
         double m_rate WTF_GUARDED_BY_LOCK(m_lock) { 1.0 };
         const MediaPlayerPrivateRemote& m_parent;
     };
     TimeProgressEstimator m_currentTimeEstimator;
+
+    MediaTime currentTimeWithLockHeld() const;
 
 #if !RELEASE_LOG_DISABLED
     const Logger& logger() const final { return m_logger; }
@@ -241,7 +244,7 @@ private:
 #endif
 
     void load(const URL&, const WebCore::ContentType&, const String&) final;
-    void prepareForPlayback(bool privateMode, WebCore::MediaPlayer::Preload, bool preservesPitch, bool prepare) final;
+    void prepareForPlayback(bool privateMode, WebCore::MediaPlayer::Preload, bool preservesPitch, bool prepareToPlay, bool prepareToRender) final;
 
 #if ENABLE(MEDIA_SOURCE)
     void load(const URL&, const WebCore::ContentType&, WebCore::MediaSourcePrivateClient&) final;
@@ -429,9 +432,7 @@ private:
     std::optional<WebCore::VideoPlaybackQualityMetrics> videoPlaybackQualityMetrics() final;
     void updateVideoPlaybackMetricsUpdateInterval(const Seconds&);
 
-#if ENABLE(AVF_CAPTIONS)
     void notifyTrackModeChanged() final;
-#endif
 
     void notifyActiveSourceBuffersChanged() final;
 
@@ -463,8 +464,12 @@ private:
 
     void setShouldCheckHardwareSupport(bool) final;
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    const String& defaultSpatialTrackingLabel() const final;
+    void setDefaultSpatialTrackingLabel(const String&) final;
     const String& spatialTrackingLabel() const final;
-    void setSpatialTrackingLabel(String&&) final;
+    void setSpatialTrackingLabel(const String&) final;
+#endif
 
 #if PLATFORM(COCOA)
     void pushVideoFrameMetadata(WebCore::VideoFrameMetadata&&, RemoteVideoFrameProxy::Properties&&);
@@ -528,6 +533,7 @@ private:
 #if PLATFORM(COCOA) && !HAVE(AVSAMPLEBUFFERDISPLAYLAYER_COPYDISPLAYEDPIXELBUFFER)
     bool m_hasBeenAskedToPaintGL { false };
 #endif
+    String m_defaultSpatialTrackingLabel;
     String m_spatialTrackingLabel;
 };
 

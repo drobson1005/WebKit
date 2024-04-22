@@ -37,7 +37,15 @@
 #include <wtf/UUID.h>
 #include <wtf/WeakPtr.h>
 
+namespace WebCore {
+struct TextIndicatorData;
+enum class TextIndicatorOption : uint16_t;
+class Editor;
+}
+
 namespace WebKit {
+
+enum class WebUnifiedTextReplacementType : uint8_t;
 
 class WebPage;
 
@@ -50,7 +58,7 @@ class UnifiedTextReplacementController final {
 public:
     explicit UnifiedTextReplacementController(WebPage&);
 
-    void willBeginTextReplacementSession(const WTF::UUID&, CompletionHandler<void(const Vector<WebKit::WebUnifiedTextReplacementContextData>&)>&&);
+    void willBeginTextReplacementSession(const WTF::UUID&, WebUnifiedTextReplacementType, CompletionHandler<void(const Vector<WebKit::WebUnifiedTextReplacementContextData>&)>&&);
 
     void didBeginTextReplacementSession(const WTF::UUID&, const Vector<WebKit::WebUnifiedTextReplacementContextData>&);
 
@@ -64,10 +72,24 @@ public:
 
     void textReplacementSessionDidReceiveEditAction(const WTF::UUID&, WebKit::WebTextReplacementData::EditAction);
 
+    void updateStateForSelectedReplacementIfNeeded();
+
+    std::optional<WebCore::SimpleRange> contextRangeForSessionWithUUID(const WTF::UUID&) const;
+
 private:
+    void replaceContentsOfRangeInSessionInternal(const WTF::UUID&, const WebCore::SimpleRange&, WTF::Function<void(WebCore::Editor&)>&&);
+    void replaceContentsOfRangeInSession(const WTF::UUID&, const WebCore::SimpleRange&, const String&);
+    void replaceContentsOfRangeInSession(const WTF::UUID&, const WebCore::SimpleRange&, WebCore::DocumentFragment&);
+
+    void textReplacementSessionPerformEditActionForPlainText(WebCore::Document&, const WTF::UUID&, WebKit::WebTextReplacementData::EditAction);
+    void textReplacementSessionPerformEditActionForRichText(WebCore::Document&, const WTF::UUID&, WebKit::WebTextReplacementData::EditAction);
+
+    RefPtr<WebCore::Document> document() const;
+
     WeakPtr<WebPage> m_webPage;
 
     HashMap<WTF::UUID, Ref<WebCore::Range>> m_contextRanges;
+    HashMap<WTF::UUID, WebUnifiedTextReplacementType> m_replacementTypes;
     HashMap<WTF::UUID, Ref<WebCore::DocumentFragment>> m_originalDocumentNodes;
     HashMap<WTF::UUID, Ref<WebCore::DocumentFragment>> m_replacedDocumentNodes;
 };

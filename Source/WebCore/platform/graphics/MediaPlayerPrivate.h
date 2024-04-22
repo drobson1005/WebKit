@@ -65,12 +65,14 @@ public:
 #endif
     virtual void cancelLoad() = 0;
 
-    virtual void prepareForPlayback(bool privateMode, MediaPlayer::Preload preload, bool preservesPitch, bool prepare)
+    virtual void prepareForPlayback(bool privateMode, MediaPlayer::Preload preload, bool preservesPitch, bool prepareToPlay, bool prepareToRender)
     {
         setPrivateBrowsingMode(privateMode);
         setPreload(preload);
         setPreservesPitch(preservesPitch);
-        if (prepare)
+        if (prepareToPlay)
+            this->prepareToPlay();
+        if (prepareToRender)
             prepareForRendering();
     }
 
@@ -358,8 +360,12 @@ public:
 
     virtual void setVideoReceiverEndpoint(const VideoReceiverEndpoint&) { }
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    virtual const String& defaultSpatialTrackingLabel() const { return emptyString(); }
+    virtual void setDefaultSpatialTrackingLabel(const String&) { }
     virtual const String& spatialTrackingLabel() const { return emptyString(); }
-    virtual void setSpatialTrackingLabel(String&&) { }
+    virtual void setSpatialTrackingLabel(const String&) { }
+#endif
 
 protected:
     mutable PlatformTimeRanges m_seekable;

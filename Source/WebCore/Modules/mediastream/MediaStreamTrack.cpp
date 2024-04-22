@@ -291,6 +291,9 @@ MediaStreamTrack::TrackSettings MediaStreamTrack::getSettings() const
     if (settings.supportsTorch())
         result.torch = settings.torch();
 
+    if (settings.supportsBackgroundBlur())
+        result.backgroundBlur = settings.backgroundBlur();
+
     return result;
 }
 
@@ -594,14 +597,12 @@ bool MediaStreamTrack::virtualHasPendingActivity() const
     return !m_ended;
 }
 
+#if ENABLE(WEB_AUDIO)
 RefPtr<WebAudioSourceProvider> MediaStreamTrack::createAudioSourceProvider()
 {
-#if ENABLE(WEB_AUDIO)
     return m_private->createAudioSourceProvider();
-#else
-    return nullptr;
-#endif
 }
+#endif
 
 bool MediaStreamTrack::isCapturingAudio() const
 {

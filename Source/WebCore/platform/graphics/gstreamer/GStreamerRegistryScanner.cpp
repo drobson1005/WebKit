@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "GStreamerRegistryScanner.h"
+#include "GStreamerQuirks.h"
 
 #if USE(GSTREAMER)
 #include "ContentType.h"
@@ -139,17 +140,12 @@ void GStreamerRegistryScanner::getSupportedDecodingTypes(HashSet<String>& types)
 
 GStreamerRegistryScanner::ElementFactories::ElementFactories(OptionSet<ElementFactories::Type> types)
 {
-#if PLATFORM(BCM_NEXUS) || PLATFORM(BROADCOM)
+    auto& quirksManager = GStreamerQuirksManager::singleton();
+    auto audioVideoDecoderFactory = quirksManager.audioVideoDecoderFactoryListType();
     if (types.contains(Type::AudioDecoder))
-        audioDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER | GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO, GST_RANK_MARGINAL);
+        audioDecoderFactories = gst_element_factory_list_get_elements(audioVideoDecoderFactory | GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO, GST_RANK_MARGINAL);
     if (types.contains(Type::VideoDecoder))
-        videoDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO, GST_RANK_MARGINAL);
-#else
-    if (types.contains(Type::AudioDecoder))
-        audioDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO, GST_RANK_MARGINAL);
-    if (types.contains(Type::VideoDecoder))
-        videoDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO, GST_RANK_MARGINAL);
-#endif
+        videoDecoderFactories = gst_element_factory_list_get_elements(audioVideoDecoderFactory | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO, GST_RANK_MARGINAL);
     if (types.contains(Type::AudioParser))
         audioParserFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER | GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO, GST_RANK_NONE);
     if (types.contains(Type::VideoParser))
@@ -298,15 +294,16 @@ GStreamerRegistryScanner::RegistryLookupResult GStreamerRegistryScanner::Element
             auto* factory = reinterpret_cast<GstElementFactory*>(factories->data);
             auto metadata = String::fromLatin1(gst_element_factory_get_metadata(factory, GST_ELEMENT_METADATA_KLASS));
             auto components = metadata.split('/');
-            if (components.contains("Hardware"_s)
-#if PLATFORM(BCM_NEXUS) || PLATFORM(BROADCOM)
-                || g_str_has_prefix(GST_OBJECT_NAME(factory), "brcm")
-#elif PLATFORM(REALTEK)
-                || g_str_has_prefix(GST_OBJECT_NAME(factory), "omx")
-#elif USE(WESTEROS_SINK)
-                || g_str_has_prefix(GST_OBJECT_NAME(factory), "westeros")
-#endif
-                ) {
+            auto& quirksManager = GStreamerQuirksManager::singleton();
+            if (quirksManager.isEnabled()) {
+                auto isAccelerated = quirksManager.isHardwareAccelerated(factory);
+                if (isAccelerated && *isAccelerated) {
+                    isUsingHardware = true;
+                    selectedFactory = factory;
+                    break;
+                }
+            }
+            if (components.contains("Hardware"_s)) {
                 isUsingHardware = true;
                 selectedFactory = factory;
                 break;
@@ -1012,8 +1009,11 @@ static inline Vector<RTCRtpCapabilities::HeaderExtensionCapability> probeRtpExte
 
 void GStreamerRegistryScanner::fillAudioRtpCapabilities(Configuration configuration, RTCRtpCapabilities& capabilities)
 {
-    if (!m_audioRtpExtensions)
-        m_audioRtpExtensions = probeRtpExtensions(m_allAudioRtpExtensions);
+    if (!m_audioRtpExtensions) {
+        auto extensions = m_commonRtpExtensions;
+        extensions.appendVector(m_allAudioRtpExtensions);
+        m_audioRtpExtensions = probeRtpExtensions(extensions);
+    }
     if (m_audioRtpExtensions)
         capabilities.headerExtensions = copyToVector(*m_audioRtpExtensions);
 
@@ -1040,8 +1040,11 @@ void GStreamerRegistryScanner::fillAudioRtpCapabilities(Configuration configurat
 
 void GStreamerRegistryScanner::fillVideoRtpCapabilities(Configuration configuration, RTCRtpCapabilities& capabilities)
 {
-    if (!m_videoRtpExtensions)
-        m_videoRtpExtensions = probeRtpExtensions(m_allVideoRtpExtensions);
+    if (!m_videoRtpExtensions) {
+        auto extensions = m_commonRtpExtensions;
+        extensions.appendVector(m_allVideoRtpExtensions);
+        m_videoRtpExtensions = probeRtpExtensions(extensions);
+    }
     if (m_videoRtpExtensions)
         capabilities.headerExtensions = copyToVector(*m_videoRtpExtensions);
 

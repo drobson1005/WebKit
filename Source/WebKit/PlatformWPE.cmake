@@ -100,12 +100,14 @@ list(APPEND WebKit_UNIFIED_SOURCE_LIST_FILES
 
 list(APPEND WebKit_SERIALIZATION_IN_FILES Shared/glib/DMABufRendererBufferFormat.serialization.in)
 
-list(APPEND WebCore_SERIALIZATION_IN_FILES SoupNetworkProxySettings.serialization.in)
-
 list(APPEND WebKit_SERIALIZATION_IN_FILES
     Shared/glib/DMABufRendererBufferMode.serialization.in
     Shared/glib/InputMethodState.serialization.in
     Shared/glib/UserMessage.serialization.in
+
+    Shared/skia/CoreIPCSkColorSpace.serialization.in
+
+    Shared/soup/WebCoreArgumentCodersSoup.serialization.in
 )
 
 list(APPEND WebKit_DERIVED_SOURCES
@@ -276,6 +278,12 @@ list(APPEND WebKit_DEPENDENCIES
     webkitwpe-forwarding-headers
 )
 
+if (GI_VERSION VERSION_GREATER_EQUAL 1.79.2)
+    set(USE_GI_FINISH_FUNC_ANNOTATION 1)
+else ()
+    set(USE_GI_FINISH_FUNC_ANNOTATION 0)
+endif ()
+
 GENERATE_GLIB_API_HEADERS(WebKit WPE_API_HEADER_TEMPLATES
     ${DERIVED_SOURCES_WPE_API_DIR}
     WPE_API_INSTALLED_HEADERS
@@ -283,7 +291,9 @@ GENERATE_GLIB_API_HEADERS(WebKit WPE_API_HEADER_TEMPLATES
     "-DWTF_PLATFORM_WPE=1"
     "-DUSE_GTK4=0"
     "-DENABLE_2022_GLIB_API=$<BOOL:${ENABLE_2022_GLIB_API}>"
+    "-DUSE_GI_FINISH_FUNC_ANNOTATION=${USE_GI_FINISH_FUNC_ANNOTATION}"
 )
+unset(USE_GI_FINISH_FUNC_ANNOTATION)
 
 GENERATE_GLIB_API_HEADERS(WebKit WPE_WEB_PROCESS_EXTENSION_API_HEADER_TEMPLATES
     ${DERIVED_SOURCES_WPE_API_DIR}
@@ -349,12 +359,11 @@ file(WRITE ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
     "</gresources>\n"
 )
 
-add_custom_command(
-    OUTPUT ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.deps
-    DEPENDS ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
-    DEPFILE ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.deps
-    COMMAND glib-compile-resources --generate --sourcedir=${CMAKE_SOURCE_DIR}/Source/WebCore/Resources --sourcedir=${CMAKE_SOURCE_DIR}/Source/WebCore/platform/audio/resources --target=${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c --dependency-file=${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.deps ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
-    VERBATIM
+GLIB_COMPILE_RESOURCES(
+    OUTPUT        ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.c
+    SOURCE_XML    ${WebKit_DERIVED_SOURCES_DIR}/WebKitResourcesGResourceBundle.xml
+    RESOURCE_DIRS ${CMAKE_SOURCE_DIR}/Source/WebCore/Resources
+                  ${CMAKE_SOURCE_DIR}/Source/WebCore/platform/audio/resources
 )
 
 list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
@@ -374,6 +383,7 @@ list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBKIT_DIR}/Shared/Extensions"
     "${WEBKIT_DIR}/Shared/glib"
     "${WEBKIT_DIR}/Shared/libwpe"
+    "${WEBKIT_DIR}/Shared/skia"
     "${WEBKIT_DIR}/Shared/soup"
     "${WEBKIT_DIR}/Shared/wpe"
     "${WEBKIT_DIR}/UIProcess/API/C/cairo"
@@ -410,20 +420,28 @@ list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
 )
 
 list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
-    ${ATK_INCLUDE_DIRS}
     ${GIO_UNIX_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     ${LIBSOUP_INCLUDE_DIRS}
 )
 
 list(APPEND WebKit_LIBRARIES
-    ATK::Bridge
     WPE::libwpe
-    ${ATK_LIBRARIES}
     ${GLIB_LIBRARIES}
     ${GLIB_GMODULE_LIBRARIES}
     ${LIBSOUP_LIBRARIES}
 )
+
+if (USE_ATK)
+    list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
+        ${ATK_INCLUDE_DIRS}
+    )
+
+    list(APPEND WebKit_LIBRARIES
+        ATK::Bridge
+        ${ATK_LIBRARIES}
+    )
+endif ()
 
 if (USE_CAIRO)
     list(APPEND WebKit_LIBRARIES
@@ -458,15 +476,6 @@ else ()
     )
     list(APPEND WebKit_LIBRARIES
         ${GSTREAMER_LIBRARIES}
-    )
-endif ()
-
-if (USE_LIBDRM)
-    list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
-        ${LIBDRM_INCLUDE_DIR}
-    )
-    list(APPEND WebKit_LIBRARIES
-        ${LIBDRM_LIBRARIES}
     )
 endif ()
 

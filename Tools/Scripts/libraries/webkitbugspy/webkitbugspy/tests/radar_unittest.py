@@ -26,20 +26,22 @@ import unittest
 from webkitbugspy import Issue, Tracker, User, radar, mocks
 from webkitcorepy import mocks as wkmocks, OutputCapture
 
-RELATED_BLANK = {'related-to': [], 'blocked-by': [], 'blocking': [], 'parent-of': [], 'subtask-of': [], 'cause-of': [], 'caused-by': [], 'duplicate-of': [], 'original-of': []}
+RELATED_BLANK = {'related-to': [], 'blocked-by': [], 'blocking': [], 'parent-of': [], 'subtask-of': [], 'cause-of': [], 'caused-by': [], 'duplicate-of': [], 'original-of': [], 'clone-of': [], 'cloned-to': []}
 
 
 class TestRadar(unittest.TestCase):
     def test_encoding(self):
-        self.assertEqual(
-            radar.Tracker.Encoder().default(radar.Tracker(project='WebKit')),
-            dict(hide_title=True, type='radar', projects=['WebKit']),
-        )
+        with OutputCapture():
+            self.assertEqual(
+                radar.Tracker.Encoder().default(radar.Tracker(project='WebKit')),
+                dict(hide_title=True, type='radar', projects=['WebKit']),
+            )
 
     def test_decoding(self):
-        decoded = Tracker.from_json(json.dumps(radar.Tracker(), cls=Tracker.Encoder))
-        self.assertIsInstance(decoded, radar.Tracker)
-        self.assertEqual(decoded.from_string('rdar://1234').id, 1234)
+        with OutputCapture():
+            decoded = Tracker.from_json(json.dumps(radar.Tracker(), cls=Tracker.Encoder))
+            self.assertIsInstance(decoded, radar.Tracker)
+            self.assertEqual(decoded.from_string('rdar://1234').id, 1234)
 
     def test_no_radar(self):
         with mocks.NoRadar():
@@ -93,6 +95,10 @@ class TestRadar(unittest.TestCase):
     def test_timestamp(self):
         with mocks.Radar(issues=mocks.ISSUES):
             self.assertEqual(radar.Tracker().issue(1).timestamp, 1639510960)
+
+    def test_modified(self):
+        with mocks.Radar(issues=mocks.ISSUES):
+            self.assertEqual(radar.Tracker().issue(1).modified, 1710859207)
 
     def test_creator(self):
         with mocks.Radar(issues=mocks.ISSUES):
@@ -469,7 +475,7 @@ What version of 'WebKit Text' should the bug be associated with?:
 
             self.assertEqual(issue.related, RELATED_BLANK)
             issue.relate(related_to=issue2)
-            self.assertEqual(issue.related, {'related-to': [issue2], 'blocked-by': [], 'blocking': [], 'parent-of': [], 'subtask-of': [], 'cause-of': [], 'caused-by': [], 'duplicate-of': [], 'original-of': []})
+            self.assertEqual(issue.related, {'related-to': [issue2], 'blocked-by': [], 'blocking': [], 'parent-of': [], 'subtask-of': [], 'cause-of': [], 'caused-by': [], 'duplicate-of': [], 'original-of': [], 'clone-of': [], 'cloned-to': []})
 
     def test_relate(self):
         with wkmocks.Environment(RADAR_USERNAME='tcontributor'), mocks.Radar(issues=mocks.ISSUES, projects=mocks.PROJECTS):
@@ -512,3 +518,32 @@ What version of 'WebKit Text' should the bug be associated with?:
                 issue.relate(fake_relation=issue2)
             self.assertEqual('\'fake_relation\' is an invalid relation', str(c.exception))
             self.assertEqual(issue.related, RELATED_BLANK)
+
+    def test_source_changes(self):
+        with mocks.Radar(issues=mocks.ISSUES):
+            tracker = radar.Tracker()
+            self.assertEqual(tracker.issue(1).source_changes, [])
+            self.assertIsNotNone(tracker.issue(1).add_source_change('WebKit, merge, a4daad5b9fbd26d557088037f54dc0935a437182'))
+            self.assertEqual(tracker.issue(1).source_changes, ['WebKit, merge, a4daad5b9fbd26d557088037f54dc0935a437182'])
+
+            repr = tracker.client.radar_for_id(1, additional_fields=['sourceChanges'])
+            self.assertEqual(
+                repr.sourceChanges,
+                'WebKit, merge, a4daad5b9fbd26d557088037f54dc0935a437182',
+            )
+
+    def test_source_changes_advanced(self):
+        with mocks.Radar(issues=mocks.ISSUES), OutputCapture():
+            tracker = radar.Tracker()
+            self.assertEqual(tracker.issue(1).source_changes, [])
+            self.assertIsNotNone(tracker.issue(1).add_source_change('Repo1, merged, a4daad5b9fbd26d557088037f54dc0935a437182'))
+            self.assertIsNotNone(tracker.issue(1).add_source_change('Repo2, merged, 604395a516c13cff80d4b0400e43a4c322dbb32f'))
+
+            self.assertIsNone(tracker.issue(1).add_source_change('Repo1, merged, a4daad5b9fbd26d557088037f54dc0935a437182'))
+            self.assertIsNone(tracker.issue(1).add_source_change('Repo2, merged, 604395a516c1'))
+
+            self.assertEqual(
+                tracker.issue(1).source_changes, [
+                    'Repo1, merged, a4daad5b9fbd26d557088037f54dc0935a437182',
+                    'Repo2, merged, 604395a516c13cff80d4b0400e43a4c322dbb32f',
+                ])

@@ -30,6 +30,7 @@
 #include "InputMethodFilter.h"
 #include "KeyAutoRepeatHandler.h"
 #include "PageClientImpl.h"
+#include "RendererBufferFormat.h"
 #include "WebFullScreenManagerProxy.h"
 #include "WebKitWebViewAccessible.h"
 #include "WebPageProxy.h"
@@ -129,7 +130,9 @@ public:
     bool setFullScreen(bool);
 #endif
 
+#if USE(ATK)
     WebKitWebViewAccessible* accessible() const;
+#endif
 
 #if ENABLE(TOUCH_EVENTS)
     WebKit::TouchGestureController& touchGestureController() const { return *m_touchGestureController; }
@@ -140,6 +143,7 @@ public:
 
 #if ENABLE(WPE_PLATFORM)
     void updateAcceleratedSurface(uint64_t);
+    WebKit::RendererBufferFormat renderBufferFormat() const;
 #endif
 
     void setCursor(const WebCore::Cursor&);
@@ -194,7 +198,9 @@ private:
 #endif
 #endif
 
+#if USE(ATK)
     mutable GRefPtr<WebKitWebViewAccessible> m_accessible;
+#endif
 
     bool m_horizontalScrollActive { false };
     bool m_verticalScrollActive { false };

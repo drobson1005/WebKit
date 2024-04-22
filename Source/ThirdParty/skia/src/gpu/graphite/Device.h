@@ -85,6 +85,9 @@ public:
 
     const Transform& localToDeviceTransform();
 
+    // Flushes any pending work to the recorder and then deregisters and abandons the recorder.
+    void setImmutable() override;
+
     SkStrikeDeviceInfo strikeDeviceInfo() const override;
 
     TextureProxy* target();
@@ -188,8 +191,7 @@ private:
 
     bool onWritePixels(const SkPixmap&, int x, int y) override;
 
-    void onDrawGlyphRunList(SkCanvas*, const sktext::GlyphRunList&,
-                            const SkPaint&, const SkPaint&) override;
+    void onDrawGlyphRunList(SkCanvas*, const sktext::GlyphRunList&, const SkPaint&) override;
 
     void onClipShader(sk_sp<SkShader> shader) override;
 
@@ -238,10 +240,9 @@ private:
                          sktext::gpu::RendererData);
 
     sk_sp<sktext::gpu::Slug> convertGlyphRunListToSlug(const sktext::GlyphRunList& glyphRunList,
-                                                       const SkPaint& initialPaint,
-                                                       const SkPaint& drawingPaint) override;
+                                                       const SkPaint& paint) override;
 
-    void drawSlug(SkCanvas*, const sktext::gpu::Slug* slug, const SkPaint& drawingPaint) override;
+    void drawSlug(SkCanvas*, const sktext::gpu::Slug* slug, const SkPaint& paint) override;
 
     // Returns the Renderer to draw the shape in the given style. If SkStrokeRec is a
     // stroke-and-fill, this returns the Renderer used for the fill portion and it can be assumed
@@ -265,6 +266,9 @@ private:
 
     bool needsFlushBeforeDraw(int numNewDraws, DstReadRequirement) const;
 
+    // Flush internal work, such as pending clip draws and atlas uploads, into the Device's DrawTask
+    void internalFlush();
+
     Recorder* fRecorder;
     sk_sp<DrawContext> fDC;
 
@@ -281,6 +285,9 @@ private:
 
     // The max depth value sent to the DrawContext, incremented so each draw has a unique value.
     PaintersDepth fCurrentDepth;
+
+    // The DrawContext's target supports MSAA
+    bool fMSAASupported = false;
 
     const sktext::gpu::SDFTControl fSDFTControl;
 

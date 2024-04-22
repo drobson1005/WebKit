@@ -66,7 +66,7 @@
 #import <wtf/WTFSemaphore.h>
 #import <wtf/WeakPtr.h>
 #import <wtf/WorkQueue.h>
-#import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
+#import <wtf/cocoa/Entitlements.h>
 #import <wtf/text/CString.h>
 
 #pragma mark - Soft Linking
@@ -103,7 +103,12 @@ static bool sampleBufferRenderersSupportKeySession()
 
 static inline bool supportsAttachContentKey()
 {
-    return processIsExtension();
+    static bool supportsAttachContentKey;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        supportsAttachContentKey = WTF::processHasEntitlement("com.apple.developer.web-browser-engine.rendering"_s) || WTF::processHasEntitlement("com.apple.private.coremedia.allow-fps-attachment"_s);
+    });
+    return supportsAttachContentKey;
 }
 
 static inline bool shouldAddContentKeyRecipients()
@@ -120,7 +125,7 @@ SourceBufferPrivateAVFObjC::SourceBufferPrivateAVFObjC(MediaSourcePrivateAVFObjC
     : SourceBufferPrivate(parent)
     , m_parser(WTFMove(parser))
     , m_listener(WebAVSampleBufferListener::create(*this))
-    , m_appendQueue(WorkQueue::create("SourceBufferPrivateAVFObjC data parser queue"))
+    , m_appendQueue(WorkQueue::create("SourceBufferPrivateAVFObjC data parser queue"_s))
 #if ENABLE(ENCRYPTED_MEDIA) && HAVE(AVCONTENTKEYSESSION)
     , m_keyStatusesChangedObserver(makeUniqueRef<Observer<void()>>([this] { tryToEnqueueBlockedSamples(); }))
     , m_streamDataParser([&] {
@@ -1092,6 +1097,10 @@ void SourceBufferPrivateAVFObjC::enqueueSampleBuffer(MediaSampleAVFObjC& sample)
     WebSampleBufferVideoRendering *renderer = nil;
     if (m_videoRenderer) {
         m_videoRenderer->enqueueSample(sample.platformSample().sample.cmSampleBuffer, !sample.isNonDisplaying());
+
+        // Enqueuing a sample for display my synchronously fire an error, which can cause m_videoRenderer to become null.
+        if (!m_videoRenderer)
+            return;
         renderer = m_videoRenderer->renderer();
 #if HAVE(AVSAMPLEBUFFERDISPLAYLAYER_READYFORDISPLAY)
         if (AVSampleBufferDisplayLayer *displayLayer = m_videoRenderer->displayLayer()) {
@@ -1285,6 +1294,7 @@ void SourceBufferPrivateAVFObjC::setVideoRenderer(WebSampleBufferVideoRendering 
 
     if (renderer) {
         m_videoRenderer = VideoMediaSampleRenderer::create(renderer);
+        m_videoRenderer->setResourceOwner(m_resourceOwner);
 #if ENABLE(ENCRYPTED_MEDIA) && HAVE(AVCONTENTKEYSESSION)
         if (m_cdmInstance && shouldAddContentKeyRecipients())
             [m_cdmInstance->contentKeySession() addContentKeyRecipient:m_videoRenderer->displayLayer()];

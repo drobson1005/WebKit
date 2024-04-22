@@ -121,13 +121,11 @@ void SVGPatternElement::svgAttributeChanged(const QualifiedName& attrName)
         InstanceInvalidationGuard guard(*this);
         if (PropertyRegistry::isAnimatedLengthAttribute(attrName))
             setPresentationalHintStyleIsDirty();
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         if (document().settings().layerBasedSVGEngineEnabled()) {
             if (CheckedPtr patternRenderer = dynamicDowncast<RenderSVGResourcePattern>(renderer()))
                 patternRenderer->invalidatePattern();
             return;
         }
-#endif
 
         updateSVGRendererForElementChange();
         return;
@@ -143,15 +141,18 @@ void SVGPatternElement::childrenChanged(const ChildChange& change)
     if (change.source == ChildChange::Source::Parser)
         return;
 
+    if (document().settings().layerBasedSVGEngineEnabled()) {
+        if (CheckedPtr patternRenderer = dynamicDowncast<RenderSVGResourcePattern>(renderer()))
+            patternRenderer->invalidatePattern();
+    }
+
     updateSVGRendererForElementChange();
 }
 
 RenderPtr<RenderElement> SVGPatternElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (document().settings().layerBasedSVGEngineEnabled())
         return createRenderer<RenderSVGResourcePattern>(*this, WTFMove(style));
-#endif
     return createRenderer<LegacyRenderSVGResourcePattern>(*this, WTFMove(style));
 }
 

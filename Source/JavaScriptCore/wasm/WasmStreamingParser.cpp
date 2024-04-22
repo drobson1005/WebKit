@@ -187,7 +187,7 @@ auto StreamingParser::parseFunctionPayload(Vector<uint8_t>&& data) -> State
 
 auto StreamingParser::parseSectionPayload(Vector<uint8_t>&& data) -> State
 {
-    SectionParser parser(data.data(), data.size(), m_offset, m_info.get());
+    SectionParser parser(data, m_offset, m_info.get());
     switch (m_section) {
 #define WASM_SECTION_PARSE(NAME, ID, ORDERING, DESCRIPTION) \
     case Section::NAME: { \
@@ -208,14 +208,14 @@ auto StreamingParser::parseSectionPayload(Vector<uint8_t>&& data) -> State
     }
     }
 
-    WASM_PARSER_FAIL_IF(parser.length() != parser.offset(), "parsing ended before the end of ", m_section, " section");
+    WASM_PARSER_FAIL_IF(parser.source().size() != parser.offset(), "parsing ended before the end of ", m_section, " section");
 
     if (!m_client.didReceiveSectionData(m_section))
         return State::FatalError;
     return State::SectionID;
 }
 
-auto StreamingParser::consume(const uint8_t* bytes, size_t bytesSize, size_t& offsetInBytes, size_t requiredSize) -> std::optional<Vector<uint8_t>>
+auto StreamingParser::consume(std::span<const uint8_t> bytes, size_t& offsetInBytes, size_t requiredSize) -> std::optional<Vector<uint8_t>>
 {
     if (m_remaining.size() == requiredSize) {
         Vector<uint8_t> result = WTFMove(m_remaining);
@@ -224,42 +224,42 @@ auto StreamingParser::consume(const uint8_t* bytes, size_t bytesSize, size_t& of
     }
 
     if (m_remaining.size() > requiredSize) {
-        Vector<uint8_t> result { m_remaining.data(), requiredSize };
+        auto result = m_remaining.subvector(0, requiredSize);
         m_remaining.remove(0, requiredSize);
         m_nextOffset += requiredSize;
         return result;
     }
 
     ASSERT(m_remaining.size() < requiredSize);
-    size_t bytesRemainingSize = bytesSize - offsetInBytes;
+    size_t bytesRemainingSize = bytes.size() - offsetInBytes;
     size_t totalDataSize = m_remaining.size() + bytesRemainingSize;
     if (totalDataSize < requiredSize) {
-        m_remaining.append(bytes + offsetInBytes, bytesRemainingSize);
-        offsetInBytes = bytesSize;
+        m_remaining.append(bytes.subspan(offsetInBytes, bytesRemainingSize));
+        offsetInBytes = bytes.size();
         return std::nullopt;
     }
 
     size_t usedSize = requiredSize - m_remaining.size();
-    m_remaining.append(bytes + offsetInBytes, usedSize);
+    m_remaining.append(bytes.subspan(offsetInBytes, usedSize));
     offsetInBytes += usedSize;
     Vector<uint8_t> result = WTFMove(m_remaining);
     m_nextOffset += requiredSize;
     return result;
 }
 
-auto StreamingParser::consumeVarUInt32(const uint8_t* bytes, size_t bytesSize, size_t& offsetInBytes, IsEndOfStream isEndOfStream) -> Expected<uint32_t, State>
+auto StreamingParser::consumeVarUInt32(std::span<const uint8_t> bytes, size_t& offsetInBytes, IsEndOfStream isEndOfStream) -> Expected<uint32_t, State>
 {
     constexpr size_t maxSize = WTF::LEBDecoder::maxByteLength<uint32_t>();
-    size_t bytesRemainingSize = bytesSize - offsetInBytes;
+    size_t bytesRemainingSize = bytes.size() - offsetInBytes;
     size_t totalDataSize = m_remaining.size() + bytesRemainingSize;
     if (m_remaining.size() >= maxSize) {
         // Do nothing.
     } else if (totalDataSize >= maxSize) {
         size_t usedSize = maxSize - m_remaining.size();
-        m_remaining.append(bytes + offsetInBytes, usedSize);
+        m_remaining.append(bytes.subspan(offsetInBytes, usedSize));
         offsetInBytes += usedSize;
     } else {
-        m_remaining.append(bytes + offsetInBytes, bytesRemainingSize);
+        m_remaining.append(bytes.subspan(offsetInBytes, bytesRemainingSize));
         offsetInBytes += bytesRemainingSize;
         // If the given bytes are the end of the stream, we try to parse VarUInt32
         // with the current remaining data since VarUInt32 may not require `maxSize`.
@@ -269,7 +269,7 @@ auto StreamingParser::consumeVarUInt32(const uint8_t* bytes, size_t bytesSize, s
 
     size_t offset = 0;
     uint32_t result = 0;
-    if (!WTF::LEBDecoder::decodeUInt32(m_remaining.data(), m_remaining.size(), offset, result))
+    if (!WTF::LEBDecoder::decodeUInt32(m_remaining, offset, result))
         return makeUnexpected(State::FatalError);
     size_t consumedSize = offset;
     m_remaining.remove(0, consumedSize);
@@ -277,12 +277,11 @@ auto StreamingParser::consumeVarUInt32(const uint8_t* bytes, size_t bytesSize, s
     return result;
 }
 
-auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfStream isEndOfStream) -> State
+auto StreamingParser::addBytes(std::span<const uint8_t> bytes, IsEndOfStream isEndOfStream) -> State
 {
 #if ASSERT_ENABLED
     if (Options::dumpWasmSourceFileName()) {
-        for (unsigned i = 0; i < bytesSize; ++i)
-            m_buffer.append(bytes[i]);
+        m_buffer.append(bytes);
 
         if (isEndOfStream == IsEndOfStream::Yes) {
             dataLogLn("Streaming parser reached end of stream.");
@@ -293,21 +292,21 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
     if (m_state == State::FatalError)
         return m_state;
 
-    m_totalSize += bytesSize;
+    m_totalSize += bytes.size();
     if (UNLIKELY(m_totalSize.hasOverflowed() || m_totalSize > maxModuleSize)) {
         m_state = fail("module size is too large, maximum ", maxModuleSize);
         return m_state;
     }
 
     if (UNLIKELY(Options::useEagerWebAssemblyModuleHashing()))
-        m_hasher.addBytes(bytes, bytesSize);
+        m_hasher.addBytes(bytes);
 
     size_t offsetInBytes = 0;
     while (true) {
-        ASSERT(offsetInBytes <= bytesSize);
+        ASSERT(offsetInBytes <= bytes.size());
         switch (m_state) {
         case State::ModuleHeader: {
-            auto result = consume(bytes, bytesSize, offsetInBytes, moduleHeaderSize);
+            auto result = consume(bytes, offsetInBytes, moduleHeaderSize);
             if (!result)
                 return m_state;
             m_state = parseModuleHeader(WTFMove(*result));
@@ -315,7 +314,7 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
         }
 
         case State::SectionID: {
-            auto result = consume(bytes, bytesSize, offsetInBytes, sectionIDSize);
+            auto result = consume(bytes, offsetInBytes, sectionIDSize);
             if (!result)
                 return m_state;
             m_state = parseSectionID(WTFMove(*result));
@@ -323,7 +322,7 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
         }
 
         case State::SectionSize: {
-            auto result = consumeVarUInt32(bytes, bytesSize, offsetInBytes, isEndOfStream);
+            auto result = consumeVarUInt32(bytes, offsetInBytes, isEndOfStream);
             if (!result) {
                 if (result.error() == State::FatalError)
                     m_state = failOnState(m_state);
@@ -336,7 +335,7 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
         }
 
         case State::SectionPayload: {
-            auto result = consume(bytes, bytesSize, offsetInBytes, m_sectionLength);
+            auto result = consume(bytes, offsetInBytes, m_sectionLength);
             if (!result)
                 return m_state;
             m_state = parseSectionPayload(WTFMove(*result));
@@ -344,7 +343,7 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
         }
 
         case State::CodeSectionSize: {
-            auto result = consumeVarUInt32(bytes, bytesSize, offsetInBytes, isEndOfStream);
+            auto result = consumeVarUInt32(bytes, offsetInBytes, isEndOfStream);
             if (!result) {
                 if (result.error() == State::FatalError)
                     m_state = failOnState(m_state);
@@ -357,7 +356,7 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
         }
 
         case State::FunctionSize: {
-            auto result = consumeVarUInt32(bytes, bytesSize, offsetInBytes, isEndOfStream);
+            auto result = consumeVarUInt32(bytes, offsetInBytes, isEndOfStream);
             if (!result) {
                 if (result.error() == State::FatalError)
                     m_state = failOnState(m_state);
@@ -370,7 +369,7 @@ auto StreamingParser::addBytes(const uint8_t* bytes, size_t bytesSize, IsEndOfSt
         }
 
         case State::FunctionPayload: {
-            auto result = consume(bytes, bytesSize, offsetInBytes, m_functionSize);
+            auto result = consume(bytes, offsetInBytes, m_functionSize);
             if (!result)
                 return m_state;
             m_state = parseFunctionPayload(WTFMove(*result));
@@ -412,7 +411,7 @@ auto StreamingParser::failOnState(State) -> State
 
 auto StreamingParser::finalize() -> State
 {
-    addBytes(nullptr, 0, IsEndOfStream::Yes);
+    addBytes({ }, IsEndOfStream::Yes);
     switch (m_state) {
     case State::ModuleHeader:
     case State::SectionSize:

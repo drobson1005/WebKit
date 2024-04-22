@@ -42,9 +42,10 @@ class NetworkLoadMetrics;
 class ResourceError;
 class FragmentedSharedBuffer;
 
-class CurlRequest : public ThreadSafeRefCounted<CurlRequest>, public CurlRequestSchedulerClient, public CurlMultipartHandleClient {
+class CurlRequest final : public ThreadSafeRefCounted<CurlRequest>, public CurlRequestSchedulerClient, public CurlMultipartHandleClient, public CanMakeThreadSafeCheckedPtr<CurlRequest> {
     WTF_MAKE_NONCOPYABLE(CurlRequest);
-
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(CurlRequest);
 public:
     enum class CaptureNetworkLoadMetrics : uint8_t {
         Basic,
@@ -82,6 +83,12 @@ public:
 private:
     WEBCORE_EXPORT CurlRequest(const ResourceRequest&, CurlRequestClient*, CaptureNetworkLoadMetrics);
 
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeThreadSafeCheckedPtr::ptrCount(); }
+    uint32_t ptrCountWithoutThreadCheck() const final { return CanMakeThreadSafeCheckedPtr::ptrCountWithoutThreadCheck(); }
+    void incrementPtrCount() const final { CanMakeThreadSafeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeThreadSafeCheckedPtr::decrementPtrCount(); }
+
     void retain() override { ref(); }
     void release() override { deref(); }
     CURL* handle() override { return m_curlHandle ? m_curlHandle->handle() : nullptr; }
@@ -105,7 +112,7 @@ private:
     void didCancelTransfer() override;
     void finalizeTransfer();
 
-    int didReceiveDebugInfo(curl_infotype, char*, size_t);
+    int didReceiveDebugInfo(curl_infotype, std::span<const char>);
 
     // For setup 
     void appendAcceptLanguageHeader(HTTPHeaderMap&);

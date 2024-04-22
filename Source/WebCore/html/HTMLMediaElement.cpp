@@ -90,9 +90,11 @@
 #include "MediaPlayer.h"
 #include "MediaQueryEvaluator.h"
 #include "MediaResourceLoader.h"
+#include "MediaResourceSniffer.h"
 #include "NavigatorMediaDevices.h"
 #include "NetworkingContext.h"
 #include "NodeName.h"
+#include "NowPlayingInfo.h"
 #include "OriginAccessPatterns.h"
 #include "PODIntervalTree.h"
 #include "PageGroup.h"
@@ -319,6 +321,25 @@ String convertEnumerationToString(HTMLMediaElement::SpeechSynthesisState enumera
     return values[static_cast<size_t>(enumerationValue)];
 }
 
+String convertEnumerationToString(HTMLMediaElement::ControlsState enumerationValue)
+{
+    // None, Initializing, Ready, PartiallyDeinitialized
+    static const NeverDestroyed<String> values[] = {
+        MAKE_STATIC_STRING_IMPL("None"),
+        MAKE_STATIC_STRING_IMPL("Initializing"),
+        MAKE_STATIC_STRING_IMPL("Ready"),
+        MAKE_STATIC_STRING_IMPL("PartiallyDeinitialized"),
+    };
+    static_assert(!static_cast<size_t>(HTMLMediaElement::ControlsState::None), "HTMLMediaElement::None is not 0 as expected");
+    static_assert(static_cast<size_t>(HTMLMediaElement::ControlsState::Initializing) == 1, "HTMLMediaElement::Initializing is not 1 as expected");
+    static_assert(static_cast<size_t>(HTMLMediaElement::ControlsState::Ready) == 2, "HTMLMediaElement::Ready is not 2 as expected");
+    static_assert(static_cast<size_t>(HTMLMediaElement::ControlsState::PartiallyDeinitialized) == 3, "HTMLMediaElement::PartiallyDeinitialized is not 3 as expected");
+    ASSERT(static_cast<size_t>(enumerationValue) < std::size(values));
+    return values[static_cast<size_t>(enumerationValue)];
+}
+
+static JSC::JSValue controllerJSValue(JSC::JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject&, HTMLMediaElement&);
+
 class TrackDisplayUpdateScope {
 public:
     TrackDisplayUpdateScope(HTMLMediaElement& element)
@@ -496,6 +517,9 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
     , m_categoryAtMostRecentPlayback(AudioSessionCategory::None)
     , m_modeAtMostRecentPlayback(AudioSessionMode::Default)
 #endif
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    , m_defaultSpatialTrackingLabelChangedObserver([this] (const String& defaultSpatialTrackingLabel) { defaultSpatialTrackingLabelChanged(defaultSpatialTrackingLabel); })
+#endif
 #if !RELEASE_LOG_DISABLED
     , m_logger(&document.logger())
     , m_logIdentifier(uniqueLogIdentifier())
@@ -645,6 +669,8 @@ HTMLMediaElement::~HTMLMediaElement()
 
     m_completelyLoaded = true;
 
+    cancelSniffer();
+
     if (RefPtr player = m_player) {
         player->invalidate();
         m_player = nullptr;
@@ -752,6 +778,7 @@ void HTMLMediaElement::unregisterWithDocument(Document& document)
 
 void HTMLMediaElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
+    ActiveDOMObject::didMoveToNewDocument(newDocument);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     ASSERT_WITH_SECURITY_IMPLICATION(&document() == &newDocument);
@@ -759,6 +786,13 @@ void HTMLMediaElement::didMoveToNewDocument(Document& oldDocument, Document& new
         oldDocument.decrementLoadEventDelayCount();
         newDocument.incrementLoadEventDelayCount();
     }
+
+    if (RefPtr audioTracks = m_audioTracks)
+        audioTracks->didMoveToNewDocument(newDocument);
+    if (RefPtr textTracks = m_textTracks)
+        textTracks->didMoveToNewDocument(newDocument);
+    if (RefPtr videoTracks = m_videoTracks)
+        videoTracks->didMoveToNewDocument(newDocument);
 
     unregisterWithDocument(oldDocument);
     registerWithDocument(newDocument);
@@ -948,6 +982,38 @@ void HTMLMediaElement::pauseAfterDetachedTask()
         pause();
     if (m_videoFullscreenMode == VideoFullscreenModeStandard)
         exitFullscreen();
+
+#if ENABLE(MODERN_MEDIA_CONTROLS)
+    if (m_controlsState == ControlsState::Initializing || m_controlsState == ControlsState::Ready) {
+        // Call MediaController.deinitialize() to get rid of circular references.
+        bool isDeinitialized = setupAndCallJS([this](JSDOMGlobalObject& globalObject, JSC::JSGlobalObject& lexicalGlobalObject, ScriptController&, DOMWrapperWorld&) {
+            auto& vm = globalObject.vm();
+            auto scope = DECLARE_THROW_SCOPE(vm);
+
+            auto controllerValue = controllerJSValue(lexicalGlobalObject, globalObject, *this);
+            RETURN_IF_EXCEPTION(scope, false);
+            auto* controllerObject = controllerValue.toObject(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, false);
+
+            auto functionValue = controllerObject->get(&lexicalGlobalObject, JSC::Identifier::fromString(vm, "deinitialize"_s));
+            if (UNLIKELY(scope.exception()) || functionValue.isUndefinedOrNull())
+                return false;
+
+            auto* function = functionValue.toObject(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, false);
+
+            auto callData = JSC::getCallData(function);
+            if (callData.type == JSC::CallData::Type::None)
+                return false;
+
+            auto resultValue = JSC::call(&lexicalGlobalObject, function, callData, controllerObject, JSC::MarkedArgumentBuffer());
+            RETURN_IF_EXCEPTION(scope, false);
+
+            return resultValue.toBoolean(&lexicalGlobalObject);
+        });
+        m_controlsState = isDeinitialized ? ControlsState::PartiallyDeinitialized : m_controlsState;
+    }
+#endif // ENABLE(MODERN_MEDIA_CONTROLS)
 
     if (!m_player)
         return;
@@ -1589,11 +1655,11 @@ void HTMLMediaElement::loadNextSourceChild()
     loadResource(mediaURL, contentType, keySystem);
 }
 
-void HTMLMediaElement::loadResource(const URL& initialURL, ContentType& contentType, const String& keySystem)
+void HTMLMediaElement::loadResource(const URL& initialURL, const ContentType& initialContentType, const String& keySystem)
 {
     ASSERT(initialURL.isEmpty() || isSafeToLoadURL(initialURL, Complain));
 
-    INFO_LOG(LOGIDENTIFIER, initialURL, contentType, keySystem);
+    INFO_LOG(LOGIDENTIFIER, initialURL, initialContentType, keySystem);
 
     RefPtr frame = document().frame();
     if (!frame) {
@@ -1638,7 +1704,7 @@ void HTMLMediaElement::loadResource(const URL& initialURL, ContentType& contentT
         // Resources that are not present in the manifest will always fail to load (at least, after the
         // cache has been primed the first time), making the testing of offline applications simpler.
         if (!resource || resource->path().isEmpty()) {
-            mediaLoadingFailed(MediaPlayer::NetworkState::NetworkError);
+            mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
             return;
         }
     }
@@ -1678,55 +1744,107 @@ void HTMLMediaElement::loadResource(const URL& initialURL, ContentType& contentT
 
     updateVolume();
 
-    bool loadAttempted = false;
-#if ENABLE(MEDIA_SOURCE)
-    if (!m_mediaSource && url.protocolIs(mediaSourceBlobProtocol) && !m_remotePlaybackConfiguration) {
-        if (RefPtr mediaSource = MediaSource::lookup(url.string()))
-            m_mediaSource = MediaSourceInterfaceMainThread::create(mediaSource.releaseNonNull());
-    }
+    auto contentType = initialContentType;
 
-    if (m_mediaSource) {
-        loadAttempted = true;
-
-        ALWAYS_LOG(LOGIDENTIFIER, "loading MSE blob");
-        if (!m_mediaSource->attachToElement(WeakPtr { *this })) {
-            // Forget our reference to the MediaSource, so we leave it alone
-            // while processing remainder of load failure.
-            m_mediaSource = nullptr;
-            mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
-        } else if (RefPtr mediaSource = m_mediaSource; !mediaSource->client() || !player->load(url, contentType, *mediaSource->client())) {
-            // We have to detach the MediaSource before we forget the reference to it.
-            mediaSource->detachFromElement();
-            m_mediaSource = nullptr;
-            mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
-        }
-    }
-#endif
-#if ENABLE(MEDIA_STREAM)
-    if (!loadAttempted && m_mediaStreamSrcObject && !m_remotePlaybackConfiguration) {
-        loadAttempted = true;
-        ALWAYS_LOG(LOGIDENTIFIER, "loading media stream blob ", m_mediaStreamSrcObject->logIdentifier());
-        if (!player->load(m_mediaStreamSrcObject->protectedPrivateStream()))
-            mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
-    }
-#endif
-
-    if (!loadAttempted && m_blob && !m_remotePlaybackConfiguration) {
-        loadAttempted = true;
+    if (m_blob && !m_remotePlaybackConfiguration) {
         ALWAYS_LOG(LOGIDENTIFIER, "loading generic blob");
         if (!m_blobURLForReading.isEmpty())
             ThreadableBlobRegistry::unregisterBlobURL(m_blobURLForReading);
         m_blobURLForReading = { BlobURL::createPublicURL(document().protectedSecurityOrigin().ptr()), document().topOrigin().data() };
         ThreadableBlobRegistry::registerBlobURL(document().protectedSecurityOrigin().ptr(), document().policyContainer(), m_blobURLForReading, m_blob->url());
 
-        if (!player->load(m_blobURLForReading, contentType, keySystem, !!m_remotePlaybackConfiguration))
-            mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
+        url = m_blobURLForReading;
+        if (contentType.isEmpty())
+            contentType = ContentType { m_blob->type() };
     }
 
-    if (!loadAttempted && !player->load(url, contentType, keySystem, !!m_remotePlaybackConfiguration))
-        mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
+    auto completionHandler = [url, player = m_player, keySystem, weakThis = WeakPtr { *this }, this](SnifferPromise::Result&& result) {
+        RefPtr protectedThis = weakThis.get();
+        if (!protectedThis)
+            return;
 
-    mediaPlayerRenderingModeChanged();
+        if (!result) {
+            if (result.error() != PlatformMediaError::Cancelled)
+                mediaLoadingFailed(MediaPlayer::NetworkState::NetworkError);
+            return;
+        }
+
+#if ENABLE(MEDIA_SOURCE)
+        if (!m_mediaSource && url.protocolIs(mediaSourceBlobProtocol) && !m_remotePlaybackConfiguration) {
+            if (RefPtr mediaSource = MediaSource::lookup(url.string()))
+                m_mediaSource = MediaSourceInterfaceMainThread::create(mediaSource.releaseNonNull());
+        }
+
+        if (m_mediaSource) {
+            ALWAYS_LOG(LOGIDENTIFIER, "loading MSE blob");
+            if (!m_mediaSource->attachToElement(*this)) {
+                // Forget our reference to the MediaSource, so we leave it alone
+                // while processing remainder of load failure.
+                m_mediaSource = nullptr;
+            } else  if (RefPtr mediaSource = m_mediaSource; !mediaSource->client() || !player->load(url, *result, *mediaSource->client())) {
+                // We have to detach the MediaSource before we forget the reference to it.
+                mediaSource->detachFromElement();
+                m_mediaSource = nullptr;
+            }
+            if (!m_mediaSource)
+                mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
+            else
+                mediaPlayerRenderingModeChanged();
+            return;
+        }
+#endif
+#if ENABLE(MEDIA_STREAM)
+        if (m_mediaStreamSrcObject && !m_remotePlaybackConfiguration) {
+            ALWAYS_LOG(LOGIDENTIFIER, "loading media stream blob ", m_mediaStreamSrcObject->logIdentifier());
+            if (!player->load(m_mediaStreamSrcObject->protectedPrivateStream()))
+                mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
+            else
+                mediaPlayerRenderingModeChanged();
+            return;
+        }
+#endif
+
+        if (!player->load(url, *result, keySystem, !!m_remotePlaybackConfiguration))
+            mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
+        else
+            mediaPlayerRenderingModeChanged();
+    };
+
+    if (needsContentTypeToPlay() && !url.isEmpty()) {
+        if (contentType.isEmpty() && url.protocolIsData())
+            contentType = ContentType(mimeTypeFromDataURL(url.string()));
+        else {
+            // If the MIME type is missing or is not meaningful, try to figure it out from the URL.
+            AtomString containerType { contentType.containerType() };
+            if (containerType.isEmpty() || containerType == applicationOctetStreamAtom() || containerType == textPlainContentTypeAtom())
+                contentType = ContentType::fromURL(url);
+        }
+        m_lastContentTypeUsed = contentType;
+    }
+
+    completionHandler(WTFMove(contentType));
+}
+
+bool HTMLMediaElement::needsContentTypeToPlay() const
+{
+#if ENABLE(MEDIA_SOURCE)
+    if (m_mediaSource || (currentSrc().protocolIs(mediaSourceBlobProtocol) && MediaSource::lookup(currentSrc().string())))
+        return false;
+#endif
+#if ENABLE(MEDIA_STREAM)
+        if (m_mediaStreamSrcObject)
+            return false;
+#endif
+    return !m_remotePlaybackConfiguration;
+}
+
+Ref<HTMLMediaElement::SnifferPromise> HTMLMediaElement::sniffForContentType(const URL& url)
+{
+    ResourceRequest request(url);
+    request.setAllowCookies(true);
+    // https://mimesniff.spec.whatwg.org/#reading-the-resource-header defines a maximum size of 1445 bytes fetch.
+    m_sniffer = MediaResourceSniffer::create(*mediaPlayerCreateResourceLoader(), WTFMove(request), 1445);
+    return m_sniffer->promise();
 }
 
 void HTMLMediaElement::mediaSourceWasDetached()
@@ -2266,10 +2384,8 @@ void HTMLMediaElement::textTrackModeChanged(TextTrack& track)
     if (RefPtr textTracks = m_textTracks; textTracks && textTracks->contains(track))
         textTracks->scheduleChangeEvent();
 
-#if ENABLE(AVF_CAPTIONS)
     if (track.trackType() == TextTrack::TrackElement && m_player)
         RefPtr { m_player }->notifyTrackModeChanged();
-#endif
 }
 
 void HTMLMediaElement::textTrackKindChanged(TextTrack& track)
@@ -2693,6 +2809,27 @@ void HTMLMediaElement::setNetworkState(MediaPlayer::NetworkState state)
         m_networkState = NETWORK_EMPTY;
         updateBufferingState();
         updateStalledState();
+        return;
+    }
+
+    if (state == MediaPlayer::NetworkState::FormatError && m_readyState < HAVE_METADATA && m_loadState == LoadingFromSrcAttr && needsContentTypeToPlay() && m_firstTimePlaying && !m_sniffer && !m_networkErrorOccured && m_lastContentTypeUsed) {
+        // We couldn't find a suitable MediaPlayer, this could be due to the content-type having been initially set incorrectly.
+        auto url = m_blob ? m_blobURLForReading.url() : currentSrc();
+        sniffForContentType(url)->whenSettled(RunLoop::main(), [weakThis = WeakPtr { *this }, this, url, player = m_player, lastContentType = *m_lastContentTypeUsed](auto&& result) {
+            RefPtr protectedThis = weakThis.get();
+            if (!protectedThis)
+                return;
+            if (!result) {
+                if (result.error() != PlatformMediaError::Cancelled)
+                    mediaLoadingFailed(MediaPlayer::NetworkState::NetworkError);
+                return;
+            }
+            player->reset();
+            if (result->isEmpty() || lastContentType == *result || !player->load(url, *result, String { }, !!m_remotePlaybackConfiguration))
+                mediaLoadingFailed(MediaPlayer::NetworkState::FormatError);
+            else
+                mediaPlayerRenderingModeChanged();
+        });
         return;
     }
 
@@ -5535,6 +5672,8 @@ void HTMLMediaElement::mediaPlayerTimeChanged()
                 if (!wasSeeking)
                     addBehaviorRestrictionsOnEndIfNecessary();
                 setAutoplayEventPlaybackState(AutoplayEventPlaybackState::None);
+                if (now > m_lastSeekTime)
+                    addPlayedRange(m_lastSeekTime, now);
             }
             setPlaying(false);
             // If the media element has a current media controller, then report the controller state
@@ -6237,6 +6376,13 @@ void HTMLMediaElement::cancelPendingTasks()
 #if !HAVE(MEDIA_VOLUME_PER_ELEMENT)
     m_volumeRevertTaskCancellationGroup.cancel();
 #endif
+    cancelSniffer();
+}
+
+void HTMLMediaElement::cancelSniffer()
+{
+    if (auto sniffer = std::exchange(m_sniffer, { }))
+        sniffer->cancel();
 }
 
 void HTMLMediaElement::userCancelledLoad()
@@ -6578,6 +6724,10 @@ void HTMLMediaElement::visibilityStateChanged()
         auto page = document().page();
         player->setPageIsVisible(!m_elementIsHidden, page ? page->sceneIdentifier() : ""_s);
     }
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    updateSpatialTrackingLabel();
+#endif
 }
 
 bool HTMLMediaElement::requiresTextTrackRepresentation() const
@@ -7040,36 +7190,6 @@ void HTMLMediaElement::prepareForVideoFullscreenStandby()
 #endif
 }
 
-WEBCORE_EXPORT void HTMLMediaElement::setVideoFullscreenStandby(bool value)
-{
-    ASSERT(is<HTMLVideoElement>(*this));
-    if (m_videoFullscreenStandby == value)
-        return;
-
-    if (!document().page())
-        return;
-
-    if (!document().page()->chrome().client().supportsVideoFullscreenStandby())
-        return;
-
-    m_videoFullscreenStandby = value;
-
-#if ENABLE(VIDEO_PRESENTATION_MODE)
-    if (RefPtr player = m_player)
-        player->videoFullscreenStandbyChanged();
-#endif
-
-    if (m_videoFullscreenMode != VideoFullscreenModeNone)
-        return;
-
-    if (m_videoFullscreenStandby)
-        document().protectedPage()->chrome().client().enterVideoFullscreenForVideoElement(downcast<HTMLVideoElement>(*this), VideoFullscreenModeNone, m_videoFullscreenStandby);
-    else
-        document().protectedPage()->chrome().client().exitVideoFullscreenForVideoElement(downcast<HTMLVideoElement>(*this), [this, protectedThis = Ref { *this }](auto success) mutable {
-            m_videoFullscreenStandby = !success;
-        });
-}
-
 void HTMLMediaElement::willBecomeFullscreenElement(VideoFullscreenMode mode)
 {
 #if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
@@ -7081,8 +7201,12 @@ void HTMLMediaElement::willBecomeFullscreenElement(VideoFullscreenMode mode)
 
 #if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
     if (oldVideoFullscreenMode == VideoFullscreenModePictureInPicture) {
-        if (auto* video = dynamicDowncast<HTMLVideoElement>(*this))
-            video->exitToFullscreenModeWithoutAnimationIfPossible(oldVideoFullscreenMode, VideoFullscreenModeStandard);
+        if (RefPtr video = dynamicDowncast<HTMLVideoElement>(*this)) {
+            if (RefPtr page = document().page(); page && mode == VideoFullscreenModeInWindow)
+                page->chrome().client().exitVideoFullscreenForVideoElement(*video);
+            else
+                video->exitToFullscreenModeWithoutAnimationIfPossible(oldVideoFullscreenMode, mode);
+        }
     }
 #endif
 
@@ -7518,8 +7642,13 @@ void HTMLMediaElement::createMediaPlayer() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
         setIsPlayingToWirelessTarget(false);
 #endif
 
-    if (RefPtr player = std::exchange(m_player, { }))
+    m_networkErrorOccured = false;
+    m_lastContentTypeUsed.reset();
+    if (RefPtr player = std::exchange(m_player, { })) {
+        // The sniffer completionHandler would have taken a reference to the old MediaPlayer.
+        cancelSniffer();
         player->invalidate();
+    }
 
     m_player = MediaPlayer::create(*this);
     RefPtr player = m_player;
@@ -7533,6 +7662,10 @@ void HTMLMediaElement::createMediaPlayer() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     schedulePlaybackControlsManagerUpdate();
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA) && ENABLE(ENCRYPTED_MEDIA)
     updateShouldContinueAfterNeedKey();
+#endif
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    updateSpatialTrackingLabel();
 #endif
 
 #if ENABLE(WEB_AUDIO)
@@ -7986,10 +8119,13 @@ void HTMLMediaElement::mediaPlayerGetRawCookies(const URL& url, MediaPlayerClien
 
 #endif
 
-void HTMLMediaElement::mediaPlayerEngineFailedToLoad() const
+void HTMLMediaElement::mediaPlayerEngineFailedToLoad()
 {
     if (!m_player)
         return;
+
+    if (m_player->networkState() == MediaPlayer::NetworkState::NetworkError)
+        m_networkErrorOccured = true;
 
     if (RefPtr page = document().page())
         page->diagnosticLoggingClient().logDiagnosticMessageWithValue(DiagnosticLoggingKeys::engineFailedToLoadKey(), m_player->engineDescription(), m_player->platformErrorCode(), 4, ShouldSample::No);
@@ -8191,99 +8327,143 @@ bool HTMLMediaElement::ensureMediaControls()
         return true;
 
     auto mediaControlsScripts = RenderTheme::singleton().mediaControlsScripts();
-    if (mediaControlsScripts.isEmpty())
+    if (mediaControlsScripts.isEmpty() || isSuspended())
         return false;
 
     INFO_LOG(LOGIDENTIFIER);
 
+    ControlsState oldControlsState = m_controlsState;
     m_controlsState = ControlsState::Initializing;
 
-    auto controlsReady = setupAndCallJS([this, mediaControlsScripts = WTFMove(mediaControlsScripts)](JSDOMGlobalObject& globalObject, JSC::JSGlobalObject& lexicalGlobalObject, ScriptController& scriptController, DOMWrapperWorld& world) {
-        auto& vm = globalObject.vm();
-        auto scope = DECLARE_CATCH_SCOPE(vm);
+    auto controlsReady = false;
+    if (oldControlsState == ControlsState::None) {
+        controlsReady = setupAndCallJS([this, mediaControlsScripts = WTFMove(mediaControlsScripts)](JSDOMGlobalObject& globalObject, JSC::JSGlobalObject& lexicalGlobalObject, ScriptController& scriptController, DOMWrapperWorld& world) {
+            auto& vm = globalObject.vm();
+            auto scope = DECLARE_CATCH_SCOPE(vm);
 
-        auto reportExceptionAndReturnFalse = [&] {
-            auto* exception = scope.exception();
-            scope.clearException();
-            reportException(&globalObject, exception);
-            return false;
-        };
+            auto reportExceptionAndReturnFalse = [&] {
+                auto* exception = scope.exception();
+                scope.clearException();
+                reportException(&globalObject, exception);
+                return false;
+            };
 
-        for (auto& mediaControlsScript : mediaControlsScripts) {
-            if (mediaControlsScript.isEmpty())
-                continue;
-            scriptController.evaluateInWorldIgnoringException(ScriptSourceCode(mediaControlsScript, JSC::SourceTaintedOrigin::Untainted), world);
+            for (auto& mediaControlsScript : mediaControlsScripts) {
+                if (mediaControlsScript.isEmpty())
+                    continue;
+                scriptController.evaluateInWorldIgnoringException(ScriptSourceCode(mediaControlsScript, JSC::SourceTaintedOrigin::Untainted), world);
+                RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
+            }
+
+            // The media controls script must provide a method with the following details.
+            // Name: createControls
+            // Parameters:
+            //     1. The ShadowRoot element that will hold the controls.
+            //     2. This object (and HTMLMediaElement).
+            //     3. The MediaControlsHost object.
+            // Return value:
+            //     A reference to the created media controller instance.
+
+            auto functionValue = globalObject.get(&lexicalGlobalObject, JSC::Identifier::fromString(vm, "createControls"_s));
+            if (functionValue.isUndefinedOrNull())
+                return false;
+
+            if (!m_mediaControlsHost)
+                m_mediaControlsHost = MediaControlsHost::create(*this);
+
+            auto mediaJSWrapper = toJS(&lexicalGlobalObject, &globalObject, *this);
+            auto mediaControlsHostJSWrapper = toJS(&lexicalGlobalObject, &globalObject, *m_mediaControlsHost.copyRef());
+
+            JSC::MarkedArgumentBuffer argList;
+            argList.append(toJS(&lexicalGlobalObject, &globalObject, Ref { ensureUserAgentShadowRoot() }));
+            argList.append(mediaJSWrapper);
+            argList.append(mediaControlsHostJSWrapper);
+            ASSERT(!argList.hasOverflowed());
+
+            auto* function = functionValue.toObject(&lexicalGlobalObject);
             RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
-        }
+            auto callData = JSC::getCallData(function);
+            if (callData.type == JSC::CallData::Type::None)
+                return false;
 
-        // The media controls script must provide a method with the following details.
-        // Name: createControls
-        // Parameters:
-        //     1. The ShadowRoot element that will hold the controls.
-        //     2. This object (and HTMLMediaElement).
-        //     3. The MediaControlsHost object.
-        // Return value:
-        //     A reference to the created media controller instance.
+            auto controllerValue = JSC::call(&lexicalGlobalObject, function, callData, &globalObject, argList);
+            RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
 
-        auto functionValue = globalObject.get(&lexicalGlobalObject, JSC::Identifier::fromString(vm, "createControls"_s));
-        if (functionValue.isUndefinedOrNull())
-            return false;
+            auto* controllerObject = JSC::jsDynamicCast<JSC::JSObject*>(controllerValue);
+            if (!controllerObject)
+                return false;
 
-        if (!m_mediaControlsHost)
-            m_mediaControlsHost = MediaControlsHost::create(*this);
+            // Connect the Media, MediaControllerHost, and Controller so the GC knows about their relationship
+            auto* mediaJSWrapperObject = mediaJSWrapper.toObject(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
+            auto controlsHost = JSC::Identifier::fromString(vm, "controlsHost"_s);
 
-        auto mediaJSWrapper = toJS(&lexicalGlobalObject, &globalObject, *this);
-        auto mediaControlsHostJSWrapper = toJS(&lexicalGlobalObject, &globalObject, *m_mediaControlsHost.copyRef());
+            ASSERT(!mediaJSWrapperObject->hasProperty(&lexicalGlobalObject, controlsHost));
 
-        JSC::MarkedArgumentBuffer argList;
-        argList.append(toJS(&lexicalGlobalObject, &globalObject, Ref { ensureUserAgentShadowRoot() }));
-        argList.append(mediaJSWrapper);
-        argList.append(mediaControlsHostJSWrapper);
-        ASSERT(!argList.hasOverflowed());
+            mediaJSWrapperObject->putDirect(vm, controlsHost, mediaControlsHostJSWrapper, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::ReadOnly);
 
-        auto* function = functionValue.toObject(&lexicalGlobalObject);
-        RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
-        auto callData = JSC::getCallData(function);
-        if (callData.type == JSC::CallData::Type::None)
-            return false;
+            auto* mediaControlsHostJSWrapperObject = JSC::jsDynamicCast<JSC::JSObject*>(mediaControlsHostJSWrapper);
+            if (!mediaControlsHostJSWrapperObject)
+                return false;
 
-        auto controllerValue = JSC::call(&lexicalGlobalObject, function, callData, &globalObject, argList);
-        RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
+            auto controller = builtinNames(vm).controllerPublicName();
 
-        auto* controllerObject = JSC::jsDynamicCast<JSC::JSObject*>(controllerValue);
-        if (!controllerObject)
-            return false;
+            ASSERT(!controllerObject->hasProperty(&lexicalGlobalObject, controller));
 
-        // Connect the Media, MediaControllerHost, and Controller so the GC knows about their relationship
-        auto* mediaJSWrapperObject = mediaJSWrapper.toObject(&lexicalGlobalObject);
-        RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
-        auto controlsHost = JSC::Identifier::fromString(vm, "controlsHost"_s);
+            mediaControlsHostJSWrapperObject->putDirect(vm, controller, controllerValue, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::ReadOnly);
 
-        ASSERT(!mediaJSWrapperObject->hasProperty(&lexicalGlobalObject, controlsHost));
+            if (m_mediaControlsDependOnPageScaleFactor)
+                updatePageScaleFactorJSProperty();
 
-        mediaJSWrapperObject->putDirect(vm, controlsHost, mediaControlsHostJSWrapper, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::ReadOnly);
+            RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
 
-        auto* mediaControlsHostJSWrapperObject = JSC::jsDynamicCast<JSC::JSObject*>(mediaControlsHostJSWrapper);
-        if (!mediaControlsHostJSWrapperObject)
-            return false;
+            updateUsesLTRUserInterfaceLayoutDirectionJSProperty();
+            RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
 
-        auto controller = builtinNames(vm).controllerPublicName();
+            return true;
+        });
+    } else if (oldControlsState == ControlsState::PartiallyDeinitialized) {
+        controlsReady = setupAndCallJS([this](JSDOMGlobalObject& globalObject, JSC::JSGlobalObject& lexicalGlobalObject, ScriptController&, DOMWrapperWorld&) {
+            auto& vm = globalObject.vm();
+            auto scope = DECLARE_THROW_SCOPE(vm);
 
-        ASSERT(!controllerObject->hasProperty(&lexicalGlobalObject, controller));
+            auto controllerValue = controllerJSValue(lexicalGlobalObject, globalObject, *this);
+            RETURN_IF_EXCEPTION(scope, false);
+            auto* controllerObject = controllerValue.toObject(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, false);
 
-        mediaControlsHostJSWrapperObject->putDirect(vm, controller, controllerValue, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::ReadOnly);
+            auto functionValue = controllerObject->get(&lexicalGlobalObject, JSC::Identifier::fromString(vm, "reinitialize"_s));
+            if (UNLIKELY(scope.exception()) || functionValue.isUndefinedOrNull())
+                return false;
 
-        if (m_mediaControlsDependOnPageScaleFactor)
-            updatePageScaleFactorJSProperty();
+            if (!m_mediaControlsHost)
+                m_mediaControlsHost = MediaControlsHost::create(*this);
 
-        RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
+            auto mediaJSWrapper = toJS(&lexicalGlobalObject, &globalObject, *this);
+            auto mediaControlsHostJSWrapper = toJS(&lexicalGlobalObject, &globalObject, *m_mediaControlsHost.copyRef());
 
-        updateUsesLTRUserInterfaceLayoutDirectionJSProperty();
-        RETURN_IF_EXCEPTION(scope, reportExceptionAndReturnFalse());
+            JSC::MarkedArgumentBuffer argList;
+            argList.append(toJS(&lexicalGlobalObject, &globalObject, Ref { ensureUserAgentShadowRoot() }));
+            argList.append(mediaJSWrapper);
+            argList.append(mediaControlsHostJSWrapper);
+            ASSERT(!argList.hasOverflowed());
 
-        return true;
-    });
-    m_controlsState = controlsReady ? ControlsState::Ready : ControlsState::None;
+            auto* function = functionValue.toObject(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, false);
+
+            auto callData = JSC::getCallData(function);
+            if (callData.type == JSC::CallData::Type::None)
+                return false;
+
+            auto resultValue = JSC::call(&lexicalGlobalObject, function, callData, controllerObject, argList);
+            RETURN_IF_EXCEPTION(scope, false);
+
+            return resultValue.toBoolean(&lexicalGlobalObject);
+        });
+    } else
+        ASSERT_NOT_REACHED();
+
+    m_controlsState = controlsReady ? ControlsState::Ready : oldControlsState;
     return controlsReady;
 }
 
@@ -8469,6 +8649,7 @@ bool HTMLMediaElement::canProduceAudio() const
 
 bool HTMLMediaElement::isSuspended() const
 {
+    ASSERT(Node::scriptExecutionContext() == ActiveDOMObject::scriptExecutionContext());
     return document().activeDOMObjectsAreSuspended() || document().activeDOMObjectsAreStopped();
 }
 
@@ -9005,7 +9186,7 @@ bool HTMLMediaElement::isVisibleInViewport() const
 
 void HTMLMediaElement::schedulePlaybackControlsManagerUpdate()
 {
-    if (RefPtr page = document().page())
+    if (RefPtrAllowingPartiallyDestroyed<Page> page = document().page())
         page->schedulePlaybackControlsManagerUpdate();
 }
 
@@ -9267,18 +9448,41 @@ String HTMLMediaElement::localizedSourceType() const
     return { };
 }
 
-const String& HTMLMediaElement::spatialTrackingLabel() const
+#if HAVE(SPATIAL_TRACKING_LABEL)
+void HTMLMediaElement::updateSpatialTrackingLabel()
 {
-    if (m_player)
-        return m_player->spatialTrackingLabel();
-    return emptyString();
+    if (!m_player)
+        return;
+
+    m_player->setSpatialTrackingLabel(m_spatialTrackingLabel);
+
+    auto page = document().protectedPage();
+    if (!page)
+        return;
+
+    m_player->setDefaultSpatialTrackingLabel(page->defaultSpatialTrackingLabel());
 }
 
-void HTMLMediaElement::setSpatialTrackingLabel(String&& spatialTrackingLabel)
+const String& HTMLMediaElement::spatialTrackingLabel() const
+{
+    return m_spatialTrackingLabel;
+}
+
+void HTMLMediaElement::setSpatialTrackingLabel(const String& spatialTrackingLabel)
+{
+    if (m_spatialTrackingLabel == spatialTrackingLabel)
+        return;
+    m_spatialTrackingLabel = spatialTrackingLabel;
+
+    m_player->setSpatialTrackingLabel(spatialTrackingLabel);
+}
+
+void HTMLMediaElement::defaultSpatialTrackingLabelChanged(const String& defaultSpatialTrackingLabel)
 {
     if (m_player)
-        m_player->setSpatialTrackingLabel(WTFMove(spatialTrackingLabel));
+        m_player->setDefaultSpatialTrackingLabel(defaultSpatialTrackingLabel);
 }
+#endif
 
 } // namespace WebCore
 

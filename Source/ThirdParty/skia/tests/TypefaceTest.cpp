@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -93,10 +94,11 @@ static void TypefaceStyle_test(skiatest::Reporter* reporter,
                     (weight == 1000 && newStyle.weight() == 999)     // DW weirdness
     );
 
-    // Some back-ends (GDI) don't support width, ensure these always report 'medium'.
-    REPORTER_ASSERT(reporter,
-                    newStyle.width() == width ||
-                    newStyle.width() == 5);
+    // Some back-ends (GDI) don't support width, ensure these always report 'normal'.
+    REPORTER_ASSERT(
+            reporter,
+            newStyle.width() == width || newStyle.width() == SkFontStyle::Width::kNormal_Width,
+            "newStyle.width(): %d width: %" PRIu16, newStyle.width(), width);
 }
 DEF_TEST(TypefaceStyle, reporter) {
     std::unique_ptr<SkStreamAsset> stream(GetResourceAsStream("fonts/Em.ttf"));
@@ -335,7 +337,8 @@ DEF_TEST(TypefaceVariationIndex, reporter) {
         return;
     }
     REPORTER_ASSERT(reporter, positionRead[0].axis == SkSetFourByteTag('w','g','h','t'));
-    REPORTER_ASSERT(reporter, positionRead[0].value == 0.5);
+    REPORTER_ASSERT(reporter, positionRead[0].value == 0.5,
+                    "positionRead[0].value: %f", positionRead[0].value);
 }
 
 DEF_TEST(Typeface, reporter) {
@@ -554,9 +557,10 @@ DEF_TEST(Typeface_serialize, reporter) {
 }
 
 DEF_TEST(Typeface_glyph_to_char, reporter) {
-    SkFont font(ToolUtils::EmojiTypeface(), 12);
+    ToolUtils::EmojiTestSample emojiSample = ToolUtils::EmojiSample();
+    SkFont font(emojiSample.typeface, 12);
     SkASSERT(font.getTypeface());
-    char const * text = ToolUtils::EmojiSampleText();
+    char const * text = emojiSample.sampleText;
     size_t const textLen = strlen(text);
     SkString familyName;
     font.getTypeface()->getFamilyName(&familyName);
@@ -600,10 +604,20 @@ DEF_TEST(LegacyMakeTypeface, reporter) {
     sk_sp<SkTypeface> typeface2 = fm->legacyMakeTypeface(nullptr, SkFontStyle::Bold());
     sk_sp<SkTypeface> typeface3 = fm->legacyMakeTypeface(nullptr, SkFontStyle::BoldItalic());
 
-    REPORTER_ASSERT(reporter, typeface1->isItalic());
-    REPORTER_ASSERT(reporter, !typeface1->isBold());
-    REPORTER_ASSERT(reporter, !typeface2->isItalic());
-    REPORTER_ASSERT(reporter, typeface2->isBold());
-    REPORTER_ASSERT(reporter, typeface3->isItalic());
-    REPORTER_ASSERT(reporter, typeface3->isBold());
+    if (typeface1 || typeface2 || typeface3) {
+        REPORTER_ASSERT(reporter, typeface1 && typeface2 && typeface1);
+    }
+
+    if (typeface1) {
+        REPORTER_ASSERT(reporter, typeface1->isItalic());
+        REPORTER_ASSERT(reporter, !typeface1->isBold());
+    }
+    if (typeface2) {
+        REPORTER_ASSERT(reporter, !typeface2->isItalic());
+        REPORTER_ASSERT(reporter, typeface2->isBold());
+    }
+    if (typeface3) {
+        REPORTER_ASSERT(reporter, typeface3->isItalic());
+        REPORTER_ASSERT(reporter, typeface3->isBold());
+    }
 }

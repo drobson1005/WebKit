@@ -514,6 +514,10 @@ static void tryInterceptNavigation(Ref<API::NavigationAction>&& navigationAction
 #if ENABLE(WK_WEB_EXTENSIONS)
 static bool isUnsupportedWebExtensionNavigation(API::NavigationAction& navigationAction, WebPageProxy& page)
 {
+    bool subframeNavigation = navigationAction.targetFrame() && !navigationAction.targetFrame()->isMainFrame();
+    if (subframeNavigation)
+        return false;
+
     auto *requiredBaseURL = page.cocoaView().get()._requiredWebExtensionBaseURL;
     if (!requiredBaseURL)
         return false;
@@ -532,9 +536,7 @@ void NavigationState::NavigationClient::decidePolicyForNavigationAction(WebPageP
 {
     bool subframeNavigation = navigationAction->targetFrame() && !navigationAction->targetFrame()->isMainFrame();
 
-    RefPtr<API::WebsitePolicies> defaultWebsitePolicies;
-    if (auto* policies = webPageProxy.configuration().defaultWebsitePolicies())
-        defaultWebsitePolicies = policies->copy();
+    RefPtr<API::WebsitePolicies> defaultWebsitePolicies = webPageProxy.configuration().defaultWebsitePolicies().copy();
 
     if (!m_navigationState || (!m_navigationState->m_navigationDelegateMethods.webViewDecidePolicyForNavigationActionDecisionHandler
         && !m_navigationState->m_navigationDelegateMethods.webViewDecidePolicyForNavigationActionWithPreferencesUserInfoDecisionHandler
@@ -547,9 +549,13 @@ void NavigationState::NavigationClient::decidePolicyForNavigationAction(WebPageP
 
 #if ENABLE(WK_WEB_EXTENSIONS)
             if (isUnsupportedWebExtensionNavigation(navigationAction, webPage)) {
+                RELEASE_LOG_DEBUG(Extensions, "Ignoring unsupported web extension navigation");
                 listener->ignore();
                 return;
             }
+
+            if (RefPtr extensionController = webPage->webExtensionController())
+                extensionController->updateWebsitePoliciesForNavigation(*defaultWebsitePolicies, navigationAction);
 #endif
 
             if (!navigationAction->targetFrame()) {
@@ -616,9 +622,13 @@ void NavigationState::NavigationClient::decidePolicyForNavigationAction(WebPageP
         ensureOnMainRunLoop([navigationAction = WTFMove(navigationAction), webPageProxy = WTFMove(webPageProxy), actionPolicy, localListener = WTFMove(localListener), apiWebsitePolicies = WTFMove(apiWebsitePolicies)] () mutable {
 #if ENABLE(WK_WEB_EXTENSIONS)
             if (actionPolicy != WKNavigationActionPolicyCancel && isUnsupportedWebExtensionNavigation(navigationAction, webPageProxy)) {
+                RELEASE_LOG_DEBUG(Extensions, "Ignoring unsupported web extension navigation");
                 localListener->ignore();
                 return;
             }
+
+            if (RefPtr extensionController = webPageProxy->webExtensionController())
+                extensionController->updateWebsitePoliciesForNavigation(*apiWebsitePolicies, navigationAction);
 #endif
 
             switch (actionPolicy) {
@@ -1127,33 +1137,18 @@ void NavigationState::NavigationClient::didReceiveAuthenticationChallenge(WebPag
     }).get()];
 }
 
-static bool systemAllowsLegacyTLSFor(WebPageProxy& page)
-{
-    bool enableLegacyTLS = page.websiteDataStore().configuration().legacyTLSEnabled();
-    if (id value = [[NSUserDefaults standardUserDefaults] objectForKey:@"WebKitEnableLegacyTLS"])
-        enableLegacyTLS = [value boolValue];
-    if (!enableLegacyTLS) {
-#if PLATFORM(IOS_FAMILY) && !PLATFORM(MACCATALYST)
-        enableLegacyTLS = [[PAL::getMCProfileConnectionClass() sharedConnection] effectiveBoolValueForSetting:@"allowDeprecatedWebKitTLS"] == MCRestrictedBoolExplicitYes;
-#elif PLATFORM(MAC)
-        enableLegacyTLS = CFPreferencesGetAppBooleanValue(CFSTR("allowDeprecatedWebKitTLS"), CFSTR("com.apple.applicationaccess"), nullptr);
-#endif
-    }
-    return enableLegacyTLS;
-}
-
 void NavigationState::NavigationClient::shouldAllowLegacyTLS(WebPageProxy& page, AuthenticationChallengeProxy& authenticationChallenge, CompletionHandler<void(bool)>&& completionHandler)
 {
     if (!m_navigationState)
-        return completionHandler(systemAllowsLegacyTLSFor(page));
+        return completionHandler(page.websiteDataStore().configuration().legacyTLSEnabled());
 
     if (!m_navigationState->m_navigationDelegateMethods.webViewAuthenticationChallengeShouldAllowLegacyTLS
         && !m_navigationState->m_navigationDelegateMethods.webViewAuthenticationChallengeShouldAllowDeprecatedTLS)
-        return completionHandler(systemAllowsLegacyTLSFor(page));
+        return completionHandler(page.websiteDataStore().configuration().legacyTLSEnabled());
 
     auto navigationDelegate = m_navigationState->navigationDelegate();
     if (!navigationDelegate)
-        return completionHandler(systemAllowsLegacyTLSFor(page));
+        return completionHandler(page.websiteDataStore().configuration().legacyTLSEnabled());
 
     if (m_navigationState->m_navigationDelegateMethods.webViewAuthenticationChallengeShouldAllowDeprecatedTLS) {
         auto checker = CompletionHandlerCallChecker::create(navigationDelegate.get(), @selector(webView:authenticationChallenge:shouldAllowDeprecatedTLS:));

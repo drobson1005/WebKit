@@ -102,14 +102,14 @@ bool RemoteLayerTreeHost::replayDynamicContentScalingDisplayListsIntoBackingStor
 #endif
 }
 
-bool RemoteLayerTreeHost::css3DTransformInteroperabilityEnabled() const
-{
-    return m_drawingArea->page().preferences().css3DTransformInteroperabilityEnabled();
-}
-
 bool RemoteLayerTreeHost::threadedAnimationResolutionEnabled() const
 {
     return m_drawingArea->page().preferences().threadedAnimationResolutionEnabled();
+}
+
+bool RemoteLayerTreeHost::cssUnprefixedBackdropFilterEnabled() const
+{
+    return m_drawingArea->page().preferences().cssUnprefixedBackdropFilterEnabled();
 }
 
 #if PLATFORM(MAC)
@@ -220,8 +220,14 @@ bool RemoteLayerTreeHost::updateLayerTree(const RemoteLayerTreeTransaction& tran
 
     // Drop the contents of any layers which were unparented; the Web process will re-send
     // the backing store in the commit that reparents them.
-    for (auto& newlyUnreachableLayerID : transaction.layerIDsWithNewlyUnreachableBackingStore())
-        layerForID(newlyUnreachableLayerID).contents = nullptr;
+    for (auto& newlyUnreachableLayerID : transaction.layerIDsWithNewlyUnreachableBackingStore()) {
+        auto* node = nodeForID(newlyUnreachableLayerID);
+        ASSERT(node);
+        if (node) {
+            node->layer().contents = nullptr;
+            node->setAsyncContentsIdentifier(std::nullopt);
+        }
+    }
 
 #if PLATFORM(MAC)
     if (updateBannerLayers(transaction))
@@ -368,7 +374,7 @@ void RemoteLayerTreeHost::createLayer(const RemoteLayerTreeTransaction::LayerCre
 
     auto node = makeNode(properties);
 
-    if (css3DTransformInteroperabilityEnabled() && [node->layer() respondsToSelector:@selector(setUsesWebKitBehavior:)]) {
+    if ([node->layer() respondsToSelector:@selector(setUsesWebKitBehavior:)]) {
         [node->layer() setUsesWebKitBehavior:YES];
         if ([node->layer() isKindOfClass:[CATransformLayer class]])
             [node->layer() setSortsSublayers:YES];

@@ -59,7 +59,7 @@ Ref<HTMLProgressElement> HTMLProgressElement::create(const QualifiedName& tagNam
 
 RenderPtr<RenderElement> HTMLProgressElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    if (!style.hasEffectiveAppearance())
+    if (!style.hasUsedAppearance())
         return RenderElement::createFor(*this, WTFMove(style));
 
     return createRenderer<RenderProgress>(*this, WTFMove(style));
@@ -140,7 +140,7 @@ void HTMLProgressElement::didElementStateChange()
         renderer->updateFromElement();
 
     if (auto* cache = document().existingAXObjectCache())
-        cache->valueChanged(this);
+        cache->valueChanged(*this);
 }
 
 void HTMLProgressElement::didAddUserAgentShadowRoot(ShadowRoot& root)

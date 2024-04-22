@@ -39,6 +39,7 @@
 #include "WebPageProxy.h"
 #include <WebCore/PlatformWheelEvent.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
+#include <WebCore/ScrollingNodeID.h>
 #include <WebCore/ScrollingThread.h>
 #include <WebCore/WheelEventDeltaFilter.h>
 #include <wtf/SystemTracing.h>
@@ -49,6 +50,7 @@ using namespace WebCore;
 class RemoteLayerTreeEventDispatcherDisplayLinkClient final : public DisplayLink::Client {
 public:
     WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RemoteLayerTreeEventDispatcherDisplayLinkClient);
 public:
     explicit RemoteLayerTreeEventDispatcherDisplayLinkClient(RemoteLayerTreeEventDispatcher& eventDispatcher)
         : m_eventDispatcher(&eventDispatcher)

@@ -63,6 +63,7 @@ public:
     void deref() const final { return ThreadSafeRefCounted<RemoteGPUProxy>::deref(); }
 
     void paintToCanvas(WebCore::NativeImage&, const WebCore::IntSize&, WebCore::GraphicsContext&) final;
+    WebGPUIdentifier backing() const { return m_backing; }
 
 private:
     friend class WebGPU::DowncastConvertToBackingContext;
@@ -85,8 +86,6 @@ private:
 
     void waitUntilInitialized();
 
-    WebGPUIdentifier backing() const { return m_backing; }
-    
     static inline constexpr Seconds defaultSendTimeout = 30_s;
     template<typename T>
     WARN_UNUSED_RETURN IPC::Error send(T&& message)
@@ -101,9 +100,9 @@ private:
 
     void requestAdapter(const WebCore::WebGPU::RequestAdapterOptions&, CompletionHandler<void(RefPtr<WebCore::WebGPU::Adapter>&&)>&&) final;
 
-    Ref<WebCore::WebGPU::PresentationContext> createPresentationContext(const WebCore::WebGPU::PresentationContextDescriptor&) final;
+    RefPtr<WebCore::WebGPU::PresentationContext> createPresentationContext(const WebCore::WebGPU::PresentationContextDescriptor&) final;
 
-    Ref<WebCore::WebGPU::CompositorIntegration> createCompositorIntegration() final;
+    RefPtr<WebCore::WebGPU::CompositorIntegration> createCompositorIntegration() final;
 
     void abandonGPUProcess();
     void disconnectGpuProcessIfNeeded();

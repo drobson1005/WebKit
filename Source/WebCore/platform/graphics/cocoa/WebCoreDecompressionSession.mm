@@ -26,6 +26,7 @@
 #import "config.h"
 #import "WebCoreDecompressionSession.h"
 
+#import "IOSurface.h"
 #import "Logging.h"
 #import "PixelBufferConformerCV.h"
 #import "VideoDecoder.h"
@@ -58,8 +59,8 @@ namespace WebCore {
 
 WebCoreDecompressionSession::WebCoreDecompressionSession(Mode mode)
     : m_mode(mode)
-    , m_decompressionQueue(WorkQueue::create("WebCoreDecompressionSession Decompression Queue"))
-    , m_enqueingQueue(WorkQueue::create("WebCoreDecompressionSession Enqueueing Queue"))
+    , m_decompressionQueue(WorkQueue::create("WebCoreDecompressionSession Decompression Queue"_s))
+    , m_enqueingQueue(WorkQueue::create("WebCoreDecompressionSession Enqueueing Queue"_s))
 {
 }
 
@@ -208,6 +209,14 @@ bool WebCoreDecompressionSession::shouldDecodeSample(CMSampleBufferRef sample, b
     return true;
 }
 
+void WebCoreDecompressionSession::assignResourceOwner(CVImageBufferRef imageBuffer)
+{
+    if (!m_resourceOwner || !imageBuffer || CFGetTypeID(imageBuffer) != CVPixelBufferGetTypeID())
+        return;
+    if (auto surface = CVPixelBufferGetIOSurface((CVPixelBufferRef)imageBuffer))
+        IOSurface::setOwnershipIdentity(surface, m_resourceOwner);
+}
+
 RetainPtr<VTDecompressionSessionRef> WebCoreDecompressionSession::ensureDecompressionSessionForSample(CMSampleBufferRef sample)
 {
     Locker lock { m_lock };
@@ -287,16 +296,22 @@ void WebCoreDecompressionSession::maybeDecodeNextSample()
             });
         } else {
             if (*result) {
+                RetainPtr<CVPixelBufferRef> imageBuffer = (CVPixelBufferRef)PAL::CMSampleBufferGetImageBuffer(result->get());
+                ASSERT(CFGetTypeID(imageBuffer.get()) == CVPixelBufferGetTypeID());
+
                 if (!m_deliverDecodedFrames) {
-                    m_enqueingQueue->dispatch([protectedThis = Ref { *this }, imageSampleBuffer = WTFMove(*result), flushId] {
-                        if (flushId == protectedThis->m_flushId)
+                    m_enqueingQueue->dispatch([protectedThis = Ref { *this }, imageSampleBuffer = WTFMove(*result), imageBuffer = WTFMove(imageBuffer), flushId] {
+                        if (flushId == protectedThis->m_flushId) {
+                            protectedThis->assignResourceOwner(imageBuffer.get());
                             protectedThis->enqueueDecodedSample(imageSampleBuffer.get());
+                        }
                     });
                 } else {
-                    ensureOnMainThread([protectedThis = Ref { *this }, this, imageSampleBuffer = WTFMove(*result), flushId]() mutable {
+                    ensureOnMainThread([protectedThis = Ref { *this }, this, imageSampleBuffer = WTFMove(*result), imageBuffer = WTFMove(imageBuffer), flushId]() mutable {
                         assertIsMainThread();
                         if (flushId == m_flushId && m_newDecodedFrameCallback) {
                             LOG(Media, "WebCoreDecompressionSession::handleDecompressionOutput(%p) - returning frame: presentationTime(%s)", this, toString(PAL::toMediaTime(PAL::CMSampleBufferGetPresentationTimeStamp(imageSampleBuffer.get()))).utf8().data());
+                            assignResourceOwner(imageBuffer.get());
                             m_newDecodedFrameCallback(WTFMove(imageSampleBuffer));
                         }
                     });
@@ -440,6 +455,7 @@ RetainPtr<CVPixelBufferRef> WebCoreDecompressionSession::decodeSampleSync(CMSamp
     VTDecodeInfoFlags flags { 0 };
     WTF::Semaphore syncDecompressionOutputSemaphore { 0 };
     VTDecompressionSessionDecodeFrameWithOutputHandler(decompressionSession.get(), sample, flags, nullptr, [&] (OSStatus, VTDecodeInfoFlags, CVImageBufferRef imageBuffer, CMTime, CMTime) mutable {
+        assignResourceOwner(imageBuffer);
         if (imageBuffer && CFGetTypeID(imageBuffer) == CVPixelBufferGetTypeID())
             pixelBuffer = (CVPixelBufferRef)imageBuffer;
         syncDecompressionOutputSemaphore.signal();

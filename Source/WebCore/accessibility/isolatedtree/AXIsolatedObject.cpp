@@ -32,6 +32,10 @@
 #include "AXIsolatedTree.h"
 #include "AXLogger.h"
 #include "AXTextRun.h"
+#include "AccessibilityNodeObject.h"
+#include "DateComponents.h"
+#include "HTMLNames.h"
+#include "RenderObject.h"
 
 #if PLATFORM(MAC)
 #import <pal/spi/mac/HIServicesSPI.h>
@@ -42,6 +46,8 @@
 #endif
 
 namespace WebCore {
+
+using namespace HTMLNames;
 
 AXIsolatedObject::AXIsolatedObject(const Ref<AccessibilityObject>& axObject, AXIsolatedTree* tree)
     : AXCoreObject(axObject->objectID())
@@ -79,6 +85,7 @@ String AXIsolatedObject::dbg() const
 
 void AXIsolatedObject::initializeProperties(const Ref<AccessibilityObject>& axObject)
 {
+    AXTRACE("AXIsolatedObject::initializeProperties"_s);
     auto& object = axObject.get();
 
     if (object.ancestorFlagsAreInitialized())
@@ -257,8 +264,8 @@ void AXIsolatedObject::initializeProperties(const Ref<AccessibilityObject>& axOb
         setProperty(AXPropertyName::IsRadioInput, object.isRadioInput());
     }
 
-    if (object.canHaveSelectedChildren())
-        setObjectVectorProperty(AXPropertyName::SelectedChildren, object.selectedChildren());
+    if (auto selectedChildren = object.selectedChildren())
+        setObjectVectorProperty(AXPropertyName::SelectedChildren, *selectedChildren);
 
     if (object.isImage())
         setProperty(AXPropertyName::EmbeddedImageDescription, object.embeddedImageDescription().isolatedCopy());
@@ -269,9 +276,7 @@ void AXIsolatedObject::initializeProperties(const Ref<AccessibilityObject>& axOb
 
     if (object.isDateTime()) {
         setProperty(AXPropertyName::DateTimeValue, object.dateTimeValue().isolatedCopy());
-#if PLATFORM(MAC)
-        setProperty(AXPropertyName::DateTimeComponents, object.dateTimeComponents());
-#endif
+        setProperty(AXPropertyName::DateTimeComponentsType, object.dateTimeComponentsType());
     }
 
     if (object.isSpinButton()) {
@@ -372,7 +377,7 @@ void AXIsolatedObject::initializeProperties(const Ref<AccessibilityObject>& axOb
 
     // These properties are only needed on the AXCoreObject interface due to their use in ATSPI,
     // so only cache them for ATSPI.
-#if PLATFORM(ATSPI)
+#if USE(ATSPI)
     // We cache IsVisible on all platforms just for Widgets above. In ATSPI, this should be cached on all objects.
     if (!object.isWidget())
         setProperty(AXPropertyName::IsVisible, object.isVisible());
@@ -487,6 +492,7 @@ void AXIsolatedObject::setProperty(AXPropertyName propertyName, AXPropertyValueV
         [](AXTextRuns& runs) { return !runs.size(); },
 #endif
         [] (WallTime& time) { return !time; },
+        [] (DateComponentsType& typedValue) { return typedValue == DateComponentsType::Invalid; },
         [](auto&) {
             ASSERT_NOT_REACHED();
             return false;
@@ -500,6 +506,8 @@ void AXIsolatedObject::setProperty(AXPropertyName propertyName, AXPropertyValueV
 
 void AXIsolatedObject::detachRemoteParts(AccessibilityDetachmentType)
 {
+    ASSERT(!isMainThread());
+
     for (const auto& childID : m_childrenIDs) {
         if (RefPtr child = tree()->objectForID(childID))
             child->detachFromParent();
@@ -559,6 +567,13 @@ void AXIsolatedObject::updateChildrenIfNecessary()
     // FIXME: this is a no-op for isolated objects and should be removed from
     // the public interface. It is used in the mac implementation of
     // [WebAccessibilityObjectWrapper accessibilityHitTest].
+}
+
+std::optional<AXCoreObject::AccessibilityChildrenVector> AXIsolatedObject::selectedChildren()
+{
+    if (m_propertyMap.contains(AXPropertyName::SelectedChildren))
+        return tree()->objectsForIDs(vectorAttributeValue<AXID>(AXPropertyName::SelectedChildren));
+    return std::nullopt;
 }
 
 void AXIsolatedObject::setSelectedChildren(const AccessibilityChildrenVector& selectedChildren)
@@ -1070,7 +1085,8 @@ void AXIsolatedObject::fillChildrenVectorForProperty(AXPropertyName propertyName
 
 void AXIsolatedObject::updateBackingStore()
 {
-    // This method can be called on either the main or the AX threads.
+    ASSERT(!isMainThread());
+
     if (RefPtr tree = this->tree())
         tree->applyPendingChanges();
     // AXIsolatedTree::applyPendingChanges can cause this object and / or the AXIsolatedTree to be destroyed.
@@ -1196,7 +1212,7 @@ void AXIsolatedObject::findMatchingObjects(AccessibilitySearchCriteria* criteria
     Accessibility::findMatchingObjects(*criteria, results);
 }
 
-String AXIsolatedObject::textUnderElement(AccessibilityTextUnderElementMode) const
+String AXIsolatedObject::textUnderElement(TextUnderElementMode) const
 {
     ASSERT_NOT_REACHED();
     return { };
@@ -1365,12 +1381,6 @@ void AXIsolatedObject::decrement()
     performFunctionOnMainThread([] (auto* axObject) {
         axObject->decrement();
     });
-}
-
-AtomString AXIsolatedObject::tagName() const
-{
-    ASSERT_NOT_REACHED();
-    return AtomString();
 }
 
 bool AXIsolatedObject::isAccessibilityRenderObject() const
@@ -1638,12 +1648,6 @@ int AXIsolatedObject::lineForPosition(const VisiblePosition& position) const
     ASSERT(isMainThread());
     auto* axObject = associatedAXObject();
     return axObject ? axObject->lineForPosition(position) : -1;
-}
-
-bool AXIsolatedObject::isListBoxOption() const
-{
-    ASSERT_NOT_REACHED();
-    return false;
 }
 
 bool AXIsolatedObject::isMockObject() const

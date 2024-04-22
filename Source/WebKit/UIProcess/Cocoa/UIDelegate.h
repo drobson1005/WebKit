@@ -88,7 +88,7 @@ private:
 
     private:
         // API::UIClient
-        void createNewPage(WebKit::WebPageProxy&, WebCore::WindowFeatures&&, Ref<API::NavigationAction>&&, CompletionHandler<void(RefPtr<WebPageProxy>&&)>&&) final;
+        void createNewPage(WebKit::WebPageProxy&, Ref<API::PageConfiguration>&&, WebCore::WindowFeatures&&, Ref<API::NavigationAction>&&, CompletionHandler<void(RefPtr<WebPageProxy>&&)>&&) final;
         void close(WebPageProxy*) final;
         void fullscreenMayReturnToInline(WebPageProxy*) final;
         void didEnterFullscreen(WebPageProxy*) final;
@@ -193,6 +193,8 @@ private:
         void updateAppBadge(WebPageProxy&, const WebCore::SecurityOriginData&, std::optional<uint64_t>) final;
         void updateClientBadge(WebPageProxy&, const WebCore::SecurityOriginData&, std::optional<uint64_t>) final;
 
+        void didAdjustVisibilityWithSelectors(WebPageProxy&, Vector<String>&&) final;
+
         WeakPtr<UIDelegate> m_uiDelegate;
     };
 
@@ -206,6 +208,7 @@ private:
         bool webViewRunJavaScriptConfirmPanelWithMessageInitiatedByFrameCompletionHandler : 1;
         bool webViewRunJavaScriptTextInputPanelWithPromptDefaultTextInitiatedByFrameCompletionHandler : 1;
         bool webViewRequestStorageAccessPanelUnderFirstPartyCompletionHandler : 1;
+        bool webViewRequestStorageAccessPanelForDomainUnderCurrentDomainForQuirkDomainsCompletionHandler : 1;
         bool webViewRunBeforeUnloadConfirmPanelWithMessageInitiatedByFrameCompletionHandler : 1;
         bool webViewRequestGeolocationPermissionForFrameDecisionHandler : 1;
         bool webViewRequestGeolocationPermissionForOriginDecisionHandler : 1;
@@ -299,6 +302,7 @@ private:
         bool webViewRequestCookieConsentWithMoreInfoHandlerDecisionHandler : 1;
         bool webViewUpdatedAppBadge : 1;
         bool webViewUpdatedClientBadge : 1;
+        bool webViewDidAdjustVisibilityWithSelectors : 1;
     } m_delegateMethods;
 };
 

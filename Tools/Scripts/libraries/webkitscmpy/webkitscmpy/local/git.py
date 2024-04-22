@@ -937,7 +937,7 @@ class Git(Scm):
                 branch_point = previous[-1].branch_point
                 identifier = previous[-1].identifier
                 hash = line.split(' ')[-1].rstrip()
-                if hash != previous[-1].hash:
+                if identifier and hash != previous[-1].hash:
                     identifier -= 1
 
                 if not identifier:
@@ -953,7 +953,7 @@ class Git(Scm):
                 commit = Commit(
                     repository_id=self.id,
                     hash=hash,
-                    branch=end.branch if identifier and branch_point else self.default_branch,
+                    branch=end.branch if not include_identifier or (identifier and branch_point) else self.default_branch,
                     identifier=identifier if include_identifier else None,
                     branch_point=branch_point if include_identifier else None,
                     order=0,
@@ -1280,16 +1280,34 @@ class Git(Scm):
             return staged
         return staged + self.modified(staged=False)
 
-    def diff_lines(self, base, head=None):
-        base = self._to_git_ref(base)
-        head = self._to_git_ref(head)
+    def diff(self, head='HEAD', base=None, include_log=False):
+        head = head if head == 'HEAD' else self._to_git_ref(head)
+        if not base:
+            base = head if head == 'HEAD' else self._to_git_ref('{}~1'.format(head))
+        else:
+            base = self._to_git_ref(base)
+
+        if head == base and head != 'HEAD':
+            sys.stderr.write("'{}' provided as both head and base\n".format(head))
+            return
+
+        if include_log and head == 'HEAD':
+            for line in self.diff(head=head, base='HEAD', include_log=False):
+                yield line
+
+        if head == base:
+            command = [self.executable(), 'diff', '{}'.format(head)]
+        elif include_log:
+            command = [self.executable(), 'format-patch', '{}..{}'.format(base, head), '--stdout']
+        else:
+            command = [self.executable(), 'diff', '{}..{}'.format(base, head)]
 
         kwargs = dict()
         if sys.version_info >= (3, 6):
             kwargs = dict(encoding='utf-8')
         target = '{}..{}'.format(base, head) if head else base
         proc = subprocess.Popen(
-            [self.executable(), 'diff', target],
+            command,
             cwd=self.root_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1298,6 +1316,7 @@ class Git(Scm):
 
         if proc.poll():
             sys.stderr.write("Failed to generate diff for '{}'\n".format(target))
+            return
 
         line = proc.stdout.readline()
         while line:

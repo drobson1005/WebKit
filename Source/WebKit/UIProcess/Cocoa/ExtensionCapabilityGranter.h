@@ -31,6 +31,7 @@
 #include <wtf/FastMalloc.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/UniqueRef.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebKit {
@@ -46,8 +47,9 @@ class ExtensionCapabilityGranter : public CanMakeWeakPtr<ExtensionCapabilityGran
     WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(ExtensionCapabilityGranter);
 public:
-    struct Client : public CanMakeCheckedPtr {
+    struct Client : public CanMakeWeakPtr<Client> {
         virtual ~Client() = default;
+
         virtual RefPtr<GPUProcessProxy> gpuProcessForCapabilityGranter(const ExtensionCapabilityGranter&) = 0;
         virtual RefPtr<WebProcessProxy> webProcessForCapabilityGranter(const ExtensionCapabilityGranter&, const String& environmentIdentifier) = 0;
     };
@@ -64,7 +66,7 @@ private:
     friend UniqueRef<ExtensionCapabilityGranter> WTF::makeUniqueRefWithoutFastMallocCheck(Client&);
     explicit ExtensionCapabilityGranter(Client&);
 
-    CheckedPtr<Client> m_client;
+    WeakRef<Client> m_client;
 };
 
 } // namespace WebKit

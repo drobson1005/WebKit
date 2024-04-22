@@ -15,11 +15,13 @@
 #include "modules/canvaskit/WasmCommon.h"
 #include "modules/skottie/include/Skottie.h"
 #include "modules/skottie/include/SkottieProperty.h"
+#include "modules/skottie/include/SlotManager.h"
 #include "modules/skottie/utils/SkottieUtils.h"
 #include "modules/skottie/utils/TextEditor.h"
 #include "modules/skparagraph/include/Paragraph.h"
 #include "modules/skresources/include/SkResources.h"
 #include "modules/sksg/include/SkSGInvalidationController.h"
+#include "modules/skshaper/utils/FactoryHelpers.h"
 #include "modules/skunicode/include/SkUnicode.h"
 #include "src/base/SkUTF.h"
 #include "src/ports/SkTypeface_FreeType.h"
@@ -267,6 +269,7 @@ public:
                .setPropertyObserver(mgr->getPropertyObserver())
                .setResourceProvider(rp)
                .setPrecompInterceptor(std::move(pinterceptor))
+               .setTextShapingFactory(SkShapers::BestAvailable())
                .setLogger(JSLogger::Make(std::move(logger)));
         auto animation = builder.make(json.c_str(), json.size());
         auto slotManager = builder.getSlotManager();

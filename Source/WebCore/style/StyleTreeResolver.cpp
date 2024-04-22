@@ -31,6 +31,7 @@
 #include "ComposedTreeIterator.h"
 #include "Document.h"
 #include "DocumentInlines.h"
+#include "DocumentTimeline.h"
 #include "HTMLBodyElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLMeterElement.h"
@@ -190,6 +191,8 @@ static bool affectsRenderedSubtree(Element& element, const RenderStyle& newStyle
 {
     if (newStyle.display() != DisplayType::None)
         return true;
+    if (element.hasDisplayNone())
+        return true;
     if (element.renderOrDisplayContentsStyle())
         return true;
     if (element.rendererIsNeeded(newStyle))
@@ -249,9 +252,6 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
         return { };
     }
 
-    if (!element.rendererIsEverNeeded() && !element.hasDisplayContents())
-        return { };
-
     if (resolutionType == ResolutionType::RebuildUsingExisting) {
         return {
             ElementUpdate { RenderStyle::clonePtr(*existingStyle), Change::Renderer },
@@ -263,11 +263,13 @@ auto TreeResolver::resolveElement(Element& element, const RenderStyle* existingS
 
     Styleable styleable { element, { } };
     auto resolvedStyle = styleForStyleable(styleable, resolutionType, resolutionContext);
-
-    if (!affectsRenderedSubtree(element, *resolvedStyle.style))
-        return { };
-
     auto update = createAnimatedElementUpdate(WTFMove(resolvedStyle), styleable, parent().change, resolutionContext);
+
+    if (!affectsRenderedSubtree(element, *update.style)) {
+        styleable.setLastStyleChangeEventStyle(nullptr);
+        return { };
+    }
+
     auto descendantsToResolve = computeDescendantsToResolve(update, existingStyle, element.styleValidity());
     bool isDocumentElement = &element == m_document.documentElement();
     if (isDocumentElement) {
@@ -561,26 +563,9 @@ ResolutionContext TreeResolver::makeResolutionContext()
 ResolutionContext TreeResolver::makeResolutionContextForPseudoElement(const ElementUpdate& elementUpdate, const PseudoElementIdentifier& pseudoElementIdentifier)
 {
     auto parentStyle = [&]() -> const RenderStyle* {
-        switch (pseudoElementIdentifier.pseudoId) {
-        case PseudoId::FirstLetter:
-            if (auto* firstLineStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::FirstLine }))
-                return firstLineStyle;
-            break;
-        case PseudoId::ViewTransitionGroup:
-            if (auto* viewTransitionStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::ViewTransition }))
-                return viewTransitionStyle;
-            break;
-        case PseudoId::ViewTransitionImagePair:
-            if (auto* groupStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::ViewTransitionGroup, pseudoElementIdentifier.nameArgument }))
-                return groupStyle;
-            break;
-        case PseudoId::ViewTransitionOld:
-        case PseudoId::ViewTransitionNew:
-            if (auto* imagePairStyle = elementUpdate.style->getCachedPseudoStyle({ PseudoId::ViewTransitionImagePair, pseudoElementIdentifier.nameArgument }))
-                return imagePairStyle;
-            break;
-        default:
-            break;
+        if (auto parentPseudoId = parentPseudoElement(pseudoElementIdentifier.pseudoId)) {
+            if (auto* parentPseudoStyle = elementUpdate.style->getCachedPseudoStyle({ *parentPseudoId, (*parentPseudoId == PseudoId::ViewTransitionGroup || *parentPseudoId == PseudoId::ViewTransitionImagePair) ? pseudoElementIdentifier.nameArgument : nullAtom() }))
+                return parentPseudoStyle;
         }
         return elementUpdate.style.get();
     };
@@ -643,28 +628,39 @@ ElementUpdate TreeResolver::createAnimatedElementUpdate(ResolvedStyle&& resolved
 {
     auto& element = styleable.element;
     auto& document = element.document();
-    auto* oldStyle = element.renderOrDisplayContentsStyle(styleable.pseudoElementIdentifier);
+    auto* currentStyle = element.renderOrDisplayContentsStyle(styleable.pseudoElementIdentifier);
 
     std::unique_ptr<RenderStyle> startingStyle;
-    if (!oldStyle && resolvedStyle.style->hasTransitions()) {
-        // https://drafts.csswg.org/css-transitions-2/#at-ruledef-starting-style
-        // "If an element does not have a before-change style for a given style change event, the starting style is used instead."
-        startingStyle = resolveStartingStyle(resolvedStyle, styleable, resolutionContext);
-        oldStyle = startingStyle.get();
-    }
+
+    auto* oldStyle = [&]() -> const RenderStyle* {
+        if (currentStyle)
+            return currentStyle;
+
+        if (resolvedStyle.style->hasTransitions()) {
+            // https://drafts.csswg.org/css-transitions-2/#at-ruledef-starting-style
+            // "If an element does not have a before-change style for a given style change event, the starting style is used instead."
+            startingStyle = resolveStartingStyle(resolvedStyle, styleable, resolutionContext);
+            return startingStyle.get();
+        }
+        return nullptr;
+    }();
+
+    auto unanimatedDisplay = resolvedStyle.style->display();
+
+    WeakStyleOriginatedAnimations newStyleOriginatedAnimations;
 
     auto updateAnimations = [&] {
         if (document.backForwardCacheState() != Document::NotInBackForwardCache || document.printing())
             return;
 
         if (oldStyle && (oldStyle->hasTransitions() || resolvedStyle.style->hasTransitions()))
-            styleable.updateCSSTransitions(*oldStyle, *resolvedStyle.style);
+            styleable.updateCSSTransitions(*oldStyle, *resolvedStyle.style, newStyleOriginatedAnimations);
 
         // The order in which CSS Transitions and CSS Animations are updated matters since CSS Transitions define the after-change style
         // to use CSS Animations as defined in the previous style change event. As such, we update CSS Animations after CSS Transitions
         // such that when CSS Transitions are updated the CSS Animations data is the same as during the previous style change event.
         if ((oldStyle && oldStyle->hasAnimations()) || resolvedStyle.style->hasAnimations())
-            styleable.updateCSSAnimations(oldStyle, *resolvedStyle.style, resolutionContext);
+            styleable.updateCSSAnimations(oldStyle, *resolvedStyle.style, resolutionContext, newStyleOriginatedAnimations);
     };
 
     auto applyAnimations = [&]() -> std::pair<std::unique_ptr<RenderStyle>, OptionSet<AnimationImpact>> {
@@ -704,7 +700,7 @@ ElementUpdate TreeResolver::createAnimatedElementUpdate(ResolvedStyle&& resolved
     };
 
     // FIXME: Something like this is also needed for viewport units.
-    if (oldStyle && parent().needsUpdateQueryContainerDependentStyle)
+    if (currentStyle && parent().needsUpdateQueryContainerDependentStyle)
         styleable.queryContainerDidChange();
 
     // First, we need to make sure that any new CSS animation occuring on this element has a matching WebAnimation
@@ -717,15 +713,44 @@ ElementUpdate TreeResolver::createAnimatedElementUpdate(ResolvedStyle&& resolved
 
     // Deduplication speeds up equality comparisons as the properties inherit to descendants.
     // FIXME: There should be a more general mechanism for this.
-    if (oldStyle)
-        newStyle->deduplicateCustomProperties(*oldStyle);
+    if (currentStyle)
+        newStyle->deduplicateCustomProperties(*currentStyle);
 
-    auto change = oldStyle ? determineChange(*oldStyle, *newStyle) : Change::Renderer;
+    auto change = currentStyle ? determineChange(*currentStyle, *newStyle) : Change::Renderer;
 
     if (element.hasInvalidRenderer() || parentChange == Change::Renderer)
         change = Change::Renderer;
 
     bool shouldRecompositeLayer = animationImpact.contains(AnimationImpact::RequiresRecomposite) || element.styleResolutionShouldRecompositeLayer();
+
+    auto animationsAffectedDisplay = [&, animatedDisplay = newStyle->display()]() {
+        auto* keyframeEffectStack = styleable.keyframeEffectStack();
+        if (!keyframeEffectStack)
+            return false;
+        if (unanimatedDisplay != animatedDisplay)
+            return true;
+        return keyframeEffectStack->containsProperty(CSSPropertyDisplay);
+    }();
+
+    if (!affectsRenderedSubtree(styleable.element, *newStyle)) {
+        // If after updating animations we end up not rendering this element or its subtree
+        // and the update did not change the "display" value then we should cancel all
+        // style-originated animations while ensuring that the new ones are canceled silently,
+        // as if they hadn't been created.
+        if (!animationsAffectedDisplay)
+            styleable.cancelStyleOriginatedAnimations(newStyleOriginatedAnimations);
+    } else if (!newStyleOriginatedAnimations.isEmpty()) {
+        // If style-originated animations were not canceled, then we should make sure that
+        // the creation of new style-originated animations during this update is known to the
+        // document's timeline as animation scheduling was paused for any animation created
+        // during this update.
+        if (auto* timeline = m_document.existingTimeline())
+            timeline->styleOriginatedAnimationsWereCreated();
+    }
+
+    if (animationsAffectedDisplay)
+        newStyle->setHasDisplayAffectedByAnimations();
+
     return { WTFMove(newStyle), change, shouldRecompositeLayer };
 }
 
@@ -773,7 +798,7 @@ std::unique_ptr<RenderStyle> TreeResolver::resolveStartingStyle(const ResolvedSt
     if (startingStyle->display() == DisplayType::None)
         return nullptr;
 
-    Adjuster adjuster(m_document, parentAfterChangeStyle, resolutionContext.parentBoxStyle, styleable.pseudoElementIdentifier ? &styleable.element : nullptr);
+    Adjuster adjuster(m_document, parentAfterChangeStyle, resolutionContext.parentBoxStyle, !styleable.pseudoElementIdentifier ? &styleable.element : nullptr);
     adjuster.adjust(*startingStyle, nullptr);
 
     return startingStyle;
@@ -968,14 +993,24 @@ void TreeResolver::resolveComposedTree()
         ASSERT(node.parentElement() == parent.element || is<ShadowRoot>(node.parentNode()) || node.parentElement()->shadowRoot());
 
         if (RefPtr text = dynamicDowncast<Text>(node)) {
-            if ((text->hasInvalidRenderer() && parent.change != Change::Renderer) || parent.style.display() == DisplayType::Contents) {
+            auto containsOnlyASCIIWhitespace = text->containsOnlyASCIIWhitespace();
+            auto needsTextUpdate = [&] {
+                if ((text->hasInvalidRenderer() && parent.change != Change::Renderer) || parent.style.display() == DisplayType::Contents)
+                    return true;
+                if (!text->renderer() && containsOnlyASCIIWhitespace && parent.style.preserveNewline()) {
+                    // FIXME: This really needs to be done only when parent.style.preserveNewline() changes value.
+                    return true;
+                }
+                return false;
+            };
+            if (needsTextUpdate()) {
                 TextUpdate textUpdate;
                 textUpdate.inheritedDisplayContentsStyle = createInheritedDisplayContentsStyleIfNeeded(parent.style, parentBoxStyle());
 
                 m_update->addText(*text, parent.element, WTFMove(textUpdate));
             }
 
-            if (!text->containsOnlyASCIIWhitespace())
+            if (!containsOnlyASCIIWhitespace)
                 parent.resolvedFirstLineAndLetterChild = true;
 
             text->setHasValidStyle();

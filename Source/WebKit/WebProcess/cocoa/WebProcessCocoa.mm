@@ -91,7 +91,7 @@
 #import <WebCore/PlatformMediaSessionManager.h>
 #import <WebCore/PlatformScreen.h>
 #import <WebCore/ProcessCapabilities.h>
-#import <WebCore/PublicSuffix.h>
+#import <WebCore/PublicSuffixStore.h>
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/SWContextManager.h>
 #import <WebCore/SystemBattery.h>
@@ -115,23 +115,27 @@
 #import <pal/spi/cocoa/pthreadSPI.h>
 #import <pal/spi/mac/NSApplicationSPI.h>
 #import <stdio.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/FileSystem.h>
 #import <wtf/Language.h>
 #import <wtf/LogInitialization.h>
 #import <wtf/MemoryPressureHandler.h>
 #import <wtf/ProcessPrivilege.h>
 #import <wtf/SoftLinking.h>
+#import <wtf/cocoa/Entitlements.h>
 #import <wtf/cocoa/NSURLExtras.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 #import <wtf/cocoa/TypeCastsCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/spi/cocoa/OSLogSPI.h>
+#import <wtf/spi/darwin/SandboxSPI.h>
 
 #if ENABLE(REMOTE_INSPECTOR)
 #import <JavaScriptCore/RemoteInspector.h>
 #endif
 
 #if PLATFORM(IOS_FAMILY)
+#import "AccessibilityUtilitiesSPI.h"
 #import "UIKitSPI.h"
 #import <bmalloc/MemoryStatusSPI.h>
 #endif
@@ -183,18 +187,6 @@
 #import <pal/cocoa/AVFoundationSoftLink.h>
 #import <pal/cocoa/DataDetectorsCoreSoftLink.h>
 #import <pal/cocoa/MediaToolboxSoftLink.h>
-
-#if PLATFORM(IOS_FAMILY)
-@interface NSObject (UIAccessibilitySafeCategory)
-- (id)safeValueForKey:(NSString *)key;
-@end
-#endif
-
-#if HAVE(CATALYST_USER_INTERFACE_IDIOM_AND_SCALE_FACTOR)
-// FIXME: This is only for binary compatibility with versions of UIKit in macOS 11 that are missing the change in <rdar://problem/68524148>.
-SOFT_LINK_FRAMEWORK(UIKit)
-SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, UIKit, _UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor, void, (UIUserInterfaceIdiom idiom, CGFloat scaleFactor), (idiom, scaleFactor))
-#endif
 
 #define RELEASE_LOG_SESSION_ID (m_sessionID ? m_sessionID->toUInt64() : 0)
 #define WEBPROCESS_RELEASE_LOG(channel, fmt, ...) RELEASE_LOG(channel, "%p - [sessionID=%" PRIu64 "] WebProcess::" fmt, this, RELEASE_LOG_SESSION_ID, ##__VA_ARGS__)
@@ -353,12 +345,10 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
     applyProcessCreationParameters(parameters.auxiliaryProcessParameters);
 
     setQOS(parameters.latencyQOS, parameters.throughputQOS);
-    
+
 #if HAVE(CATALYST_USER_INTERFACE_IDIOM_AND_SCALE_FACTOR)
-    if (canLoad_UIKit__UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor()) {
-        auto [overrideUserInterfaceIdiom, overrideScaleFactor] = parameters.overrideUserInterfaceIdiomAndScale;
-        softLink_UIKit__UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor(static_cast<UIUserInterfaceIdiom>(overrideUserInterfaceIdiom), overrideScaleFactor);
-    }
+    auto [overrideUserInterfaceIdiom, overrideScaleFactor] = parameters.overrideUserInterfaceIdiomAndScale;
+    _UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor(static_cast<UIUserInterfaceIdiom>(overrideUserInterfaceIdiom), overrideScaleFactor);
 #endif
 
     populateMobileGestaltCache(WTFMove(parameters.mobileGestaltExtensionHandle));
@@ -581,6 +571,17 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
 
     disableURLSchemeCheckInDataDetectors();
 
+#if ENABLE(QUICKLOOK_SANDBOX_RESTRICTIONS)
+    if (auto auditToken = parentProcessConnection()->getAuditToken()) {
+        bool parentCanSetStateFlags = WTF::hasEntitlementValueInArray(auditToken.value(), "com.apple.private.security.enable-state-flags"_s, "EnableQuickLookSandboxResources"_s);
+        if (parentCanSetStateFlags) {
+            auto auditToken = auditTokenForSelf();
+            bool status = sandbox_enable_state_flag("ParentProcessCanEnableQuickLookStateFlag", auditToken.value());
+            WEBPROCESS_RELEASE_LOG(Sandbox, "Enabling ParentProcessCanEnableQuickLookStateFlag state flag, status = %d", status);
+        }
+    }
+#endif
+
 #if HAVE(VIDEO_RESTRICTED_DECODING) && PLATFORM(MAC) && !ENABLE(TRUSTD_BLOCKING_IN_WEBCONTENT)
     if (codeCheckSemaphore)
         dispatch_semaphore_wait(codeCheckSemaphore.get(), DISPATCH_TIME_FOREVER);
@@ -781,19 +782,20 @@ RetainPtr<NSDictionary> WebProcess::additionalStateForDiagnosticReport() const
 #endif // USE(OS_STATE)
 
 #if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+#if PLATFORM(IOS_FAMILY)
 static void prewarmLogs()
 {
     // This call will create container manager log objects.
     // FIXME: this can be removed if we move all calls to topPrivatelyControlledDomain out of the WebContent process.
     // This would be desirable, since the WebContent process is blocking access to the container manager daemon.
-    topPrivatelyControlledDomain("apple.com"_s);
+    PublicSuffixStore::singleton().topPrivatelyControlledDomain("apple.com"_s);
 
-    static std::array<std::pair<const char*, const char*>, 5> logs { {
-        { "com.apple.CFBundle", "strings" },
-        { "com.apple.network", "" },
-        { "com.apple.CFNetwork", "ATS" },
-        { "com.apple.coremedia", "" },
-        { "com.apple.SafariShared", "Translation" },
+    static std::array<std::pair<ASCIILiteral, ASCIILiteral>, 5> logs { {
+        { "com.apple.CFBundle"_s, "strings"_s },
+        { "com.apple.network"_s, ""_s },
+        { "com.apple.CFNetwork"_s, "ATS"_s },
+        { "com.apple.coremedia"_s, ""_s },
+        { "com.apple.SafariShared"_s, "Translation"_s },
     } };
 
     for (auto& log : logs) {
@@ -802,13 +804,14 @@ static void prewarmLogs()
         UNUSED_PARAM(enabled);
     }
 }
+#endif // PLATFORM(IOS_FAMILY)
 
 static Ref<WorkQueue> logQueue()
 {
     static LazyNeverDestroyed<Ref<WorkQueue>> queue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, [&] {
-        queue.construct(WorkQueue::create("Log Queue", WorkQueue::QOS::Background));
+        queue.construct(WorkQueue::create("Log Queue"_s, WorkQueue::QOS::Background));
     });
     return queue.get();
 }
@@ -820,16 +823,27 @@ static void registerLogHook()
 
     static os_log_hook_t prevHook = nullptr;
 
-    prevHook = os_log_set_hook(OS_LOG_TYPE_DEFAULT, ^(os_log_type_t type, os_log_message_t msg) {
+#ifdef NDEBUG
+    // OS_LOG_TYPE_DEFAULT implies default, fault, and error.
+    constexpr auto minimumType = OS_LOG_TYPE_DEFAULT;
+#else
+    // OS_LOG_TYPE_DEBUG implies debug, info, default, fault, and error.
+    constexpr auto minimumType = OS_LOG_TYPE_DEBUG;
+#endif
+
+    prevHook = os_log_set_hook(minimumType, ^(os_log_type_t type, os_log_message_t msg) {
         if (prevHook)
             prevHook(type, msg);
 
         if (msg->buffer_sz > 1024)
             return;
 
-        // Skip debug logs in non-internal builds.
-        if (type == OS_LOG_TYPE_DEBUG)
+#ifdef NDEBUG
+        // Don't send messages with types we don't want to log in release. Even though OS_LOG_TYPE_DEFAULT is the minimum,
+        // the hook will be called for other subsystems with debug and info types.
+        if (type & (OS_LOG_TYPE_DEBUG | OS_LOG_TYPE_INFO))
             return;
+#endif
 
         CString logFormat(msg->format);
         CString logChannel(msg->subsystem);
@@ -843,8 +857,8 @@ static void registerLogHook()
             qos = Thread::QOS::UserInteractive;
         }
 
-        Vector<uint8_t> buffer(msg->buffer, msg->buffer_sz);
-        Vector<uint8_t> privdata(msg->privdata, msg->privdata_sz);
+        Vector<uint8_t> buffer(std::span { msg->buffer, msg->buffer_sz });
+        Vector<uint8_t> privdata(std::span { msg->privdata, msg->privdata_sz });
 
         logQueue()->dispatchWithQOS([logFormat = WTFMove(logFormat), logChannel = WTFMove(logChannel), logCategory = WTFMove(logCategory), type = type, buffer = WTFMove(buffer), privdata = WTFMove(privdata), qos] {
             os_log_message_s msg;
@@ -863,7 +877,7 @@ static void registerLogHook()
 
             auto connectionID = WebProcess::singleton().networkProcessConnectionID();
             if (connectionID)
-                IPC::Connection::send(connectionID, Messages::NetworkConnectionToWebProcess::LogOnBehalfOfWebContent(logChannel.bytesInludingNullTerminator(), logCategory.bytesInludingNullTerminator(), logString, type, getpid()), 0, { }, qos);
+                IPC::Connection::send(connectionID, Messages::NetworkConnectionToWebProcess::LogOnBehalfOfWebContent(logChannel.spanIncludingNullTerminator(), logCategory.spanIncludingNullTerminator(), logString, type, getpid()), 0, { }, qos);
 
             free(messageString);
         }, qos);
@@ -875,8 +889,12 @@ static void registerLogHook()
 
 void WebProcess::platformInitializeProcess(const AuxiliaryProcessInitializationParameters& parameters)
 {
+    WebCore::PublicSuffixStore::singleton().enablePublicSuffixCache();
+
 #if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+#if PLATFORM(IOS_FAMILY)
     prewarmLogs();
+#endif
     registerLogHook();
 #endif
 
@@ -1211,6 +1229,11 @@ void WebProcess::scrollerStylePreferenceChanged(bool useOverlayScrollbars)
 
     static_cast<ScrollbarThemeMac&>(theme).preferencesChanged();
     
+    for (auto& page : m_pageMap.values()) {
+        if (RefPtr frameView = page->localMainFrameView())
+            frameView->scrollbarStyleDidChange();
+    }
+
     NSScrollerStyle style = useOverlayScrollbars ? NSScrollerStyleOverlay : NSScrollerStyleLegacy;
     [NSScrollerImpPair _updateAllScrollerImpPairsForNewRecommendedScrollerStyle:style];
 }
@@ -1386,11 +1409,6 @@ void WebProcess::handlePreferenceChange(const String& domain, const String& key,
     AuxiliaryProcess::handlePreferenceChange(domain, key, value);
 }
 
-void WebProcess::notifyPreferencesChanged(const String& domain, const String& key, const std::optional<String>& encodedValue)
-{
-    preferenceDidUpdate(domain, key, encodedValue);
-}
-
 void WebProcess::accessibilitySettingsDidChange()
 {
     for (auto& page : m_pageMap.values())
@@ -1398,7 +1416,7 @@ void WebProcess::accessibilitySettingsDidChange()
 }
 #endif
 
-void WebProcess::grantAccessToAssetServices(Vector<WebKit::SandboxExtension::Handle>&& assetServicesHandles)
+void WebProcess::grantAccessToAssetServices(Vector<WebKit::SandboxExtensionHandle>&& assetServicesHandles)
 {
     if (m_assetServicesExtensions.size())
         return;
@@ -1426,7 +1444,7 @@ void WebProcess::disableURLSchemeCheckInDataDetectors() const
 #endif
 }
 
-void WebProcess::switchFromStaticFontRegistryToUserFontRegistry(Vector<WebKit::SandboxExtension::Handle>&& fontMachExtensionHandles)
+void WebProcess::switchFromStaticFontRegistryToUserFontRegistry(Vector<WebKit::SandboxExtensionHandle>&& fontMachExtensionHandles)
 {
     SandboxExtension::consumePermanently(fontMachExtensionHandles);
 #if HAVE(STATIC_FONT_REGISTRY)
@@ -1525,15 +1543,19 @@ void WebProcess::systemDidWake()
 #if PLATFORM(MAC)
 void WebProcess::openDirectoryCacheInvalidated(SandboxExtension::Handle&& handle, SandboxExtension::Handle&& machBootstrapHandle)
 {
-    auto bootstrapExtension = SandboxExtension::create(WTFMove(machBootstrapHandle));
+    auto cacheInvalidationHandler = [handle = WTFMove(handle), machBootstrapHandle = WTFMove(machBootstrapHandle)] () mutable {
+        auto bootstrapExtension = SandboxExtension::create(WTFMove(machBootstrapHandle));
 
-    if (bootstrapExtension)
-        bootstrapExtension->consume();
-    
-    AuxiliaryProcess::openDirectoryCacheInvalidated(WTFMove(handle));
-    
-    if (bootstrapExtension)
-        bootstrapExtension->revoke();
+        if (bootstrapExtension)
+            bootstrapExtension->consume();
+
+        AuxiliaryProcess::openDirectoryCacheInvalidated(WTFMove(handle));
+
+        if (bootstrapExtension)
+            bootstrapExtension->revoke();
+    };
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), makeBlockPtr(WTFMove(cacheInvalidationHandler)).get());
 }
 #endif
 

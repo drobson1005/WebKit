@@ -83,7 +83,6 @@ public:
     virtual void frameDetached() = 0;
     virtual bool preventsParentFromBeingComplete() const = 0;
     virtual void changeLocation(FrameLoadRequest&&) = 0;
-    virtual void broadcastFrameRemovalToOtherProcesses() = 0;
     virtual void didFinishLoadInAnotherProcess() = 0;
 
     virtual FrameView* virtualView() const = 0;
@@ -93,6 +92,7 @@ public:
     virtual const Frame* opener() const = 0;
     virtual Frame* opener() = 0;
     virtual FrameLoaderClient& loaderClient() = 0;
+    virtual void documentURLForConsoleLog(CompletionHandler<void(const URL&)>&&) = 0;
 
     virtual String customUserAgent() const = 0;
     virtual String customUserAgentAsSiteSpecificQuirks() const = 0;

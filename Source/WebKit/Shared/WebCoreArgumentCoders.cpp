@@ -26,162 +26,8 @@
 #include "config.h"
 #include "WebCoreArgumentCoders.h"
 
-#include "StreamConnectionEncoder.h"
-#include <JavaScriptCore/GenericTypedArrayViewInlines.h>
-#include <JavaScriptCore/JSGenericTypedArrayViewInlines.h>
-#include <WebCore/ARKitBadgeSystemImage.h>
-#include <WebCore/ApplePayLogoSystemImage.h>
-#include <WebCore/AuthenticationChallenge.h>
-#include <WebCore/AuthenticationChallenge.h>
-#include <WebCore/BlobPart.h>
-#include <WebCore/ButtonPart.h>
-#include <WebCore/ByteArrayPixelBuffer.h>
-#include <WebCore/COEPInheritenceViolationReportBody.h>
-#include <WebCore/CORPViolationReportBody.h>
-#include <WebCore/CSPViolationReportBody.h>
-#include <WebCore/CSSFilter.h>
-#include <WebCore/CacheQueryOptions.h>
-#include <WebCore/CacheStorageConnection.h>
-#include <WebCore/ColorWellPart.h>
-#include <WebCore/CompositionUnderline.h>
-#include <WebCore/Credential.h>
-#include <WebCore/Cursor.h>
-#include <WebCore/DOMCacheEngine.h>
-#include <WebCore/DatabaseDetails.h>
-#include <WebCore/DecomposedGlyphs.h>
-#include <WebCore/DeprecationReportBody.h>
-#include <WebCore/DiagnosticLoggingClient.h>
-#include <WebCore/DictationAlternative.h>
-#include <WebCore/DictionaryPopupInfo.h>
-#include <WebCore/DisplayListItems.h>
-#include <WebCore/DistantLightSource.h>
-#include <WebCore/DragData.h>
-#include <WebCore/EventTrackingRegions.h>
-#include <WebCore/FEBlend.h>
-#include <WebCore/FEColorMatrix.h>
-#include <WebCore/FEComponentTransfer.h>
-#include <WebCore/FEComposite.h>
-#include <WebCore/FEConvolveMatrix.h>
-#include <WebCore/FEDiffuseLighting.h>
-#include <WebCore/FEDisplacementMap.h>
-#include <WebCore/FEDropShadow.h>
-#include <WebCore/FEFlood.h>
-#include <WebCore/FEGaussianBlur.h>
-#include <WebCore/FEImage.h>
-#include <WebCore/FEMerge.h>
-#include <WebCore/FEMorphology.h>
-#include <WebCore/FEOffset.h>
-#include <WebCore/FESpecularLighting.h>
-#include <WebCore/FETile.h>
-#include <WebCore/FETurbulence.h>
-#include <WebCore/FetchOptions.h>
-#include <WebCore/File.h>
-#include <WebCore/FileChooser.h>
-#include <WebCore/Filter.h>
-#include <WebCore/FilterEffect.h>
-#include <WebCore/FilterFunction.h>
-#include <WebCore/FilterOperation.h>
-#include <WebCore/FilterOperations.h>
-#include <WebCore/FloatQuad.h>
 #include <WebCore/Font.h>
 #include <WebCore/FontCustomPlatformData.h>
-#include <WebCore/GraphicsContext.h>
-#include <WebCore/GraphicsLayer.h>
-#include <WebCore/IDBGetResult.h>
-#include <WebCore/IdentityTransformOperation.h>
-#include <WebCore/Image.h>
-#include <WebCore/ImageControlsButtonPart.h>
-#include <WebCore/InnerSpinButtonPart.h>
-#include <WebCore/JSDOMExceptionHandling.h>
-#include <WebCore/Length.h>
-#include <WebCore/LengthBox.h>
-#include <WebCore/LightSource.h>
-#include <WebCore/Matrix3DTransformOperation.h>
-#include <WebCore/MatrixTransformOperation.h>
-#include <WebCore/MediaSelectionOption.h>
-#include <WebCore/MenuListButtonPart.h>
-#include <WebCore/MenuListPart.h>
-#include <WebCore/MeterPart.h>
-#include <WebCore/NotificationResources.h>
-#include <WebCore/Pasteboard.h>
-#include <WebCore/Path.h>
-#include <WebCore/PerspectiveTransformOperation.h>
-#include <WebCore/PluginData.h>
-#include <WebCore/PointLightSource.h>
-#include <WebCore/ProgressBarPart.h>
-#include <WebCore/PromisedAttachmentInfo.h>
-#include <WebCore/RectEdges.h>
-#include <WebCore/Region.h>
-#include <WebCore/RegistrableDomain.h>
-#include <WebCore/Report.h>
-#include <WebCore/ReportBody.h>
-#include <WebCore/ResourceRequest.h>
-#include <WebCore/ResourceResponse.h>
-#include <WebCore/RotateTransformOperation.h>
-#include <WebCore/SVGFilter.h>
-#include <WebCore/ScaleTransformOperation.h>
-#include <WebCore/ScriptBuffer.h>
-#include <WebCore/ScriptExecutionContextIdentifier.h>
-#include <WebCore/ScrollingConstraints.h>
-#include <WebCore/ScrollingCoordinator.h>
-#include <WebCore/SearchFieldCancelButtonPart.h>
-#include <WebCore/SearchFieldPart.h>
-#include <WebCore/SearchFieldResultsPart.h>
-#include <WebCore/SearchPopupMenu.h>
-#include <WebCore/SecurityOrigin.h>
-#include <WebCore/SerializedPlatformDataCueValue.h>
-#include <WebCore/SerializedScriptValue.h>
-#include <WebCore/ShareData.h>
-#include <WebCore/ShareableBitmap.h>
-#include <WebCore/ShareableResource.h>
-#include <WebCore/SharedBuffer.h>
-#include <WebCore/SkewTransformOperation.h>
-#include <WebCore/SliderThumbPart.h>
-#include <WebCore/SliderTrackPart.h>
-#include <WebCore/SourceAlpha.h>
-#include <WebCore/SourceGraphic.h>
-#include <WebCore/SpotLightSource.h>
-#include <WebCore/SwitchThumbPart.h>
-#include <WebCore/SwitchTrackPart.h>
-#include <WebCore/SystemImage.h>
-#include <WebCore/TestReportBody.h>
-#include <WebCore/TextAreaPart.h>
-#include <WebCore/TextCheckerClient.h>
-#include <WebCore/TextFieldPart.h>
-#include <WebCore/TextIndicator.h>
-#include <WebCore/ToggleButtonPart.h>
-#include <WebCore/TransformOperation.h>
-#include <WebCore/TransformationMatrix.h>
-#include <WebCore/TranslateTransformOperation.h>
-#include <WebCore/UserStyleSheet.h>
-#include <WebCore/VelocityData.h>
-#include <WebCore/ViewportArguments.h>
-#include <WebCore/WindowFeatures.h>
-#include <wtf/URL.h>
-#include <wtf/text/CString.h>
-#include <wtf/text/StringHash.h>
-
-#if PLATFORM(IOS_FAMILY)
-#include <WebCore/SelectionGeometry.h>
-#endif // PLATFORM(IOS_FAMILY)
-
-#if ENABLE(MEDIA_STREAM)
-#include <WebCore/CaptureDevice.h>
-#include <WebCore/MediaConstraints.h>
-#endif
-
-#if ENABLE(IMAGE_ANALYSIS)
-#include <WebCore/TextRecognitionResult.h>
-#endif
-
-#if ENABLE(APPLE_PAY)
-#include <WebCore/ApplePayButtonPart.h>
-#endif
-
-#if USE(APPKIT)
-#include <WebCore/AppKitControlSystemImage.h>
-#endif
-
 // FIXME: Seems like we could use std::tuple to cut down the code below a lot!
 
 namespace IPC {
@@ -266,7 +112,7 @@ std::optional<Ref<FontCustomPlatformData>> ArgumentCoder<FontCustomPlatformData>
     return fontCustomPlatformData.releaseNonNull();
 }
 
-void ArgumentCoder<WebCore::FontPlatformData::Attributes>::encode(Encoder& encoder, const WebCore::FontPlatformData::Attributes& data)
+void ArgumentCoder<WebCore::FontPlatformDataAttributes>::encode(Encoder& encoder, const WebCore::FontPlatformDataAttributes& data)
 {
     encoder << data.m_orientation;
     encoder << data.m_widthVariant;
@@ -278,7 +124,7 @@ void ArgumentCoder<WebCore::FontPlatformData::Attributes>::encode(Encoder& encod
     encodePlatformData(encoder, data);
 }
 
-std::optional<FontPlatformData::Attributes> ArgumentCoder<FontPlatformData::Attributes>::decode(Decoder& decoder)
+std::optional<FontPlatformDataAttributes> ArgumentCoder<FontPlatformDataAttributes>::decode(Decoder& decoder)
 {
     std::optional<WebCore::FontOrientation> orientation;
     decoder >> orientation;
@@ -310,7 +156,7 @@ std::optional<FontPlatformData::Attributes> ArgumentCoder<FontPlatformData::Attr
     if (!syntheticOblique)
         return std::nullopt;
 
-    FontPlatformData::Attributes result(size.value(), orientation.value(), widthVariant.value(), textRenderingMode.value(), syntheticBold.value(), syntheticOblique.value());
+    FontPlatformDataAttributes result(size.value(), orientation.value(), widthVariant.value(), textRenderingMode.value(), syntheticBold.value(), syntheticOblique.value());
 
     if (!decodePlatformData(decoder, result))
         return std::nullopt;

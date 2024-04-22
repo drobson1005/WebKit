@@ -34,6 +34,7 @@
 #include "FontSelectorClient.h"
 #include "FrameDestructionObserver.h"
 #include "FrameIdentifier.h"
+#include "HitTestSource.h"
 #include "IntDegrees.h"
 #include "PageIdentifier.h"
 #include "PlaybackTargetClientContextIdentifier.h"
@@ -355,8 +356,7 @@ enum class DocumentCompatibilityMode : uint8_t {
 
 enum class DimensionsCheck : uint8_t {
     Width = 1 << 0,
-    Height = 1 << 1,
-    All = 1 << 2, // FIXME: This is probably meant to be Width | Height instead.
+    Height = 1 << 1
 };
 
 enum class LayoutOptions : uint8_t {
@@ -367,7 +367,7 @@ enum class LayoutOptions : uint8_t {
     DoNotLayoutAncestorDocuments = 1 << 4,
 };
 
-enum class HttpEquivPolicy {
+enum class HttpEquivPolicy : uint8_t {
     Enabled,
     DisabledBySettings,
     DisabledByContentDispositionAttachmentSandbox
@@ -516,8 +516,8 @@ public:
 
     static CustomElementNameValidationStatus validateCustomElementName(const AtomString&);
 
-    WEBCORE_EXPORT RefPtr<Range> caretRangeFromPoint(int x, int y);
-    std::optional<BoundaryPoint> caretPositionFromPoint(const LayoutPoint& clientPoint);
+    WEBCORE_EXPORT RefPtr<Range> caretRangeFromPoint(int x, int y, HitTestSource = HitTestSource::Script);
+    std::optional<BoundaryPoint> caretPositionFromPoint(const LayoutPoint& clientPoint, HitTestSource);
 
     WEBCORE_EXPORT Element* scrollingElementForAPI();
     WEBCORE_EXPORT Element* scrollingElement();
@@ -729,7 +729,7 @@ public:
 
     // updateLayoutIgnorePendingStylesheets() forces layout even if we are waiting for pending stylesheet loads,
     // so calling this may cause a flash of unstyled content (FOUC).
-        WEBCORE_EXPORT UpdateLayoutResult updateLayoutIgnorePendingStylesheets(OptionSet<LayoutOptions> = { }, const Element* = nullptr);
+    WEBCORE_EXPORT UpdateLayoutResult updateLayoutIgnorePendingStylesheets(OptionSet<LayoutOptions> = { }, const Element* = nullptr);
 
     std::unique_ptr<RenderStyle> styleForElementIgnoringPendingStylesheets(Element&, const RenderStyle* parentStyle, const std::optional<Style::PseudoElementIdentifier>& = std::nullopt);
 
@@ -771,7 +771,7 @@ public:
     bool hasLivingRenderTree() const { return renderView() && !renderTreeBeingDestroyed(); }
     void updateRenderTree(std::unique_ptr<Style::Update> styleUpdate);
 
-    bool updateLayoutIfDimensionsOutOfDate(Element&, OptionSet<DimensionsCheck> = { DimensionsCheck::All });
+    bool updateLayoutIfDimensionsOutOfDate(Element&, OptionSet<DimensionsCheck> = { DimensionsCheck::Width, DimensionsCheck::Height });
 
     inline AXObjectCache* existingAXObjectCache() const;
     WEBCORE_EXPORT AXObjectCache* axObjectCache() const;
@@ -1078,8 +1078,8 @@ public:
     DOMTimerHoldingTank* domTimerHoldingTankIfExists() { return m_domTimerHoldingTank.get(); }
     DOMTimerHoldingTank& domTimerHoldingTank();
 #endif
-    
     void processViewport(const String& features, ViewportArguments::Type origin);
+    WEBCORE_EXPORT bool isViewportDocument() const;
     void processDisabledAdaptations(const String& adaptations);
     void updateViewportArguments();
     void processReferrerPolicy(const String& policy, ReferrerPolicySource);
@@ -1270,6 +1270,7 @@ public:
     WEBCORE_EXPORT EventLoopTaskGroup& eventLoop() final;
     CheckedRef<EventLoopTaskGroup> checkedEventLoop() { return eventLoop(); }
     WindowEventLoop& windowEventLoop();
+    Ref<WindowEventLoop> protectedWindowEventLoop();
 
     ScriptedAnimationController* scriptedAnimationController() { return m_scriptedAnimationController.get(); }
     void suspendScriptedAnimationControllerCallbacks();
@@ -1377,6 +1378,14 @@ public:
 
     using DisplayChangedObserver = WTF::Observer<void(PlatformDisplayID)>;
     void addDisplayChangedObserver(const DisplayChangedObserver&);
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    const String& defaultSpatialTrackingLabel() const;
+    void defaultSpatialTrackingLabelChanged(const String&);
+
+    using DefaultSpatialTrackingLabelChangedObserver = WTF::Observer<void(const String&)>;
+    void addDefaultSpatialTrackingLabelChangedObserver(const DefaultSpatialTrackingLabelChangedObserver&);
+#endif
 
 #if ENABLE(FULLSCREEN_API)
     FullscreenManager* fullscreenManagerIfExists() { return m_fullscreenManager.get(); }
@@ -1568,7 +1577,7 @@ public:
 
     SecurityOrigin& securityOrigin() const { return *SecurityContext::securityOrigin(); }
     inline Ref<SecurityOrigin> protectedSecurityOrigin() const; // Defined in DocumentInlines.h.
-    SecurityOrigin& topOrigin() const final { return topDocument().securityOrigin(); }
+    WEBCORE_EXPORT SecurityOrigin& topOrigin() const final;
     Ref<SecurityOrigin> protectedTopOrigin() const;
     inline ClientOrigin clientOrigin() const;
 
@@ -1586,8 +1595,8 @@ public:
 
     void setVisualUpdatesAllowedByClient(bool);
 
-    bool wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey) final;
-    bool unwrapCryptoKey(const Vector<uint8_t>& wrappedKey, Vector<uint8_t>& key) final;
+    std::optional<Vector<uint8_t>> wrapCryptoKey(const Vector<uint8_t>&) final;
+    std::optional<Vector<uint8_t>> unwrapCryptoKey(const Vector<uint8_t>&) final;
 
     void setHasStyleWithViewportUnits() { m_hasStyleWithViewportUnits = true; }
     bool hasStyleWithViewportUnits() const { return m_hasStyleWithViewportUnits; }
@@ -1798,11 +1807,9 @@ public:
 
     const FixedVector<CSSPropertyID>& exposedComputedCSSPropertyIDs();
 
-#if ENABLE(CSS_PAINTING_API)
     PaintWorklet& ensurePaintWorklet();
     PaintWorkletGlobalScope* paintWorkletGlobalScopeForName(const String& name);
     void setPaintWorkletGlobalScopeForName(const String& name, Ref<PaintWorkletGlobalScope>&&);
-#endif
 
     WEBCORE_EXPORT bool isRunningUserScripts() const;
     WEBCORE_EXPORT void setAsRunningUserScripts();
@@ -2218,6 +2225,10 @@ private:
     WeakHashSet<MediaCanStartListener> m_mediaCanStartListeners;
     WeakHashSet<DisplayChangedObserver> m_displayChangedObservers;
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    WeakHashSet<DefaultSpatialTrackingLabelChangedObserver> m_defaultSpatialTrackingLabelChangedObservers;
+#endif
+
 #if ENABLE(FULLSCREEN_API)
     std::unique_ptr<FullscreenManager> m_fullscreenManager;
 #endif
@@ -2346,10 +2357,8 @@ private:
     
     std::optional<FixedVector<CSSPropertyID>> m_exposedComputedCSSPropertyIDs;
 
-#if ENABLE(CSS_PAINTING_API)
     RefPtr<PaintWorklet> m_paintWorklet;
     HashMap<String, Ref<PaintWorkletGlobalScope>> m_paintWorkletGlobalScopes;
-#endif
 
 #if ENABLE(CONTENT_CHANGE_OBSERVER)
     std::unique_ptr<ContentChangeObserver> m_contentChangeObserver;

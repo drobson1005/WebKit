@@ -43,6 +43,7 @@
 #endif
 
 namespace WebCore {
+class Device;
 class NativeImage;
 }
 
@@ -74,7 +75,7 @@ public:
         m_onSubmittedWorkScheduledCallback = WTFMove(onSubmittedWorkScheduledCallback);
     }
 
-    void withDisplayBufferAsNativeImage(uint32_t bufferIndex, Function<void(WebCore::NativeImage&)>) final;
+    void withDisplayBufferAsNativeImage(uint32_t bufferIndex, Function<void(WebCore::NativeImage*)>) final;
     void paintCompositedResultsToCanvas(WebCore::ImageBuffer&, uint32_t) final;
 
 private:
@@ -90,7 +91,7 @@ private:
     void prepareForDisplay(CompletionHandler<void()>&&) override;
 
 #if PLATFORM(COCOA)
-    Vector<MachSendRight> recreateRenderBuffers(int width, int height) override;
+    Vector<MachSendRight> recreateRenderBuffers(int width, int height, WebCore::DestinationColorSpace&&, WebCore::AlphaPremultiplication, Device&) override;
 
     Vector<UniqueRef<WebCore::IOSurface>> m_renderBuffers;
     WTF::Function<void(CFArrayRef)> m_renderBuffersWereRecreatedCallback;
@@ -100,6 +101,7 @@ private:
 
     RefPtr<PresentationContextImpl> m_presentationContext;
     Ref<ConvertToBackingContext> m_convertToBackingContext;
+    WeakPtr<Device> m_device;
 };
 
 } // namespace WebCore::WebGPU

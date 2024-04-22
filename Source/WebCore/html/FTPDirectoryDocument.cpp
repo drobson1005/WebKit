@@ -53,6 +53,8 @@ WTF_MAKE_ISO_ALLOCATED_IMPL(FTPDirectoryDocument);
 using namespace HTMLNames;
     
 class FTPDirectoryDocumentParser final : public HTMLDocumentParser {
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(HTMLDocumentParser);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(FTPDirectoryDocumentParser);
 public:
     static Ref<FTPDirectoryDocumentParser> create(HTMLDocument& document)
     {
@@ -114,7 +116,7 @@ void FTPDirectoryDocumentParser::appendEntry(String&& filename, String&& size, S
     rowElement->setAttributeWithoutSynchronization(HTMLNames::classAttr, "ftpDirectoryEntryRow"_s);
 
     Ref typeElement = HTMLTableCellElement::create(tdTag, document);
-    typeElement->appendChild(Text::create(document, String(&noBreakSpace, 1)));
+    typeElement->appendChild(Text::create(document, span(noBreakSpace)));
     if (isDirectory)
         typeElement->setAttributeWithoutSynchronization(HTMLNames::classAttr, "ftpDirectoryIcon ftpDirectoryTypeDirectory"_s);
     else
@@ -266,13 +268,13 @@ void FTPDirectoryDocumentParser::parseAndAppendOneLine(const String& inputLine)
 
     String filename;
     if (result.type == FTPDirectoryEntry) {
-        filename = makeString(StringView { result.filename, result.filenameLength }, '/');
+        filename = makeString(result.filenameSpan(), '/');
 
         // We have no interest in linking to "current directory"
         if (filename == "./"_s)
             return;
     } else
-        filename = String(result.filename, result.filenameLength);
+        filename = String(result.filenameSpan());
 
     LOG(FTP, "Appending entry - %s, %s", filename.ascii().data(), result.fileSize.ascii().data());
 
@@ -298,7 +300,7 @@ bool FTPDirectoryDocumentParser::loadDocumentTemplate()
         return false;
     }
 
-    HTMLDocumentParser::insert(String(templateDocumentData.get()->data(), templateDocumentData.get()->size()));
+    HTMLDocumentParser::insert(String(templateDocumentData.get()->span()));
 
     Ref document = *this->document();
 
@@ -392,7 +394,7 @@ void FTPDirectoryDocumentParser::append(RefPtr<StringImpl>&& inputSource)
 
     while (cursor < m_dest) {
         if (*cursor == '\n') {
-            m_carryOver.append(StringView(start, cursor - start));
+            m_carryOver.append(StringView(std::span(start, cursor - start)));
             LOG(FTP, "%s", m_carryOver.toString().ascii().data());
             parseAndAppendOneLine(m_carryOver.toString());
             m_carryOver.clear();
@@ -404,7 +406,7 @@ void FTPDirectoryDocumentParser::append(RefPtr<StringImpl>&& inputSource)
 
     // Copy the partial line we have left to the carryover buffer
     if (cursor - start > 1)
-        m_carryOver.append(StringView(start, cursor - start - 1));
+        m_carryOver.append(StringView(std::span(start, cursor - start - 1)));
 }
 
 void FTPDirectoryDocumentParser::finish()

@@ -48,7 +48,7 @@ template<typename CharacterType> void CSSVariableData::updateBackingStringsInTok
         if (!token.hasStringBacking() || token.isBackedByStringLiteral())
             continue;
         unsigned length = token.value().length();
-        token.updateCharacters(currentOffset, length);
+        token.updateCharacters(std::span<const CharacterType> { currentOffset, length });
         currentOffset += length;
     }
     ASSERT(currentOffset == m_backingString.characters<CharacterType>() + m_backingString.length());
@@ -60,7 +60,7 @@ bool CSSVariableData::operator==(const CSSVariableData& other) const
 }
 
 CSSVariableData::CSSVariableData(const CSSParserTokenRange& range, const CSSParserContext& context)
-    : m_tokens(range.begin(), range.size())
+    : m_tokens(range.span())
     , m_context(context)
 {
     StringBuilder stringBuilder;

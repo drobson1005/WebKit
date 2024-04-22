@@ -254,7 +254,15 @@ bool WebExtensionTab::extensionHasAccess() const
 bool WebExtensionTab::extensionHasPermission() const
 {
     ASSERT(extensionHasAccess());
+
     return extensionContext()->hasPermission(url(), const_cast<WebExtensionTab*>(this));
+}
+
+bool WebExtensionTab::extensionHasTemporaryPermission() const
+{
+    ASSERT(extensionHasAccess());
+    RefPtr temporaryPattern = temporaryPermissionMatchPattern();
+    return temporaryPattern && temporaryPattern->matchesURL(url());
 }
 
 RefPtr<WebExtensionWindow> WebExtensionTab::window() const

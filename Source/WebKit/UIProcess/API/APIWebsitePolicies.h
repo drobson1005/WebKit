@@ -27,8 +27,10 @@
 
 #include "APIObject.h"
 #include "WebsitePoliciesData.h"
+#include <wtf/WeakPtr.h>
 
 namespace WebKit {
+class LockdownModeObserver;
 class WebUserContentControllerProxy;
 class WebsiteDataStore;
 struct WebsitePoliciesData;
@@ -36,7 +38,7 @@ struct WebsitePoliciesData;
 
 namespace API {
 
-class WebsitePolicies final : public API::ObjectImpl<API::Object::Type::WebsitePolicies> {
+class WebsitePolicies final : public API::ObjectImpl<API::Object::Type::WebsitePolicies>, public CanMakeWeakPtr<WebsitePolicies> {
 public:
     static Ref<WebsitePolicies> create() { return adoptRef(*new WebsitePolicies); }
     WebsitePolicies();
@@ -133,11 +135,17 @@ public:
     bool allowPrivacyProxy() const { return m_data.allowPrivacyProxy; }
     void setAllowPrivacyProxy(bool allow) { m_data.allowPrivacyProxy = allow; }
 
+    const HashSet<WTF::String>& visibilityAdjustmentSelectors() const { return m_data.visibilityAdjustmentSelectors; }
+    void setVisibilityAdjustmentSelectors(HashSet<WTF::String>&& selectors) { m_data.visibilityAdjustmentSelectors = WTFMove(selectors); }
+
 private:
     WebKit::WebsitePoliciesData m_data;
     RefPtr<WebKit::WebsiteDataStore> m_websiteDataStore;
     RefPtr<WebKit::WebUserContentControllerProxy> m_userContentController;
     std::optional<bool> m_lockdownModeEnabled;
+#if PLATFORM(COCOA)
+    std::unique_ptr<WebKit::LockdownModeObserver> m_lockdownModeObserver;
+#endif
 };
 
 } // namespace API

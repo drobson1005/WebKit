@@ -67,6 +67,7 @@
 #include "HitTestResult.h"
 #include "ImageBuffer.h"
 #include "InspectorInstrumentation.h"
+#include "JSDOMWindow.h"
 #include "JSNode.h"
 #include "JSServiceWorkerGlobalScope.h"
 #include "JSWindowProxy.h"
@@ -303,11 +304,6 @@ void LocalFrame::setDocument(RefPtr<Document>&& newDocument)
         if (RefPtr page = this->page())
             page->didChangeMainDocument();
         checkedLoader()->client().dispatchDidChangeMainDocument();
-
-        // We want to generate the same unique names whenever a page is loaded to avoid making layout tests
-        // flaky and for things like form state restoration to work. To achieve this, we reset our frame
-        // identifier generator every time the page is navigated.
-        tree().resetFrameIdentifiers();
     }
 
     if (RefPtr previousDocument = m_doc) {
@@ -362,11 +358,6 @@ bool LocalFrame::preventsParentFromBeingComplete() const
 void LocalFrame::changeLocation(FrameLoadRequest&& request)
 {
     checkedLoader()->changeLocation(WTFMove(request));
-}
-
-void LocalFrame::broadcastFrameRemovalToOtherProcesses()
-{
-    checkedLoader()->client().broadcastFrameRemovalToOtherProcesses();
 }
 
 void LocalFrame::didFinishLoadInAnotherProcess()
@@ -458,7 +449,7 @@ String LocalFrame::searchForLabelsAboveCell(const JSC::Yarr::RegularExpression& 
         // search within the above cell we found for a match
         size_t lengthSearched = 0;
         for (RefPtr textNode = TextNodeTraversal::firstWithin(*aboveCell); textNode; textNode = TextNodeTraversal::next(*textNode, aboveCell.get())) {
-            if (!textNode->renderer() || textNode->renderer()->style().visibility() != Visibility::Visible)
+            if (!textNode->renderer() || textNode->renderer()->style().usedVisibility() != Visibility::Visible)
                 continue;
             // For each text chunk, run the regexp
             String nodeString = textNode->data();
@@ -518,7 +509,7 @@ String LocalFrame::searchForLabelsBeforeElement(const Vector<String>& labels, El
                 return result;
             }
             searchedCellAbove = true;
-        } else if (n->isTextNode() && n->renderer() && n->renderer()->style().visibility() == Visibility::Visible) {
+        } else if (n->isTextNode() && n->renderer() && n->renderer()->style().usedVisibility() == Visibility::Visible) {
             // For each text chunk, run the regexp
             String nodeString = n->nodeValue();
             // add 100 for slop, to make it more likely that we'll search whole nodes
@@ -873,7 +864,7 @@ VisiblePosition LocalFrame::visiblePositionForPoint(const IntPoint& framePoint) 
     CheckedPtr renderer = node->renderer();
     if (!renderer)
         return VisiblePosition();
-    VisiblePosition visiblePos = renderer->positionForPoint(result.localPoint(), nullptr);
+    VisiblePosition visiblePos = renderer->positionForPoint(result.localPoint(), HitTestSource::User, nullptr);
     if (visiblePos.isNull())
         visiblePos = firstPositionInOrBeforeNode(node.get());
     return visiblePos;
@@ -996,6 +987,14 @@ FrameView* LocalFrame::virtualView() const
 FrameLoaderClient& LocalFrame::loaderClient()
 {
     return loader().client();
+}
+
+void LocalFrame::documentURLForConsoleLog(CompletionHandler<void(const URL&)>&& completionHandler)
+{
+    RefPtr document = this->document();
+    if (!document)
+        return completionHandler({ });
+    completionHandler(document->url());
 }
 
 String LocalFrame::trackedRepaintRectsAsText() const
@@ -1218,8 +1217,8 @@ void LocalFrame::resetScript()
 LocalFrame* LocalFrame::fromJSContext(JSContextRef context)
 {
     JSC::JSGlobalObject* globalObjectObj = toJS(context);
-    if (auto* window = JSC::jsDynamicCast<JSLocalDOMWindow*>(globalObjectObj))
-        return window->wrapped().frame();
+    if (auto* window = JSC::jsDynamicCast<JSDOMWindow*>(globalObjectObj))
+        return dynamicDowncast<LocalFrame>(window->wrapped().frame());
     if (auto* serviceWorkerGlobalScope = JSC::jsDynamicCast<JSServiceWorkerGlobalScope*>(globalObjectObj))
         return serviceWorkerGlobalScope->wrapped().serviceWorkerPage() ? dynamicDowncast<LocalFrame>(serviceWorkerGlobalScope->wrapped().serviceWorkerPage()->mainFrame()) : nullptr;
     return nullptr;
@@ -1234,8 +1233,8 @@ LocalFrame* LocalFrame::contentFrameFromWindowOrFrameElement(JSContextRef contex
     JSC::JSValue value = toJS(globalObject, valueRef);
     JSC::VM& vm = globalObject->vm();
 
-    if (auto* window = JSLocalDOMWindow::toWrapped(vm, value))
-        return window->frame();
+    if (auto* window = JSDOMWindow::toWrapped(vm, value))
+        return dynamicDowncast<LocalFrame>(window->frame());
 
     auto* jsNode = JSC::jsDynamicCast<JSNode*>(value);
     if (!jsNode)

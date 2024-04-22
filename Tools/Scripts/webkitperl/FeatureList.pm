@@ -68,7 +68,6 @@ my (
     $contextMenusSupport,
     $cssDeviceAdaptationSupport,
     $cssImageResolutionSupport,
-    $cssPaintingAPISupport,
     $cssScrollSnapSupport,
     $cssTrailingWordSupport,
     $cursorVisibilitySupport,
@@ -99,7 +98,6 @@ my (
     $iosTouchEventsSupport,
     $jitSupport,
     $jpegXLSupport,
-    $layerBasedSVGEngineSupport,
     $llvmProfileGenerationSupport,
     $legacyCustomProtocolManagerSupport,
     $legacyEncryptedMediaSupport,
@@ -128,7 +126,6 @@ my (
     $pdfkitPluginSupport,
     $pictureInPictureAPISupport,
     $pointerLockSupport,
-    $publicSuffixListSupport,
     $quotaSupport,
     $remoteInspectorSupport,
     $resourceUsageSupport,
@@ -146,7 +143,6 @@ my (
     $systemMallocSupport,
     $telephoneNumberDetectionSupport,
     $textAutosizingSupport,
-    $threeDTransformsSupport,
     $touchEventsSupport,
     $unifiedBuildsSupport,
     $userMessageHandlersSupport,
@@ -177,9 +173,6 @@ my (
 my @features = (
     { option => "fatal-warnings", desc => "Toggle warnings as errors (CMake only)",
       define => "DEVELOPER_MODE_FATAL_WARNINGS", value => \$fatalWarnings },
-
-    { option => "3d-rendering", desc => "Toggle 3D rendering support",
-      define => "ENABLE_3D_TRANSFORMS", value => \$threeDTransformsSupport },
 
     { option => "accessibility-isolated-tree", desc => "Toggle accessibility isolated tree support",
       define => "ENABLE_ACCESSIBILITY_ISOLATED_TREE", value => \$accessibilityIsolatedTreeSupport },
@@ -216,9 +209,6 @@ my @features = (
 
     { option => "context-menus", desc => "Toggle Context Menu support",
       define => "ENABLE_CONTEXT_MENUS", value => \$contextMenusSupport },
-
-    { option => "css-painting-api", desc => "Toggle CSS Painting API support",
-      define => "ENABLE_CSS_PAINTING_API", value => \$cssPaintingAPISupport },
 
     { option => "cursor-visibility", desc => "Toggle cursor visibility support",
       define => "ENABLE_CURSOR_VISIBILITY", value => \$cursorVisibilitySupport },
@@ -298,9 +288,6 @@ my @features = (
     { option => "jit", desc => "Toggle JustInTime JavaScript support",
       define => "ENABLE_JIT", value => \$jitSupport },
 
-    { option => "layer-based-svg-engine", desc => "Toggle Layer Based SVG Engine support",
-      define => "ENABLE_LAYER_BASED_SVG_ENGINE", value => \$layerBasedSVGEngineSupport },
-
     { option => "llvm-profile-generation", desc => "Include LLVM's instrumentation to generate profiles for PGO",
       define => "ENABLE_LLVM_PROFILE_GENERATION", value => \$llvmProfileGenerationSupport },
 
@@ -378,9 +365,6 @@ my @features = (
 
     { option => "pointer-lock", desc => "Toggle pointer lock support",
       define => "ENABLE_POINTER_LOCK", value => \$pointerLockSupport },
-
-    { option => "public-suffix-list", desc => "Toggle public suffix list support",
-      define => "ENABLE_PUBLIC_SUFFIX_LIST", value => \$publicSuffixListSupport },
 
     { option => "remote-inspector", desc => "Toggle remote inspector support",
       define => "ENABLE_REMOTE_INSPECTOR", value => \$remoteInspectorSupport },

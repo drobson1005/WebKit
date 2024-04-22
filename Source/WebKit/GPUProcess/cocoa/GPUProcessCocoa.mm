@@ -74,11 +74,6 @@ RetainPtr<NSDictionary> GPUProcess::additionalStateForDiagnosticReport() const
 #endif // USE(OS_STATE)
 
 #if ENABLE(CFPREFS_DIRECT_MODE)
-void GPUProcess::notifyPreferencesChanged(const String& domain, const String& key, const std::optional<String>& encodedValue)
-{
-    preferenceDidUpdate(domain, key, encodedValue);
-}
-
 void GPUProcess::dispatchSimulatedNotificationsForPreferenceChange(const String& key)
 {
 }
@@ -126,6 +121,16 @@ void GPUProcess::platformInitializeGPUProcess(GPUProcessCreationParameters& para
     MTLSetShaderCachePath(parameters.containerCachesDirectory);
 #endif
 }
+
+#if USE(EXTENSIONKIT)
+void GPUProcess::resolveBookmarkDataForCacheDirectory(const std::span<const uint8_t>& bookmarkData)
+{
+    auto bookmark = adoptNS([[NSData alloc] initWithBytes:bookmarkData.data() length:bookmarkData.size()]);
+    BOOL bookmarkIsStale = NO;
+    NSError* error = nil;
+    [NSURL URLByResolvingBookmarkData:bookmark.get() options:NSURLBookmarkResolutionWithoutUI relativeToURL:nil bookmarkDataIsStale:&bookmarkIsStale error:&error];
+}
+#endif
 
 } // namespace WebKit
 

@@ -63,7 +63,7 @@ messages -> WebProcess LegacyReceiver NotRefCounted {
     SetHasStylusDevice(bool hasStylusDevice)
 #endif
 
-    void StartMemorySampler(WebKit::SandboxExtension::Handle sampleLogFileHandle, String sampleLogFilePath, double interval);
+    void StartMemorySampler(WebKit::SandboxExtensionHandle sampleLogFileHandle, String sampleLogFilePath, double interval);
     void StopMemorySampler();
 
     SetTextCheckerState(struct WebKit::TextCheckerState textCheckerState)
@@ -168,21 +168,18 @@ messages -> WebProcess LegacyReceiver NotRefCounted {
     SeedResourceLoadStatisticsForTesting(WebCore::RegistrableDomain firstPartyDomain, WebCore::RegistrableDomain thirdPartyDomain, bool shouldScheduleNotification) -> ()
     SetThirdPartyCookieBlockingMode(enum:uint8_t WebCore::ThirdPartyCookieBlockingMode blockingMode) -> ()
     SetDomainsWithUserInteraction(HashSet<WebCore::RegistrableDomain> domains)
-    SetDomainsWithCrossPageStorageAccess(HashMap<WebCore::RegistrableDomain, WebCore::RegistrableDomain> domains) -> ()
+    SetDomainsWithCrossPageStorageAccess(HashMap<WebCore::RegistrableDomain, Vector<WebCore::RegistrableDomain>> domains) -> ()
     SendResourceLoadStatisticsDataImmediately() -> ()
 
     UpdateDomainsWithStorageAccessQuirks(HashSet<WebCore::RegistrableDomain> domainsWithStorageAccessQuirks);
 
-    GrantAccessToAssetServices(Vector<WebKit::SandboxExtension::Handle> assetServicesHandles)
+    GrantAccessToAssetServices(Vector<WebKit::SandboxExtensionHandle> assetServicesHandles)
     RevokeAccessToAssetServices()
-    SwitchFromStaticFontRegistryToUserFontRegistry(Vector<WebKit::SandboxExtension::Handle> fontMachExtensionHandles)
+    SwitchFromStaticFontRegistryToUserFontRegistry(Vector<WebKit::SandboxExtensionHandle> fontMachExtensionHandles)
 
 #if PLATFORM(COCOA)
     DisableURLSchemeCheckInDataDetectors()
-    UnblockServicesRequiredByAccessibility(Vector<WebKit::SandboxExtension::Handle> handleArray)
-#if ENABLE(CFPREFS_DIRECT_MODE)
-    NotifyPreferencesChanged(String domain, String key, std::optional<String> encodedValue)
-#endif
+    UnblockServicesRequiredByAccessibility(Vector<WebKit::SandboxExtensionHandle> handleArray)
     PowerSourceDidChange(bool hasAC)
 #endif
 
@@ -213,16 +210,14 @@ messages -> WebProcess LegacyReceiver NotRefCounted {
 #endif
 
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK)
-    SetMediaAccessibilityPreferences(WebCore::CaptionUserPreferences::CaptionDisplayMode displayMode, Vector<String> languages)
+    SetMediaAccessibilityPreferences(enum:uint8_t WebCore::CaptionUserPreferencesDisplayMode displayMode, Vector<String> languages)
 #endif
 
 #if PLATFORM(MAC)
-    OpenDirectoryCacheInvalidated(WebKit::SandboxExtension::Handle handle, WebKit::SandboxExtension::Handle machBootstrapHandle)
+    OpenDirectoryCacheInvalidated(WebKit::SandboxExtensionHandle handle, WebKit::SandboxExtensionHandle machBootstrapHandle)
 #endif
 
     ReleaseMemory() -> ()
-
-    AddAllowedFirstPartyForCookies(WebCore::RegistrableDomain firstPartyDomain)
 
 #if ENABLE(NOTIFY_BLOCKING)
     PostNotification(String message, std::optional<uint64_t> state)

@@ -40,7 +40,9 @@ namespace WebKit {
 
 using namespace WebCore;
 
-class VideoPresentationInterfaceLMK : public VideoPresentationInterfaceIOS {
+class VideoPresentationInterfaceLMK final : public VideoPresentationInterfaceIOS {
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(VideoPresentationInterfaceLMK);
 public:
     static Ref<VideoPresentationInterfaceLMK> create(PlaybackSessionInterfaceIOS&);
 #if !RELEASE_LOG_DISABLED
@@ -62,15 +64,18 @@ private:
     UIViewController *playerViewController() const final;
     void tryToStartPictureInPicture() final { }
     void stopPictureInPicture() final { }
-    void presentFullscreen(bool animated, CompletionHandler<void(BOOL, NSError *)>&&) final;
-    void dismissFullscreen(bool animated, CompletionHandler<void(BOOL, NSError *)>&&) final;
+    void presentFullscreen(bool animated, Function<void(BOOL, NSError *)>&&) final;
+    void dismissFullscreen(bool animated, Function<void(BOOL, NSError *)>&&) final;
     void setShowsPlaybackControls(bool) final;
     void setContentDimensions(const FloatSize&) final;
     void setAllowsPictureInPicturePlayback(bool) final { }
     bool isExternalPlaybackActive() const final { return false; }
     AVPlayerViewController *avPlayerViewController() const final { return nullptr; }
+    void setupCaptionsLayer(CALayer *parent, const FloatSize&) final;
+    LMPlayableViewController *playableViewController() final;
 
     WKSLinearMediaPlayer *linearMediaPlayer() const;
+    void ensurePlayableViewController();
 
     RetainPtr<LMPlayableViewController> m_playerViewController;
 };

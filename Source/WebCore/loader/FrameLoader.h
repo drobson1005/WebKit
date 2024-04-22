@@ -78,6 +78,7 @@ class LocalFrameLoaderClient;
 class NavigationAction;
 class NetworkingContext;
 class Node;
+class Page;
 class ResourceError;
 class ResourceRequest;
 class ResourceResponse;
@@ -100,9 +101,10 @@ WEBCORE_EXPORT bool isReload(FrameLoadType);
 
 using ContentPolicyDecisionFunction = CompletionHandler<void(PolicyAction)>;
 
-class FrameLoader final : public CanMakeCheckedPtr {
-    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Loader);
+class FrameLoader final : public CanMakeCheckedPtr<FrameLoader> {
     WTF_MAKE_NONCOPYABLE(FrameLoader);
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Loader);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(FrameLoader);
 public:
     FrameLoader(LocalFrame&, UniqueRef<LocalFrameLoaderClient>&&);
     ~FrameLoader();
@@ -228,7 +230,7 @@ public:
     void detachViewsAndDocumentLoader();
 
     static void addHTTPOriginIfNeeded(ResourceRequest&, const String& origin);
-    static void addSameSiteInfoToRequestIfNeeded(ResourceRequest&, const Document* initiator = nullptr);
+    static void addSameSiteInfoToRequestIfNeeded(ResourceRequest&, const Document* initiator = nullptr, const Page* = nullptr);
 
     const LocalFrameLoaderClient& client() const { return m_client.get(); }
     LocalFrameLoaderClient& client() { return m_client.get(); }

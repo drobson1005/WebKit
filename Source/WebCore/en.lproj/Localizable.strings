@@ -94,9 +94,6 @@
 /* window title for a standalone image (uses multiplication symbol, not x) */
 "%s %d×%d pixels" = "%s %d×%d pixels";
 
-/* Name of application's single WebCrypto master key in Keychain */
-"%s WebCrypto Master Key" = "%s WebCrypto Master Key";
-
 /* Present the number of selected <option> items in a <select multiple> element (iOS only) */
 "%zu Items" = "%zu Items";
 
@@ -123,9 +120,6 @@
 
 /* 2× media controls context menu playback speed label */
 "2× (Media Controls Menu Playback Speed)" = "2×";
-
-/* Name of application's single WebCrypto master key in Keychain */
-"<application> WebCrypto Master Key" = "<application> WebCrypto Master Key";
 
 /* window title for a standalone image (uses multiplication symbol, not x) */
 "<filename> %d×%d pixels" = "<filename> %d×%d pixels";
@@ -181,6 +175,9 @@
 /* Allow button title in user media prompt */
 "Allow (usermedia)" = "Allow";
 
+/* Message for requesting cross-site cookie and website data access. */
+"Allow related %@ websites to share cookies and website data?" = "Allow related %@ websites to share cookies and website data?";
+
 /* Allow screen button title in window and screen sharing prompt */
 "Allow to Share Screen" = "Allow to Share Screen";
 
@@ -214,9 +211,6 @@
 /* Message for user microphone access prompt */
 "Allow “%@” to use your microphone?" = "Allow “%@” to use your microphone?";
 
-/* Informative text for requesting cross-site cookie and website data access. */
-"Allowing access to website data is necessary for the website to work correctly." = "Allowing access to website data is necessary for the website to work correctly.";
-
 /* WKWebExtensionErrorUnknown description */
 "An unknown error has occurred." = "An unknown error has occurred.";
 
@@ -234,9 +228,6 @@
 
 /* Label for the plain Apple Pay button. */
 "Apple Pay" = "Apple Pay";
-
-/* Message for requesting cross-site cookie and website data access. */
-"Are you logging in to this website, and do you want to allow other %@ sites access to your website data while browsing the websites listed below?" = "Are you logging in to this website, and do you want to allow other %@ sites access to your website data while browsing the websites listed below?";
 
 /* Malware confirmation dialog title */
 "Are you sure you wish to go to this site?" = "Are you sure you wish to go to this site?";
@@ -724,6 +715,9 @@
 /* Inspect Element context menu item */
 "Inspect Element" = "Inspect Element";
 
+/* Message when a PDF fails to unlock with the given password */
+"Invalid Password" = "Invalid Password";
+
 /* WKWebExtensionErrorInvalidManifestEntry description for commands */
 "Invalid `commands` manifest entry." = "Invalid `commands` manifest entry.";
 
@@ -744,9 +738,6 @@
 
 /* WKWebExtensionErrorInvalidManifestEntry description for web_accessible_resources */
 "Invalid `web_accessible_resources` manifest entry." = "Invalid `web_accessible_resources` manifest entry.";
-
-/* Message when a PDF fails to unlock with the given password */
-"Invalid Password" = "Invalid Password";
 
 /* Validation message for input form controls with a value not matching type */
 "Invalid value" = "Invalid value";
@@ -949,8 +940,17 @@
 /* Media Element Source Type */
 "ManagedMediaSource (Media Element Source Type)" = "Managed Media Source";
 
+/* WKWebExtensionErrorInvalidBackgroundContent description for empty or invalid preferred environment key */
+"Manifest `background` entry has an empty or invalid `preferred_environment` key." = "Manifest `background` entry has an empty or invalid `preferred_environment` key.";
+
+/* WKWebExtensionErrorInvalidBackgroundContent description for missing background page or scripts keys */
+"Manifest `background` entry has missing or empty required `page` or `scripts` key for `preferred_environment` of `document`." = "Manifest `background` entry has missing or empty required `page` or `scripts` key for `preferred_environment` of `document`.";
+
 /* WKWebExtensionErrorInvalidBackgroundContent description for missing background required keys */
-"Manifest `background` entry has missing or empty required key `scripts`, `page`, or `service_worker`." = "Manifest `background` entry has missing or empty required key `scripts`, `page`, or `service_worker`.";
+"Manifest `background` entry has missing or empty required `scripts`, `page`, or `service_worker` key." = "Manifest `background` entry has missing or empty required `scripts`, `page`, or `service_worker` key.";
+
+/* WKWebExtensionErrorInvalidBackgroundContent description for missing background service_worker or scripts keys */
+"Manifest `background` entry has missing or empty required `service_worker` or `scripts` key for `preferred_environment` of `service_worker`." = "Manifest `background` entry has missing or empty required `service_worker` or `scripts` key for `preferred_environment` of `service_worker`.";
 
 /* WKWebExtensionErrorInvalidContentScripts description for missing or empty 'js' and 'css' arrays */
 "Manifest `content_scripts` entry has missing or empty 'js' and 'css' arrays." = "Manifest `content_scripts` entry has missing or empty 'js' and 'css' arrays.";
@@ -960,6 +960,9 @@
 
 /* WKWebExtensionErrorInvalidContentScripts description for unknown 'run_at' value */
 "Manifest `content_scripts` entry has unknown `run_at` value." = "Manifest `content_scripts` entry has unknown `run_at` value.";
+
+/* WKWebExtensionErrorInvalidContentScripts description for unknown 'world' value */
+"Manifest `content_scripts` entry has unknown `world` value." = "Manifest `content_scripts` entry has unknown `world` value.";
 
 /* _WKWebExtensionErrorInvalidDeclarativeNetRequestEntry description for missing declarativeNetRequest permission */
 "Manifest has no `declarativeNetRequest` permission." = "Manifest has no `declarativeNetRequest` permission.";
@@ -1144,6 +1147,9 @@
 /* Playback Speed media controls context menu title */
 "Playback Speed (Media Controls Menu)" = "Playback Speed";
 
+/* Subtitle when a PDF needs a password to be unlocked */
+"Please enter the password below." = "Please enter the password below.";
+
 /* Label text to be used when a plug-in was blocked from loading because it was too small */
 "Plug-In too small" = "Plug-In too small";
 
@@ -1182,6 +1188,9 @@
 
 /* label for first item in the menu that appears when clicking on the search field image, used as embedded menu title */
 "Recent Searches" = "Recent Searches";
+
+/* Label describing the list of related websites controlled by the same organization */
+"Related %@ websites" = "Related %@ websites";
 
 /* Reload context menu item */
 "Reload" = "Reload";
@@ -1389,6 +1398,9 @@
 
 /* Label for the support with Apple Pay button. */
 "Support with Apple Pay" = "Support with Apple Pay";
+
+/* Swap characters context menu item */
+"Swap characters" = "Swap characters";
 
 /* File Upload alert sheet camera button string for taking only photos */
 "Take Photo (file upload action sheet)" = "Take Photo";
@@ -1603,6 +1615,12 @@
 /* The download was cancelled by the user */
 "User cancelled the download" = "User cancelled the download";
 
+/* Informative text for requesting cross-site cookie and website data access for two sites */
+"Using the same cookies and website data is required for %s and %s to work correctly, but could make it easier to track your browsing across these websites." = "Using the same cookies and website data is required for %s and %s to work correctly, but could make it easier to track your browsing across these websites.";
+
+/* Informative text for requesting cross-site cookie and website data access for four or more sites. */
+"Using the same cookies and website data is required for %s, %s, and %lu other websites to work correctly, but could make it easier to track your browsing across these websites." = "Using the same cookies and website data is required for %s, %s, and %lu other websites to work correctly, but could make it easier to track your browsing across these websites.";
+
 /* Codec Strings */
 "VP8 (Codec String)" = "VP8";
 
@@ -1644,9 +1662,6 @@
 
 /* Unwanted software warning title */
 "Website With Harmful Software Warning" = "Website With Harmful Software Warning";
-
-/* Accessory text for requesting cross-site cookie and website data access. */
-"While you are visiting %@, the following related websites will gain access to their cookies:\n  - %@" = "While you are visiting %@, the following related websites will gain access to their cookies:\n  - %@";
 
 /* Year label in date picker */
 "YEAR (Date picker for extra zoom mode)" = "YEAR";
@@ -1789,6 +1804,9 @@
 /* accessibility role description for a mark element */
 "highlighted" = "highlighted";
 
+/* accessibility label for hour fields. */
+"hour" = "hour";
+
 /* accessibility role description for image map */
 "image map" = "image map";
 
@@ -1818,6 +1836,12 @@
 
 /* An ARIA accessibility group that contains mathematical symbols. */
 "math" = "math";
+
+/* accessibility label for milliseconds fields. */
+"milliseconds" = "milliseconds";
+
+/* accessibility label for minutes fields. */
+"minutes" = "minutes";
 
 /* accessibility label for a date field month input. */
 "month" = "month";
@@ -1882,9 +1906,6 @@
 /* accessibility label for play button */
 "play" = "play";
 
-/* Subtitle when a PDF needs a password to be unlocked */
-"Please enter the password below." = "Please enter the password below.";
-
 /* Verb stating the action that will occur when a button is pressed, as used by accessibility */
 "press" = "press";
 
@@ -1911,6 +1932,9 @@
 
 /* An ARIA accessibility group that contains a search feature of a website. */
 "search" = "search";
+
+/* accessibility label for seconds fields. */
+"seconds" = "seconds";
 
 /* accessibility help text for jump back 30 seconds button */
 "seek movie back 30 seconds" = "seek movie back 30 seconds";
@@ -2010,13 +2034,6 @@
 
 /* accessibility label for a date field year input. */
 "year" = "year";
-
-/* Accessibility labels for time fields. */
-"hour" = "hour";
-"minutes" = "minutes";
-"seconds" = "seconds";
-"milliseconds" = "milliseconds";
-"meridiem" = "meridiem";
 
 /* Message for requesting access to the device motion and orientation */
 "“%@” Would Like to Access Motion and Orientation" = "“%@” Would Like to Access Motion and Orientation";

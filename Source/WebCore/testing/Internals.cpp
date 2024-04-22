@@ -1106,7 +1106,7 @@ float Internals::imageFrameDurationAtIndex(HTMLImageElement& element, unsigned i
 void Internals::setImageFrameDecodingDuration(HTMLImageElement& element, float duration)
 {
     if (auto* bitmapImage = bitmapImageFromImageElement(element))
-        bitmapImage->setFrameDecodingDurationForTesting(Seconds { duration });
+        bitmapImage->setMinimumDecodingDurationForTesting(Seconds { duration });
 }
 
 void Internals::resetImageAnimation(HTMLImageElement& element)
@@ -1173,6 +1173,27 @@ unsigned Internals::imageDecodeCount(HTMLImageElement& element)
 {
     auto* bitmapImage = bitmapImageFromImageElement(element);
     return bitmapImage ? bitmapImage->decodeCountForTesting() : 0;
+}
+
+AtomString Internals::imageLastDecodingOptions(HTMLImageElement& element)
+{
+    auto* bitmapImage = bitmapImageFromImageElement(element);
+    if (!bitmapImage)
+        return { };
+
+    auto options = bitmapImage->currentFrameDecodingOptions();
+    StringBuilder builder;
+    builder.append("{ decodingMode : ");
+    builder.append(options.decodingMode() == DecodingMode::Asynchronous ? "Asynchronous" : "Synchronous");
+    if (auto sizeForDrawing = options.sizeForDrawing()) {
+        builder.append(", sizeForDrawing : { ");
+        builder.append(sizeForDrawing->width());
+        builder.append(", ");
+        builder.append(sizeForDrawing->height());
+        builder.append(" }");
+    }
+    builder.append(" }");
+    return builder.toAtomString();
 }
 
 unsigned Internals::imageCachedSubimageCreateCount(HTMLImageElement& element)
@@ -2703,26 +2724,26 @@ String Internals::parserMetaData(JSC::JSValue code)
     else
         return String();
 
-    const char* prefix;
+    ASCIILiteral prefix;
     String functionName;
-    const char* suffix = "";
+    ASCIILiteral suffix = ""_s;
 
     if (executable->isFunctionExecutable()) {
-        prefix = "function \"";
+        prefix = "function \""_s;
         functionName = static_cast<FunctionExecutable*>(executable)->ecmaName().string();
-        suffix = "\"";
+        suffix = "\""_s;
     } else if (executable->isEvalExecutable())
-        prefix = "eval";
+        prefix = "eval"_s;
     else if (executable->isModuleProgramExecutable())
-        prefix = "module";
+        prefix = "module"_s;
     else if (executable->isProgramExecutable())
-        prefix = "program";
+        prefix = "program"_s;
     else
         RELEASE_ASSERT_NOT_REACHED();
 
-    return makeString(prefix, functionName, suffix, " { ",
-        executable->firstLine(), ':', executable->startColumn(), " - ",
-        executable->lastLine(), ':', executable->endColumn(), " }");
+    return makeString(prefix, functionName, suffix, " { "_s,
+        executable->firstLine(), ':', executable->startColumn(), " - "_s,
+        executable->lastLine(), ':', executable->endColumn(), " }"_s);
 }
 
 void Internals::updateEditorUINowIfScheduled()
@@ -2908,17 +2929,17 @@ static ExceptionOr<FindOptions> parseFindOptions(const Vector<String>& optionLis
 {
     const struct {
         ASCIILiteral name;
-        FindOptionFlag value;
+        FindOption value;
     } flagList[] = {
-        { "CaseInsensitive"_s, CaseInsensitive },
-        { "AtWordStarts"_s, AtWordStarts },
-        { "TreatMedialCapitalAsWordStart"_s, TreatMedialCapitalAsWordStart },
-        { "Backwards"_s, Backwards },
-        { "WrapAround"_s, WrapAround },
-        { "StartInSelection"_s, StartInSelection },
-        { "DoNotRevealSelection"_s, DoNotRevealSelection },
-        { "AtWordEnds"_s, AtWordEnds },
-        { "DoNotTraverseFlatTree"_s, DoNotTraverseFlatTree },
+        { "CaseInsensitive"_s, FindOption::CaseInsensitive },
+        { "AtWordStarts"_s, FindOption::AtWordStarts },
+        { "TreatMedialCapitalAsWordStart"_s, FindOption::TreatMedialCapitalAsWordStart },
+        { "Backwards"_s, FindOption::Backwards },
+        { "WrapAround"_s, FindOption::WrapAround },
+        { "StartInSelection"_s, FindOption::StartInSelection },
+        { "DoNotRevealSelection"_s, FindOption::DoNotRevealSelection },
+        { "AtWordEnds"_s, FindOption::AtWordEnds },
+        { "DoNotTraverseFlatTree"_s, FindOption::DoNotTraverseFlatTree },
     };
     FindOptions result;
     for (auto& option : optionList) {
@@ -3222,6 +3243,15 @@ ExceptionOr<Vector<uint64_t>> Internals::scrollingNodeIDForNode(Node* node)
     auto* scrollableArea = areaOrException.releaseReturnValue();
     Vector<uint64_t> returnNodeID = { scrollableArea->scrollingNodeID().object().toUInt64(), scrollableArea->scrollingNodeID().processIdentifier().toUInt64() };
     return returnNodeID;
+}
+
+ExceptionOr<unsigned> Internals::scrollableAreaWidth(Node& node)
+{
+    auto areaOrException = scrollableAreaForNode(&node);
+    if (areaOrException.hasException())
+        return areaOrException.releaseException();
+    auto* scrollableArea = areaOrException.releaseReturnValue();
+    return scrollableArea->contentsSize().width();
 }
 
 static OptionSet<PlatformLayerTreeAsTextFlags> toPlatformLayerTreeFlags(unsigned short flags)
@@ -4096,58 +4126,58 @@ unsigned Internals::layoutCount() const
 }
 
 #if !PLATFORM(IOS_FAMILY)
-static const char* cursorTypeToString(Cursor::Type cursorType)
+static ASCIILiteral cursorTypeToString(Cursor::Type cursorType)
 {
     switch (cursorType) {
-    case Cursor::Type::Pointer: return "Pointer";
-    case Cursor::Type::Cross: return "Cross";
-    case Cursor::Type::Hand: return "Hand";
-    case Cursor::Type::IBeam: return "IBeam";
-    case Cursor::Type::Wait: return "Wait";
-    case Cursor::Type::Help: return "Help";
-    case Cursor::Type::EastResize: return "EastResize";
-    case Cursor::Type::NorthResize: return "NorthResize";
-    case Cursor::Type::NorthEastResize: return "NorthEastResize";
-    case Cursor::Type::NorthWestResize: return "NorthWestResize";
-    case Cursor::Type::SouthResize: return "SouthResize";
-    case Cursor::Type::SouthEastResize: return "SouthEastResize";
-    case Cursor::Type::SouthWestResize: return "SouthWestResize";
-    case Cursor::Type::WestResize: return "WestResize";
-    case Cursor::Type::NorthSouthResize: return "NorthSouthResize";
-    case Cursor::Type::EastWestResize: return "EastWestResize";
-    case Cursor::Type::NorthEastSouthWestResize: return "NorthEastSouthWestResize";
-    case Cursor::Type::NorthWestSouthEastResize: return "NorthWestSouthEastResize";
-    case Cursor::Type::ColumnResize: return "ColumnResize";
-    case Cursor::Type::RowResize: return "RowResize";
-    case Cursor::Type::MiddlePanning: return "MiddlePanning";
-    case Cursor::Type::EastPanning: return "EastPanning";
-    case Cursor::Type::NorthPanning: return "NorthPanning";
-    case Cursor::Type::NorthEastPanning: return "NorthEastPanning";
-    case Cursor::Type::NorthWestPanning: return "NorthWestPanning";
-    case Cursor::Type::SouthPanning: return "SouthPanning";
-    case Cursor::Type::SouthEastPanning: return "SouthEastPanning";
-    case Cursor::Type::SouthWestPanning: return "SouthWestPanning";
-    case Cursor::Type::WestPanning: return "WestPanning";
-    case Cursor::Type::Move: return "Move";
-    case Cursor::Type::VerticalText: return "VerticalText";
-    case Cursor::Type::Cell: return "Cell";
-    case Cursor::Type::ContextMenu: return "ContextMenu";
-    case Cursor::Type::Alias: return "Alias";
-    case Cursor::Type::Progress: return "Progress";
-    case Cursor::Type::NoDrop: return "NoDrop";
-    case Cursor::Type::Copy: return "Copy";
-    case Cursor::Type::None: return "None";
-    case Cursor::Type::NotAllowed: return "NotAllowed";
-    case Cursor::Type::ZoomIn: return "ZoomIn";
-    case Cursor::Type::ZoomOut: return "ZoomOut";
-    case Cursor::Type::Grab: return "Grab";
-    case Cursor::Type::Grabbing: return "Grabbing";
-    case Cursor::Type::Custom: return "Custom";
+    case Cursor::Type::Pointer: return "Pointer"_s;
+    case Cursor::Type::Cross: return "Cross"_s;
+    case Cursor::Type::Hand: return "Hand"_s;
+    case Cursor::Type::IBeam: return "IBeam"_s;
+    case Cursor::Type::Wait: return "Wait"_s;
+    case Cursor::Type::Help: return "Help"_s;
+    case Cursor::Type::EastResize: return "EastResize"_s;
+    case Cursor::Type::NorthResize: return "NorthResize"_s;
+    case Cursor::Type::NorthEastResize: return "NorthEastResize"_s;
+    case Cursor::Type::NorthWestResize: return "NorthWestResize"_s;
+    case Cursor::Type::SouthResize: return "SouthResize"_s;
+    case Cursor::Type::SouthEastResize: return "SouthEastResize"_s;
+    case Cursor::Type::SouthWestResize: return "SouthWestResize"_s;
+    case Cursor::Type::WestResize: return "WestResize"_s;
+    case Cursor::Type::NorthSouthResize: return "NorthSouthResize"_s;
+    case Cursor::Type::EastWestResize: return "EastWestResize"_s;
+    case Cursor::Type::NorthEastSouthWestResize: return "NorthEastSouthWestResize"_s;
+    case Cursor::Type::NorthWestSouthEastResize: return "NorthWestSouthEastResize"_s;
+    case Cursor::Type::ColumnResize: return "ColumnResize"_s;
+    case Cursor::Type::RowResize: return "RowResize"_s;
+    case Cursor::Type::MiddlePanning: return "MiddlePanning"_s;
+    case Cursor::Type::EastPanning: return "EastPanning"_s;
+    case Cursor::Type::NorthPanning: return "NorthPanning"_s;
+    case Cursor::Type::NorthEastPanning: return "NorthEastPanning"_s;
+    case Cursor::Type::NorthWestPanning: return "NorthWestPanning"_s;
+    case Cursor::Type::SouthPanning: return "SouthPanning"_s;
+    case Cursor::Type::SouthEastPanning: return "SouthEastPanning"_s;
+    case Cursor::Type::SouthWestPanning: return "SouthWestPanning"_s;
+    case Cursor::Type::WestPanning: return "WestPanning"_s;
+    case Cursor::Type::Move: return "Move"_s;
+    case Cursor::Type::VerticalText: return "VerticalText"_s;
+    case Cursor::Type::Cell: return "Cell"_s;
+    case Cursor::Type::ContextMenu: return "ContextMenu"_s;
+    case Cursor::Type::Alias: return "Alias"_s;
+    case Cursor::Type::Progress: return "Progress"_s;
+    case Cursor::Type::NoDrop: return "NoDrop"_s;
+    case Cursor::Type::Copy: return "Copy"_s;
+    case Cursor::Type::None: return "None"_s;
+    case Cursor::Type::NotAllowed: return "NotAllowed"_s;
+    case Cursor::Type::ZoomIn: return "ZoomIn"_s;
+    case Cursor::Type::ZoomOut: return "ZoomOut"_s;
+    case Cursor::Type::Grab: return "Grab"_s;
+    case Cursor::Type::Grabbing: return "Grabbing"_s;
+    case Cursor::Type::Custom: return "Custom"_s;
     case Cursor::Type::Invalid: break;
     }
 
     ASSERT_NOT_REACHED();
-    return "UNKNOWN";
+    return "UNKNOWN"_s;
 }
 #endif
 
@@ -4184,8 +4214,7 @@ Ref<ArrayBuffer> Internals::serializeObject(const RefPtr<SerializedScriptValue>&
 
 Ref<SerializedScriptValue> Internals::deserializeBuffer(ArrayBuffer& buffer) const
 {
-    Vector<uint8_t> bytes { static_cast<const uint8_t*>(buffer.data()), buffer.byteLength() };
-    return SerializedScriptValue::createFromWireBytes(WTFMove(bytes));
+    return SerializedScriptValue::createFromWireBytes(buffer.toVector());
 }
 
 bool Internals::isFromCurrentWorld(JSC::JSValue value) const
@@ -4402,6 +4431,15 @@ ExceptionOr<void> Internals::setOverridePreferredDynamicRangeMode(HTMLMediaEleme
 
     element.setOverridePreferredDynamicRangeMode(mode);
     return { };
+}
+
+void Internals::enableGStreamerHolePunching(HTMLVideoElement& element)
+{
+#if USE(GSTREAMER)
+    element.enableGStreamerHolePunching();
+#else
+    UNUSED_PARAM(element);
+#endif
 }
 
 #endif
@@ -6440,6 +6478,14 @@ void Internals::reloadWithoutContentExtensions()
         frame->loader().reload(ReloadOption::DisableContentBlockers);
 }
 
+void Internals::disableContentExtensionsChecks()
+{
+    RefPtr frame = this->frame();
+    RefPtr loader = frame ? frame->loader().documentLoader() : nullptr;
+    if (loader)
+        loader->setContentExtensionEnablement({ ContentExtensionDefaultEnablement::Disabled, { } });
+}
+
 void Internals::setUseSystemAppearance(bool value)
 {
     if (!contextDocument() || !contextDocument()->page())
@@ -6770,7 +6816,7 @@ bool Internals::hasSandboxUnixSyscallAccess(const String& process, unsigned sysc
 #endif
 }
 
-String Internals::windowLocationHost(LocalDOMWindow& window)
+String Internals::windowLocationHost(DOMWindow& window)
 {
     return window.location().host();
 }
@@ -7133,17 +7179,17 @@ String Internals::treeOrderBoundaryPoints(Node& containerA, unsigned offsetA, No
 
 bool Internals::rangeContainsNode(const AbstractRange& range, Node& node, TreeType type)
 {
-    return containsForTesting(convertType(type), makeSimpleRange(range), node);
+    return contains(convertType(type), makeSimpleRange(range), node);
 }
 
 bool Internals::rangeContainsBoundaryPoint(const AbstractRange& range, Node& container, unsigned offset, TreeType type)
 {
-    return containsForTesting(convertType(type), makeSimpleRange(range), { container, offset });
+    return contains(convertType(type), makeSimpleRange(range), { container, offset });
 }
 
 bool Internals::rangeContainsRange(const AbstractRange& outerRange, const AbstractRange& innerRange, TreeType type)
 {
-    return containsForTesting(convertType(type), makeSimpleRange(outerRange), makeSimpleRange(innerRange));
+    return contains(convertType(type), makeSimpleRange(outerRange), makeSimpleRange(innerRange));
 }
 
 bool Internals::rangeIntersectsNode(const AbstractRange& range, Node& node, TreeType type)
@@ -7218,12 +7264,7 @@ void Internals::retainTextIteratorForDocumentContent()
 
 RefPtr<PushSubscription> Internals::createPushSubscription(const String& endpoint, std::optional<EpochTimeStamp> expirationTime, const ArrayBuffer& serverVAPIDPublicKey, const ArrayBuffer& clientECDHPublicKey, const ArrayBuffer& auth)
 {
-    auto myEndpoint = endpoint;
-    Vector<uint8_t> myServerVAPIDPublicKey { static_cast<const uint8_t*>(serverVAPIDPublicKey.data()), serverVAPIDPublicKey.byteLength() };
-    Vector<uint8_t> myClientECDHPublicKey { static_cast<const uint8_t*>(clientECDHPublicKey.data()), clientECDHPublicKey.byteLength() };
-    Vector<uint8_t> myAuth { static_cast<const uint8_t*>(auth.data()), auth.byteLength() };
-
-    return PushSubscription::create(PushSubscriptionData { { }, WTFMove(myEndpoint), expirationTime, WTFMove(myServerVAPIDPublicKey), WTFMove(myClientECDHPublicKey), WTFMove(myAuth) });
+    return PushSubscription::create(PushSubscriptionData { { }, { endpoint }, expirationTime, serverVAPIDPublicKey.toVector(), clientECDHPublicKey.toVector(), auth.toVector() });
 }
 
 #if ENABLE(ARKIT_INLINE_PREVIEW_MAC)
@@ -7308,7 +7349,7 @@ AccessibilityObject* Internals::axObjectForElement(Element& element) const
     WebCore::AXObjectCache::enableAccessibility();
 
     auto* cache = document->axObjectCache();
-    return cache ? cache->getOrCreate(&element) : nullptr;
+    return cache ? cache->getOrCreate(element) : nullptr;
 }
 
 String Internals::getComputedLabel(Element& element) const
@@ -7352,6 +7393,53 @@ void Internals::setHistoryTotalStateObjectPayloadLimitOverride(uint32_t limit)
     if (!window)
         return;
     window->history().setTotalStateObjectPayloadLimitOverride(limit);
+}
+
+void Internals::setPDFDisplayModeForTesting(Element& element, const String& displayMode) const
+{
+    RefPtr pluginElement = dynamicDowncast<HTMLPlugInElement>(element);
+    if (!pluginElement)
+        return;
+
+    RefPtr pluginViewBase = pluginElement->pluginWidget();
+    if (!pluginViewBase)
+        return;
+
+    pluginViewBase->setPDFDisplayModeForTesting(displayMode);
+}
+
+Vector<Internals::PDFAnnotationRect> Internals::pdfAnnotationRectsForTesting(Element& element) const
+{
+    Vector<PDFAnnotationRect> annotationRects;
+    if (RefPtr pluginElement = dynamicDowncast<HTMLPlugInElement>(element)) {
+        if (RefPtr pluginViewBase = pluginElement ? pluginElement->pluginWidget() : nullptr) {
+            for (auto& annotationRect : pluginViewBase->pdfAnnotationRectsForTesting())
+                annotationRects.append({ annotationRect.x(), annotationRect.y(), annotationRect.width(), annotationRect.height() });
+        }
+    }
+    return annotationRects;
+}
+
+void Internals::registerPDFTest(Ref<VoidCallback>&& callback, Element& element)
+{
+    RefPtr pluginElement = dynamicDowncast<HTMLPlugInElement>(element);
+    if (!pluginElement)
+        return;
+
+    if (RefPtr pluginViewBase = pluginElement->pluginWidget())
+        pluginViewBase->registerPDFTestCallback(WTFMove(callback));
+}
+
+const String& Internals::defaultSpatialTrackingLabel() const
+{
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    auto* document = contextDocument();
+    if (!document)
+        return nullString();
+    if (RefPtr page = document->page())
+        return page->defaultSpatialTrackingLabel();
+#endif
+    return nullString();
 }
 
 } // namespace WebCore

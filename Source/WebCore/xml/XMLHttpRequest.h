@@ -56,6 +56,7 @@ struct OwnedString;
 
 class XMLHttpRequest final : public ActiveDOMObject, public RefCounted<XMLHttpRequest>, private ThreadableLoaderClient, public XMLHttpRequestEventTarget {
     WTF_MAKE_ISO_ALLOCATED_EXPORT(XMLHttpRequest, WEBCORE_EXPORT);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(XMLHttpRequest);
 public:
     static Ref<XMLHttpRequest> create(ScriptExecutionContext&);
     WEBCORE_EXPORT ~XMLHttpRequest();
@@ -178,7 +179,7 @@ private:
     ExceptionOr<void> send(DOMFormData&);
     ExceptionOr<void> send(JSC::ArrayBuffer&);
     ExceptionOr<void> send(JSC::ArrayBufferView&);
-    ExceptionOr<void> sendBytesData(const void*, size_t);
+    ExceptionOr<void> sendBytesData(std::span<const uint8_t>);
 
     void changeState(State);
     void callReadyStateChangeListener();

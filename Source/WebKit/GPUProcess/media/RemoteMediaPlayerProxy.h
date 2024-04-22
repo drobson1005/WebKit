@@ -142,7 +142,7 @@ public:
 
     void getConfiguration(RemoteMediaPlayerConfiguration&);
 
-    void prepareForPlayback(bool privateMode, WebCore::MediaPlayerEnums::Preload, bool preservesPitch, WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm, bool prepareForRendering, WebCore::IntSize presentationSize, float videoContentScale, WebCore::DynamicRangeMode);
+    void prepareForPlayback(bool privateMode, WebCore::MediaPlayerEnums::Preload, bool preservesPitch, WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm, bool prepareToPlay, bool prepareForRendering, WebCore::IntSize presentationSize, float videoContentScale, WebCore::DynamicRangeMode);
     void prepareForRendering();
 
     void load(URL&&, std::optional<SandboxExtension::Handle>&&, const WebCore::ContentType&, const String&, bool, CompletionHandler<void(RemoteMediaPlayerConfiguration&&)>&&);
@@ -254,7 +254,7 @@ private:
     void mediaPlayerRateChanged() final;
     void mediaPlayerPlaybackStateChanged() final;
     void mediaPlayerResourceNotSupported() final;
-    void mediaPlayerEngineFailedToLoad() const final;
+    void mediaPlayerEngineFailedToLoad() final;
     void mediaPlayerActiveSourceBuffersChanged() final;
     void mediaPlayerBufferedTimeRangesChanged() final;
     void mediaPlayerSeekableTimeRangesChanged() final;
@@ -297,7 +297,7 @@ private:
 
     void textTrackRepresentationBoundsChanged(const WebCore::IntRect&) final;
 
-#if ENABLE(AVF_CAPTIONS)
+#if PLATFORM(COCOA)
     Vector<RefPtr<WebCore::PlatformTextTrack>> outOfBandTrackSources() final;
 #endif
 
@@ -367,7 +367,10 @@ private:
     using LayerHostingContextIDCallback = WebCore::MediaPlayer::LayerHostingContextIDCallback;
     void requestHostingContextID(LayerHostingContextIDCallback&&);
     void setShouldCheckHardwareSupport(bool);
-    void setSpatialTrackingLabel(String&&);
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    void setDefaultSpatialTrackingLabel(const String&);
+    void setSpatialTrackingLabel(const String&);
+#endif
 
 #if !RELEASE_LOG_DISABLED
     const Logger& mediaPlayerLogger() final { return m_logger; }

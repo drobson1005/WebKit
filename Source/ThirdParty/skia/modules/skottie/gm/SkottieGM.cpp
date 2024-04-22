@@ -9,11 +9,14 @@
 #include "include/codec/SkCodec.h"
 #include "include/codec/SkGifDecoder.h"
 #include "include/core/SkColor.h"
+#include "include/core/SkFontMgr.h"
 #include "include/core/SkStream.h"
 #include "modules/skottie/include/Skottie.h"
 #include "modules/skottie/include/SkottieProperty.h"
 #include "modules/skottie/utils/SkottieUtils.h"
 #include "modules/skresources/include/SkResources.h"
+#include "modules/skshaper/include/SkShaper_factory.h"
+#include "modules/skshaper/utils/FactoryHelpers.h"
 #include "tools/Resources.h"
 #include "tools/fonts/FontToolUtils.h"
 
@@ -54,6 +57,7 @@ protected:
             fAnimation = skottie::Animation::Builder()
                             .setFontManager(ToolUtils::TestFontMgr())
                             .setResourceProvider(sk_make_sp<FakeWebFontProvider>())
+                            .setTextShapingFactory(SkShapers::BestAvailable())
                             .make(stream.get());
         }
     }
@@ -107,6 +111,7 @@ protected:
             fAnimation   = skottie::Animation::Builder()
                               .setFontManager(ToolUtils::TestFontMgr())
                               .setPropertyObserver(fPropManager->getPropertyObserver())
+                              .setTextShapingFactory(SkShapers::BestAvailable())
                               .make(stream.get());
             fColorProps  = fPropManager->getColorProps();
             fTextProps   = fPropManager->getTextProps();

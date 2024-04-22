@@ -18,6 +18,7 @@
 #include "common/FixedVector.h"
 #include "common/Optional.h"
 #include "common/PackedEnums.h"
+#include "common/WorkerThread.h"
 #include "common/backtrace_utils.h"
 #include "common/debug.h"
 #include "libANGLE/Error.h"
@@ -78,7 +79,6 @@ class ImageVk;
 class ProgramExecutableVk;
 class RenderbufferVk;
 class RenderTargetVk;
-class RendererVk;
 class RenderPassCache;
 class ShareGroupVk;
 }  // namespace rx
@@ -126,6 +126,8 @@ constexpr uint32_t kInvalidMemoryHeapIndex = UINT32_MAX;
 
 namespace vk
 {
+class Renderer;
+
 // Used for memory allocation tracking.
 enum class MemoryAllocationType;
 
@@ -280,7 +282,7 @@ class [[nodiscard]] ScopedQueueSerialIndex final : angle::NonCopyable
 class Context : angle::NonCopyable
 {
   public:
-    Context(RendererVk *renderer);
+    Context(Renderer *renderer);
     virtual ~Context();
 
     virtual void handleError(VkResult result,
@@ -288,14 +290,14 @@ class Context : angle::NonCopyable
                              const char *function,
                              unsigned int line) = 0;
     VkDevice getDevice() const;
-    RendererVk *getRenderer() const { return mRenderer; }
+    Renderer *getRenderer() const { return mRenderer; }
     const angle::FeaturesVk &getFeatures() const;
 
     const angle::VulkanPerfCounters &getPerfCounters() const { return mPerfCounters; }
     angle::VulkanPerfCounters &getPerfCounters() { return mPerfCounters; }
 
   protected:
-    RendererVk *const mRenderer;
+    Renderer *const mRenderer;
     angle::VulkanPerfCounters mPerfCounters;
 };
 
@@ -307,6 +309,11 @@ class GlobalOps : angle::NonCopyable
 
     virtual void putBlob(const angle::BlobCacheKey &key, const angle::MemoryBuffer &value) = 0;
     virtual bool getBlob(const angle::BlobCacheKey &key, angle::BlobCacheValue *valueOut)  = 0;
+
+    virtual std::shared_ptr<angle::WaitableEvent> postMultiThreadWorkerTask(
+        const std::shared_ptr<angle::Closure> &task) = 0;
+
+    virtual void notifyDeviceLost() = 0;
 };
 
 class RenderPassDesc;
@@ -400,7 +407,7 @@ class GarbageObject
     GarbageObject &operator=(GarbageObject &&rhs);
 
     bool valid() const { return mHandle != VK_NULL_HANDLE; }
-    void destroy(RendererVk *renderer);
+    void destroy(Renderer *renderer);
 
     template <typename DerivedT, typename HandleT>
     static GarbageObject Get(WrappedObject<DerivedT, HandleT> *object)
@@ -475,8 +482,8 @@ class StagingBuffer final : angle::NonCopyable
   public:
     StagingBuffer();
     void release(ContextVk *contextVk);
-    void collectGarbage(RendererVk *renderer, const QueueSerial &queueSerial);
-    void destroy(RendererVk *renderer);
+    void collectGarbage(Renderer *renderer, const QueueSerial &queueSerial);
+    void destroy(Renderer *renderer);
 
     angle::Result init(Context *context, VkDeviceSize size, StagingUsage usage);
 
@@ -609,7 +616,7 @@ template <typename T>
 class [[nodiscard]] RendererScoped final : angle::NonCopyable
 {
   public:
-    RendererScoped(RendererVk *renderer) : mRenderer(renderer) {}
+    RendererScoped(Renderer *renderer) : mRenderer(renderer) {}
     ~RendererScoped() { mVar.release(mRenderer); }
 
     const T &get() const { return mVar; }
@@ -618,7 +625,7 @@ class [[nodiscard]] RendererScoped final : angle::NonCopyable
     T &&release() { return std::move(mVar); }
 
   private:
-    RendererVk *mRenderer;
+    Renderer *mRenderer;
     T mVar;
 };
 
@@ -689,6 +696,12 @@ class AtomicRefCounted : angle::NonCopyable
     {
         ASSERT(isReferenced());
         mRefCount.fetch_sub(1, std::memory_order_relaxed);
+    }
+
+    unsigned int getAndReleaseRef()
+    {
+        ASSERT(isReferenced());
+        return mRefCount.fetch_sub(1, std::memory_order_relaxed);
     }
 
     bool isReferenced() const { return mRefCount.load(std::memory_order_relaxed) != 0; }

@@ -46,7 +46,9 @@ class Path;
 class RenderObject;
 class RenderStyle;
 
-class EventRegionContext : public RegionContext {
+class EventRegionContext final : public RegionContext {
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(EventRegionContext);
 public:
     WEBCORE_EXPORT explicit EventRegionContext(EventRegion&);
     WEBCORE_EXPORT virtual ~EventRegionContext();
@@ -58,9 +60,9 @@ public:
 
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
     void uniteInteractionRegions(RenderObject&, const FloatRect&);
-    bool shouldConsolidateInteractionRegion(RenderObject&, const IntRect&);
+    bool shouldConsolidateInteractionRegion(RenderObject&, const IntRect&, const ElementIdentifier&);
     void removeSuperfluousInteractionRegions();
-    Vector<InteractionRegion> shrinkWrappedInteractionRegions();
+    void shrinkWrapInteractionRegions();
     void copyInteractionRegionsToEventRegion();
 #endif
 
@@ -71,9 +73,10 @@ private:
     Vector<InteractionRegion> m_interactionRegions;
     HashMap<IntRect, InteractionRegion::ContentHint> m_interactionRectsAndContentHints;
     HashSet<IntRect> m_occlusionRects;
+    HashSet<IntRect> m_elementGuardRects;
     HashSet<ElementIdentifier> m_containerRemovalCandidates;
     HashSet<ElementIdentifier> m_containersToRemove;
-    HashMap<ElementIdentifier, Vector<FloatRect>> m_discoveredRectsByElement;
+    HashMap<ElementIdentifier, Vector<InteractionRegion>> m_discoveredRegionsByElement;
 #endif
 };
 
@@ -133,7 +136,7 @@ public:
 
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
     const Vector<InteractionRegion>& interactionRegions() const { return m_interactionRegions; }
-    void appendInteractionRegions(Vector<InteractionRegion>&&);
+    void appendInteractionRegions(const Vector<InteractionRegion>&);
     void clearInteractionRegions();
 #endif
 

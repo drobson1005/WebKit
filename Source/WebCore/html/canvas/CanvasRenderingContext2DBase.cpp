@@ -252,7 +252,7 @@ CanvasRenderingContext2DBase::~CanvasRenderingContext2DBase()
 
 bool CanvasRenderingContext2DBase::isAccelerated() const
 {
-#if USE(IOSURFACE_CANVAS_BACKING_STORE)
+#if USE(IOSURFACE_CANVAS_BACKING_STORE) || USE(SKIA)
     auto* context = canvasBase().existingDrawingContext();
     return context && context->renderingMode() == RenderingMode::Accelerated;
 #else
@@ -2884,6 +2884,11 @@ PixelFormat CanvasRenderingContext2DBase::pixelFormat() const
 DestinationColorSpace CanvasRenderingContext2DBase::colorSpace() const
 {
     return toDestinationColorSpace(m_settings.colorSpace);
+}
+
+bool CanvasRenderingContext2DBase::willReadFrequently() const
+{
+    return m_settings.willReadFrequently;
 }
 
 OptionSet<ImageBufferOptions> CanvasRenderingContext2DBase::adjustImageBufferOptionsForTesting(OptionSet<ImageBufferOptions> bufferOptions)

@@ -34,9 +34,9 @@
 #include "InspectorInstrumentation.h"
 #include "JSDOMBindingSecurity.h"
 #include "JSDOMExceptionHandling.h"
+#include "JSDOMWindow.h"
 #include "JSDocument.h"
 #include "JSExecState.h"
-#include "JSLocalDOMWindow.h"
 #include "LoadableModuleScript.h"
 #include "LocalFrame.h"
 #include "LocalFrameLoaderClient.h"
@@ -185,8 +185,10 @@ void ScriptController::loadModuleScriptInWorld(LoadableModuleScript& moduleScrip
     auto& proxy = jsWindowProxy(world);
     auto& lexicalGlobalObject = *proxy.window();
 
-    auto& promise = JSExecState::loadModule(lexicalGlobalObject, topLevelModuleURL, JSC::JSScriptFetchParameters::create(lexicalGlobalObject.vm(), WTFMove(topLevelFetchParameters)), JSC::JSScriptFetcher::create(lexicalGlobalObject.vm(), { &moduleScript }));
-    setupModuleScriptHandlers(moduleScript, promise, world);
+    auto* promise = JSExecState::loadModule(lexicalGlobalObject, topLevelModuleURL, JSC::JSScriptFetchParameters::create(lexicalGlobalObject.vm(), WTFMove(topLevelFetchParameters)), JSC::JSScriptFetcher::create(lexicalGlobalObject.vm(), { &moduleScript }));
+    if (UNLIKELY(!promise))
+        return;
+    setupModuleScriptHandlers(moduleScript, *promise, world);
 }
 
 void ScriptController::loadModuleScript(LoadableModuleScript& moduleScript, const URL& topLevelModuleURL, Ref<JSC::ScriptFetchParameters>&& topLevelFetchParameters)
@@ -201,8 +203,10 @@ void ScriptController::loadModuleScriptInWorld(LoadableModuleScript& moduleScrip
     auto& proxy = jsWindowProxy(world);
     auto& lexicalGlobalObject = *proxy.window();
 
-    auto& promise = JSExecState::loadModule(lexicalGlobalObject, sourceCode.jsSourceCode(), JSC::JSScriptFetcher::create(lexicalGlobalObject.vm(), { &moduleScript }));
-    setupModuleScriptHandlers(moduleScript, promise, world);
+    auto* promise = JSExecState::loadModule(lexicalGlobalObject, sourceCode.jsSourceCode(), JSC::JSScriptFetcher::create(lexicalGlobalObject.vm(), { &moduleScript }));
+    if (UNLIKELY(!promise))
+        return;
+    setupModuleScriptHandlers(moduleScript, *promise, world);
 }
 
 void ScriptController::loadModuleScript(LoadableModuleScript& moduleScript, const ScriptSourceCode& sourceCode)
@@ -292,7 +296,7 @@ void ScriptController::initScriptForWindowProxy(JSWindowProxy& windowProxy)
     JSC::VM& vm = world.vm();
     auto scope = DECLARE_CATCH_SCOPE(vm);
 
-    jsCast<JSLocalDOMWindow*>(windowProxy.window())->updateDocument();
+    jsCast<JSDOMWindow*>(windowProxy.window())->updateDocument();
     EXCEPTION_ASSERT_UNUSED(scope, !scope.exception());
 
     if (RefPtr document = m_frame.document())
@@ -466,7 +470,7 @@ void ScriptController::updateDocument()
 {
     for (auto& jsWindowProxy : windowProxy().jsWindowProxiesAsVector()) {
         JSLockHolder lock(jsWindowProxy->world().vm());
-        jsCast<JSLocalDOMWindow*>(jsWindowProxy->window())->updateDocument();
+        jsCast<JSDOMWindow*>(jsWindowProxy->window())->updateDocument();
     }
 }
 

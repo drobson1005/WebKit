@@ -209,7 +209,7 @@ void RemoteMediaPlayerProxy::cancelLoad()
     m_player->cancelLoad();
 }
 
-void RemoteMediaPlayerProxy::prepareForPlayback(bool privateMode, WebCore::MediaPlayerEnums::Preload preload, bool preservesPitch, WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm pitchCorrectionAlgorithm, bool prepareForRendering, WebCore::IntSize presentationSize, float videoContentScale, WebCore::DynamicRangeMode preferredDynamicRangeMode)
+void RemoteMediaPlayerProxy::prepareForPlayback(bool privateMode, WebCore::MediaPlayerEnums::Preload preload, bool preservesPitch, WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm pitchCorrectionAlgorithm, bool prepareToPlay, bool prepareForRendering, WebCore::IntSize presentationSize, float videoContentScale, WebCore::DynamicRangeMode preferredDynamicRangeMode)
 {
     m_player->setPrivateBrowsingMode(privateMode);
     m_player->setPreload(preload);
@@ -217,6 +217,8 @@ void RemoteMediaPlayerProxy::prepareForPlayback(bool privateMode, WebCore::Media
     m_player->setPitchCorrectionAlgorithm(pitchCorrectionAlgorithm);
     m_player->setPreferredDynamicRangeMode(preferredDynamicRangeMode);
     m_player->setPresentationSize(presentationSize);
+    if (prepareToPlay)
+        m_player->prepareToPlay();
     if (prepareForRendering)
         m_player->prepareForRendering();
     m_videoContentScale = videoContentScale;
@@ -483,7 +485,7 @@ void RemoteMediaPlayerProxy::mediaPlayerRateChanged()
     m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::RateChanged(m_player->effectiveRate(), timeUpdateData(*m_player, m_player->currentTime())), m_id);
 }
 
-void RemoteMediaPlayerProxy::mediaPlayerEngineFailedToLoad() const
+void RemoteMediaPlayerProxy::mediaPlayerEngineFailedToLoad()
 {
     m_webProcessConnection->send(Messages::MediaPlayerPrivateRemote::EngineFailedToLoad(m_player->platformErrorCode()), m_id);
 }
@@ -871,7 +873,7 @@ bool RemoteMediaPlayerProxy::doesHaveAttribute(const AtomString&, AtomString*) c
     return false;
 }
 
-#if ENABLE(AVF_CAPTIONS)
+#if PLATFORM(COCOA)
 Vector<RefPtr<PlatformTextTrack>> RemoteMediaPlayerProxy::outOfBandTrackSources()
 {
     return WTF::map(m_configuration.outOfBandTrackData, [](auto& data) -> RefPtr<PlatformTextTrack> {
@@ -1082,9 +1084,7 @@ void RemoteMediaPlayerProxy::applicationDidBecomeActive()
 
 void RemoteMediaPlayerProxy::notifyTrackModeChanged()
 {
-#if ENABLE(AVF_CAPTIONS)
     m_player->notifyTrackModeChanged();
-#endif
 }
 
 void RemoteMediaPlayerProxy::tracksChanged()
@@ -1229,10 +1229,17 @@ void RemoteMediaPlayerProxy::setShouldCheckHardwareSupport(bool value)
     m_shouldCheckHardwareSupport = value;
 }
 
-void RemoteMediaPlayerProxy::setSpatialTrackingLabel(String&& spatialTrackingLabel)
+#if HAVE(SPATIAL_TRACKING_LABEL)
+void RemoteMediaPlayerProxy::setDefaultSpatialTrackingLabel(const String& defaultSpatialTrackingLabel)
 {
-    m_player->setSpatialTrackingLabel(WTFMove(spatialTrackingLabel));
+    m_player->setDefaultSpatialTrackingLabel(defaultSpatialTrackingLabel);
 }
+
+void RemoteMediaPlayerProxy::setSpatialTrackingLabel(const String& spatialTrackingLabel)
+{
+    m_player->setSpatialTrackingLabel(spatialTrackingLabel);
+}
+#endif
 
 #if !RELEASE_LOG_DISABLED
 WTFLogChannel& RemoteMediaPlayerProxy::logChannel() const

@@ -255,7 +255,7 @@ static inline std::variant<SkipExtraction, ItemData, URL, Editable> extractItemD
     if (!renderer || renderer->style().opacity() < minOpacityToConsiderVisible)
         return { SkipExtraction::SelfAndSubtree };
 
-    if (renderer->style().visibility() == Visibility::Hidden)
+    if (renderer->style().usedVisibility() == Visibility::Hidden)
         return { SkipExtraction::Self };
 
     if (RefPtr textNode = dynamicDowncast<Text>(node)) {
@@ -457,6 +457,15 @@ struct StringsAndBlockOffset {
     int offset { 0 };
 };
 
+static IntSize reducePrecision(FloatSize size)
+{
+    static constexpr auto resolution = 10;
+    return {
+        static_cast<int>(std::round(size.width() / resolution)) * resolution,
+        static_cast<int>(std::round(size.height() / resolution)) * resolution
+    };
+}
+
 static void extractRenderedText(Vector<StringsAndBlockOffset>& stringsAndOffsets, ContainerNode& node, BlockFlowDirection direction)
 {
     CheckedPtr renderer = node.renderer();
@@ -502,8 +511,20 @@ static void extractRenderedText(Vector<StringsAndBlockOffset>& stringsAndOffsets
     }
 
     auto frameView = renderer->view().protectedFrameView();
+    auto appendReplacedRenderer = [&](RenderReplaced& renderReplaced) {
+        auto rectIgnoringZoom = renderReplaced.replacedContentRect();
+        rectIgnoringZoom.scale(1 / frameView->protectedFrame()->pageZoomFactor());
+        auto roundedSizeIgnoringZoom = reducePrecision(rectIgnoringZoom.size());
+        appendStrings({ makeString('{', roundedSizeIgnoringZoom.width(), ',', roundedSizeIgnoringZoom.height(), '}') }, frameView->contentsToRootView(renderReplaced.absoluteBoundingBoxRect()));
+    };
+
+    if (CheckedPtr renderReplaced = dynamicDowncast<RenderReplaced>(*renderer)) {
+        appendReplacedRenderer(*renderReplaced);
+        return;
+    }
+
     for (auto& descendant : descendantsOfType<RenderObject>(*renderer)) {
-        if (descendant.style().visibility() == Visibility::Hidden)
+        if (descendant.style().usedVisibility() == Visibility::Hidden)
             continue;
 
         if (descendant.style().opacity() < minOpacityToConsiderVisible)
@@ -528,35 +549,22 @@ static void extractRenderedText(Vector<StringsAndBlockOffset>& stringsAndOffsets
             continue;
         }
 
-        if (descendant.isRenderReplaced()) {
-            auto bounds = frameView->contentsToRootView(descendant.absoluteBoundingBoxRect());
-            appendStrings({ makeString('{', bounds.width(), ',', bounds.height(), '}') }, bounds);
+        if (CheckedPtr renderReplaced = dynamicDowncast<RenderReplaced>(descendant)) {
+            appendReplacedRenderer(*renderReplaced);
             continue;
         }
     }
 }
 
-Expected<String, ExceptionCode> extractRenderedText(LocalFrame& frame, String&& selector)
+String extractRenderedText(Element& element)
 {
-    RefPtr document = frame.document();
-    if (!document)
-        return makeUnexpected(ExceptionCode::NotAllowedError);
-
-    auto result = document->querySelector(WTFMove(selector));
-    if (result.hasException())
-        return makeUnexpected(result.releaseException().code());
-
-    RefPtr element = result.releaseReturnValue();
-    if (!element)
-        return makeUnexpected(ExceptionCode::NotFoundError);
-
-    if (!element->renderer())
+    if (!element.renderer())
         return emptyString();
 
-    auto direction = element->renderer()->style().blockFlowDirection();
+    auto direction = element.renderer()->style().blockFlowDirection();
 
     Vector<StringsAndBlockOffset> stringsAndOffsets;
-    extractRenderedText(stringsAndOffsets, *element, direction);
+    extractRenderedText(stringsAndOffsets, element, direction);
 
     bool ascendingOrder = [&] {
         switch (direction) {

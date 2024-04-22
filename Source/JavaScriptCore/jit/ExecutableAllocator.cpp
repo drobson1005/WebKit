@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include "ExecutableAllocationFuzz.h"
 #include "JITOperationValidation.h"
 #include "LinkBuffer.h"
+#include <wtf/ByteOrder.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/FastBitVector.h>
 #include <wtf/FileSystem.h>
@@ -42,6 +43,7 @@
 #include <wtf/Scope.h>
 #include <wtf/SystemTracing.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/UUID.h>
 #include <wtf/WorkQueue.h>
 
 #if ENABLE(LIBPAS_JIT_HEAP)
@@ -155,11 +157,14 @@ static_assert(fixedExecutableMemoryPoolSize * executablePoolReservationFraction 
 static_assert(fixedExecutableMemoryPoolSize < 4 * GB, "ExecutableMemoryHandle assumes it is less than 4GB");
 #endif
 
+// 325696c8-e7cc-11ee-9f4e-325096b39f47
+static constexpr WTF::UUID jscJITNamespace { static_cast<UInt128>(0x325696c8e7cc11eeULL) << 64 | (0x9f4e325096b39f47ULL) };
+
 static bool isJITEnabled()
 {
     bool jitEnabled = !g_jscConfig.jitDisabled;
 #if HAVE(IOS_JIT_RESTRICTIONS)
-    jitEnabled = jitEnabled && processHasEntitlement("dynamic-codesigning"_s);
+    jitEnabled = jitEnabled && (processHasEntitlement("dynamic-codesigning"_s) || processHasEntitlement("com.apple.developer.cs.allow-jit"_s));
 #elif HAVE(MAC_JIT_RESTRICTIONS) && USE(APPLE_INTERNAL_SDK)
     jitEnabled = jitEnabled && processHasEntitlement("com.apple.security.cs.allow-jit"_s);
 #endif
@@ -179,7 +184,7 @@ void ExecutableAllocator::disableJIT()
 
 #if HAVE(IOS_JIT_RESTRICTIONS) || HAVE(MAC_JIT_RESTRICTIONS) && USE(APPLE_INTERNAL_SDK)
 #if HAVE(IOS_JIT_RESTRICTIONS)
-    bool shouldDisableJITMemory = processHasEntitlement("dynamic-codesigning"_s);
+    bool shouldDisableJITMemory = processHasEntitlement("dynamic-codesigning"_s) || processHasEntitlement("com.apple.developer.cs.allow-jit"_s);
 #else
     bool shouldDisableJITMemory = processHasEntitlement("com.apple.security.cs.allow-jit"_s) && !isKernOpenSource();
 #endif
@@ -439,6 +444,14 @@ static ALWAYS_INLINE JITReservation initializeJITPageReservation()
         static_assert(WebConfig::reservedSlotsForExecutableAllocator >= 2);
         WebConfig::g_config[0] = bitwise_cast<uintptr_t>(reservation.base);
         WebConfig::g_config[1] = bitwise_cast<uintptr_t>(reservationEnd);
+#endif
+
+#if HAVE(KDEBUG_H)
+        {
+            uint64_t pid = getCurrentProcessID();
+            auto uuid = WTF::UUID::createVersion5(jscJITNamespace, std::span { bitwise_cast<const uint8_t*>(&pid), sizeof(pid) });
+            kdebug_trace(KDBG_CODE(DBG_DYLD, DBG_DYLD_UUID, DBG_DYLD_UUID_MAP_A), WTF::byteSwap64(uuid.high()), WTF::byteSwap64(uuid.low()), bitwise_cast<uintptr_t>(reservation.base), 0);
+        }
 #endif
     }
 
@@ -1290,7 +1303,7 @@ void dumpJITMemory(const void* dst, const void* src, size_t size)
     static std::once_flag once;
     std::call_once(once, [] {
         buffer = bitwise_cast<uint8_t*>(malloc(bufferSize));
-        flushQueue.construct(WorkQueue::create("jsc.dumpJITMemory.queue", WorkQueue::QOS::Background));
+        flushQueue.construct(WorkQueue::create("jsc.dumpJITMemory.queue"_s, WorkQueue::QOS::Background));
         std::atexit([] {
             Locker locker { dumpJITMemoryLock };
             DumpJIT::flush();

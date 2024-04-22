@@ -31,7 +31,9 @@
 #import "WKSLinearMediaPlayer.h"
 #import "WKSLinearMediaTypes.h"
 #import <WebCore/MediaSelectionOption.h>
+#import <WebCore/NowPlayingInfo.h>
 #import <WebCore/PlaybackSessionModel.h>
+#import <WebCore/SharedBuffer.h>
 #import <WebCore/TimeRanges.h>
 #import <wtf/OSObjectPtr.h>
 #import <wtf/WeakPtr.h>
@@ -158,16 +160,42 @@
         model->setMuted(muted);
 }
 
-- (void)linearMediaPlayerToggleInlineMode:(WKSLinearMediaPlayer *)player
+- (void)linearMediaPlayer:(WKSLinearMediaPlayer *)player setAudioTrack:(WKSLinearMediaTrack * _Nullable)audioTrack
 {
-    if (auto model = _model.get())
-        model->toggleFullscreen();
+    auto model = _model.get();
+    if (!model)
+        return;
+
+    NSUInteger index = audioTrack ? [player.audioTracks indexOfObject:audioTrack] : 0;
+    if (index != NSNotFound)
+        model->selectAudioMediaOption(index);
 }
 
-- (void)linearMediaPlayer:(WKSLinearMediaPlayer *)player didExitFullscreenWithError:(NSError * _Nullable)error
+- (void)linearMediaPlayer:(WKSLinearMediaPlayer *)player setLegibleTrack:(WKSLinearMediaTrack * _Nullable)legibleTrack
+{
+    auto model = _model.get();
+    if (!model)
+        return;
+
+    NSUInteger index = legibleTrack ? [player.legibleTracks indexOfObject:legibleTrack] : 0;
+    if (index != NSNotFound)
+        model->selectLegibleMediaOption(index);
+}
+
+- (void)linearMediaPlayerEnterFullscreen:(WKSLinearMediaPlayer *)player
 {
     if (auto model = _model.get())
-        model->setVideoReceiverEndpoint(nullptr);
+        model->enterFullscreen();
+}
+
+- (void)linearMediaPlayerExitFullscreen:(WKSLinearMediaPlayer *)player
+{
+    auto model = _model.get();
+    if (!model)
+        return;
+
+    model->exitFullscreen();
+    model->setVideoReceiverEndpoint(nullptr);
 }
 
 - (void)linearMediaPlayer:(WKSLinearMediaPlayer *)player setVideoReceiverEndpoint:(xpc_object_t)videoReceiverEndpoint
@@ -187,10 +215,21 @@ Ref<PlaybackSessionInterfaceLMK> PlaybackSessionInterfaceLMK::create(PlaybackSes
     return interface;
 }
 
+static WebCore::NowPlayingMetadataObserver nowPlayingMetadataObserver(PlaybackSessionInterfaceLMK& interface)
+{
+    return {
+        [weakInterface = WeakPtr { interface }](auto& metadata) {
+            if (RefPtr interface = weakInterface.get())
+                interface->nowPlayingMetadataChanged(metadata);
+        }
+    };
+}
+
 PlaybackSessionInterfaceLMK::PlaybackSessionInterfaceLMK(PlaybackSessionModel& model)
     : PlaybackSessionInterfaceIOS { model }
     , m_player { adoptNS([allocWKSLinearMediaPlayerInstance() init]) }
     , m_playerDelegate { adoptNS([[WKLinearMediaPlayerDelegate alloc] initWithModel:model]) }
+    , m_nowPlayingMetadataObserver { nowPlayingMetadataObserver(*this) }
 {
     [m_player setDelegate:m_playerDelegate.get()];
 }
@@ -221,10 +260,9 @@ void PlaybackSessionInterfaceLMK::currentTimeChanged(double currentTime, double)
 
 void PlaybackSessionInterfaceLMK::rateChanged(OptionSet<PlaybackSessionModel::PlaybackState> playbackState, double playbackRate, double)
 {
-    if (playbackState.contains(PlaybackSessionModel::PlaybackState::Stalled))
-        return;
-
-    [m_player setPlaybackRate:playbackState.contains(PlaybackSessionModel::PlaybackState::Playing) ? playbackRate : 0];
+    [m_player setSelectedPlaybackRate:playbackRate];
+    if (!playbackState.contains(PlaybackSessionModel::PlaybackState::Stalled))
+        [m_player setPlaybackRate:playbackState.contains(PlaybackSessionModel::PlaybackState::Playing) ? playbackRate : 0];
 }
 
 void PlaybackSessionInterfaceLMK::seekableRangesChanged(const TimeRanges& timeRanges, double, double)
@@ -246,6 +284,44 @@ void PlaybackSessionInterfaceLMK::canPlayFastReverseChanged(bool canPlayFastReve
     [m_player setCanScanBackward:canPlayFastReverse];
 }
 
+void PlaybackSessionInterfaceLMK::audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex)
+{
+    RetainPtr audioTracks = adoptNS([[NSMutableArray alloc] initWithCapacity:options.size()]);
+    for (auto& option : options) {
+        RetainPtr audioTrack = adoptNS([allocWKSLinearMediaTrackInstance() initWithLocalizedDisplayName:option.displayName]);
+        [audioTracks addObject:audioTrack.get()];
+    }
+
+    [m_player setAudioTracks:audioTracks.get()];
+    audioMediaSelectionIndexChanged(selectedIndex);
+}
+
+void PlaybackSessionInterfaceLMK::legibleMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex)
+{
+    RetainPtr legibleTracks = adoptNS([[NSMutableArray alloc] initWithCapacity:options.size()]);
+    for (auto& option : options) {
+        RetainPtr legibleTrack = adoptNS([allocWKSLinearMediaTrackInstance() initWithLocalizedDisplayName:option.displayName]);
+        [legibleTracks addObject:legibleTrack.get()];
+    }
+
+    [m_player setLegibleTracks:legibleTracks.get()];
+    legibleMediaSelectionIndexChanged(selectedIndex);
+}
+
+void PlaybackSessionInterfaceLMK::audioMediaSelectionIndexChanged(uint64_t selectedIndex)
+{
+    NSArray *audioTracks = [m_player audioTracks];
+    if (selectedIndex < audioTracks.count)
+        [m_player setCurrentAudioTrack:audioTracks[selectedIndex]];
+}
+
+void PlaybackSessionInterfaceLMK::legibleMediaSelectionIndexChanged(uint64_t selectedIndex)
+{
+    NSArray *legibleTracks = [m_player legibleTracks];
+    if (selectedIndex < legibleTracks.count)
+        [m_player setCurrentLegibleTrack:legibleTracks[selectedIndex]];
+}
+
 void PlaybackSessionInterfaceLMK::mutedChanged(bool muted)
 {
     [m_player setIsMuted:muted];
@@ -254,6 +330,46 @@ void PlaybackSessionInterfaceLMK::mutedChanged(bool muted)
 void PlaybackSessionInterfaceLMK::volumeChanged(double volume)
 {
     [m_player setVolume:volume];
+}
+
+void PlaybackSessionInterfaceLMK::startObservingNowPlayingMetadata()
+{
+    if (m_playbackSessionModel)
+        m_playbackSessionModel->addNowPlayingMetadataObserver(m_nowPlayingMetadataObserver);
+}
+
+void PlaybackSessionInterfaceLMK::stopObservingNowPlayingMetadata()
+{
+    if (m_playbackSessionModel)
+        m_playbackSessionModel->removeNowPlayingMetadataObserver(m_nowPlayingMetadataObserver);
+}
+
+static RetainPtr<NSData> artworkData(const WebCore::NowPlayingMetadata& metadata)
+{
+    if (!metadata.artwork)
+        return nil;
+
+    RefPtr image = metadata.artwork->image;
+    if (!image)
+        return nil;
+
+    RefPtr fragmentedData = image->data();
+    if (!fragmentedData || fragmentedData->isEmpty())
+        return nil;
+
+    RetainPtr artworkData = adoptNS([[NSMutableData alloc] initWithCapacity:fragmentedData->size()]);
+    fragmentedData->forEachSegment([&](auto segment) {
+        [artworkData appendBytes:segment.data() length:segment.size()];
+    });
+
+    return adoptNS([artworkData copy]);
+}
+
+void PlaybackSessionInterfaceLMK::nowPlayingMetadataChanged(const WebCore::NowPlayingMetadata& metadata)
+{
+    RetainPtr contentMetadata = [allocWKSLinearMediaContentMetadataInstance() initWithTitle:metadata.title subtitle:metadata.artist];
+    [m_player setContentMetadata:contentMetadata.get()];
+    [m_player setArtwork:artworkData(metadata).get()];
 }
 
 #if !RELEASE_LOG_DISABLED

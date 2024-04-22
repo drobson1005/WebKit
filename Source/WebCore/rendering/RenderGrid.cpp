@@ -87,6 +87,16 @@ void RenderGrid::styleDidChange(StyleDifference diff, const RenderStyle* oldStyl
         return;
 
     const RenderStyle& newStyle = this->style();
+
+    auto hasDifferentTrackSizes = [&newStyle, &oldStyle](GridTrackSizingDirection direction) {
+        return newStyle.gridTrackSizes(direction) != oldStyle->gridTrackSizes(direction);
+    };
+
+    if (hasDifferentTrackSizes(GridTrackSizingDirection::ForColumns) || hasDifferentTrackSizes(GridTrackSizingDirection::ForRows)) {
+        for (auto& child : childrenOfType<RenderBox>(*this))
+            child.setChildNeedsLayout();
+    }
+
     if (oldStyle->resolvedAlignItems(selfAlignmentNormalBehavior(this)).position() == ItemPosition::Stretch) {
         // Style changes on the grid container implying stretching (to-stretch) or
         // shrinking (from-stretch) require the affected items to be laid out again.
@@ -330,8 +340,14 @@ void RenderGrid::layoutGrid(bool relayoutChildren)
             computeTrackSizesForIndefiniteSize(m_trackSizingAlgorithm, GridTrackSizingDirection::ForRows);
             if (shouldApplySizeContainment())
                 shouldRecomputeHeight = true;
-        } else
-            computeTrackSizesForDefiniteSize(GridTrackSizingDirection::ForRows, availableLogicalHeight(ExcludeMarginBorderPadding));
+        } else {
+            auto availableLogicalHeightForContentBox = [&] {
+                if (!hasOverridingLogicalHeight())
+                    return availableLogicalHeight(ExcludeMarginBorderPadding);
+                return constrainContentBoxLogicalHeightByMinMax(overridingLogicalHeight() - borderAndPaddingLogicalHeight(), { });
+            };
+            computeTrackSizesForDefiniteSize(GridTrackSizingDirection::ForRows, availableLogicalHeightForContentBox());
+        }
 
         LayoutUnit trackBasedLogicalHeight = borderAndPaddingLogicalHeight() + scrollbarLogicalHeight();
         if (auto size = explicitIntrinsicInnerLogicalSize(GridTrackSizingDirection::ForRows))
@@ -642,7 +658,7 @@ void RenderGrid::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, Layo
     m_grid.m_currentGrid = std::ref(grid);
     GridTrackSizingAlgorithm algorithm(this, grid);
     // placeItemsOnGrid isn't const since it mutates our grid, but it's safe to do
-    // so here since we've overriden m_currentGrid with a stack based temporary.
+    // so here since we've overridden m_currentGrid with a stack based temporary.
     const_cast<RenderGrid&>(*this).placeItemsOnGrid(std::nullopt);
 
     performPreLayoutForGridItems(algorithm, ShouldUpdateGridAreaLogicalSize::No);

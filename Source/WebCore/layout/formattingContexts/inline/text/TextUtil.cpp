@@ -74,7 +74,7 @@ InlineLayoutUnit TextUtil::width(const InlineTextBox& inlineTextBox, const FontC
         if (fontCascade.canTakeFixedPitchFastContentMeasuring())
             width = fontCascade.widthForSimpleTextWithFixedPitch(view, inlineTextBox.style().collapseWhiteSpace());
         else
-            width = fontCascade.widthForSimpleText(view);
+            width = fontCascade.widthForTextUsingSimplifiedMeasuring(view);
     } else {
         auto& style = inlineTextBox.style();
         auto directionalOverride = style.unicodeBidi() == UnicodeBidi::Override;
@@ -237,6 +237,11 @@ TextUtil::WordBreakLeft TextUtil::breakWord(const InlineTextBox& inlineTextBox, 
     ASSERT(availableWidth >= 0);
     ASSERT(length);
     auto text = inlineTextBox.content();
+
+    if (UNLIKELY(!textWidth)) {
+        ASSERT_NOT_REACHED();
+        return { };
+    }
 
     if (inlineTextBox.canUseSimpleFontCodePath()) {
 
@@ -434,6 +439,9 @@ TextBreakIterator::ContentAnalysis TextUtil::contentAnalysis(WordBreak wordBreak
 
 bool TextUtil::isStrongDirectionalityCharacter(char32_t character)
 {
+    if (isLatin1(character))
+        return false;
+
     auto bidiCategory = u_charDirection(character);
     return bidiCategory == U_RIGHT_TO_LEFT
         || bidiCategory == U_RIGHT_TO_LEFT_ARABIC
@@ -497,10 +505,10 @@ TextDirection TextUtil::directionForTextContent(StringView content)
 TextRun TextUtil::ellipsisTextRun(bool isHorizontal)
 {
     if (isHorizontal) {
-        static MainThreadNeverDestroyed<const AtomString> horizontalEllipsisStr(&horizontalEllipsis, 1);
+        static MainThreadNeverDestroyed<const AtomString> horizontalEllipsisStr(span(horizontalEllipsis));
         return TextRun { horizontalEllipsisStr->string() };
     }
-    static MainThreadNeverDestroyed<const AtomString> verticalEllipsisStr(&verticalEllipsis, 1);
+    static MainThreadNeverDestroyed<const AtomString> verticalEllipsisStr(span(verticalEllipsis));
     return TextRun { verticalEllipsisStr->string() };
 }
 
@@ -569,20 +577,16 @@ static bool canUseSimplifiedTextMeasuringForCharacters(std::span<const Character
     auto* rawCharacters = characters.data();
     for (unsigned i = 0; i < characters.size(); ++i) {
         auto character = rawCharacters[i]; // Not using characters[i] to bypass the bounds check.
-        if (!WidthIterator::characterCanUseSimplifiedTextMeasuring(character, whitespaceIsCollapsed))
-            return false;
-        auto glyphData = fontCascade.glyphDataForCharacter(character, false);
-        if (!glyphData.isValid() || glyphData.font != &primaryFont)
+        if (!fontCascade.canUseSimplifiedTextMeasuring(character, AutoVariant, whitespaceIsCollapsed, primaryFont))
             return false;
     }
     return true;
 }
 
-bool TextUtil::canUseSimplifiedTextMeasuring(StringView textContent, const RenderStyle& style, const RenderStyle* firstLineStyle)
+bool TextUtil::canUseSimplifiedTextMeasuring(StringView textContent, const FontCascade& fontCascade, bool whitespaceIsCollapsed, const RenderStyle* firstLineStyle)
 {
     ASSERT(textContent.is8Bit() || FontCascade::characterRangeCodePath(textContent.characters16(), textContent.length()) == FontCascade::CodePath::Simple);
     // FIXME: All these checks should be more fine-grained at the inline item level.
-    auto& fontCascade = style.fontCascade();
     if (fontCascade.wordSpacing() || fontCascade.letterSpacing())
         return false;
 
@@ -599,7 +603,6 @@ bool TextUtil::canUseSimplifiedTextMeasuring(StringView textContent, const Rende
     if (primaryFont.syntheticBoldOffset())
         return false;
 
-    auto whitespaceIsCollapsed = style.collapseWhiteSpace();
     if (textContent.is8Bit())
         return canUseSimplifiedTextMeasuringForCharacters(textContent.span8(), fontCascade, primaryFont, whitespaceIsCollapsed);
     return canUseSimplifiedTextMeasuringForCharacters(textContent.span16(), fontCascade, primaryFont, whitespaceIsCollapsed);

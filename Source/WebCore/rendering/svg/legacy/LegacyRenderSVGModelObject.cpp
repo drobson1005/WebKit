@@ -47,11 +47,13 @@ namespace WebCore {
 WTF_MAKE_ISO_ALLOCATED_IMPL(LegacyRenderSVGModelObject);
 
 LegacyRenderSVGModelObject::LegacyRenderSVGModelObject(Type type, SVGElement& element, RenderStyle&& style, OptionSet<SVGModelObjectFlag> typeFlags)
-    : RenderElement(type, element, WTFMove(style), { }, typeFlags | SVGModelObjectFlag::IsLegacy)
+    : RenderElement(type, element, WTFMove(style), { }, typeFlags | SVGModelObjectFlag::IsLegacy | SVGModelObjectFlag::UsesBoundaryCaching)
 {
     ASSERT(isLegacyRenderSVGModelObject());
     ASSERT(!isRenderSVGModelObject());
 }
+
+LegacyRenderSVGModelObject::~LegacyRenderSVGModelObject() = default;
 
 LayoutRect LegacyRenderSVGModelObject::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext context) const
 {
@@ -129,7 +131,7 @@ void LegacyRenderSVGModelObject::willBeDestroyed()
 void LegacyRenderSVGModelObject::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
     if (diff == StyleDifference::Layout) {
-        setNeedsBoundariesUpdate();
+        invalidateCachedBoundaries();
         if (style().affectsTransform() || (oldStyle && oldStyle->affectsTransform()))
             setNeedsTransformUpdate();
     }
@@ -153,7 +155,7 @@ static void getElementCTM(SVGElement* element, AffineTransform& transform)
     AffineTransform localTransform;
     Node* current = element;
 
-    while (auto* currentElement = dynamicDowncast<SVGElement>(current)) {
+    while (RefPtr currentElement = dynamicDowncast<SVGElement>(current)) {
         localTransform = currentElement->renderer()->localToParentTransform();
         transform = localTransform.multiply(transform);
         // For getCTM() computation, stop at the nearest viewport element
@@ -193,7 +195,7 @@ void LegacyRenderSVGModelObject::absoluteFocusRingQuads(Vector<FloatQuad>& quads
     
 bool LegacyRenderSVGModelObject::checkIntersection(RenderElement* renderer, const FloatRect& rect)
 {
-    if (!renderer || renderer->style().effectivePointerEvents() == PointerEvents::None)
+    if (!renderer || renderer->style().usedPointerEvents() == PointerEvents::None)
         return false;
     if (!isGraphicsElement(*renderer))
         return false;
@@ -208,7 +210,7 @@ bool LegacyRenderSVGModelObject::checkIntersection(RenderElement* renderer, cons
 
 bool LegacyRenderSVGModelObject::checkEnclosure(RenderElement* renderer, const FloatRect& rect)
 {
-    if (!renderer || renderer->style().effectivePointerEvents() == PointerEvents::None)
+    if (!renderer || renderer->style().usedPointerEvents() == PointerEvents::None)
         return false;
     if (!isGraphicsElement(*renderer))
         return false;

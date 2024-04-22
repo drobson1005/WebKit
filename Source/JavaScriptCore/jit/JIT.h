@@ -164,7 +164,7 @@ namespace JSC {
         using Base = JSInterfaceJIT;
 
     public:
-        JIT(VM&, BaselineJITPlan&, CodeBlock*, BytecodeIndex loopOSREntryBytecodeOffset);
+        JIT(VM&, BaselineJITPlan&, CodeBlock*);
         ~JIT();
 
         VM& vm() { return *JSInterfaceJIT::vm(); }
@@ -400,6 +400,7 @@ namespace JSC {
         void emit_op_beloweq(const JSInstruction*);
         void emit_op_try_get_by_id(const JSInstruction*);
         void emit_op_get_by_id(const JSInstruction*);
+        void emit_op_get_length(const JSInstruction*);
         void emit_op_get_by_id_with_this(const JSInstruction*);
         void emit_op_get_by_id_direct(const JSInstruction*);
         void emit_op_get_by_val(const JSInstruction*);
@@ -526,6 +527,7 @@ namespace JSC {
         void emit_op_log_shadow_chicken_prologue(const JSInstruction*);
         void emit_op_log_shadow_chicken_tail(const JSInstruction*);
         void emit_op_to_property_key(const JSInstruction*);
+        void emit_op_to_property_key_or_number(const JSInstruction*);
 
         template<typename OpcodeType>
         void generateGetByValSlowCase(const OpcodeType&, Vector<SlowCaseEntry>::iterator&);
@@ -551,6 +553,7 @@ namespace JSC {
         void emitSlow_op_get_callee(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_try_get_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_length(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_by_id_with_this(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_by_id_direct(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
@@ -945,7 +948,6 @@ namespace JSC {
 
         bool m_canBeOptimized;
         bool m_shouldEmitProfiling;
-        BytecodeIndex m_loopOSREntryBytecodeIndex;
 
         CodeBlock* const m_profiledCodeBlock { nullptr };
         UnlinkedCodeBlock* const m_unlinkedCodeBlock { nullptr };

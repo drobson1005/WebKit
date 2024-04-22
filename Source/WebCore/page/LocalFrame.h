@@ -327,7 +327,6 @@ private:
     void frameDetached() final;
     bool preventsParentFromBeingComplete() const final;
     void changeLocation(FrameLoadRequest&&) final;
-    void broadcastFrameRemovalToOtherProcesses() final;
     void didFinishLoadInAnotherProcess() final;
 
     FrameView* virtualView() const final;
@@ -337,6 +336,7 @@ private:
     const Frame* opener() const final;
     Frame* opener();
     FrameLoaderClient& loaderClient() final;
+    void documentURLForConsoleLog(CompletionHandler<void(const URL&)>&&) final;
 
     WeakHashSet<FrameDestructionObserver> m_destructionObservers;
 

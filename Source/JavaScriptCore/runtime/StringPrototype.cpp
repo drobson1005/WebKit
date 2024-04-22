@@ -321,7 +321,7 @@ static ALWAYS_INLINE JSString* jsSpliceSubstrings(JSGlobalObject* globalObject, 
         Checked<int, AssertNoOverflow> bufferPos = 0;
         for (int i = 0; i < rangeCount; i++) {
             int srcLen = substringRanges[i].distance();
-            StringImpl::copyCharacters(buffer + bufferPos.value(), sourceData + substringRanges[i].begin(), srcLen);
+            StringImpl::copyCharacters(buffer + bufferPos.value(), { sourceData + substringRanges[i].begin(), static_cast<size_t>(srcLen) });
             bufferPos += srcLen;
         }
 
@@ -340,7 +340,7 @@ static ALWAYS_INLINE JSString* jsSpliceSubstrings(JSGlobalObject* globalObject, 
     Checked<int, AssertNoOverflow> bufferPos = 0;
     for (int i = 0; i < rangeCount; i++) {
         int srcLen = substringRanges[i].distance();
-        StringImpl::copyCharacters(buffer + bufferPos.value(), sourceData + substringRanges[i].begin(), srcLen);
+        StringImpl::copyCharacters(buffer + bufferPos.value(), { sourceData + substringRanges[i].begin(), static_cast<size_t>(srcLen) });
         bufferPos += srcLen;
     }
 
@@ -1201,13 +1201,11 @@ static ALWAYS_INLINE bool splitStringByOneCharacterImpl(Indice& result, StringIm
     // 12. Let q = p.
     size_t matchPosition;
     size_t position = 0;
-    unsigned stringLength = string->length();
-    const CharacterType* characters = string->characters<CharacterType>();
     // 13. Repeat, while q != s
     //   a. Call SplitMatch(S, q, R) and let z be its MatchResult result.
     //   b. If z is failure, then let q = q+1.
     //   c. Else, z is not failure
-    while ((matchPosition = WTF::find(characters, stringLength, separatorCharacter, position)) != notFound) {
+    while ((matchPosition = WTF::find(string->span<CharacterType>(), separatorCharacter, position)) != notFound) {
         // 1. Let T be a String value equal to the substring of S consisting of the characters at positions p (inclusive)
         //    through q (exclusive).
         // 2. Call the [[DefineOwnProperty]] internal method of A with arguments ToString(lengthA),
@@ -1909,7 +1907,7 @@ static JSValue normalize(JSGlobalObject* globalObject, JSString* string, Normali
     // Latin-1 characters (U+0000..U+00FF) are left unaffected by NFC.
     // ASCII characters (U+0000..U+007F) are left unaffected by all of the Normalization Forms
     // https://unicode.org/reports/tr15/#Description_Norm
-    if (view.is8Bit() && (form == NormalizationForm::NFC || charactersAreAllASCII(view.characters8(), view.length())))
+    if (view.is8Bit() && (form == NormalizationForm::NFC || view.containsOnlyASCII()))
         RELEASE_AND_RETURN(scope, string);
 
     const UNormalizer2* normalizer = JSC::normalizer(form);
@@ -1971,9 +1969,9 @@ JSC_DEFINE_HOST_FUNCTION(stringProtoFuncNormalize, (JSGlobalObject* globalObject
     RELEASE_AND_RETURN(scope, JSValue::encode(normalize(globalObject, string, form)));
 }
 
-static inline std::optional<unsigned> illFormedIndex(const UChar* characters, unsigned length)
+static inline std::optional<unsigned> illFormedIndex(std::span<const UChar> characters)
 {
-    for (unsigned index = 0; index < length; ++index) {
+    for (unsigned index = 0; index < characters.size(); ++index) {
         UChar character = characters[index];
         if (!U16_IS_SURROGATE(character))
             continue;
@@ -1982,7 +1980,7 @@ static inline std::optional<unsigned> illFormedIndex(const UChar* characters, un
             return index;
 
         ASSERT(U16_IS_SURROGATE_LEAD(character));
-        if ((index + 1) == length)
+        if ((index + 1) == characters.size())
             return index;
         UChar nextCharacter = characters[index + 1];
 
@@ -2015,7 +2013,7 @@ JSC_DEFINE_HOST_FUNCTION(stringProtoFuncIsWellFormed, (JSGlobalObject* globalObj
 
     if (string.is8Bit())
         return JSValue::encode(jsBoolean(true));
-    return JSValue::encode(jsBoolean(!illFormedIndex(string.characters16(), string.length())));
+    return JSValue::encode(jsBoolean(!illFormedIndex(string.span16())));
 }
 
 JSC_DEFINE_HOST_FUNCTION(stringProtoFuncToWellFormed, (JSGlobalObject* globalObject, CallFrame* callFrame))
@@ -2043,16 +2041,15 @@ JSC_DEFINE_HOST_FUNCTION(stringProtoFuncToWellFormed, (JSGlobalObject* globalObj
     if (string.is8Bit())
         return JSValue::encode(stringValue);
 
-    const UChar* characters = string.characters16();
-    unsigned length = string.length();
-    auto firstIllFormedIndex = illFormedIndex(characters, length);
+    auto characters = string.span16();
+    auto firstIllFormedIndex = illFormedIndex(characters);
     if (!firstIllFormedIndex)
         return JSValue::encode(stringValue);
 
     Vector<UChar> buffer;
-    buffer.reserveInitialCapacity(length);
-    buffer.append(characters, firstIllFormedIndex.value());
-    for (unsigned index = firstIllFormedIndex.value(); index < length; ++index) {
+    buffer.reserveInitialCapacity(characters.size());
+    buffer.append(characters.first(*firstIllFormedIndex));
+    for (unsigned index = firstIllFormedIndex.value(); index < characters.size(); ++index) {
         UChar character = characters[index];
 
         if (!U16_IS_SURROGATE(character)) {
@@ -2066,7 +2063,7 @@ JSC_DEFINE_HOST_FUNCTION(stringProtoFuncToWellFormed, (JSGlobalObject* globalObj
         }
 
         ASSERT(U16_IS_SURROGATE_LEAD(character));
-        if ((index + 1) == length) {
+        if ((index + 1) == characters.size()) {
             buffer.append(replacementCharacter);
             continue;
         }

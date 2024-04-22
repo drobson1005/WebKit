@@ -21,7 +21,6 @@
 
 #pragma once
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "AffineTransform.h"
 #include "FloatPoint.h"
 #include "FloatRect.h"
@@ -34,6 +33,7 @@ class SVGForeignObjectElement;
 
 class RenderSVGForeignObject final : public RenderSVGBlock {
     WTF_MAKE_ISO_ALLOCATED(RenderSVGForeignObject);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderSVGForeignObject);
 public:
     RenderSVGForeignObject(SVGForeignObjectElement&, RenderStyle&&);
     virtual ~RenderSVGForeignObject();
@@ -73,5 +73,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGForeignObject, isRenderSVGForeignObject())
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

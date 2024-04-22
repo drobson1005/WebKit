@@ -31,6 +31,7 @@
 
 #include "WCPlatformLayerGCGL.h"
 #include "WCTileGrid.h"
+#include <WebCore/GraphicsContext.h>
 #include <WebCore/TransformState.h>
 
 namespace WebKit {
@@ -38,6 +39,7 @@ using namespace WebCore;
 
 class WCTiledBacking final : public TiledBacking {
     WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(WCTiledBacking);
 public:
     WCTiledBacking(GraphicsLayerWC& owner)
         : m_owner(owner) { }
@@ -526,7 +528,7 @@ void GraphicsLayerWC::flushCompositingState(const FloatRect& passedVisibleRect)
     // passedVisibleRect doesn't contain the scrollbar area. Inflate it.
     FloatRect visibleRect = passedVisibleRect;
     visibleRect.inflate(20.f);
-    TransformState state(client().useCSS3DTransformInteroperability(), TransformState::UnapplyInverseTransformDirection, FloatQuad(visibleRect));
+    TransformState state(TransformState::UnapplyInverseTransformDirection, FloatQuad(visibleRect));
     state.setSecondaryQuad(FloatQuad { visibleRect });
     recursiveCommitChanges(state);
 }

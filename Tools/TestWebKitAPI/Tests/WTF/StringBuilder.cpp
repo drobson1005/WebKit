@@ -43,9 +43,9 @@ static void expectBuilderContent(StringView expected, const StringBuilder& build
     // Not using builder.toString() or builder.toStringPreserveCapacity() because they all
     // change internal state of builder.
     if (builder.is8Bit())
-        EXPECT_EQ(expected, String(builder.characters8(), builder.length()));
+        EXPECT_EQ(expected, String(builder.span<LChar>()));
     else
-        EXPECT_EQ(expected, String(builder.characters16(), builder.length()));
+        EXPECT_EQ(expected, String(builder.span<UChar>()));
 }
 
 void expectEmpty(const StringBuilder& builder)
@@ -68,7 +68,7 @@ TEST(StringBuilderTest, Append)
     expectBuilderContent("0123456789"_s, builder);
     builder.append("abcd");
     expectBuilderContent("0123456789abcd"_s, builder);
-    builder.appendCharacters("efgh", 3);
+    builder.append(std::span { reinterpret_cast<const LChar*>("efgh"), 3 });
     expectBuilderContent("0123456789abcdefg"_s, builder);
     builder.append("");
     expectBuilderContent("0123456789abcdefg"_s, builder);
@@ -77,11 +77,11 @@ TEST(StringBuilderTest, Append)
 
     builder.toString(); // Test after reifyString().
     StringBuilder builder1;
-    builder.appendCharacters("", 0);
+    builder.append(""_span);
     expectBuilderContent("0123456789abcdefg#"_s, builder);
-    builder1.appendCharacters(builder.characters8(), builder.length());
+    builder1.append(builder.span<LChar>());
     builder1.append("XYZ");
-    builder.appendCharacters(builder1.characters8(), builder1.length());
+    builder.append(builder1.span<LChar>());
     expectBuilderContent("0123456789abcdefg#0123456789abcdefg#XYZ"_s, builder);
 
     StringBuilder builder2;
@@ -102,21 +102,21 @@ TEST(StringBuilderTest, Append)
     builderForUChar32Append.append(U'A');
     EXPECT_EQ(3U, builderForUChar32Append.length());
     const UChar resultArray[] = { U16_LEAD(frakturAChar), U16_TRAIL(frakturAChar), 'A' };
-    expectBuilderContent(String(resultArray, std::size(resultArray)), builderForUChar32Append);
+    expectBuilderContent(String({ resultArray, std::size(resultArray) }), builderForUChar32Append);
     {
         StringBuilder builder;
         StringBuilder builder2;
         char32_t frakturAChar = 0x1D504;
         const UChar data[] = { U16_LEAD(frakturAChar), U16_TRAIL(frakturAChar) };
-        builder2.appendCharacters(data, 2);
+        builder2.append(std::span { data });
         EXPECT_EQ(2U, builder2.length());
         String result2 = builder2.toString();
         EXPECT_EQ(2U, result2.length());
         builder.append(builder2);
-        builder.appendCharacters(data, 2);
+        builder.append(std::span { data });
         EXPECT_EQ(4U, builder.length());
         const UChar resultArray[] = { U16_LEAD(frakturAChar), U16_TRAIL(frakturAChar), U16_LEAD(frakturAChar), U16_TRAIL(frakturAChar) };
-        expectBuilderContent(String(resultArray, std::size(resultArray)), builder);
+        expectBuilderContent(String({ resultArray, std::size(resultArray) }), builder);
     }
 }
 
@@ -159,9 +159,9 @@ TEST(StringBuilderTest, VariadicAppend)
     {
         StringBuilder builder;
         builder.append(String("0123456789"_s), "abcd", bullseye, "");
-        expectBuilderContent(makeString("0123456789abcd", String(&bullseye, 1)), builder);
+        expectBuilderContent(makeString("0123456789abcd", String({ &bullseye, 1 })), builder);
         builder.append(String("A"_s), "B", 'C', "");
-        expectBuilderContent(makeString("0123456789abcd", String(&bullseye, 1), "ABC"), builder);
+        expectBuilderContent(makeString("0123456789abcd", String({ &bullseye, 1 }), "ABC"), builder);
     }
 
     {
@@ -172,7 +172,7 @@ TEST(StringBuilderTest, VariadicAppend)
         EXPECT_TRUE(builder.is8Bit());
         EXPECT_LT(builder.capacity(), builder.length() + 3);
         builder.append(String("A"_s), "B", bullseye, "");
-        expectBuilderContent(makeString("0123456789abcdeAB", String(&bullseye, 1)), builder);
+        expectBuilderContent(makeString("0123456789abcdeAB", String({ &bullseye, 1 })), builder);
     }
 
     {
@@ -184,7 +184,7 @@ TEST(StringBuilderTest, VariadicAppend)
         EXPECT_TRUE(builder.is8Bit());
         EXPECT_GE(builder.capacity(), builder.length() + 3);
         builder.append(String("A"_s), "B", bullseye, "");
-        expectBuilderContent(makeString("0123456789abcdeAB", String(&bullseye, 1)), builder);
+        expectBuilderContent(makeString("0123456789abcdeAB", String({ &bullseye, 1 })), builder);
     }
 }
 
@@ -409,7 +409,7 @@ TEST(StringBuilderTest, ToAtomStringOnEmpty)
     }
     { // AtomString constructed from an empty char* string.
         StringBuilder builder;
-        builder.appendCharacters("", 0);
+        builder.append(""_span);
         AtomString atomString = builder.toAtomString();
         EXPECT_EQ(emptyAtom(), atomString);
     }

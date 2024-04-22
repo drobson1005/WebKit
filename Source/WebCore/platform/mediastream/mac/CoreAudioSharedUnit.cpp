@@ -351,6 +351,18 @@ OSStatus CoreAudioSharedUnit::setupAudioUnit()
             RELEASE_LOG_ERROR_IF(err, WebRTC, "CoreAudioSharedUnit::setupAudioUnit(%p) unable to set capture unit output device ID %d, error %d (%.4s)", this, (int)defaultOutputDeviceID, (int)err, (char*)&err);
         }
         setOutputDeviceID(!err ? defaultOutputDeviceID : 0);
+    } else {
+        // With HALOutput, we cannot rely on sample rate conversions, we stick to hardware sample rate.
+        static const AudioObjectPropertyAddress nominalSampleRateAddress = {
+            kAudioDevicePropertyNominalSampleRate,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+
+        Float64 nominalSampleRate;
+        UInt32 nominalSampleRateSize = sizeof(Float64);
+        if (AudioObjectGetPropertyData(deviceID, &nominalSampleRateAddress, 0, 0, &nominalSampleRateSize, (void*)&nominalSampleRate) == noErr)
+            setSampleRate(nominalSampleRate);
     }
 #endif
 
@@ -687,7 +699,7 @@ bool CoreAudioSharedUnit::migrateToNewDefaultDevice(const CaptureDevice& capture
 void CoreAudioSharedUnit::prewarmAudioUnitCreation(CompletionHandler<void()>&& callback)
 {
     if (!m_audioUnitCreationWarmupPromise) {
-        m_audioUnitCreationWarmupPromise = invokeAsync(WorkQueue::create("CoreAudioSharedUnit AudioUnit creation").get(), [] {
+        m_audioUnitCreationWarmupPromise = invokeAsync(WorkQueue::create("CoreAudioSharedUnit AudioUnit creation"_s).get(), [] {
             return createAudioUnit(true);
         })->whenSettled(RunLoop::main(), [weakThis = WeakPtr { *this }] (auto&& vpioUnitOrError) {
             if (weakThis && vpioUnitOrError.has_value())

@@ -15,8 +15,8 @@
 #include "common/FixedVector.h"
 #include "common/WorkerThread.h"
 #include "libANGLE/Uniform.h"
-#include "libANGLE/renderer/vulkan/ResourceVk.h"
 #include "libANGLE/renderer/vulkan/ShaderInterfaceVariableInfoMap.h"
+#include "libANGLE/renderer/vulkan/vk_resource.h"
 #include "libANGLE/renderer/vulkan/vk_utils.h"
 
 namespace gl
@@ -115,9 +115,11 @@ enum class RenderPassStoreOp
     None,
 };
 
-// There can be a maximum of IMPLEMENTATION_MAX_DRAW_BUFFERS color and resolve attachments, plus one
-// depth/stencil attachment and one depth/stencil resolve attachment.
-constexpr size_t kMaxFramebufferAttachments = gl::IMPLEMENTATION_MAX_DRAW_BUFFERS * 2 + 2;
+// There can be a maximum of IMPLEMENTATION_MAX_DRAW_BUFFERS color and resolve attachments, plus -
+// - one depth/stencil attachment
+// - one depth/stencil resolve attachment
+// - one fragment shading rate attachment
+constexpr size_t kMaxFramebufferAttachments = gl::IMPLEMENTATION_MAX_DRAW_BUFFERS * 2 + 3;
 template <typename T>
 using FramebufferAttachmentArray = std::array<T, kMaxFramebufferAttachments>;
 template <typename T>
@@ -156,10 +158,12 @@ class alignas(4) RenderPassDesc final
     void packColorUnresolveAttachment(size_t colorIndexGL);
     void removeColorUnresolveAttachment(size_t colorIndexGL);
     // Indicate that a depth/stencil attachment should have a corresponding resolve attachment.
-    void packDepthStencilResolveAttachment();
+    void packDepthResolveAttachment();
+    void packStencilResolveAttachment();
     // Indicate that a depth/stencil attachment should take its data from the resolve attachment
     // initially.
-    void packDepthStencilUnresolveAttachment(bool unresolveDepth, bool unresolveStencil);
+    void packDepthUnresolveAttachment();
+    void packStencilUnresolveAttachment();
     void removeDepthStencilUnresolveAttachment();
 
     void setWriteControlMode(gl::SrgbWriteControlMode mode);
@@ -188,7 +192,9 @@ class alignas(4) RenderPassDesc final
     {
         return mColorUnresolveAttachmentMask.test(colorIndexGL);
     }
-    bool hasDepthStencilResolveAttachment() const { return mResolveDepthStencil; }
+    bool hasDepthStencilResolveAttachment() const { return mResolveDepth || mResolveStencil; }
+    bool hasDepthResolveAttachment() const { return mResolveDepth; }
+    bool hasStencilResolveAttachment() const { return mResolveStencil; }
     bool hasDepthStencilUnresolveAttachment() const { return mUnresolveDepth || mUnresolveStencil; }
     bool hasDepthUnresolveAttachment() const { return mUnresolveDepth; }
     bool hasStencilUnresolveAttachment() const { return mUnresolveStencil; }
@@ -201,7 +207,10 @@ class alignas(4) RenderPassDesc final
 
     void setLegacyDither(bool enabled);
 
-    // Get the number of attachments in the Vulkan render pass, i.e. after removing disabled
+    // Get the number of clearable attachments in the Vulkan render pass, i.e. after removing
+    // disabled color attachments.
+    size_t clearableAttachmentCount() const;
+    // Get the total number of attachments in the Vulkan render pass, i.e. after removing disabled
     // color attachments.
     size_t attachmentCount() const;
 
@@ -219,6 +228,9 @@ class alignas(4) RenderPassDesc final
 
     void updateRenderToTexture(bool isRenderToTexture) { mIsRenderToTexture = isRenderToTexture; }
     bool isRenderToTexture() const { return mIsRenderToTexture; }
+
+    void setFragmentShadingAttachment(bool value) { mHasFragmentShadingAttachment = value; }
+    bool hasFragmentShadingAttachment() const { return mHasFragmentShadingAttachment; }
 
     angle::FormatID operator[](size_t index) const
     {
@@ -239,9 +251,12 @@ class alignas(4) RenderPassDesc final
     // Framebuffer fetch
     uint8_t mHasFramebufferFetch : 1;
 
+    // Depth/stencil resolve
+    uint8_t mResolveDepth : 1;
+    uint8_t mResolveStencil : 1;
+
     // Multisampled render to texture
     uint8_t mIsRenderToTexture : 1;
-    uint8_t mResolveDepthStencil : 1;
     uint8_t mUnresolveDepth : 1;
     uint8_t mUnresolveStencil : 1;
 
@@ -251,8 +266,11 @@ class alignas(4) RenderPassDesc final
     // external_format_resolve
     uint8_t mIsYUVResolve : 1;
 
+    // Foveated rendering
+    uint8_t mHasFragmentShadingAttachment : 1;
+
     // Available space for expansion.
-    uint8_t mPadding2;
+    uint8_t mPadding2 : 6;
 
     // Whether each color attachment has a corresponding resolve attachment.  Color resolve
     // attachments can be used to optimize resolve through glBlitFramebuffer() as well as support
@@ -803,6 +821,12 @@ class GraphicsPipelineDesc final
         return mSharedNonVertexInput.renderPass.hasFramebufferFetch();
     }
 
+    void setRenderPassFoveation(bool isFoveated);
+    bool getRenderPassFoveation() const
+    {
+        return mSharedNonVertexInput.renderPass.hasFragmentShadingAttachment();
+    }
+
     void setRenderPassColorAttachmentFormat(size_t colorIndexGL, angle::FormatID formatID);
 
     // Blend states
@@ -1085,7 +1109,7 @@ class YcbcrConversionDesc final
 
     bool valid() const { return mExternalOrVkFormat != 0; }
     void reset();
-    void update(RendererVk *rendererVk,
+    void update(Renderer *renderer,
                 uint64_t externalFormat,
                 VkSamplerYcbcrModelConversion conversionModel,
                 VkSamplerYcbcrRange colorRange,
@@ -1096,7 +1120,7 @@ class YcbcrConversionDesc final
                 angle::FormatID intendedFormatID,
                 YcbcrLinearFilterSupport linearFilterSupported);
     VkFilter getChromaFilter() const { return static_cast<VkFilter>(mChromaFilter); }
-    bool updateChromaFilter(RendererVk *rendererVk, VkFilter filter);
+    bool updateChromaFilter(Renderer *renderer, VkFilter filter);
     void updateConversionModel(VkSamplerYcbcrModelConversion conversionModel);
     uint64_t getExternalFormat() const { return mIsExternalFormat ? mExternalOrVkFormat : 0; }
 
@@ -1284,7 +1308,7 @@ class PipelineCacheAccess
                                    const VkComputePipelineCreateInfo &createInfo,
                                    vk::Pipeline *pipelineOut);
 
-    void merge(RendererVk *renderer, const vk::PipelineCache &pipelineCache);
+    void merge(Renderer *renderer, const vk::PipelineCache &pipelineCache);
 
     bool isThreadSafe() const { return mMutex != nullptr; }
 
@@ -1301,7 +1325,7 @@ class PipelineCacheAccess
 class CreateMonolithicPipelineTask : public Context, public angle::Closure
 {
   public:
-    CreateMonolithicPipelineTask(RendererVk *renderer,
+    CreateMonolithicPipelineTask(Renderer *renderer,
                                  const PipelineCacheAccess &pipelineCache,
                                  const PipelineLayout &pipelineLayout,
                                  const ShaderModuleMap &shaders,
@@ -1379,9 +1403,10 @@ class PipelineHelper final : public Resource
     PipelineHelper();
     ~PipelineHelper() override;
     inline explicit PipelineHelper(Pipeline &&pipeline, CacheLookUpFeedback feedback);
+    PipelineHelper &operator=(PipelineHelper &&other);
 
     void destroy(VkDevice device);
-    void release(ContextVk *contextVk);
+    void release(Context *context);
 
     bool valid() const { return mPipeline.valid(); }
     const Pipeline &getPipeline() const { return mPipeline; }
@@ -1469,8 +1494,8 @@ class FramebufferHelper : public Resource
     FramebufferHelper(FramebufferHelper &&other);
     FramebufferHelper &operator=(FramebufferHelper &&other);
 
-    angle::Result init(ContextVk *contextVk, const VkFramebufferCreateInfo &createInfo);
-    void destroy(RendererVk *rendererVk);
+    angle::Result init(Context *context, const VkFramebufferCreateInfo &createInfo);
+    void destroy(Renderer *renderer);
     void release(ContextVk *contextVk);
 
     bool valid() { return mFramebuffer.valid(); }
@@ -1495,6 +1520,16 @@ class FramebufferHelper : public Resource
 ANGLE_INLINE PipelineHelper::PipelineHelper(Pipeline &&pipeline, CacheLookUpFeedback feedback)
     : mPipeline(std::move(pipeline)), mCacheLookUpFeedback(feedback)
 {}
+
+ANGLE_INLINE PipelineHelper &PipelineHelper::operator=(PipelineHelper &&other)
+{
+    ASSERT(!mPipeline.valid());
+
+    std::swap(mPipeline, other.mPipeline);
+    mCacheLookUpFeedback = other.mCacheLookUpFeedback;
+
+    return *this;
+}
 
 struct ImageSubresourceRange
 {
@@ -1857,12 +1892,16 @@ void UpdatePreCacheActiveTextures(const gl::ProgramExecutable &executable,
 //  - Depth/stencil resolve attachment is at index gl::IMPLEMENTATION_MAX_DRAW_BUFFERS+1
 //  - Resolve attachments are at indices [gl::IMPLEMENTATION_MAX_DRAW_BUFFERS+2,
 //                                        gl::IMPLEMENTATION_MAX_DRAW_BUFFERS*2+1]
+//    Fragment shading rate attachment serial is at index
+//    (gl::IMPLEMENTATION_MAX_DRAW_BUFFERS*2+1)+1
 constexpr size_t kFramebufferDescDepthStencilIndex = 0;
 constexpr size_t kFramebufferDescColorIndexOffset  = kFramebufferDescDepthStencilIndex + 1;
 constexpr size_t kFramebufferDescDepthStencilResolveIndexOffset =
     kFramebufferDescColorIndexOffset + gl::IMPLEMENTATION_MAX_DRAW_BUFFERS;
 constexpr size_t kFramebufferDescColorResolveIndexOffset =
     kFramebufferDescDepthStencilResolveIndexOffset + 1;
+constexpr size_t kFramebufferDescFragmentShadingRateAttachmentIndexOffset =
+    kFramebufferDescColorResolveIndexOffset + gl::IMPLEMENTATION_MAX_DRAW_BUFFERS;
 
 // Enable struct padding warnings for the code below since it is used in caches.
 ANGLE_ENABLE_STRUCT_PADDING_WARNINGS
@@ -1914,6 +1953,9 @@ class FramebufferDesc
 
     void updateRenderToTexture(bool isRenderToTexture);
 
+    void updateFragmentShadingRate(ImageOrBufferViewSubresourceSerial serial);
+    bool hasFragmentShadingRateAttachment() const;
+
   private:
     void reset();
     void update(uint32_t index, ImageOrBufferViewSubresourceSerial serial);
@@ -1944,7 +1986,7 @@ class FramebufferDesc
 };
 
 constexpr size_t kFramebufferDescSize = sizeof(FramebufferDesc);
-static_assert(kFramebufferDescSize == 148, "Size check failed");
+static_assert(kFramebufferDescSize == 156, "Size check failed");
 
 // Disable warnings about struct padding.
 ANGLE_DISABLE_STRUCT_PADDING_WARNINGS
@@ -2018,9 +2060,9 @@ class SharedCacheKeyManager
     void addKey(const SharedCacheKeyT &key);
     // Iterate over the descriptor array and release the descriptor and cache.
     void releaseKeys(ContextVk *contextVk);
-    void releaseKeys(RendererVk *rendererVk);
+    void releaseKeys(Renderer *renderer);
     // Iterate over the descriptor array and destroy the descriptor and cache.
-    void destroyKeys(RendererVk *renderer);
+    void destroyKeys(Renderer *renderer);
     void clear();
 
     // The following APIs are expected to be used for assertion only
@@ -2242,7 +2284,7 @@ class FramebufferCache final : angle::NonCopyable
     FramebufferCache() = default;
     ~FramebufferCache() { ASSERT(mPayload.empty()); }
 
-    void destroy(RendererVk *rendererVk);
+    void destroy(vk::Renderer *renderer);
 
     bool get(ContextVk *contextVk, const vk::FramebufferDesc &desc, vk::Framebuffer &framebuffer);
     void insert(ContextVk *contextVk,
@@ -2433,8 +2475,8 @@ class GraphicsPipelineCache final : public HasCacheStats<VulkanCacheType::Graphi
     GraphicsPipelineCache() = default;
     ~GraphicsPipelineCache() override { ASSERT(mPayload.empty()); }
 
-    void destroy(ContextVk *contextVk);
-    void release(ContextVk *contextVk);
+    void destroy(vk::Context *context);
+    void release(vk::Context *context);
 
     void populate(const vk::GraphicsPipelineDesc &desc, vk::Pipeline &&pipeline);
 
@@ -2488,6 +2530,7 @@ class GraphicsPipelineCache final : public HasCacheStats<VulkanCacheType::Graphi
                     vk::CacheLookUpFeedback feedback,
                     const vk::GraphicsPipelineDesc **descPtrOut,
                     vk::PipelineHelper **pipelineOut);
+    void update(const vk::GraphicsPipelineDesc &desc, vk::Pipeline &&pipeline);
 
     using KeyEqual = typename GraphicsPipelineCacheTypeHelper<Hash>::KeyEqual;
     std::unordered_map<vk::GraphicsPipelineDesc, vk::PipelineHelper, Hash, KeyEqual> mPayload;
@@ -2505,7 +2548,7 @@ class DescriptorSetLayoutCache final : angle::NonCopyable
     DescriptorSetLayoutCache();
     ~DescriptorSetLayoutCache();
 
-    void destroy(RendererVk *rendererVk);
+    void destroy(vk::Renderer *renderer);
 
     angle::Result getDescriptorSetLayout(
         vk::Context *context,
@@ -2524,7 +2567,7 @@ class PipelineLayoutCache final : public HasCacheStats<VulkanCacheType::Pipeline
     PipelineLayoutCache();
     ~PipelineLayoutCache() override;
 
-    void destroy(RendererVk *rendererVk);
+    void destroy(vk::Renderer *renderer);
 
     angle::Result getPipelineLayout(
         vk::Context *context,
@@ -2543,7 +2586,7 @@ class SamplerCache final : public HasCacheStats<VulkanCacheType::Sampler>
     SamplerCache();
     ~SamplerCache() override;
 
-    void destroy(RendererVk *rendererVk);
+    void destroy(vk::Renderer *renderer);
 
     angle::Result getSampler(ContextVk *contextVk,
                              const vk::SamplerDesc &desc,
@@ -2561,7 +2604,7 @@ class SamplerYcbcrConversionCache final
     SamplerYcbcrConversionCache();
     ~SamplerYcbcrConversionCache() override;
 
-    void destroy(RendererVk *rendererVk);
+    void destroy(vk::Renderer *renderer);
 
     angle::Result getSamplerYcbcrConversion(vk::Context *context,
                                             const vk::YcbcrConversionDesc &ycbcrConversionDesc,

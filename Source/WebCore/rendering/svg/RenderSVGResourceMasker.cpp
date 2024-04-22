@@ -21,7 +21,6 @@
 #include "config.h"
 #include "RenderSVGResourceMasker.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "Element.h"
 #include "ElementIterator.h"
 #include "FloatPoint.h"
@@ -33,6 +32,7 @@
 #include "RenderSVGModelObjectInlines.h"
 #include "RenderSVGResourceMaskerInlines.h"
 #include "SVGContainerLayout.h"
+#include "SVGElementTypeHelpers.h"
 #include "SVGGraphicsElement.h"
 #include "SVGLengthContext.h"
 #include "SVGRenderStyle.h"
@@ -111,41 +111,45 @@ void RenderSVGResourceMasker::applyMask(PaintInfo& paintInfo, const RenderLayerM
     auto drawColorSpace = DestinationColorSpace::SRGB();
 
     Ref svgStyle = style().svgStyle();
-#if ENABLE(DESTINATION_COLOR_SPACE_LINEAR_SRGB)
     if (svgStyle->colorInterpolation() == ColorInterpolation::LinearRGB) {
-#if USE(CG)
+#if USE(CG) || USE(SKIA)
         maskColorSpace = DestinationColorSpace::LinearSRGB();
 #endif
         drawColorSpace = DestinationColorSpace::LinearSRGB();
     }
-#endif
 
-    // FIXME: try to use GraphicsContext::createScaledImageBuffer instead.
-    auto maskImage = createImageBuffer(repaintBoundingBox, absoluteTransform, maskColorSpace, &context);
-    if (!maskImage)
-        return;
+    RefPtr<ImageBuffer> maskImage = m_masker.get(targetRenderer);
+    bool missingMaskerData = !maskImage;
+    if (missingMaskerData) {
+        // FIXME: try to use GraphicsContext::createScaledImageBuffer instead.
+        maskImage = createImageBuffer(repaintBoundingBox, absoluteTransform, maskColorSpace, &context);
+        if (!maskImage)
+            return;
+    }
 
     context.setCompositeOperation(CompositeOperator::DestinationIn);
     context.beginTransparencyLayer(1);
 
-    layer()->paintSVGResourceLayer(maskImage->context(), contentTransform);
+    if (missingMaskerData) {
+        checkedLayer()->paintSVGResourceLayer(maskImage->context(), contentTransform);
 
-#if !USE(CG)
-    maskImage->transformToColorSpace(drawColorSpace);
+#if !USE(CG) && !USE(SKIA)
+        maskImage->transformToColorSpace(drawColorSpace);
 #else
-    UNUSED_PARAM(drawColorSpace);
+        UNUSED_PARAM(drawColorSpace);
 #endif
 
-    if (svgStyle->maskType() == MaskType::Luminance)
-        maskImage->convertToLuminanceMask();
-
+        if (svgStyle->maskType() == MaskType::Luminance)
+            maskImage->convertToLuminanceMask();
+        m_masker.set(targetRenderer, maskImage);
+    }
     context.setCompositeOperation(CompositeOperator::SourceOver);
 
     // The mask image has been created in the absolute coordinate space, as the image should not be scaled.
     // So the actual masking process has to be done in the absolute coordinate space as well.
     FloatRect absoluteTargetRect = enclosingIntRect(absoluteTransform.mapRect(repaintBoundingBox));
     context.concatCTM(absoluteTransform.inverse().value_or(AffineTransform()));
-    context.drawConsumingImageBuffer(WTFMove(maskImage), absoluteTargetRect);
+    context.drawImageBuffer(*maskImage, absoluteTargetRect);
     context.endTransparencyLayer();
 }
 
@@ -176,6 +180,10 @@ FloatRect RenderSVGResourceMasker::resourceBoundingBox(const RenderObject& objec
     return maskRect;
 }
 
+void RenderSVGResourceMasker::removeReferencingCSSClient(const RenderElement& client)
+{
+    if (auto renderer = dynamicDowncast<RenderLayerModelObject>(client))
+        m_masker.remove(renderer);
 }
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)
+}

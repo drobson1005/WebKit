@@ -56,6 +56,7 @@ static NSString * const transientZoomScrollPositionOverrideAnimationKey = @"wkSc
 class RemoteLayerTreeDisplayLinkClient final : public DisplayLink::Client {
 public:
     WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RemoteLayerTreeDisplayLinkClient);
 public:
     explicit RemoteLayerTreeDisplayLinkClient(WebPageProxyIdentifier pageID)
         : m_pageIdentifier(pageID)
@@ -182,13 +183,15 @@ void RemoteLayerTreeDrawingAreaProxyMac::didCommitLayerTree(IPC::Connection&, co
         removeTransientZoomFromLayer();
         m_transactionIDAfterEndingTransientZoom = { };
     }
-    if (m_usesOverlayScrollbars != m_webPageProxy->scrollingCoordinatorProxy()->overlayScrollbarsEnabled()) {
-        m_usesOverlayScrollbars = m_webPageProxy->scrollingCoordinatorProxy()->overlayScrollbarsEnabled();
-        WebCore::DeprecatedGlobalSettings::setUsesOverlayScrollbars(m_usesOverlayScrollbars);
+    auto usesOverlayScrollbars = m_webPageProxy->scrollingCoordinatorProxy()->overlayScrollbarsEnabled();
+    auto newScrollbarStyle = usesOverlayScrollbars ? ScrollbarStyle::Overlay : ScrollbarStyle::AlwaysVisible;
+    if (!m_scrollbarStyle || m_scrollbarStyle != newScrollbarStyle) {
+        m_scrollbarStyle = newScrollbarStyle;
+        WebCore::DeprecatedGlobalSettings::setUsesOverlayScrollbars(usesOverlayScrollbars);
         
-        ScrollerStyle::setUseOverlayScrollbars(m_usesOverlayScrollbars);
+        ScrollerStyle::setUseOverlayScrollbars(usesOverlayScrollbars);
         
-        NSScrollerStyle style = m_usesOverlayScrollbars ? NSScrollerStyleOverlay : NSScrollerStyleLegacy;
+        NSScrollerStyle style = usesOverlayScrollbars ? NSScrollerStyleOverlay : NSScrollerStyleLegacy;
         [NSScrollerImpPair _updateAllScrollerImpPairsForNewRecommendedScrollerStyle:style];
     }
 

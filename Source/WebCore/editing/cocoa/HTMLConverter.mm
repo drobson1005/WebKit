@@ -87,6 +87,7 @@
 #endif
 
 #if USE(APPLE_INTERNAL_SDK)
+#include <WebKitAdditions/WebMultiRepresentationHEICAttachmentAdditions.h>
 #include <WebKitAdditions/WebMultiRepresentationHEICAttachmentDeclarationsAdditions.h>
 #endif
 
@@ -115,9 +116,10 @@ enum {
 
 #else
 static RetainPtr<NSFileWrapper> fileWrapperForURL(DocumentLoader *, NSURL *);
-static RetainPtr<NSFileWrapper> fileWrapperForElement(HTMLImageElement&);
-static RetainPtr<NSTextAttachment> attachmentForElement(HTMLImageElement&);
 #endif
+
+static RetainPtr<NSFileWrapper> fileWrapperForElement(HTMLImageElement&);
+static RetainPtr<NSAttributedString> attributedStringWithAttachmentForElement(HTMLImageElement&);
 
 // Additional control Unicode characters
 const unichar WebNextLineCharacter = 0x0085;
@@ -1229,7 +1231,7 @@ BOOL HTMLConverter::_addMultiRepresentationHEICAttachmentForImageElement(HTMLIma
     if (rangeToReplace.location < _domRangeStartIndex)
         _domRangeStartIndex += rangeToReplace.length;
 
-    [_attrStr addAttribute:NSAttachmentAttributeName value:attachment range:rangeToReplace];
+    [_attrStr addAttribute:WebMultiRepresentationHEICAttachmentAttributeName value:attachment range:rangeToReplace];
 
     _flags.isSoft = NO;
     return YES;
@@ -1825,7 +1827,7 @@ BOOL HTMLConverter::_processElement(Element& element, NSInteger depth)
         Element* blockElement = _blockLevelElementForNode(element.parentInComposedTree());
         NSString *breakClass = element.getAttribute(classAttr);
         NSString *blockTag = blockElement ? (NSString *)blockElement->tagName() : nil;
-        BOOL isExtraBreak = [@"Apple-interchange-newline" isEqualToString:breakClass];
+        BOOL isExtraBreak = [AppleInterchangeNewline.createNSString() isEqualToString:breakClass];
         BOOL blockElementIsParagraph = ([@"P" isEqualToString:blockTag] || [@"LI" isEqualToString:blockTag] || ([blockTag hasPrefix:@"H"] && 2 == [blockTag length]));
         if (isExtraBreak)
             _flags.hasTrailingNewline = YES;
@@ -2315,6 +2317,8 @@ static RetainPtr<NSFileWrapper> fileWrapperForURL(DocumentLoader* dataSource, NS
     return nil;
 }
 
+#endif
+
 static RetainPtr<NSFileWrapper> fileWrapperForElement(HTMLImageElement& element)
 {
     if (CachedImage* cachedImage = element.cachedImage()) {
@@ -2335,23 +2339,25 @@ static RetainPtr<NSFileWrapper> fileWrapperForElement(HTMLImageElement& element)
     return nil;
 }
 
-static RetainPtr<NSTextAttachment> attachmentForElement(HTMLImageElement& element)
+static RetainPtr<NSAttributedString> attributedStringWithAttachmentForElement(HTMLImageElement& element)
 {
 #if ENABLE(MULTI_REPRESENTATION_HEIC)
     if (element.isMultiRepresentationHEIC()) {
         if (RefPtr image = element.image()) {
-            if (WebMultiRepresentationHEICAttachment *attachment = image->adapter().multiRepresentationHEIC())
-                return retainPtr(static_cast<NSTextAttachment *>(attachment));
+            if (WebMultiRepresentationHEICAttachment *attachment = image->adapter().multiRepresentationHEIC()) {
+                RetainPtr attachmentString = adoptNS([[NSString alloc] initWithFormat:@"%C", static_cast<unichar>(NSAttachmentCharacter)]);
+                RetainPtr attributedString = adoptNS([[NSMutableAttributedString alloc] initWithString:attachmentString.get()]);
+                [attributedString addAttribute:WebMultiRepresentationHEICAttachmentAttributeName value:attachment range:NSMakeRange(0, 1)];
+                return attributedString;
+            }
         }
     }
 #endif
 
     RetainPtr fileWrapper = fileWrapperForElement(element);
-    RetainPtr attachment = adoptNS([[NSTextAttachment alloc] initWithFileWrapper:fileWrapper.get()]);
-    return attachment;
+    RetainPtr attachment = adoptNS([[PlatformNSTextAttachment alloc] initWithFileWrapper:fileWrapper.get()]);
+    return [NSAttributedString attributedStringWithAttachment:attachment.get()];
 }
-
-#endif
 
 namespace WebCore {
 
@@ -2361,12 +2367,13 @@ AttributedString attributedString(const SimpleRange& range)
     return HTMLConverter { range }.convert();
 }
 
-#if PLATFORM(MAC)
-
 // This function uses TextIterator, which makes offsets in its result compatible with HTML editing.
 AttributedString editingAttributedString(const SimpleRange& range, IncludeImages includeImages)
 {
+#if PLATFORM(MAC)
     auto fontManager = [NSFontManager sharedFontManager];
+#endif
+
     auto string = adoptNS([[NSMutableAttributedString alloc] init]);
     auto attrs = adoptNS([[NSMutableDictionary alloc] init]);
     NSUInteger stringLength = 0;
@@ -2374,7 +2381,7 @@ AttributedString editingAttributedString(const SimpleRange& range, IncludeImages
         auto node = it.node();
 
         if (RefPtr imageElement = dynamicDowncast<HTMLImageElement>(node); imageElement && includeImages == IncludeImages::Yes)
-            [string appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachmentForElement(*imageElement).get()]];
+            [string appendAttributedString:attributedStringWithAttachmentForElement(*imageElement).get()];
 
         auto currentTextLength = it.text().length();
         if (!currentTextLength)
@@ -2393,10 +2400,17 @@ AttributedString editingAttributedString(const SimpleRange& range, IncludeImages
             [attrs setObject:[NSNumber numberWithInteger:NSUnderlineStyleSingle] forKey:NSUnderlineStyleAttributeName];
         if (style.textDecorationsInEffect() & TextDecorationLine::LineThrough)
             [attrs setObject:[NSNumber numberWithInteger:NSUnderlineStyleSingle] forKey:NSStrikethroughStyleAttributeName];
-        if (auto font = style.fontCascade().primaryFont().getCTFont())
-            [attrs setObject:(__bridge NSFont *)font forKey:NSFontAttributeName];
-        else
-            [attrs setObject:[fontManager convertFont:WebDefaultFont() toSize:style.fontCascade().primaryFont().platformData().size()] forKey:NSFontAttributeName];
+        if (auto ctFont = style.fontCascade().primaryFont().getCTFont())
+            [attrs setObject:(__bridge PlatformFont *)ctFont forKey:NSFontAttributeName];
+        else {
+            auto size = style.fontCascade().primaryFont().platformData().size();
+#if PLATFORM(IOS_FAMILY)
+            PlatformFont *platformFont = [PlatformFontClass systemFontOfSize:size];
+#else
+            PlatformFont *platformFont = [fontManager convertFont:WebDefaultFont() toSize:size];
+#endif
+            [attrs setObject:platformFont forKey:NSFontAttributeName];
+        }
 
         auto textAlignment = NSTextAlignmentNatural;
         switch (style.textAlign()) {
@@ -2428,7 +2442,7 @@ AttributedString editingAttributedString(const SimpleRange& range, IncludeImages
         }
 
         if (textAlignment != NSTextAlignmentNatural) {
-            auto paragraphStyle = adoptNS(NSParagraphStyle.defaultParagraphStyle.mutableCopy);
+            auto paragraphStyle = adoptNS([PlatformNSParagraphStyle defaultParagraphStyle].mutableCopy);
             [paragraphStyle setAlignment:textAlignment];
             [attrs setObject:paragraphStyle.get() forKey:NSParagraphStyleAttributeName];
         }
@@ -2458,7 +2472,5 @@ AttributedString editingAttributedString(const SimpleRange& range, IncludeImages
 
     return AttributedString::fromNSAttributedString(WTFMove(string));
 }
-
-#endif
     
 }

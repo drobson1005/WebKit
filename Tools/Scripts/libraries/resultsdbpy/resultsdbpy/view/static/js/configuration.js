@@ -172,7 +172,7 @@ class Configuration {
             result += ' ' + this.platform
         if (this.version_name != null)
             result += ' ' + this.version_name;
-        else if (this.version != null)
+        if (this.version != null && (this.version_name == null || this.sdk != null))
             result += ' ' + Configuration.integerToVersion(this.version);
         if (this.sdk != null)
             result += ' (' + this.sdk + ')';
@@ -286,6 +286,9 @@ class Configuration {
         const ending = this.version_name ? this.version_name.substring(this.version_name.length - 2) : null;
         if ([' A', ' B', ' C', ' D', ' E', ' F', ' G', ' H'].includes(ending))
             version_name = this.version_name.substring(0, this.version_name.length - 2);
+        let architecture = null;
+        if (this.architecture != null && (DEFAULT_ARCHITECTURE == null || this.architecture.search(DEFAULT_ARCHITECTURE) < 0))
+            architecture = this.architecture;
         return {
             platform: [this.platform],
             version:[this.version ? Configuration.integerToVersion(this.version) : null],
@@ -294,7 +297,7 @@ class Configuration {
             style: [this.style],
             flavor: [this.flavor],
             model: [this.model],
-            architecture: [this.architecture],
+            architecture: [architecture],
         };
     }
 }

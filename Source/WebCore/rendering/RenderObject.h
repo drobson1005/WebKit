@@ -95,13 +95,15 @@ namespace Style {
 class PseudoElementRequest;
 }
 
+enum class HitTestSource : bool;
 enum class RepaintRectCalculation : bool { Fast, Accurate };
 enum class RepaintOutlineBounds : bool { No, Yes };
 enum class RequiresFullRepaint : bool { No, Yes };
 
 // Base class for all rendering tree objects.
-class RenderObject : public CachedImageClient, public CanMakeCheckedPtr {
+class RenderObject : public CachedImageClient, public CanMakeCheckedPtr<RenderObject> {
     WTF_MAKE_COMPACT_ISO_ALLOCATED(RenderObject);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderObject);
     friend class RenderBlock;
     friend class RenderBlockFlow;
     friend class RenderBox;
@@ -145,11 +147,6 @@ public:
         Progress,
         Quote,
         Replica,
-        RubyAsInline,
-        RubyAsBlock,
-        RubyBase,
-        RubyRun,
-        RubyText,
         ScrollbarPart,
         SearchField,
         Slider,
@@ -245,6 +242,7 @@ public:
         IsFragmentedFlow = 1 << 1,
         IsTextControl = 1 << 2,
         IsSVGBlock = 1 << 3,
+        IsViewTransitionContainer = 1 << 4,
     };
 
     enum class LineBreakFlag : uint8_t {
@@ -256,6 +254,7 @@ public:
         IsMedia = 1 << 1,
         IsWidget = 1 << 2,
         IsViewTransitionCapture = 1 << 3,
+        UsesBoundaryCaching = 1 << 5,
     };
 
     enum class SVGModelObjectFlag : uint8_t {
@@ -264,6 +263,7 @@ public:
         IsHiddenContainer = 1 << 2,
         IsResourceContainer = 1 << 3,
         IsShape = 1 << 4,
+        UsesBoundaryCaching = 1 << 5,
     };
 
     class TypeSpecificFlags {
@@ -321,7 +321,8 @@ public:
         }
 
         const uint8_t m_kind : 3 { enumToUnderlyingType(Kind::Invalid) }; // Security hardening to store the type.
-        const uint8_t m_flags : 5 { 0 };
+        const uint8_t m_flags : 6 { 0 };
+        // 7 bits free.
     };
 
     // Anonymous objects should pass the document as their node, and they will then automatically be
@@ -456,13 +457,8 @@ public:
     bool isRenderModel() const { return type() == Type::Model; }
 #endif
     bool isRenderFragmentContainer() const { return isRenderBlockFlow() && m_typeSpecificFlags.blockFlowFlags().contains(BlockFlowFlag::IsFragmentContainer); }
+    bool isRenderViewTransitionContainer() const { return isRenderBlockFlow() && m_typeSpecificFlags.blockFlowFlags().contains(BlockFlowFlag::IsViewTransitionContainer); }
     bool isRenderReplica() const { return type() == Type::Replica; }
-
-    bool isRenderRubyAsInline() const { return type() == Type::RubyAsInline; }
-    bool isRenderRubyAsBlock() const { return type() == Type::RubyAsBlock; }
-    bool isRenderRubyBase() const { return type() == Type::RubyBase; }
-    bool isRenderRubyRun() const { return type() == Type::RubyRun; }
-    bool isRenderRubyText() const { return type() == Type::RubyText; }
 
     bool isRenderSlider() const { return type() == Type::Slider; }
     bool isRenderTable() const;
@@ -597,13 +593,15 @@ public:
     bool isRenderOrLegacyRenderSVGForeignObject() const { return isRenderSVGForeignObject() || isLegacyRenderSVGForeignObject(); }
     bool isRenderOrLegacyRenderSVGModelObject() const { return isRenderSVGModelObject() || isLegacyRenderSVGModelObject(); }
     bool isSVGLayerAwareRenderer() const { return isRenderSVGRoot() || isRenderSVGModelObject() || isRenderSVGText() || isRenderSVGInline() || isRenderSVGForeignObject(); }
+    bool isSVGRenderer() const { return isRenderOrLegacyRenderSVGRoot() || isLegacyRenderSVGModelObject() || isRenderSVGModelObject() || isRenderSVGBlock() || isRenderSVGInline(); }
 
     // FIXME: Those belong into a SVG specific base-class for all renderers (see above)
     // Unfortunately we don't have such a class yet, because it's not possible for all renderers
     // to inherit from RenderSVGObject -> RenderObject (some need RenderBlock inheritance for instance)
-    virtual void setNeedsTransformUpdate() { }
+    void invalidateCachedBoundaries();
+    bool usesBoundaryCaching() const;
     virtual void setNeedsBoundariesUpdate();
-    virtual bool needsBoundariesUpdate() { return false; }
+    virtual void setNeedsTransformUpdate() { }
 
     // Per SVG 1.1 objectBoundingBox ignores clipping, masking, filter effects, opacity and stroke-width.
     // This is used for all computation of objectBoundingBox relative units and by SVGLocatable::getBBox().
@@ -614,7 +612,6 @@ public:
     virtual FloatRect objectBoundingBox() const;
     virtual FloatRect strokeBoundingBox() const;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     // The objectBoundingBox of a SVG container is affected by the transformations applied on its children -- the container
     // bounding box is a union of all child bounding boxes, mapped through their transformation matrices.
     //
@@ -625,7 +622,6 @@ public:
     // painting, hit-testing etc. This allows to minimize the amount of re-layouts when animating transformations in SVG
     // (not using CSS Animations/Transitions / Web Animations, but e.g. SMIL <animateTransform>, JS, ...).
     virtual FloatRect objectBoundingBoxWithoutTransformations() const { return objectBoundingBox(); }
-#endif
 
     // Returns the smallest rectangle enclosing all of the painted content
     // respecting clipping, masking, filters, opacity, stroke-width and markers
@@ -645,7 +641,7 @@ public:
     // rest of the rendering tree will move to a similar model.
     virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction);
 
-    virtual bool hasIntrinsicAspectRatio() const { return isReplacedOrInlineBlock() && (isImage() || isRenderVideo() || isRenderHTMLCanvas()); }
+    virtual bool hasIntrinsicAspectRatio() const { return isReplacedOrInlineBlock() && (isImage() || isRenderVideo() || isRenderHTMLCanvas() || isRenderViewTransitionCapture()); }
     bool isAnonymous() const { return m_typeFlags.contains(TypeFlag::IsAnonymous); }
     bool isAnonymousBlock() const;
     bool isBlockBox() const;
@@ -731,7 +727,7 @@ public:
 
     Node* node() const
     { 
-        if (isAnonymous())
+        if (isAnonymous() || isRenderViewTransitionContainer())
             return nullptr;
         return m_node.ptr();
     }
@@ -760,7 +756,7 @@ public:
 
     RenderBoxModelObject* offsetParent() const;
 
-    void markContainingBlocksForLayout(ScheduleRelayout = ScheduleRelayout::Yes, RenderElement* newRoot = nullptr);
+    RenderElement* markContainingBlocksForLayout(RenderElement* layoutRoot = nullptr);
     void setNeedsLayout(MarkingBehavior = MarkContainingBlockChain);
     enum class EverHadSkippedContentLayout { Yes, No };
     void clearNeedsLayout(EverHadSkippedContentLayout = EverHadSkippedContentLayout::Yes);
@@ -788,9 +784,7 @@ public:
     void setHasReflection(bool = true);
     void setHasOutlineAutoAncestor(bool = true);
     void setPaintContainmentApplies(bool value = true) { m_stateBitfields.setFlag(StateFlag::PaintContainmentApplies, value); }
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     void setHasSVGTransform(bool value = true) { m_stateBitfields.setFlag(StateFlag::HasSVGTransform, value); }
-#endif
 
     // Hook so that RenderTextControl can return the line height of its inner renderer.
     // For other renderers, the value is the same as lineHeight(false).
@@ -809,8 +803,8 @@ public:
 
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
 
-    virtual Position positionForPoint(const LayoutPoint&);
-    virtual VisiblePosition positionForPoint(const LayoutPoint&, const RenderFragmentContainer*);
+    virtual Position positionForPoint(const LayoutPoint&, HitTestSource);
+    virtual VisiblePosition positionForPoint(const LayoutPoint&, HitTestSource, const RenderFragmentContainer*);
     VisiblePosition createVisiblePosition(int offset, Affinity) const;
     VisiblePosition createVisiblePosition(const Position&) const;
 
@@ -895,13 +889,13 @@ public:
     
     // Repaint the entire object.  Called when, e.g., the color of a border changes, or when a border
     // style changes.
-    void repaint() const;
+    enum class ForceRepaint : bool { No, Yes };
+    void repaint(ForceRepaint = ForceRepaint::No) const;
 
     // Repaint a specific subrectangle within a given object.  The rect |r| is in the object's coordinate space.
     WEBCORE_EXPORT void repaintRectangle(const LayoutRect&, bool shouldClipToLayer = true) const;
 
     enum class ClipRepaintToLayer : bool { No, Yes };
-    enum class ForceRepaint : bool { No, Yes };
     void repaintRectangle(const LayoutRect&, ClipRepaintToLayer, ForceRepaint, std::optional<LayoutBoxExtent> additionalRepaintOutsets = std::nullopt) const;
 
     // Repaint a slow repaint object, which, at this time, means we are repainting an object with background-attachment:fixed.
@@ -1103,21 +1097,20 @@ public:
     virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const;
     
     bool shouldUseTransformFromContainer(const RenderObject* container) const;
-    void getTransformFromContainer(const RenderObject* container, const LayoutSize& offsetInContainer, TransformationMatrix&) const;
+    void getTransformFromContainer(const LayoutSize& offsetInContainer, TransformationMatrix&) const;
     
     void pushOntoTransformState(TransformState&, OptionSet<MapCoordinatesMode>, const RenderLayerModelObject* repaintContainer, const RenderElement* container, const LayoutSize& offsetInContainer, bool containerSkipped) const;
     void pushOntoGeometryMap(RenderGeometryMap&, const RenderLayerModelObject* repaintContainer, RenderElement* container, bool containerSkipped) const;
 
-    bool participatesInPreserve3D(const RenderElement* container) const;
+    bool participatesInPreserve3D() const;
 
     virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& /* additionalOffset */, const RenderLayerModelObject* /* paintContainer */ = nullptr) const { };
 
     LayoutRect absoluteOutlineBounds() const { return outlineBoundsForRepaint(nullptr); }
 
     // FIXME: Renderers should not need to be notified about internal reparenting (webkit.org/b/224143).
-    enum class IsInternalMove : bool { No, Yes };
-    virtual void insertedIntoTree(IsInternalMove = IsInternalMove::No);
-    virtual void willBeRemovedFromTree(IsInternalMove = IsInternalMove::No);
+    virtual void insertedIntoTree();
+    virtual void willBeRemovedFromTree();
 
     void resetFragmentedFlowStateOnRemoval();
     void initializeFragmentedFlowStateOnInsertion();
@@ -1143,6 +1136,7 @@ protected:
 
     virtual void willBeDestroyed();
 
+    void scheduleLayout(RenderElement* layoutRoot);
     void setNeedsPositionedMovementLayoutBit(bool b) { m_stateBitfields.setFlag(StateFlag::NeedsPositionedMovementLayout, b); }
     void setNormalChildNeedsLayoutBit(bool b) { m_stateBitfields.setFlag(StateFlag::NormalChildNeedsLayout, b); }
     void setPosChildNeedsLayoutBit(bool b) { m_stateBitfields.setFlag(StateFlag::PosChildNeedsLayout, b); }
@@ -1277,10 +1271,9 @@ private:
     SingleThreadWeakPtr<RenderElement> m_parent;
     SingleThreadPackedWeakPtr<RenderObject> m_previous;
     const OptionSet<TypeFlag> m_typeFlags;
-    // Free 8 bits
-    SingleThreadPackedWeakPtr<RenderObject> m_next;
     const Type m_type;
-    const TypeSpecificFlags m_typeSpecificFlags; // Depends on values of m_type and/or m_typeFlags
+    SingleThreadPackedWeakPtr<RenderObject> m_next;
+    const TypeSpecificFlags m_typeSpecificFlags;
 
     CheckedPtr<Layout::Box> m_layoutBox;
 
@@ -1374,7 +1367,7 @@ inline void RenderObject::setNeedsLayout(MarkingBehavior markParents)
         return;
     m_stateBitfields.setFlag(StateFlag::NeedsLayout);
     if (markParents == MarkContainingBlockChain)
-        markContainingBlocksForLayout();
+        scheduleLayout(markContainingBlocksForLayout());
     if (hasLayer())
         setLayerNeedsFullRepaint();
 }
@@ -1574,6 +1567,14 @@ inline bool RenderObject::isRenderTable() const
         break;
     }
     return false;
+}
+
+inline bool RenderObject::usesBoundaryCaching() const
+{
+    // Use the same bit for UsesBoundaryCaching so that clang collapse two comparisons into one.
+    ASSERT(enumToUnderlyingType(ReplacedFlag::UsesBoundaryCaching) == enumToUnderlyingType(SVGModelObjectFlag::UsesBoundaryCaching));
+    return (m_typeSpecificFlags.kind() == TypeSpecificFlags::Kind::Replaced && m_typeSpecificFlags.replacedFlags().contains(ReplacedFlag::UsesBoundaryCaching))
+        || (m_typeSpecificFlags.kind() == TypeSpecificFlags::Kind::SVGModelObject && m_typeSpecificFlags.svgFlags().contains(SVGModelObjectFlag::UsesBoundaryCaching));
 }
 
 WTF::TextStream& operator<<(WTF::TextStream&, const RenderObject&);

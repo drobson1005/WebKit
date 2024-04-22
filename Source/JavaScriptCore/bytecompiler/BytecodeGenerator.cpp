@@ -599,17 +599,23 @@ BytecodeGenerator::BytecodeGenerator(VM& vm, FunctionNode* functionNode, Unlinke
                     m_outOfMemoryDuringConstruction = true;
                     return;
                 }
+
+                unsigned varOrAnonymous = UINT_MAX;
+
                 if (UniquedStringImpl* name = visibleNameForParameter(parameters.at(i).first)) {
                     VarOffset varOffset(offset);
                     SymbolTableEntry entry(varOffset);
-                    // Stores to these variables via the ScopedArguments object will not do
-                    // notifyWrite(), since that would be cumbersome. Also, watching formal
-                    // parameters when "arguments" is in play is unlikely to be super profitable.
-                    // So, we just disable it.
-                    entry.disableWatching(m_vm);
                     functionSymbolTable->set(NoLockingNecessary, name, entry);
+
+IGNORE_GCC_WARNINGS_BEGIN("dangling-reference")
+                    const Identifier& ident =
+                        static_cast<const BindingNode*>(parameters.at(i).first)->boundProperty();
+IGNORE_GCC_WARNINGS_END
+
+                    varOrAnonymous = addConstant(ident);
                 }
-                OpPutToScope::emit(this, m_lexicalEnvironmentRegister, UINT_MAX, virtualRegisterForArgumentIncludingThis(1 + i), GetPutInfo(ThrowIfNotFound, ResolvedClosureVar, InitializationMode::NotInitialization, ecmaMode), SymbolTableOrScopeDepth::symbolTable(VirtualRegister { symbolTableConstantIndex }), offset.offset());
+
+                OpPutToScope::emit(this, m_lexicalEnvironmentRegister, varOrAnonymous, virtualRegisterForArgumentIncludingThis(1 + i), GetPutInfo(ThrowIfNotFound, ResolvedClosureVar, InitializationMode::ScopedArgumentInitialization, ecmaMode), SymbolTableOrScopeDepth::symbolTable(VirtualRegister { symbolTableConstantIndex }), offset.offset());
             }
             
             // This creates a scoped arguments object and copies the overflow arguments into the
@@ -2725,11 +2731,20 @@ RegisterID* BytecodeGenerator::emitTryGetById(RegisterID* dst, RegisterID* base,
     return dst;
 }
 
+RegisterID* BytecodeGenerator::emitGetLength(RegisterID* dst, RegisterID* base)
+{
+    OpGetLength::emit(this, kill(dst), base, nextValueProfileIndex());
+    return dst;
+}
+
 RegisterID* BytecodeGenerator::emitGetById(RegisterID* dst, RegisterID* base, const Identifier& property)
 {
     ASSERT_WITH_MESSAGE(!parseIndex(property), "Indexed properties should be handled with get_by_val.");
 
-    OpGetById::emit(this, kill(dst), base, addConstant(property), nextValueProfileIndex());
+    if (property == m_vm.propertyNames->length)
+        OpGetLength::emit(this, kill(dst), base, nextValueProfileIndex());
+    else
+        OpGetById::emit(this, kill(dst), base, addConstant(property), nextValueProfileIndex());
     return dst;
 }
 
@@ -3910,6 +3925,12 @@ void BytecodeGenerator::emitToPrimitive(RegisterID* dst, RegisterID* src)
 RegisterID* BytecodeGenerator::emitToPropertyKey(RegisterID* dst, RegisterID* src)
 {
     OpToPropertyKey::emit(this, dst, src);
+    return dst;
+}
+
+RegisterID* BytecodeGenerator::emitToPropertyKeyOrNumber(RegisterID* dst, RegisterID* src)
+{
+    OpToPropertyKeyOrNumber::emit(this, dst, src);
     return dst;
 }
 
@@ -5626,9 +5647,10 @@ void StaticPropertyAnalysis::record()
     }
 }
 
-void BytecodeGenerator::emitToThis()
+RegisterID* BytecodeGenerator::emitToThis(RegisterID* srcDst)
 {
-    OpToThis::emit(this, kill(&m_thisRegister), ecmaMode(), nextValueProfileIndex());
+    OpToThis::emit(this, kill(srcDst), ecmaMode(), nextValueProfileIndex());
+    return srcDst;
 }
 
 ForInContext* BytecodeGenerator::findForInContext(RegisterID* property)

@@ -28,9 +28,9 @@ namespace WebCore {
 inline void SegmentedString::Substring::appendTo(StringBuilder& builder) const
 {
     if (is8Bit)
-        builder.appendCharacters(currentCharacter8, length);
+        builder.append(std::span { currentCharacter8, length });
     else
-        builder.appendCharacters(currentCharacter16, length);
+        builder.append(std::span { currentCharacter16, length });
 }
 
 SegmentedString& SegmentedString::operator=(SegmentedString&& other)
@@ -252,7 +252,7 @@ SegmentedString::AdvancePastResult SegmentedString::advancePastSlowCase(const ch
         auto character = m_currentCharacter;
         if (characterMismatch(character, literal[i], lettersIgnoringASCIICase)) {
             if (i)
-                pushBack(String { consumedCharacters, i });
+                pushBack(String({ consumedCharacters, i }));
             return DidNotMatch;
         }
         advancePastNonNewline();

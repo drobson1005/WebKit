@@ -63,7 +63,6 @@
 #include "EventLoop.h"
 #include "EventNames.h"
 #include "EventPath.h"
-#include "FeaturePolicy.h"
 #include "FloatRect.h"
 #include "FocusController.h"
 #include "FrameLoadRequest.h"
@@ -95,6 +94,7 @@
 #include "PageTransitionEvent.h"
 #include "Performance.h"
 #include "PerformanceNavigationTiming.h"
+#include "PermissionsPolicy.h"
 #include "Quirks.h"
 #include "RemoteFrame.h"
 #include "RequestAnimationFrameCallback.h"
@@ -413,7 +413,7 @@ void LocalDOMWindow::setCanShowModalDialogOverride(bool allow)
 }
 
 LocalDOMWindow::LocalDOMWindow(Document& document)
-    : DOMWindow(GlobalWindowIdentifier { Process::identifier(), WindowIdentifier::generate() })
+    : DOMWindow(GlobalWindowIdentifier { Process::identifier(), WindowIdentifier::generate() }, DOMWindowType::Local)
     , ContextDestructionObserver(&document)
 {
     ASSERT(frame());
@@ -695,7 +695,7 @@ History& LocalDOMWindow::history()
 Navigation& LocalDOMWindow::navigation()
 {
     if (!m_navigation)
-        m_navigation = Navigation::create(protectedScriptExecutionContext().get(), *this);
+        m_navigation = Navigation::create(*this);
     return *m_navigation;
 }
 
@@ -990,7 +990,7 @@ ExceptionOr<void> LocalDOMWindow::postMessage(JSC::JSGlobalObject& lexicalGlobal
     if (targetSecurityOrigin.hasException())
         return targetSecurityOrigin.releaseException();
 
-    Vector<RefPtr<MessagePort>> ports;
+    Vector<Ref<MessagePort>> ports;
     auto messageData = SerializedScriptValue::create(lexicalGlobalObject, messageValue, WTFMove(options.transfer), ports, SerializationForStorage::No, SerializationContext::WindowPostMessage);
     if (messageData.hasException())
         return messageData.releaseException();
@@ -1251,13 +1251,13 @@ bool LocalDOMWindow::find(const String& string, bool caseSensitive, bool backwar
         return false;
 
     // FIXME (13016): Support wholeWord, searchInFrames and showDialog.    
-    FindOptions options { DoNotTraverseFlatTree };
+    FindOptions options { FindOption::DoNotTraverseFlatTree };
     if (backwards)
-        options.add(Backwards);
+        options.add(FindOption::Backwards);
     if (!caseSensitive)
-        options.add(CaseInsensitive);
+        options.add(FindOption::CaseInsensitive);
     if (wrap)
-        options.add(WrapAround);
+        options.add(FindOption::WrapAround);
     return frame()->editor().findString(string, options);
 }
 
@@ -2085,8 +2085,8 @@ bool LocalDOMWindow::isAllowedToUseDeviceMotion(String& message) const
         return false;
 
     Ref document = *this->document();
-    if (!isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Gyroscope, document, LogFeaturePolicyFailure::No)
-        || !isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Accelerometer, document, LogFeaturePolicyFailure::No)) {
+    if (!isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Gyroscope, document, LogPermissionsPolicyFailure::No)
+        || !isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Accelerometer, document, LogPermissionsPolicyFailure::No)) {
         message = "Third-party iframes are not allowed access to device motion unless explicitly allowed via Feature-Policy (gyroscope & accelerometer)"_s;
         return false;
     }
@@ -2100,9 +2100,9 @@ bool LocalDOMWindow::isAllowedToUseDeviceOrientation(String& message) const
         return false;
 
     Ref document = *this->document();
-    if (!isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Gyroscope, document, LogFeaturePolicyFailure::No)
-        || !isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Accelerometer, document, LogFeaturePolicyFailure::No)
-        || !isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Magnetometer, document, LogFeaturePolicyFailure::No)) {
+    if (!isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Gyroscope, document, LogPermissionsPolicyFailure::No)
+        || !isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Accelerometer, document, LogPermissionsPolicyFailure::No)
+        || !isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Type::Magnetometer, document, LogPermissionsPolicyFailure::No)) {
         message = "Third-party iframes are not allowed access to device orientation unless explicitly allowed via Feature-Policy (gyroscope & accelerometer & magnetometer)"_s;
         return false;
     }
@@ -2677,12 +2677,12 @@ ExceptionOr<RefPtr<WindowProxy>> LocalDOMWindow::open(LocalDOMWindow& activeWind
 
     // Get the target frame for the special cases of _top and _parent.
     // In those cases, we schedule a location change right now and return early.
-    RefPtr<LocalFrame> targetFrame;
+    RefPtr<Frame> targetFrame;
     if (isTopTargetFrameName(frameName))
-        targetFrame = dynamicDowncast<LocalFrame>(&frame->tree().top());
+        targetFrame = &frame->tree().top();
     else if (isParentTargetFrameName(frameName)) {
         if (RefPtr parent = frame->tree().parent())
-            targetFrame = dynamicDowncast<LocalFrame>(parent.get());
+            targetFrame = parent.get();
         else
             targetFrame = frame;
     }
@@ -2692,7 +2692,8 @@ ExceptionOr<RefPtr<WindowProxy>> LocalDOMWindow::open(LocalDOMWindow& activeWind
 
         URL completedURL = firstFrame->protectedDocument()->completeURL(urlString);
 
-        if (targetFrame->document()->protectedWindow()->isInsecureScriptAccess(activeWindow, completedURL.string()))
+        RefPtr localTargetFrame = dynamicDowncast<LocalFrame>(targetFrame.get());
+        if (localTargetFrame && localTargetFrame->document()->protectedWindow()->isInsecureScriptAccess(activeWindow, completedURL.string()))
             return &targetFrame->windowProxy();
 
         if (urlString.isEmpty())

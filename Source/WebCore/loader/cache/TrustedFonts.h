@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include <wtf/EnumTraits.h>
 #include <wtf/Forward.h>
 #include <wtf/RobinHoodHashSet.h>
 
@@ -55,6 +54,5 @@ enum class FontParsingPolicy : uint8_t {
 };
 
 FontParsingPolicy fontBinaryParsingPolicy(std::span<const uint8_t>, DownloadableBinaryFontTrustedTypes);
-FontParsingPolicy fontBinaryParsingPolicy(const void*, size_t, DownloadableBinaryFontTrustedTypes);
 
 } // namespace WebCore

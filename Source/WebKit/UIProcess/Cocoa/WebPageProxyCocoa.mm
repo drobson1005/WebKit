@@ -79,6 +79,7 @@
 #import <wtf/BlockPtr.h>
 #import <wtf/SoftLinking.h>
 #import <wtf/cf/TypeCastsCF.h>
+#import <wtf/cocoa/SpanCocoa.h>
 
 #if ENABLE(MEDIA_USAGE)
 #import "MediaUsageManagerCocoa.h"
@@ -287,6 +288,27 @@ void WebPageProxy::startDrag(const DragItem& dragItem, ShareableBitmap::Handle&&
 
 #endif
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+
+void WebPageProxy::getTextIndicatorForID(WTF::UUID& uuid, CompletionHandler<void(std::optional<WebCore::TextIndicatorData>&&)>&& completionHandler)
+{
+    if (!hasRunningProcess())
+        return;
+
+    sendWithAsyncReply(Messages::WebPage::GetTextIndicatorForID(uuid), WTFMove(completionHandler));
+}
+
+void WebPageProxy::updateTextIndicatorStyleVisibilityForID(WTF::UUID& uuid, bool visible, CompletionHandler<void()>&& completionHandler)
+{
+    if (!hasRunningProcess())
+        return;
+
+    sendWithAsyncReply(Messages::WebPage::UpdateTextIndicatorStyleVisibilityForID(uuid, visible), WTFMove(completionHandler));
+}
+
+#endif // UNIFIED_TEXT_REPLACEMENT
+
+
 #if ENABLE(ATTACHMENT_ELEMENT)
 
 void WebPageProxy::platformRegisterAttachment(Ref<API::Attachment>&& attachment, const String& preferredFileName, const IPC::SharedBufferReference& bufferCopy)
@@ -442,6 +464,11 @@ IPC::Connection* WebPageProxy::Internals::paymentCoordinatorConnection(const Web
 const String& WebPageProxy::Internals::paymentCoordinatorBoundInterfaceIdentifier(const WebPaymentCoordinatorProxy&)
 {
     return page.websiteDataStore().configuration().boundInterfaceIdentifier();
+}
+
+void WebPageProxy::Internals::getPaymentCoordinatorEmbeddingUserAgent(WebPageProxyIdentifier, CompletionHandler<void(const String&)>&& completionHandler)
+{
+    completionHandler(page.userAgent());
 }
 
 const String& WebPageProxy::Internals::paymentCoordinatorSourceApplicationBundleIdentifier(const WebPaymentCoordinatorProxy&)
@@ -792,6 +819,9 @@ void WebPageProxy::startApplePayAMSUISession(URL&& originatingURL, ApplePayAMSUI
         return;
     }
 
+    // FIXME: When in element fullscreen, UIClient::presentingViewController() may not return the
+    // WKFullScreenViewController even though that is the presenting view controller of the WKWebView.
+    // We should call PageClientImpl::presentingViewController() instead.
     PlatformViewController *presentingViewController = uiClient().presentingViewController();
     if (!presentingViewController) {
         completionHandler(std::nullopt);
@@ -825,6 +855,7 @@ void WebPageProxy::abortApplePayAMSUISession()
 #endif // ENABLE(APPLE_PAY_AMS_UI)
 
 #if ENABLE(CONTEXT_MENUS)
+
 #if HAVE(TRANSLATION_UI_SERVICES)
 
 bool WebPageProxy::canHandleContextMenuTranslation() const
@@ -838,21 +869,27 @@ void WebPageProxy::handleContextMenuTranslation(const TranslationContextMenuInfo
 }
 
 #endif // HAVE(TRANSLATION_UI_SERVICES)
-#endif // ENABLE(CONTEXT_MENUS)
 
-void WebPageProxy::requestActiveNowPlayingSessionInfo(CompletionHandler<void(bool, WebCore::NowPlayingInfo&&)>&& callback)
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+
+bool WebPageProxy::canHandleSwapCharacters() const
 {
-    sendWithAsyncReply(Messages::WebPage::RequestActiveNowPlayingSessionInfo(), WTFMove(callback));
+    return protectedPageClient()->canHandleSwapCharacters();
 }
-
-#if ENABLE(UNIFIED_TEXT_REPLACEMENT) && ENABLE(CONTEXT_MENUS)
 
 void WebPageProxy::handleContextMenuSwapCharacters(WebCore::IntRect selectionBoundsInRootView)
 {
     protectedPageClient()->handleContextMenuSwapCharacters(selectionBoundsInRootView);
 }
 
-#endif
+#endif // ENABLE(UNIFIED_TEXT_REPLACEMENT)
+
+#endif // ENABLE(CONTEXT_MENUS)
+
+void WebPageProxy::requestActiveNowPlayingSessionInfo(CompletionHandler<void(bool, WebCore::NowPlayingInfo&&)>&& callback)
+{
+    sendWithAsyncReply(Messages::WebPage::RequestActiveNowPlayingSessionInfo(), WTFMove(callback));
+}
 
 void WebPageProxy::setLastNavigationWasAppInitiated(ResourceRequest& request)
 {
@@ -889,7 +926,8 @@ void WebPageProxy::disableURLSchemeCheckInDataDetectors() const
 
 void WebPageProxy::switchFromStaticFontRegistryToUserFontRegistry()
 {
-    process().send(Messages::WebProcess::SwitchFromStaticFontRegistryToUserFontRegistry(process().fontdMachExtensionHandles(SandboxExtension::MachBootstrapOptions::EnableMachBootstrap)), 0);
+    if (auto handles = process().fontdMachExtensionHandles())
+        process().send(Messages::WebProcess::SwitchFromStaticFontRegistryToUserFontRegistry(WTFMove(*handles)), 0);
 }
 
 NSDictionary *WebPageProxy::contentsOfUserInterfaceItem(NSString *userInterfaceItem)
@@ -935,15 +973,9 @@ bool WebPageProxy::isQuarantinedAndNotUserApproved(const String& fileURLString)
 
 #if ENABLE(MULTI_REPRESENTATION_HEIC)
 
-static std::span<const uint8_t> span(NSData *data)
+void WebPageProxy::insertMultiRepresentationHEIC(NSData *data, NSString *altText)
 {
-    return { static_cast<const uint8_t*>(data.bytes), data.length };
-}
-
-void WebPageProxy::insertMultiRepresentationHEIC(NSData *data)
-{
-    send(Messages::WebPage::InsertMultiRepresentationHEIC(span(data)));
-
+    send(Messages::WebPage::InsertMultiRepresentationHEIC(span(data), altText));
 }
 
 #endif
@@ -1126,9 +1158,9 @@ bool WebPageProxy::shouldDeactivateMediaCapability() const
 
 #if ENABLE(UNIFIED_TEXT_REPLACEMENT)
 
-void WebPageProxy::willBeginTextReplacementSession(const WTF::UUID& uuid, CompletionHandler<void(const Vector<WebUnifiedTextReplacementContextData>&)>&& completionHandler)
+void WebPageProxy::willBeginTextReplacementSession(const WTF::UUID& uuid, WebUnifiedTextReplacementType type, CompletionHandler<void(const Vector<WebUnifiedTextReplacementContextData>&)>&& completionHandler)
 {
-    sendWithAsyncReply(Messages::WebPage::WillBeginTextReplacementSession(uuid), WTFMove(completionHandler));
+    sendWithAsyncReply(Messages::WebPage::WillBeginTextReplacementSession(uuid, type), WTFMove(completionHandler));
 }
 
 void WebPageProxy::didBeginTextReplacementSession(const WTF::UUID& uuid, const Vector<WebKit::WebUnifiedTextReplacementContextData>& contexts)
@@ -1159,6 +1191,32 @@ void WebPageProxy::textReplacementSessionDidReceiveTextWithReplacementRange(cons
 void WebPageProxy::textReplacementSessionDidReceiveEditAction(const WTF::UUID& uuid, WebTextReplacementData::EditAction action)
 {
     send(Messages::WebPage::TextReplacementSessionDidReceiveEditAction(uuid, action));
+}
+
+void WebPageProxy::textReplacementSessionShowInformationForReplacementWithUUIDRelativeToRect(const WTF::UUID& sessionUUID, const WTF::UUID& replacementUUID, WebCore::IntRect selectionBoundsInRootView)
+{
+    protectedPageClient()->textReplacementSessionShowInformationForReplacementWithUUIDRelativeToRect(sessionUUID, replacementUUID, selectionBoundsInRootView);
+}
+
+void WebPageProxy::textReplacementSessionUpdateStateForReplacementWithUUID(const WTF::UUID& sessionUUID, WebTextReplacementData::State state, const WTF::UUID& replacementUUID)
+{
+    protectedPageClient()->textReplacementSessionUpdateStateForReplacementWithUUID(sessionUUID, state, replacementUUID);
+}
+
+void WebPageProxy::enableTextIndicatorStyleAfterElementWithID(const String& elementID, const WTF::UUID& uuid)
+{
+    if (!hasRunningProcess())
+        return;
+
+    send(Messages::WebPage::EnableTextIndicatorStyleAfterElementWithID(elementID, uuid));
+}
+
+void WebPageProxy::enableTextIndicatorStyleForElementWithID(const String& elementID, const WTF::UUID& uuid)
+{
+    if (!hasRunningProcess())
+        return;
+
+    send(Messages::WebPage::EnableTextIndicatorStyleForElementWithID(elementID, uuid));
 }
 
 #endif

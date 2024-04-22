@@ -101,15 +101,6 @@ void RenderLayerModelObject::willBeDestroyed()
     RenderElement::willBeDestroyed();
 }
 
-void RenderLayerModelObject::willBeRemovedFromTree(IsInternalMove isInternalMove)
-{
-    bool shouldNotRepaint = is<RenderMultiColumnSet>(this->previousSibling());
-    if (auto* layer = this->layer(); layer && layer->needsFullRepaint() && isInternalMove == IsInternalMove::No && !shouldNotRepaint && containingBlock())
-        issueRepaint(std::nullopt, ClipRepaintToLayer::No, ForceRepaint::Yes);
-
-    RenderElement::willBeRemovedFromTree(isInternalMove);
-}
-
 void RenderLayerModelObject::destroyLayer()
 {
     ASSERT(!hasLayer());
@@ -179,9 +170,7 @@ void RenderLayerModelObject::styleDidChange(StyleDifference diff, const RenderSt
         if (oldStyle && oldStyle->hasBlendMode())
             layer()->willRemoveChildWithBlendMode();
         setHasTransformRelatedProperty(false); // All transform-related properties force layers, so we know we don't have one or the object doesn't support them.
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
         setHasSVGTransform(false); // Same reason as for setHasTransformRelatedProperty().
-#endif
         setHasReflection(false);
 
         // Repaint the about to be destroyed self-painting layer when style change also triggers repaint.
@@ -308,7 +297,6 @@ void RenderLayerModelObject::updateLayerTransform()
         layer()->updateTransform();
 }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 bool RenderLayerModelObject::shouldPaintSVGRenderer(const PaintInfo& paintInfo, const OptionSet<PaintPhase> relevantPaintPhases) const
 {
     if (paintInfo.context().paintingDisabled())
@@ -320,7 +308,7 @@ bool RenderLayerModelObject::shouldPaintSVGRenderer(const PaintInfo& paintInfo, 
     if (!paintInfo.shouldPaintWithinRoot(*this))
         return false;
 
-    if (style().visibility() == Visibility::Hidden || style().display() == DisplayType::None)
+    if (style().usedVisibility() == Visibility::Hidden || style().display() == DisplayType::None)
         return false;
 
     return true;
@@ -631,14 +619,12 @@ bool RenderLayerModelObject::pointInSVGClippingArea(const FloatPoint& point) con
 
     return true;
 }
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)
 
 CheckedPtr<RenderLayer> RenderLayerModelObject::checkedLayer() const
 {
     return m_layer.get();
 }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 void RenderLayerModelObject::repaintOrRelayoutAfterSVGTransformChange()
 {
     ASSERT(document().settings().layerBasedSVGEngineEnabled());
@@ -714,7 +700,7 @@ void RenderLayerModelObject::paintSVGClippingMask(PaintInfo& paintInfo, const Fl
 {
     ASSERT(paintInfo.phase == PaintPhase::ClippingMask);
     auto& context = paintInfo.context();
-    if (!paintInfo.shouldPaintWithinRoot(*this) || style().visibility() != Visibility::Visible || context.paintingDisabled())
+    if (!paintInfo.shouldPaintWithinRoot(*this) || style().usedVisibility() != Visibility::Visible || context.paintingDisabled())
         return;
 
     ASSERT(document().settings().layerBasedSVGEngineEnabled());
@@ -734,17 +720,10 @@ void RenderLayerModelObject::paintSVGMask(PaintInfo& paintInfo, const LayoutPoin
         referencedMaskerRenderer->applyMask(paintInfo, *this, adjustedPaintOffset);
 }
 
-#endif
-
 bool rendererNeedsPixelSnapping(const RenderLayerModelObject& renderer)
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (renderer.document().settings().layerBasedSVGEngineEnabled() && renderer.isSVGLayerAwareRenderer() && !renderer.isRenderSVGRoot())
         return false;
-#else
-    UNUSED_PARAM(renderer);
-#endif
-
     return true;
 }
 

@@ -304,6 +304,7 @@ typedef NSString *ASAuthorizationSecurityKeyPublicKeyCredentialDescriptorTranspo
 @end
 
 @interface ASAuthorizationSecurityKeyPublicKeyCredentialRegistration : NSObject <ASAuthorizationPublicKeyCredentialRegistration>
+@property (nonatomic, readonly) NSArray<ASAuthorizationSecurityKeyPublicKeyCredentialDescriptorTransport> *transports;
 @end
 
 typedef NSInteger ASCOSEAlgorithmIdentifier NS_TYPED_EXTENSIBLE_ENUM;
@@ -332,11 +333,13 @@ typedef NSString *ASAuthorizationPublicKeyCredentialResidentKeyPreference;
 @end
 
 @interface ASAuthorizationSecurityKeyPublicKeyCredentialAssertion : NSObject <ASAuthorizationPublicKeyCredentialAssertion>
+@property (nonatomic, readonly) BOOL appID;
 @end
 
 @interface ASAuthorizationSecurityKeyPublicKeyCredentialAssertionRequest : ASAuthorizationRequest <ASAuthorizationPublicKeyCredentialAssertionRequest>
 
 @property (nonatomic, copy) NSArray<ASAuthorizationSecurityKeyPublicKeyCredentialDescriptor *> *allowedCredentials;
+@property (nonatomic, nullable, copy) NSString *appID;
 
 @end
 
@@ -365,6 +368,7 @@ typedef NS_ERROR_ENUM(ASAuthorizationErrorDomain, ASAuthorizationError) {
     ASAuthorizationErrorNotHandled = 1003,
     ASAuthorizationErrorFailed = 1004,
     ASAuthorizationErrorNotInteractive = 1005,
+    ASAuthorizationErrorMatchedExcludedCredential = 1006,
 };
 
 NS_ASSUME_NONNULL_END

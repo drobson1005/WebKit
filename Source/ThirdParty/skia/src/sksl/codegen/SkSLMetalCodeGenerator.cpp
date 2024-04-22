@@ -392,11 +392,13 @@ void MetalCodeGenerator::write(std::string_view s) {
     if (s.empty()) {
         return;
     }
+#if defined(SK_DEBUG) || defined(SKSL_STANDALONE)
     if (fAtLineStart) {
         for (int i = 0; i < fIndentation; i++) {
             fOut->writeText("    ");
         }
     }
+#endif
     fOut->writeText(std::string(s).c_str());
     fAtLineStart = false;
 }
@@ -2687,7 +2689,7 @@ void MetalCodeGenerator::writeInterfaceBlock(const InterfaceBlock& intf) {
     }
     fIndentation--;
     this->write("}");
-    if (intf.instanceName().size()) {
+    if (!intf.instanceName().empty()) {
         this->write(" ");
         this->write(intf.instanceName());
         if (intf.arraySize() > 0) {

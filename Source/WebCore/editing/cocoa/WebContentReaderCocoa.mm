@@ -468,7 +468,7 @@ static std::optional<MarkupAndArchive> extractMarkupAndArchive(SharedBuffer& buf
     if (!canShowMIMETypeAsHTML(type))
         return std::nullopt;
 
-    return MarkupAndArchive { String::fromUTF8(mainResource->data().makeContiguous()->data(), mainResource->data().size()), mainResource.releaseNonNull(), archive.releaseNonNull() };
+    return MarkupAndArchive { String::fromUTF8(mainResource->data().makeContiguous()->span()), mainResource.releaseNonNull(), archive.releaseNonNull() };
 }
 
 static String sanitizeMarkupWithArchive(LocalFrame& frame, Document& destinationDocument, MarkupAndArchive& markupAndArchive, MSOListQuirks msoListQuirks, const std::function<bool(const String)>& canShowMIMETypeAsHTML)
@@ -511,12 +511,11 @@ static String sanitizeMarkupWithArchive(LocalFrame& frame, Document& destination
         if (!shouldReplaceSubresourceURLWithBlobDuringSanitization(subframeURL))
             continue;
 
-        MarkupAndArchive subframeContent = { String::fromUTF8(subframeMainResource->data().makeContiguous()->data(), subframeMainResource->data().size()),
+        MarkupAndArchive subframeContent = { String::fromUTF8(subframeMainResource->data().makeContiguous()->span()),
             subframeMainResource.releaseNonNull(), subframeArchive.copyRef() };
         auto subframeMarkup = sanitizeMarkupWithArchive(frame, destinationDocument, subframeContent, MSOListQuirks::Disabled, canShowMIMETypeAsHTML);
 
-        CString utf8 = subframeMarkup.utf8();
-        auto blob = Blob::create(&destinationDocument, Vector { utf8.dataAsUInt8Ptr(), utf8.length() }, type);
+        auto blob = Blob::create(&destinationDocument, Vector(subframeMarkup.utf8().span()), type);
 
         String subframeBlobURL = DOMURL::createObjectURL(destinationDocument, blob);
         blobURLMap.set(AtomString { subframeURL.string() }, AtomString { subframeBlobURL });

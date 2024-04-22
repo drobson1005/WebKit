@@ -34,7 +34,6 @@
 #include "FloatConversion.h"
 #include "NodeName.h"
 #include "RenderObject.h"
-#include "SVGAnimateColorElement.h"
 #include "SVGAnimateElement.h"
 #include "SVGElementInlines.h"
 #include "SVGElementTypeHelpers.h"
@@ -427,10 +426,10 @@ float SVGAnimationElement::calculatePercentForSpline(float percent, unsigned spl
 
 float SVGAnimationElement::calculatePercentFromKeyPoints(float percent) const
 {
-    const auto& keyTimes = this->keyTimes();
+    const auto& keyTimes = m_keyTimesFromAttribute;
 
     ASSERT(!m_keyPoints.isEmpty());
-    ASSERT(calcMode() != CalcMode::Paced);
+    ASSERT(calcMode() != CalcMode::Paced || animationMode() == AnimationMode::Path);
     ASSERT(keyTimes.size() > 1);
     ASSERT(m_keyPoints.size() == keyTimes.size());
 
@@ -490,7 +489,7 @@ void SVGAnimationElement::currentValuesForValuesAnimation(float percent, float& 
     }
 
     CalcMode calcMode = this->calcMode();
-    if (is<SVGAnimateElement>(*this) || is<SVGAnimateColorElement>(*this)) {
+    if (is<SVGAnimateElement>(*this)) {
         ASSERT(targetElement());
         if (downcast<SVGAnimateElementBase>(*this).isDiscreteAnimator())
             calcMode = CalcMode::Discrete;
@@ -544,11 +543,11 @@ void SVGAnimationElement::startedActiveInterval()
     if (!hasValidAttributeType())
         return;
 
-    const auto& keyTimes = this->keyTimes();
-
     // These validations are appropriate for all animation modes.
-    if (hasAttributeWithoutSynchronization(SVGNames::keyPointsAttr) && m_keyPoints.size() != keyTimes.size())
+    if (hasAttributeWithoutSynchronization(SVGNames::keyPointsAttr) && m_keyPoints.size() != m_keyTimesFromAttribute.size())
         return;
+
+    const auto& keyTimes = this->keyTimes();
 
     AnimationMode animationMode = this->animationMode();
     CalcMode calcMode = this->calcMode();
@@ -612,7 +611,7 @@ void SVGAnimationElement::updateAnimation(float percent, unsigned repeatCount)
             m_lastValuesAnimationFrom = from;
             m_lastValuesAnimationTo = to;
         }
-    } else if (!m_keyPoints.isEmpty() && calcMode != CalcMode::Paced)
+    } else if (!m_keyPoints.isEmpty() && (calcMode != CalcMode::Paced || animationMode == AnimationMode::Path))
         effectivePercent = calculatePercentFromKeyPoints(percent);
     else if (m_keyPoints.isEmpty() && calcMode == CalcMode::Spline && keyTimes().size() > 1)
         effectivePercent = calculatePercentForSpline(percent, calculateKeyTimesIndex(percent));

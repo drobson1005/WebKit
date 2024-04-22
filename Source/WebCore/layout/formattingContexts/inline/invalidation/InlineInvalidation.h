@@ -37,6 +37,7 @@ class RenderStyle;
 namespace Layout {
 
 class Box;
+class ElementBox;
 class InlineTextBox;
 struct InvalidatedLine;
 
@@ -44,7 +45,8 @@ class InlineInvalidation {
 public:
     InlineInvalidation(InlineDamage&, const InlineItemList&, const InlineDisplay::Content&);
 
-    void styleChanged(const Box&, const RenderStyle& oldStyle);
+    bool rootStyleWillChange(const ElementBox& formattingContextRoot, const RenderStyle& newStyle);
+    bool styleWillChange(const Box&, const RenderStyle& newStyle);
 
     bool textInserted(const InlineTextBox& newOrDamagedInlineTextBox, std::optional<size_t> offset = { });
     bool textWillBeRemoved(const InlineTextBox&, std::optional<size_t> offset = { });
@@ -52,14 +54,14 @@ public:
     bool inlineLevelBoxInserted(const Box&);
     bool inlineLevelBoxWillBeRemoved(const Box&);
 
-    void horizontalConstraintChanged();
+    bool restartForPagination(size_t lineIndex, LayoutUnit pageTopAdjustment);
 
-    void restartForPagination(size_t lineIndex, LayoutUnit pageTopAdjustment);
+    static bool mayOnlyNeedPartialLayout(const InlineDamage* inlineDamage) { return inlineDamage && inlineDamage->layoutStartPosition(); }
 
 private:
     enum class ShouldApplyRangeLayout : bool { No, Yes };
-    void updateInlineDamage(InlineDamage::Type, std::optional<InlineDamage::Reason>, std::optional<InvalidatedLine>, ShouldApplyRangeLayout = ShouldApplyRangeLayout::No, LayoutUnit restartPaginationAdjustment = 0_lu);
-    bool applyFullDamageIfNeeded(const Box&);
+    bool updateInlineDamage(const InvalidatedLine&, InlineDamage::Reason, ShouldApplyRangeLayout = ShouldApplyRangeLayout::No, LayoutUnit restartPaginationAdjustment = 0_lu);
+    bool setFullLayoutIfNeeded(const Box&);
     const InlineDisplay::Boxes& displayBoxes() const { return m_displayContent.boxes; }
     const InlineDisplay::Lines& displayLines() const { return m_displayContent.lines; }
 

@@ -128,10 +128,8 @@ RefPtr<StyleImage> BuilderState::createStyleImage(const CSSValue& value)
         return radialGradientvalue->createStyleImage(*this);
     if (auto conicGradientValue = dynamicDowncast<CSSConicGradientValue>(value))
         return conicGradientValue->createStyleImage(*this);
-#if ENABLE(CSS_PAINTING_API)
     if (auto* paintImageValue = dynamicDowncast<CSSPaintImageValue>(value))
         return paintImageValue->createStyleImage(*this);
-#endif
     return nullptr;
 }
 
@@ -218,7 +216,7 @@ void BuilderState::updateFontForTextSizeAdjust()
 
 void BuilderState::updateFontForZoomChange()
 {
-    if (m_style.effectiveZoom() == parentStyle().effectiveZoom() && m_style.textZoom() == parentStyle().textZoom())
+    if (m_style.usedZoom() == parentStyle().usedZoom() && m_style.textZoom() == parentStyle().textZoom())
         return;
 
     const auto& childFont = m_style.fontDescription();

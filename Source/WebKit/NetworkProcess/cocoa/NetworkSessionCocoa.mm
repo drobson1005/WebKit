@@ -67,6 +67,7 @@
 #import <wtf/URL.h>
 #import <wtf/WeakObjCPtr.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
+#import <wtf/cocoa/SpanCocoa.h>
 #import <wtf/cocoa/TypeCastsCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/darwin/WeakLinking.h>
@@ -923,7 +924,7 @@ static NSDictionary<NSString *, id> *extractResolutionReport(NSError *error)
             }
         }
 
-        auto resumeDataReference = resumeData ? std::span { static_cast<const uint8_t*>(resumeData.bytes), resumeData.length } : std::span<const uint8_t> { };
+        auto resumeDataReference = span(resumeData);
         download->didFail(error, resumeDataReference);
     }
 }
@@ -1995,6 +1996,17 @@ private:
     const DataTaskIdentifier m_identifier;
 };
 
+void NetworkSessionCocoa::loadImageForDecoding(WebCore::ResourceRequest&& request, WebPageProxyIdentifier pageID, CompletionHandler<void(std::variant<WebCore::ResourceError, Ref<WebCore::SharedBuffer>>&&)>&& completionHandler)
+{
+    auto session = sessionWrapperForTask(pageID, request, WebCore::StoredCredentialsPolicy::Use, std::nullopt).session;
+    RetainPtr task = [session dataTaskWithRequest:request.nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody) completionHandler:makeBlockPtr([completionHandler = WTFMove(completionHandler)] (NSData *data, NSURLResponse *response, NSError *error) mutable {
+        if (error)
+            return completionHandler(error);
+        completionHandler(WebCore::SharedBuffer::create(data));
+    }).get()];
+    [task resume];
+}
+
 void NetworkSessionCocoa::dataTaskWithRequest(WebPageProxyIdentifier pageID, WebCore::ResourceRequest&& request, const std::optional<WebCore::SecurityOriginData>& topOrigin, CompletionHandler<void(DataTaskIdentifier)>&& completionHandler)
 {
     auto identifier = DataTaskIdentifier::generate();
@@ -2006,7 +2018,7 @@ void NetworkSessionCocoa::dataTaskWithRequest(WebPageProxyIdentifier pageID, Web
     auto nsRequest = request.nsURLRequest(WebCore::HTTPBodyUpdatePolicy::UpdateHTTPBody);
     auto session = sessionWrapperForTask(pageID, request, WebCore::StoredCredentialsPolicy::Use, std::nullopt).session;
     auto task = [session dataTaskWithRequest:nsRequest];
-    auto delegate = adoptNS([[WKURLSessionTaskDelegate alloc] initWithIdentifier:identifier session:*this]);
+    auto delegate = adoptNS([[WKURLSessionTaskDelegate alloc] initWithTask:task identifier:identifier session:*this]);
 #if HAVE(NSURLSESSION_TASK_DELEGATE)
     task.delegate = delegate.get();
 #endif
@@ -2182,7 +2194,7 @@ void NetworkSessionCocoa::setProxyConfigData(const Vector<std::pair<Vector<uint8
     bool recreateSessions = false;
     for (auto& config : proxyConfigurations) {
         uuid_t identifier;
-        memcpy(identifier, config.second.toSpan().data(), sizeof(uuid_t));
+        memcpy(identifier, config.second.span().data(), sizeof(uuid_t));
 
         auto nwProxyConfig = adoptNS(createProxyConfig(config.first.data(), config.first.size(), identifier));
 

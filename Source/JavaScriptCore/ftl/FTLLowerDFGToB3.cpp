@@ -113,14 +113,6 @@
 #include <wtf/GenericHashKey.h>
 #include <wtf/RecursableLambda.h>
 
-#undef RELEASE_ASSERT
-#define RELEASE_ASSERT(assertion) do { \
-    if (!(assertion)) { \
-        WTFReportAssertionFailure(__FILE__, __LINE__, WTF_PRETTY_FUNCTION, #assertion); \
-        CRASH(); \
-    } \
-} while (0)
-
 namespace JSC { namespace FTL {
 
 using namespace B3;
@@ -1066,6 +1058,7 @@ private:
             compileCheckDetached();
             break;
         case GetArrayLength:
+        case GetUndetachedTypeArrayLength:
             compileGetArrayLength();
             break;
         case GetTypedArrayLengthAsInt52:
@@ -1290,6 +1283,9 @@ private:
             break;
         case ToPropertyKey:
             compileToPropertyKey();
+            break;
+        case ToPropertyKeyOrNumber:
+            compileToPropertyKeyOrNumber();
             break;
         case MakeRope:
             compileMakeRope();
@@ -5857,29 +5853,30 @@ IGNORE_CLANG_WARNINGS_END
     LValue compileGetByValImpl()
     {
         JSGlobalObject* globalObject = m_graph.globalObjectFor(m_origin.semantic);
-        switch (m_node->arrayMode().type()) {
+        ArrayMode arrayMode = m_node->arrayMode();
+        switch (arrayMode.type()) {
         case Array::Int32:
         case Array::Contiguous: {
             LValue index = lowInt32(m_graph.varArgChild(m_node, 1));
             LValue storage = lowStorage(m_graph.varArgChild(m_node, 2));
             
-            IndexedAbstractHeap& heap = m_node->arrayMode().type() == Array::Int32 ?
+            IndexedAbstractHeap& heap = arrayMode.type() == Array::Int32 ?
                 m_heaps.indexedInt32Properties : m_heaps.indexedContiguousProperties;
 
             LValue base = lowCell(m_graph.varArgChild(m_node, 0));
 
-            if (m_node->arrayMode().isInBounds()) {
+            if (arrayMode.isInBounds()) {
                 LValue result = m_out.load64(baseIndexWithProvenValue(heap, storage, index, m_graph.varArgChild(m_node, 1)));
                 LValue isHole = m_out.isZero64(result);
-                if (m_node->arrayMode().isInBoundsSaneChain()) {
+                if (arrayMode.isInBoundsSaneChain()) {
                     DFG_ASSERT(
-                        m_graph, m_node, m_node->arrayMode().type() == Array::Contiguous, m_node->arrayMode().type());
+                        m_graph, m_node, arrayMode.type() == Array::Contiguous, arrayMode.type());
                     result = m_out.select(
                         isHole, m_out.constInt64(JSValue::encode(jsUndefined())), result);
                 } else
                     speculate(LoadFromHole, noValue(), nullptr, isHole);
                 // We have to keep base alive to keep content in storage alive.
-                if (m_node->arrayMode().type() == Array::Contiguous)
+                if (arrayMode.type() == Array::Contiguous)
                     ensureStillAliveHere(base);
                 return result;
             }
@@ -5902,7 +5899,7 @@ IGNORE_CLANG_WARNINGS_END
             
             m_out.appendTo(slowCase, continuation);
             ValueFromBlock slowResult;
-            if (m_node->arrayMode().isOutOfBoundsSaneChain()) {
+            if (arrayMode.isOutOfBoundsSaneChain()) {
                 speculate(NegativeIndex, noValue(), nullptr, m_out.lessThan(index, m_out.int32Zero));
                 slowResult = m_out.anchor(m_out.constInt64(JSValue::ValueUndefined));
             } else
@@ -5911,7 +5908,7 @@ IGNORE_CLANG_WARNINGS_END
             
             m_out.appendTo(continuation, lastNext);
             // We have to keep base alive to keep content in storage alive.
-            if (m_node->arrayMode().type() == Array::Contiguous)
+            if (arrayMode.type() == Array::Contiguous)
                 ensureStillAliveHere(base);
             return m_out.phi(Int64, fastResult, slowResult);
         }
@@ -5923,11 +5920,11 @@ IGNORE_CLANG_WARNINGS_END
             
             IndexedAbstractHeap& heap = m_heaps.indexedDoubleProperties;
             
-            if (m_node->arrayMode().isInBounds()) {
+            if (arrayMode.isInBounds()) {
                 LValue result = m_out.loadDouble(
                     baseIndexWithProvenValue(heap, storage, index, m_graph.varArgChild(m_node, 1)));
                 
-                if (!m_node->arrayMode().isInBoundsSaneChain()) {
+                if (!arrayMode.isInBoundsSaneChain()) {
                     speculate(
                         LoadFromHole, noValue(), nullptr,
                         m_out.doubleNotEqualOrUnordered(result, result));
@@ -5936,7 +5933,7 @@ IGNORE_CLANG_WARNINGS_END
                 return result;
             }
 
-            bool resultIsUnboxed = m_node->arrayMode().isOutOfBoundsSaneChain() && !(m_node->flags() & NodeBytecodeUsesAsOther);
+            bool resultIsUnboxed = arrayMode.isOutOfBoundsSaneChain() && !(m_node->flags() & NodeBytecodeUsesAsOther);
 
             LBasicBlock inBounds = m_out.newBlock();
             LBasicBlock boxPath = m_out.newBlock();
@@ -5961,7 +5958,7 @@ IGNORE_CLANG_WARNINGS_END
             
             m_out.appendTo(slowCase, continuation);
             ValueFromBlock slowResult;
-            if (m_node->arrayMode().isOutOfBoundsSaneChain()) {
+            if (arrayMode.isOutOfBoundsSaneChain()) {
                 speculate(NegativeIndex, noValue(), nullptr, m_out.lessThan(index, m_out.int32Zero));
                 if (resultIsUnboxed)
                     slowResult = m_out.anchor(m_out.constDouble(PNaN));
@@ -5995,7 +5992,7 @@ IGNORE_CLANG_WARNINGS_END
 
             LValue length = m_out.load32NonNegative(base, m_heaps.DirectArguments_length);
             auto isOutOfBounds = m_out.aboveOrEqual(index, length);
-            if (m_node->arrayMode().isInBounds()) {
+            if (arrayMode.isInBounds()) {
                 speculate(OutOfBounds, noValue(), nullptr, isOutOfBounds);
                 TypedPointer address = m_out.baseIndex(
                     m_heaps.DirectArguments_storage, base, m_out.zeroExtPtr(index));
@@ -6210,7 +6207,7 @@ IGNORE_CLANG_WARNINGS_END
 
             IndexedAbstractHeap& heap = m_heaps.ArrayStorage_vector;
 
-            if (m_node->arrayMode().isInBounds()) {
+            if (arrayMode.isInBounds()) {
                 LValue result = m_out.load64(baseIndexWithProvenValue(heap, storage, index, m_graph.varArgChild(m_node, 1)));
                 speculate(LoadFromHole, noValue(), nullptr, m_out.isZero64(result));
                 // We have to keep base alive to keep content in storage alive.
@@ -6261,32 +6258,57 @@ IGNORE_CLANG_WARNINGS_END
             LValue index = lowInt32(m_graph.varArgChild(m_node, 1));
             LValue storage = lowStorage(m_graph.varArgChild(m_node, 2));
             
-            TypedArrayType type = m_node->arrayMode().typedArrayType();
+            TypedArrayType type = arrayMode.typedArrayType();
             ASSERT(isTypedView(type));
             {
                 TypedPointer pointer = pointerIntoTypedArray(storage, index, type);
-                
-                if (isInt(type)) {
-                    LValue result = loadFromIntTypedArray(pointer, type);
-                    // We have to keep base alive since that keeps storage alive.
+
+                auto loadValue = [&]() -> LValue {
+                    if (isInt(type))
+                        return loadFromIntTypedArray(pointer, type);
+
+                    ASSERT(isFloat(type));
+
+                    switch (type) {
+                    case TypeFloat32:
+                        return m_out.floatToDouble(m_out.loadFloat(pointer));
+                    case TypeFloat64:
+                        return m_out.loadDouble(pointer);
+                    default:
+                        DFG_CRASH(m_graph, m_node, "Bad typed array type");
+                    }
+                    return nullptr;
+                };
+
+                if (arrayMode.isOutOfBounds()) {
+                    LBasicBlock fastCase = m_out.newBlock();
+                    LBasicBlock continuation = m_out.newBlock();
+
+                    ValueFromBlock slowResult = m_out.anchor(m_out.constInt64(JSValue::encode(jsUndefined())));
+                    LValue length = typedArrayLength(base, arrayMode.mayBeResizableOrGrowableSharedTypedArray(), arrayMode.type() == Array::AnyTypedArray ? std::nullopt : std::optional { arrayMode.typedArrayType() }, m_graph.varArgChild(m_node, 0));
+#if USE(LARGE_TYPED_ARRAYS)
+                    m_out.branch(m_out.aboveOrEqual(m_out.signExt32To64(index), length), rarely(continuation), usually(fastCase));
+#else
+                    m_out.branch(m_out.aboveOrEqual(index, length), rarely(continuation), usually(fastCase));
+#endif
+
+                    LBasicBlock lastNext = m_out.appendTo(fastCase, continuation);
+                    LValue unboxedResult = loadValue();
+                    LValue result = nullptr;
+                    if (isInt(type))
+                        result = boxInt32(unboxedResult);
+                    else
+                        result = boxDouble(purifyNaN(unboxedResult));
+                    ValueFromBlock fastResult = m_out.anchor(result);
+                    m_out.jump(continuation);
+
+                    m_out.appendTo(continuation, lastNext);
+                    // We have to keep base alive to keep content in storage alive.
                     ensureStillAliveHere(base);
-                    return result;
+                    return m_out.phi(Int64, fastResult, slowResult);
                 }
-            
-                ASSERT(isFloat(type));
-                
-                LValue result;
-                switch (type) {
-                case TypeFloat32:
-                    result = m_out.floatToDouble(m_out.loadFloat(pointer));
-                    break;
-                case TypeFloat64:
-                    result = m_out.loadDouble(pointer);
-                    break;
-                default:
-                    DFG_CRASH(m_graph, m_node, "Bad typed array type");
-                }
-                
+
+                LValue result = loadValue();
                 // We have to keep base alive since that keeps storage alive.
                 ensureStillAliveHere(base);
                 return result;
@@ -6307,8 +6329,13 @@ IGNORE_CLANG_WARNINGS_END
     void compileGetByVal()
     {
         LValue result = compileGetByValImpl();
-        TypedArrayType type = m_node->arrayMode().typedArrayType();
+        ArrayMode arrayMode = m_node->arrayMode();
+        TypedArrayType type = arrayMode.typedArrayType();
         if (isInt(type)) {
+            if (arrayMode.isOutOfBounds()) {
+                setJSValue(result);
+                return;
+            }
             constexpr bool canSpeculate = true;
             setIntTypedArrayLoadResult(result, type, canSpeculate);
             return;
@@ -6726,8 +6753,23 @@ IGNORE_CLANG_WARNINGS_END
                 LValue valueToStore;
                 
                 if (isInt(type)) {
-                    LValue intValue = getIntTypedArrayStoreOperand(child3, isClamped(type));
+                    bool isClamped = JSC::isClamped(type);
+                    if (isClamped) {
+                        if (child3->op() == GetByVal) {
+                            switch (child3->arrayMode().type()) {
+                            case Array::Uint8Array:
+                            case Array::Uint8ClampedArray: {
+                                // If the value is coming from Uint8Array / Uint8ClampedArray, the value is always within uint8_t.
+                                isClamped = false;
+                                break;
+                            }
+                            default:
+                                break;
+                            }
+                        }
+                    }
 
+                    LValue intValue = getIntTypedArrayStoreOperand(child3, isClamped);
                     valueToStore = intValue;
                 } else /* !isInt(type) */ {
                     LValue value = lowDouble(child3);
@@ -8009,7 +8051,7 @@ IGNORE_CLANG_WARNINGS_END
                 byteSize = m_out.constIntPtr(sizeof(IndexingHeader) + outOfLineCapacity * sizeof(JSValue) + argumentsLength.known * sizeof(JSValue));
             else
                 byteSize = m_out.add(m_out.constIntPtr(sizeof(IndexingHeader) + outOfLineCapacity * sizeof(JSValue)), m_out.shl(m_out.zeroExtPtr(length), m_out.constInt32(3)));
-            LValue allocator = allocatorForSize(vm().jsValueGigacageAuxiliarySpace(), byteSize, slowCase);
+            LValue allocator = allocatorForSize(vm().auxiliarySpace(), byteSize, slowCase);
             LValue storage = allocateHeapCell(allocator, slowCase);
             for (unsigned i = 0; i < outOfLineCapacity; ++i)
                 m_out.store64(m_out.int64Zero, m_out.address(m_heaps.properties.atAnyNumber(), storage, i * sizeof(JSValue)));
@@ -9712,25 +9754,53 @@ IGNORE_CLANG_WARNINGS_END
         LBasicBlock slowPathCase = m_out.newBlock();
         LBasicBlock continuation = m_out.newBlock();
 
-        Vector<ValueFromBlock, 3> results;
-        m_out.branch(
-            isCell(value, provenType(m_node->child1())), unsure(isCellCase), unsure(slowPathCase));
+        ValueFromBlock fastResult = m_out.anchor(value);
+        m_out.branch(isCell(value, provenType(m_node->child1())), unsure(isCellCase), unsure(slowPathCase));
 
         LBasicBlock lastNext = m_out.appendTo(isCellCase, notStringCase);
-        results.append(m_out.anchor(value));
         m_out.branch(isString(value, provenType(m_node->child1())), unsure(continuation), unsure(notStringCase));
 
         m_out.appendTo(notStringCase, slowPathCase);
-        results.append(m_out.anchor(value));
         m_out.branch(isSymbol(value, provenType(m_node->child1())), unsure(continuation), unsure(slowPathCase));
 
         m_out.appendTo(slowPathCase, continuation);
-        results.append(m_out.anchor(vmCall(
-            Int64, operationToPropertyKey, weakPointer(globalObject), value)));
+        ValueFromBlock slowResult = m_out.anchor(vmCall(Int64, operationToPropertyKey, weakPointer(globalObject), value));
         m_out.jump(continuation);
 
         m_out.appendTo(continuation, lastNext);
-        setJSValue(m_out.phi(Int64, results));
+        setJSValue(m_out.phi(Int64, fastResult, slowResult));
+    }
+
+    void compileToPropertyKeyOrNumber()
+    {
+        ASSERT(m_node->child1().useKind() == UntypedUse);
+        JSGlobalObject* globalObject = m_graph.globalObjectFor(m_origin.semantic);
+        LValue value = lowJSValue(m_node->child1());
+
+        LBasicBlock notNumberCase = m_out.newBlock();
+        LBasicBlock isCellCase = m_out.newBlock();
+        LBasicBlock notStringCase = m_out.newBlock();
+        LBasicBlock slowPathCase = m_out.newBlock();
+        LBasicBlock continuation = m_out.newBlock();
+
+        ValueFromBlock fastResult = m_out.anchor(value);
+        m_out.branch(isNumber(value, provenType(m_node->child1())), unsure(continuation), unsure(notNumberCase));
+
+        LBasicBlock lastNext = m_out.appendTo(notNumberCase, isCellCase);
+        m_out.branch(isCell(value, provenType(m_node->child1())), unsure(isCellCase), unsure(slowPathCase));
+
+        m_out.appendTo(isCellCase, notStringCase);
+        m_out.branch(isString(value, provenType(m_node->child1())), unsure(continuation), unsure(notStringCase));
+
+        m_out.appendTo(notStringCase, slowPathCase);
+        m_out.branch(isSymbol(value, provenType(m_node->child1())), unsure(continuation), unsure(slowPathCase));
+
+        m_out.appendTo(slowPathCase, continuation);
+        ValueFromBlock slowResult = m_out.anchor(vmCall(Int64, operationToPropertyKeyOrNumber, weakPointer(globalObject), value));
+        m_out.jump(continuation);
+
+        m_out.appendTo(continuation, lastNext);
+        setJSValue(m_out.phi(Int64, fastResult, slowResult));
     }
     
     void compileMakeRope()
@@ -10927,8 +10997,7 @@ IGNORE_CLANG_WARNINGS_END
             return;
         }
 
-        if (m_node->isBinaryUseKind(SymbolUse, UntypedUse)
-            || m_node->isBinaryUseKind(UntypedUse, SymbolUse)) {
+        if (m_node->isReflexiveBinaryUseKind(SymbolUse, UntypedUse)) {
             Edge symbolEdge = m_node->child1();
             Edge untypedEdge = m_node->child2();
             if (symbolEdge.useKind() != SymbolUse)
@@ -10941,11 +11010,14 @@ IGNORE_CLANG_WARNINGS_END
             return;
         }
 
-        if (m_node->isBinaryUseKind(MiscUse, UntypedUse)
-            || m_node->isBinaryUseKind(UntypedUse, MiscUse)
+        if (m_node->isBinaryUseKind(MiscUse)
+            || m_node->isReflexiveBinaryUseKind(MiscUse, UntypedUse)
+            || m_node->isBinaryUseKind(OtherUse)
+            || m_node->isReflexiveBinaryUseKind(OtherUse, UntypedUse)
+            || m_node->isBinaryUseKind(BooleanUse)
+            || m_node->isReflexiveBinaryUseKind(BooleanUse, UntypedUse)
 #if !USE(BIGINT32)
-            || m_node->isBinaryUseKind(NotDoubleUse, NeitherDoubleNorHeapBigIntNorStringUse)
-            || m_node->isBinaryUseKind(NeitherDoubleNorHeapBigIntNorStringUse, NotDoubleUse)) {
+            || m_node->isReflexiveBinaryUseKind(NotDoubleUse, NeitherDoubleNorHeapBigIntNorStringUse)) {
 #else
             ) {
 #endif
@@ -11353,7 +11425,7 @@ IGNORE_CLANG_WARNINGS_END
 
                 jit.addLinkTask(
                     [=] (LinkBuffer& linkBuffer) {
-                        callLinkInfo->setCodeLocations(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
+                        callLinkInfo->setDoneLocation(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
                     });
             });
 
@@ -11535,7 +11607,7 @@ IGNORE_CLANG_WARNINGS_END
                     jit.jump().linkTo(mainPath, &jit);
 
                     jit.addLinkTask([=] (LinkBuffer& linkBuffer) {
-                        callLinkInfo->setCodeLocations(linkBuffer.locationOf<JSInternalPtrTag>(slowPath));
+                        callLinkInfo->setSlowPathStart(linkBuffer.locationOf<JSInternalPtrTag>(slowPath));
                     });
                     return;
                 }
@@ -11589,7 +11661,7 @@ IGNORE_CLANG_WARNINGS_END
                         
                         jit.addLinkTask(
                             [=] (LinkBuffer& linkBuffer) {
-                                callLinkInfo->setCodeLocations(linkBuffer.locationOf<JSInternalPtrTag>(slowPath));
+                                callLinkInfo->setSlowPathStart(linkBuffer.locationOf<JSInternalPtrTag>(slowPath));
                             });
                     });
             });
@@ -11699,7 +11771,7 @@ IGNORE_CLANG_WARNINGS_END
 
                 jit.addLinkTask(
                     [=] (LinkBuffer& linkBuffer) {
-                        callLinkInfo->setCodeLocations(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
+                        callLinkInfo->setDoneLocation(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
                     });
             });
     }
@@ -12054,7 +12126,7 @@ IGNORE_CLANG_WARNINGS_END
                 
                 jit.addLinkTask(
                     [=] (LinkBuffer& linkBuffer) {
-                        callLinkInfo->setCodeLocations(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
+                        callLinkInfo->setDoneLocation(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
                     });
             });
 
@@ -12334,7 +12406,7 @@ IGNORE_CLANG_WARNINGS_END
                 
                 jit.addLinkTask(
                     [=] (LinkBuffer& linkBuffer) {
-                        callLinkInfo->setCodeLocations(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
+                        callLinkInfo->setDoneLocation(linkBuffer.locationOf<JSInternalPtrTag>(doneLocation));
                     });
             });
 
@@ -15552,12 +15624,15 @@ IGNORE_CLANG_WARNINGS_END
 
         m_out.appendTo(genericICBlock);
         LValue genericResult = compileGetByValImpl();
-        TypedArrayType type = m_node->arrayMode().typedArrayType();
+        ArrayMode arrayMode = m_node->arrayMode();
+        TypedArrayType type = arrayMode.typedArrayType();
         if (isInt(type)) {
-            if (elementSize(type) < 4 || isSigned(type))
-                genericResult = boxInt32(genericResult);
-            else
-                genericResult = strictInt52ToJSValue(m_out.zeroExt(genericResult, Int64));
+            if (!arrayMode.isOutOfBounds()) {
+                if (elementSize(type) < 4 || isSigned(type))
+                    genericResult = boxInt32(genericResult);
+                else
+                    genericResult = strictInt52ToJSValue(m_out.zeroExt(genericResult, Int64));
+            }
         } else if (genericResult->type() == Double)
             genericResult = boxDouble(purifyNaN(genericResult));
 
@@ -15892,7 +15967,7 @@ IGNORE_CLANG_WARNINGS_END
                 ValueFromBlock noButterfly = m_out.anchor(m_out.intPtrZero);
                 
                 LValue startOfStorage = allocateHeapCell(
-                    allocatorForSize(vm().jsValueGigacageAuxiliarySpace(), butterflySize, slowPath),
+                    allocatorForSize(vm().auxiliarySpace(), butterflySize, slowPath),
                     slowPath);
 
                 LValue fastButterflyValue = m_out.add(
@@ -17128,7 +17203,7 @@ IGNORE_CLANG_WARNINGS_END
         LBasicBlock lastNext = m_out.insertNewBlocksBefore(slowPath);
 
         size_t sizeInBytes = sizeInValues * sizeof(JSValue);
-        Allocator allocator = vm().jsValueGigacageAuxiliarySpace().allocatorFor(sizeInBytes, AllocatorForMode::AllocatorIfExists);
+        Allocator allocator = vm().auxiliarySpace().allocatorFor(sizeInBytes, AllocatorForMode::AllocatorIfExists);
         LValue startOfStorage = allocateHeapCell(
             m_out.constIntPtr(allocator.localAllocator()), slowPath);
         ValueFromBlock fastButterfly = m_out.anchor(
@@ -19217,7 +19292,7 @@ IGNORE_CLANG_WARNINGS_END
         LValue butterflySize = m_out.add(
             payloadSize, m_out.constIntPtr(sizeof(IndexingHeader)));
 
-        LValue allocator = allocatorForSize(vm().jsValueGigacageAuxiliarySpace(), butterflySize, failCase);
+        LValue allocator = allocatorForSize(vm().auxiliarySpace(), butterflySize, failCase);
         LValue startOfStorage = allocateHeapCell(allocator, failCase);
 
         LValue butterfly = m_out.add(startOfStorage, m_out.constIntPtr(sizeof(IndexingHeader)));
@@ -20270,6 +20345,25 @@ IGNORE_CLANG_WARNINGS_END
             }
             
             if (isClamped) {
+#if CPU(ARM64)
+                if (edge.useKind() == Int32Use) {
+                    PatchpointValue* patchpoint = m_out.patchpoint(Int32);
+                    patchpoint->appendSomeRegister(value);
+                    patchpoint->numGPScratchRegisters = 1;
+                    patchpoint->setGenerator([=] (CCallHelpers& jit, const StackmapGenerationParams& params) {
+                        GPRReg resultGPR = params[0].gpr();
+                        GPRReg inputGPR = params[1].gpr();
+                        GPRReg scratch1GPR = params.gpScratch(0);
+                        jit.clearBitsWithMaskRightShift32(inputGPR, inputGPR, CCallHelpers::TrustedImm32(31), resultGPR);
+                        jit.move(CCallHelpers::TrustedImm32(0xff), scratch1GPR);
+                        jit.moveConditionally32(CCallHelpers::Below, resultGPR, scratch1GPR, resultGPR, scratch1GPR, resultGPR);
+                    });
+                    patchpoint->effects = Effects::none();
+                    valueAsInt32 = patchpoint;
+                    return valueAsInt32;
+                }
+#endif
+
                 LBasicBlock atLeastZero = m_out.newBlock();
                 LBasicBlock continuation = m_out.newBlock();
                             
@@ -21805,6 +21899,7 @@ IGNORE_CLANG_WARNINGS_END
 
             switch (arrayMode.arrayClass()) {
             case Array::OriginalArray:
+            case Array::OriginalNonCopyOnWriteArray:
             case Array::OriginalCopyOnWriteArray:
                 DFG_CRASH(m_graph, m_node, "Unexpected original array");
                 return nullptr;
@@ -21847,6 +21942,7 @@ IGNORE_CLANG_WARNINGS_END
             LBasicBlock lastNext = m_out.appendTo(checkCase, trueCase);
             switch (arrayMode.arrayClass()) {
             case Array::OriginalArray:
+            case Array::OriginalNonCopyOnWriteArray:
             case Array::OriginalCopyOnWriteArray:
                 DFG_CRASH(m_graph, m_node, "Unexpected original array");
                 return nullptr;

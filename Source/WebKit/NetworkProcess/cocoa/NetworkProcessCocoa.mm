@@ -37,7 +37,7 @@
 #import "SandboxExtension.h"
 #import "WebCookieManager.h"
 #import <WebCore/NetworkStorageSession.h>
-#import <WebCore/PublicSuffix.h>
+#import <WebCore/PublicSuffixStore.h>
 #import <WebCore/ResourceRequestCFNet.h>
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/SecurityOrigin.h>
@@ -206,18 +206,13 @@ void saveCookies(NSHTTPCookieStorage *cookieStorage, CompletionHandler<void()>&&
 void NetworkProcess::platformFlushCookies(PAL::SessionID sessionID, CompletionHandler<void()>&& completionHandler)
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies));
-    if (auto* networkStorageSession = storageSession(sessionID))
-        saveCookies(networkStorageSession->nsCookieStorage(), WTFMove(completionHandler));
-    else
-        completionHandler();
-}
+    auto* networkStorageSession = storageSession(sessionID);
+    if (!networkStorageSession)
+        return completionHandler();
 
-#if ENABLE(CFPREFS_DIRECT_MODE)
-void NetworkProcess::notifyPreferencesChanged(const String& domain, const String& key, const std::optional<String>& encodedValue)
-{
-    preferenceDidUpdate(domain, key, encodedValue);
+    RetainPtr cookieStorage = networkStorageSession->nsCookieStorage();
+    saveCookies(cookieStorage.get(), WTFMove(completionHandler));
 }
-#endif
 
 const String& NetworkProcess::uiProcessBundleIdentifier() const
 {
@@ -232,7 +227,7 @@ void NetworkProcess::setBackupExclusionPeriodForTesting(PAL::SessionID sessionID
 {
     auto callbackAggregator = CallbackAggregator::create(WTFMove(completionHandler));
     if (auto* session = networkSession(sessionID))
-        session->storageManager().setBackupExclusionPeriodForTesting(period, [callbackAggregator] { });
+        session->protectedStorageManager()->setBackupExclusionPeriodForTesting(period, [callbackAggregator] { });
 }
 #endif // PLATFORM(IOS_FAMILY)
 
@@ -255,43 +250,5 @@ void NetworkProcess::setProxyConfigData(PAL::SessionID sessionID, Vector<std::pa
     session->setProxyConfigData(WTFMove(proxyConfigurations));
 }
 #endif // HAVE(NW_PROXY_CONFIG)
-
-#if USE(RUNNINGBOARD) && USE(EXTENSIONKIT)
-bool NetworkProcess::acquireLockedFileActivity()
-{
-    RELEASE_LOG(Process, "NetworkProcess::acquireLockedFileActivity hasAcquiredFileActivity = %d", hasAcquiredFileActivity());
-
-    invalidateFileActivity();
-
-    m_holdingLockedFileSemaphore = adoptOSObject(dispatch_semaphore_create(0));
-    [[NSProcessInfo processInfo] performExpiringActivityWithReason:@"Expiring activity for locked file" usingBlock:[holdingLockedFileSemaphore = m_holdingLockedFileSemaphore] (BOOL expired) {
-        RELEASE_LOG(Process, "Starting expiring activity, expired = %d", expired);
-        if (!expired) {
-            auto timeout = dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC);
-            dispatch_semaphore_wait(holdingLockedFileSemaphore.get(), timeout);
-        }
-    }];
-
-    return true;
-}
-
-void NetworkProcess::invalidateFileActivity()
-{
-    RELEASE_LOG(Process, "NetworkProcess::invalidateActivity hasAcquiredFileActivity = %d", hasAcquiredFileActivity());
-
-    if (!hasAcquiredFileActivity())
-        return;
-
-    if (m_holdingLockedFileSemaphore) {
-        dispatch_semaphore_signal(m_holdingLockedFileSemaphore.get());
-        m_holdingLockedFileSemaphore = nullptr;
-    }
-}
-
-bool NetworkProcess::hasAcquiredFileActivity() const
-{
-    return !!m_holdingLockedFileSemaphore;
-}
-#endif
 
 } // namespace WebKit

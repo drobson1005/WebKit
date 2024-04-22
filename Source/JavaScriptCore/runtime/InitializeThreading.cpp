@@ -115,7 +115,7 @@ void initialize()
 
         AssemblyCommentRegistry::initialize();
 #if ENABLE(WEBASSEMBLY)
-        if (Options::useWasmIPInt())
+        if (Options::useWasmIPInt() || Options::useIPIntWrappers())
             IPInt::initialize();
 #endif
         LLInt::initialize();
@@ -136,15 +136,11 @@ void initialize()
             WTF::fastEnableMiniMode();
 
         if (Wasm::isSupported() || !Options::usePollingTraps()) {
-            // JSLock::lock() can call registerThreadForMachExceptionHandling() which crashes if this has not been called first.
-            initializeSignalHandling();
-
             if (!Options::usePollingTraps())
                 VMTraps::initializeSignals();
             if (Wasm::isSupported())
                 Wasm::prepareSignalingMemory();
-        } else
-            disableSignalHandling();
+        }
 
         WTF::compilerFence();
         RELEASE_ASSERT(!g_jscConfig.initializeHasBeenCalled);

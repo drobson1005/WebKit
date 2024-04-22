@@ -87,7 +87,7 @@ struct SameSizeAsBorderValue {
 
 static_assert(sizeof(BorderValue) == sizeof(SameSizeAsBorderValue), "BorderValue should not grow");
 
-struct SameSizeAsRenderStyle {
+struct SameSizeAsRenderStyle : CanMakeCheckedPtr<SameSizeAsRenderStyle> {
     void* nonInheritedDataRefs[1];
     struct NonInheritedFlags {
         unsigned m_bitfields[2];
@@ -845,8 +845,8 @@ static bool rareDataChangeRequiresLayout(const StyleRareNonInheritedData& first,
     if (first.inputSecurity != second.inputSecurity)
         return true;
 
-    if (first.effectiveContainment().contains(Containment::Size) != second.effectiveContainment().contains(Containment::Size)
-        || first.effectiveContainment().contains(Containment::InlineSize) != second.effectiveContainment().contains(Containment::InlineSize))
+    if (first.usedContain().contains(Containment::Size) != second.usedContain().contains(Containment::Size)
+        || first.usedContain().contains(Containment::InlineSize) != second.usedContain().contains(Containment::InlineSize))
         return true;
 
     // content-visibiliy:hidden turns on contain:size which requires relayout.
@@ -882,7 +882,7 @@ static bool rareInheritedDataChangeRequiresLayout(const StyleRareInheritedData& 
         || first.textAlignLast != second.textAlignLast
         || first.textJustify != second.textJustify
         || first.textIndentLine != second.textIndentLine
-        || first.effectiveZoom != second.effectiveZoom
+        || first.usedZoom != second.usedZoom
         || first.textZoom != second.textZoom
 #if ENABLE(TEXT_AUTOSIZING)
         || first.textSizeAdjust != second.textSizeAdjust
@@ -909,7 +909,7 @@ static bool rareInheritedDataChangeRequiresLayout(const StyleRareInheritedData& 
         || first.lineSnap != second.lineSnap
         || first.lineAlign != second.lineAlign
         || first.hangingPunctuation != second.hangingPunctuation
-        || first.effectiveContentVisibility != second.effectiveContentVisibility
+        || first.usedContentVisibility != second.usedContentVisibility
 #if ENABLE(OVERFLOW_SCROLLING_TOUCH)
         || first.useTouchOverflowScrolling != second.useTouchOverflowScrolling
 #endif
@@ -1070,7 +1070,7 @@ bool RenderStyle::changeRequiresLayout(const RenderStyle& other, OptionSet<Style
         || m_nonInheritedFlags.overflowY != other.m_nonInheritedFlags.overflowY)
         return true;
 
-    if ((visibility() == Visibility::Collapse) != (other.visibility() == Visibility::Collapse))
+    if ((usedVisibility() == Visibility::Collapse) != (other.usedVisibility() == Visibility::Collapse))
         return true;
 
     bool hasFirstLineStyle = hasPseudoStyle(PseudoId::FirstLine);
@@ -1175,7 +1175,7 @@ bool RenderStyle::changeRequiresLayerRepaint(const RenderStyle& other, OptionSet
 
 static bool requiresPainting(const RenderStyle& style)
 {
-    if (style.visibility() == Visibility::Hidden)
+    if (style.usedVisibility() == Visibility::Hidden)
         return false;
     if (!style.opacity())
         return false;
@@ -1220,7 +1220,6 @@ static bool rareInheritedDataChangeRequiresRepaint(const StyleRareInheritedData&
     ;
 }
 
-#if ENABLE(CSS_PAINTING_API)
 void RenderStyle::addCustomPaintWatchProperty(const AtomString& name)
 {
     auto& data = m_nonInheritedData.access().rareData.access();
@@ -1265,7 +1264,6 @@ inline static bool changedCustomPaintWatchedProperty(const RenderStyle& a, const
 
     return false;
 }
-#endif
 
 bool RenderStyle::changeRequiresRepaint(const RenderStyle& other, OptionSet<StyleDifferenceContextSensitiveProperty>& changedContextSensitiveProperties) const
 {
@@ -1312,10 +1310,8 @@ bool RenderStyle::changeRequiresRepaint(const RenderStyle& other, OptionSet<Styl
         && rareInheritedDataChangeRequiresRepaint(*m_rareInheritedData, *other.m_rareInheritedData))
         return true;
 
-#if ENABLE(CSS_PAINTING_API)
     if (changedCustomPaintWatchedProperty(*this, *m_nonInheritedData->rareData, other, *other.m_nonInheritedData->rareData))
         return true;
-#endif
 
     return false;
 }
@@ -1542,6 +1538,8 @@ void RenderStyle::conservativelyCollectChangedAnimatableProperties(const RenderS
             changingProperties.m_properties.set(CSSPropertyClear);
         if (first.position != second.position)
             changingProperties.m_properties.set(CSSPropertyPosition);
+        if (first.effectiveDisplay != second.effectiveDisplay)
+            changingProperties.m_properties.set(CSSPropertyDisplay);
         if (first.floating != second.floating)
             changingProperties.m_properties.set(CSSPropertyFloat);
         if (first.tableLayout != second.tableLayout)
@@ -1550,7 +1548,6 @@ void RenderStyle::conservativelyCollectChangedAnimatableProperties(const RenderS
             changingProperties.m_properties.set(CSSPropertyTextDecorationLine);
 
         // Non animated styles are followings.
-        // effectiveDisplay
         // originalDisplay
         // unicodeBidi
         // usesViewportUnits
@@ -2080,14 +2077,14 @@ void RenderStyle::conservativelyCollectChangedAnimatableProperties(const RenderS
         // textSizeAdjust
         // userSelect
         // isInSubtreeWithBlendMode
-        // effectiveTouchActions
+        // usedTouchActions
         // eventListenerRegionTypes
         // effectiveInert
-        // effectiveContentVisibility
+        // usedContentVisibility
         // strokeColor
         // visitedLinkStrokeColor
         // hasSetStrokeColor
-        // effectiveZoom
+        // usedZoom
         // textBoxEdge
         // textSecurity
         // userModify
@@ -2577,8 +2574,8 @@ const AtomString& RenderStyle::hyphenString() const
         return hyphenationString;
 
     // FIXME: This should depend on locale.
-    static MainThreadNeverDestroyed<const AtomString> hyphenMinusString(&hyphenMinus, 1);
-    static MainThreadNeverDestroyed<const AtomString> hyphenString(&hyphen, 1);
+    static MainThreadNeverDestroyed<const AtomString> hyphenMinusString(span(hyphenMinus));
+    static MainThreadNeverDestroyed<const AtomString> hyphenString(span(hyphen));
     return fontCascade().primaryFont().glyphForCharacter(hyphen) ? hyphenString : hyphenMinusString;
 }
 
@@ -2590,28 +2587,28 @@ const AtomString& RenderStyle::textEmphasisMarkString() const
     case TextEmphasisMark::Custom:
         return textEmphasisCustomMark();
     case TextEmphasisMark::Dot: {
-        static MainThreadNeverDestroyed<const AtomString> filledDotString(&bullet, 1);
-        static MainThreadNeverDestroyed<const AtomString> openDotString(&whiteBullet, 1);
+        static MainThreadNeverDestroyed<const AtomString> filledDotString(span(bullet));
+        static MainThreadNeverDestroyed<const AtomString> openDotString(span(whiteBullet));
         return textEmphasisFill() == TextEmphasisFill::Filled ? filledDotString : openDotString;
     }
     case TextEmphasisMark::Circle: {
-        static MainThreadNeverDestroyed<const AtomString> filledCircleString(&blackCircle, 1);
-        static MainThreadNeverDestroyed<const AtomString> openCircleString(&whiteCircle, 1);
+        static MainThreadNeverDestroyed<const AtomString> filledCircleString(span(blackCircle));
+        static MainThreadNeverDestroyed<const AtomString> openCircleString(span(whiteCircle));
         return textEmphasisFill() == TextEmphasisFill::Filled ? filledCircleString : openCircleString;
     }
     case TextEmphasisMark::DoubleCircle: {
-        static MainThreadNeverDestroyed<const AtomString> filledDoubleCircleString(&fisheye, 1);
-        static MainThreadNeverDestroyed<const AtomString> openDoubleCircleString(&bullseye, 1);
+        static MainThreadNeverDestroyed<const AtomString> filledDoubleCircleString(span(fisheye));
+        static MainThreadNeverDestroyed<const AtomString> openDoubleCircleString(span(bullseye));
         return textEmphasisFill() == TextEmphasisFill::Filled ? filledDoubleCircleString : openDoubleCircleString;
     }
     case TextEmphasisMark::Triangle: {
-        static MainThreadNeverDestroyed<const AtomString> filledTriangleString(&blackUpPointingTriangle, 1);
-        static MainThreadNeverDestroyed<const AtomString> openTriangleString(&whiteUpPointingTriangle, 1);
+        static MainThreadNeverDestroyed<const AtomString> filledTriangleString(span(blackUpPointingTriangle));
+        static MainThreadNeverDestroyed<const AtomString> openTriangleString(span(whiteUpPointingTriangle));
         return textEmphasisFill() == TextEmphasisFill::Filled ? filledTriangleString : openTriangleString;
     }
     case TextEmphasisMark::Sesame: {
-        static MainThreadNeverDestroyed<const AtomString> filledSesameString(&sesameDot, 1);
-        static MainThreadNeverDestroyed<const AtomString> openSesameString(&whiteSesameDot, 1);
+        static MainThreadNeverDestroyed<const AtomString> filledSesameString(span(sesameDot));
+        static MainThreadNeverDestroyed<const AtomString> openSesameString(span(whiteSesameDot));
         return textEmphasisFill() == TextEmphasisFill::Filled ? filledSesameString : openSesameString;
     }
     case TextEmphasisMark::Auto:
@@ -3030,7 +3027,7 @@ Color RenderStyle::colorResolvingCurrentColor(CSSPropertyID colorProperty, bool 
         if (colorProperty == CSSPropertyTextDecorationColor) {
             if (hasPositiveStrokeWidth()) {
                 // Prefer stroke color if possible but not if it's fully transparent.
-                auto strokeColor = colorResolvingCurrentColor(effectiveStrokeColorProperty(), visitedLink);
+                auto strokeColor = colorResolvingCurrentColor(usedStrokeColorProperty(), visitedLink);
                 if (strokeColor.isVisible())
                     return strokeColor;
             }
@@ -3106,7 +3103,7 @@ Color RenderStyle::usedAccentColor() const
     return colorResolvingCurrentColor(accentColor());
 }
 
-Color RenderStyle::effectiveScrollbarThumbColor() const
+Color RenderStyle::usedScrollbarThumbColor() const
 {
     if (!scrollbarColor().has_value())
         return { };
@@ -3117,7 +3114,7 @@ Color RenderStyle::effectiveScrollbarThumbColor() const
     return colorResolvingCurrentColor(scrollbarColor().value().thumbColor);
 }
 
-Color RenderStyle::effectiveScrollbarTrackColor() const
+Color RenderStyle::usedScrollbarTrackColor() const
 {
     if (!scrollbarColor().has_value())
         return { };
@@ -3776,7 +3773,7 @@ bool RenderStyle::hasPositiveStrokeWidth() const
 
 Color RenderStyle::computedStrokeColor() const
 {
-    return visitedDependentColor(effectiveStrokeColorProperty());
+    return visitedDependentColor(usedStrokeColorProperty());
 }
 
 UsedClear RenderStyle::usedClear(const RenderObject& renderer)

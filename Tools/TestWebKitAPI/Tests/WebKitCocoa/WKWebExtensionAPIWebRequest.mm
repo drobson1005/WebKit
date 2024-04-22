@@ -27,13 +27,16 @@
 
 #if ENABLE(WK_WEB_EXTENSIONS)
 
+#import "HTTPServer.h"
+#import "PlatformUtilities.h"
+#import "WebExtensionUtilities.h"
 #import <WebKit/_WKWebExtensionWebRequestFilter.h>
 
 namespace TestWebKitAPI {
 
 #if PLATFORM(MAC)
 
-static auto *webRequestManifest = @{ @"manifest_version": @3, @"permissions": @[ @"webRequest" ], @"background": @{ @"scripts": @[ @"background.js" ], @"type": @"module", @"persistent": @YES } };
+static auto *webRequestManifest = @{ @"manifest_version": @2, @"permissions": @[ @"webRequest" ], @"background": @{ @"scripts": @[ @"background.js" ], @"type": @"module", @"persistent": @YES } };
 
 TEST(WKWebExtensionAPIWebRequest, EventListenerTest)
 {

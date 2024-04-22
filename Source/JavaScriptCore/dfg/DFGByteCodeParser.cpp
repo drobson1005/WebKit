@@ -251,7 +251,7 @@ private:
     Node* replace(Node* base, unsigned identifier, const PutByVariant&, Node* value);
 
     template<typename Op>
-    void parseGetById(const JSInstruction*);
+    void parseGetById(const JSInstruction*, unsigned identifierNumber, CacheableIdentifier);
     void simplifyGetByStatus(Node* base, GetByStatus&);
     void handleGetById(
         VirtualRegister destination, SpeculatedType, Node* base, CacheableIdentifier, unsigned identifierNumber, GetByStatus, AccessType, BytecodeIndex osrExitIndex);
@@ -376,7 +376,7 @@ private:
             // case if the function is a singleton then we already know it.
             if (FunctionExecutable* executable = jsDynamicCast<FunctionExecutable*>(m_codeBlock->ownerExecutable())) {
                 if (JSFunction* function = executable->singleton().inferredValue()) {
-                    m_graph.watchpoints().addLazily(executable);
+                    m_graph.watchpoints().addLazily(m_graph, executable);
                     return weakJSConstant(function);
                 }
             }
@@ -767,17 +767,6 @@ private:
     Node* weakJSConstant(JSValue constantValue)
     {
         return jsConstant(m_graph.freeze(constantValue));
-    }
-
-    // Helper functions to get/set the this value.
-    Node* getThis()
-    {
-        return get(m_inlineStackTop->m_codeBlock->thisRegister());
-    }
-
-    void setThis(Node* value)
-    {
-        set(m_inlineStackTop->m_codeBlock->thisRegister(), value);
     }
 
     InlineCallFrame* inlineCallFrame()
@@ -6064,14 +6053,12 @@ void ByteCodeParser::clearCaches()
 }
 
 template<typename Op>
-void ByteCodeParser::parseGetById(const JSInstruction* currentInstruction)
+void ByteCodeParser::parseGetById(const JSInstruction* currentInstruction, unsigned identifierNumber, CacheableIdentifier identifier)
 {
     auto bytecode = currentInstruction->as<Op>();
     SpeculatedType prediction = getPrediction();
     
     Node* base = get(bytecode.m_base);
-    unsigned identifierNumber = m_inlineStackTop->m_identifierRemap[bytecode.m_property];
-    UniquedStringImpl* uid = m_graph.identifiers()[identifierNumber];
     
     AccessType type = AccessType::GetById;
     if (Op::opcodeID == op_try_get_by_id)
@@ -6084,7 +6071,7 @@ void ByteCodeParser::parseGetById(const JSInstruction* currentInstruction)
         m_inlineStackTop->m_baselineMap, m_icContextStack,
         currentCodeOrigin());
 
-    handleGetById(bytecode.m_dst, prediction, base, CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_inlineStackTop->m_profiledBlock, uid), identifierNumber, getByStatus, type, nextOpcodeIndex());
+    handleGetById(bytecode.m_dst, prediction, base, identifier, identifierNumber, getByStatus, type, nextOpcodeIndex());
 }
 
 static uint64_t makeDynamicVarOpInfo(unsigned identifierNumber, unsigned getPutInfo)
@@ -6232,8 +6219,8 @@ void ByteCodeParser::parseBlock(unsigned limit)
         }
             
         case op_to_this: {
-            Node* op1 = getThis();
             auto bytecode = currentInstruction->as<OpToThis>();
+            Node* op1 = get(VirtualRegister(bytecode.m_srcDst));
             auto& metadata = bytecode.metadata(codeBlock);
             StructureID cachedStructureID = metadata.m_cachedStructureID;
             Structure* cachedStructure = nullptr;
@@ -6245,7 +6232,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
                 || cachedStructure->classInfoForCells()->isSubClassOf(JSScope::info())
                 || m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadCache)
                 || (op1->op() == GetLocal && op1->variableAccessData()->structureCheckHoistingFailed())) {
-                setThis(addToGraph(ToThis, OpInfo(bytecode.m_ecmaMode), OpInfo(getPrediction()), op1));
+                set(bytecode.m_srcDst, addToGraph(ToThis, OpInfo(bytecode.m_ecmaMode), OpInfo(getPrediction()), op1));
             } else {
                 addToGraph(
                     CheckStructure,
@@ -6914,6 +6901,13 @@ void ByteCodeParser::parseBlock(unsigned limit)
             NEXT_OPCODE(op_to_property_key);
         }
 
+        case op_to_property_key_or_number: {
+            auto bytecode = currentInstruction->as<OpToPropertyKeyOrNumber>();
+            Node* value = get(bytecode.m_src);
+            set(bytecode.m_dst, addToGraph(ToPropertyKeyOrNumber, value));
+            NEXT_OPCODE(op_to_property_key_or_number);
+        }
+
         case op_strcat: {
             auto bytecode = currentInstruction->as<OpStrcat>();
             int startOperand = bytecode.m_src.offset();
@@ -7316,16 +7310,35 @@ void ByteCodeParser::parseBlock(unsigned limit)
         }
 
         case op_get_by_id_direct: {
-            parseGetById<OpGetByIdDirect>(currentInstruction);
+            auto bytecode = currentInstruction->as<OpGetByIdDirect>();
+            unsigned identifierNumber = m_inlineStackTop->m_identifierRemap[bytecode.m_property];
+            UniquedStringImpl* uid = m_graph.identifiers()[identifierNumber];
+            auto identifier = CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_inlineStackTop->m_profiledBlock, uid);
+            parseGetById<OpGetByIdDirect>(currentInstruction, identifierNumber, identifier);
             NEXT_OPCODE(op_get_by_id_direct);
         }
         case op_try_get_by_id: {
-            parseGetById<OpTryGetById>(currentInstruction);
+            auto bytecode = currentInstruction->as<OpTryGetById>();
+            unsigned identifierNumber = m_inlineStackTop->m_identifierRemap[bytecode.m_property];
+            UniquedStringImpl* uid = m_graph.identifiers()[identifierNumber];
+            auto identifier = CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_inlineStackTop->m_profiledBlock, uid);
+            parseGetById<OpTryGetById>(currentInstruction, identifierNumber, identifier);
             NEXT_OPCODE(op_try_get_by_id);
         }
         case op_get_by_id: {
-            parseGetById<OpGetById>(currentInstruction);
+            auto bytecode = currentInstruction->as<OpGetById>();
+            unsigned identifierNumber = m_inlineStackTop->m_identifierRemap[bytecode.m_property];
+            UniquedStringImpl* uid = m_graph.identifiers()[identifierNumber];
+            auto identifier = CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_inlineStackTop->m_profiledBlock, uid);
+            parseGetById<OpGetById>(currentInstruction, identifierNumber, identifier);
             NEXT_OPCODE(op_get_by_id);
+        }
+        case op_get_length: {
+            unsigned identifierNumber = m_graph.identifiers().ensure(m_vm->propertyNames->length.impl());
+            UniquedStringImpl* uid = m_graph.identifiers()[identifierNumber];
+            auto identifier = CacheableIdentifier::createFromImmortalIdentifier(uid);
+            parseGetById<OpGetLength>(currentInstruction, identifierNumber, identifier);
+            NEXT_OPCODE(op_get_length);
         }
         case op_get_by_id_with_this: {
             SpeculatedType prediction = getPrediction();
@@ -8545,7 +8558,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
 
                 if (symbolTable) {
                     if (JSScope* scope = symbolTable->singleton().inferredValue()) {
-                        m_graph.watchpoints().addLazily(symbolTable);
+                        m_graph.watchpoints().addLazily(m_graph, symbolTable);
                         set(bytecode.m_dst, weakJSConstant(scope));
                         break;
                     }
@@ -8861,6 +8874,9 @@ void ByteCodeParser::parseBlock(unsigned limit)
                     // Must happen after the store. See comment for GetGlobalVar.
                     addToGraph(NotifyWrite, OpInfo(watchpoints));
                 }
+
+                // Keep scope alive until after put.
+                addToGraph(Phantom, scopeNode);
                 break;
             }
 

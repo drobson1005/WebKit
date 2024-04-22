@@ -167,7 +167,7 @@ static String generateTemporaryPath(const Function<bool(const String&)>& action)
     do {
         wchar_t tempFile[] = L"XXXXXXXX.tmp"; // Use 8.3 style name (more characters aren't helpful due to 8.3 short file names)
         const int randomPartLength = 8;
-        cryptographicallyRandomValues(tempFile, randomPartLength * sizeof(wchar_t));
+        cryptographicallyRandomValues({ reinterpret_cast<uint8_t*>(tempFile), randomPartLength * sizeof(wchar_t) });
 
         // Limit to valid filesystem characters, also excluding others that could be problematic, like punctuation.
         // don't include both upper and lowercase since Windows file systems are typically not case sensitive.
@@ -275,7 +275,7 @@ bool flushFile(PlatformFileHandle)
     return false;
 }
 
-int writeToFile(PlatformFileHandle handle, const void* data, int length)
+int64_t writeToFile(PlatformFileHandle handle, const void* data, size_t length)
 {
     if (!isHandleValid(handle))
         return -1;
@@ -285,10 +285,10 @@ int writeToFile(PlatformFileHandle handle, const void* data, int length)
 
     if (!success)
         return -1;
-    return static_cast<int>(bytesWritten);
+    return static_cast<int64_t>(bytesWritten);
 }
 
-int readFromFile(PlatformFileHandle handle, void* data, int length)
+int64_t readFromFile(PlatformFileHandle handle, void* data, size_t length)
 {
     if (!isHandleValid(handle))
         return -1;
@@ -298,7 +298,7 @@ int readFromFile(PlatformFileHandle handle, void* data, int length)
 
     if (!success)
         return -1;
-    return static_cast<int>(bytesRead);
+    return static_cast<int64_t>(bytesRead);
 }
 
 String localUserSpecificStorageDirectory()

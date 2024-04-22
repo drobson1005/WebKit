@@ -858,8 +858,8 @@ RefPtr<DocumentFragment> Pasteboard::documentFragment(LocalFrame& frame, const S
         // get data off of clipboard
         HANDLE cbData = ::GetClipboardData(HTMLClipboardFormat);
         if (cbData) {
-            SIZE_T dataSize = ::GlobalSize(cbData);
-            String cfhtml(PAL::UTF8Encoding().decode(static_cast<char*>(GlobalLock(cbData)), dataSize));
+            std::span data { static_cast<uint8_t*>(GlobalLock(cbData)), ::GlobalSize(cbData) };
+            String cfhtml(PAL::UTF8Encoding().decode(data));
             GlobalUnlock(cbData);
             ::CloseClipboard();
 
@@ -1156,7 +1156,7 @@ void Pasteboard::writeCustomData(const Vector<PasteboardCustomData>& data)
 
         if (customData.hasSameOriginCustomData() || !customData.origin().isEmpty()) {
             auto sharedBuffer = customData.createSharedBuffer();
-            HGLOBAL cbData = createGlobalData(reinterpret_cast<const uint8_t*>(sharedBuffer->data()), sharedBuffer->size());
+            HGLOBAL cbData = createGlobalData(sharedBuffer->span());
             if (cbData && !::SetClipboardData(CustomDataClipboardFormat, cbData))
                 ::GlobalFree(cbData);
         }

@@ -49,9 +49,10 @@ RemoteCompositorIntegrationProxy::~RemoteCompositorIntegrationProxy()
 }
 
 #if PLATFORM(COCOA)
-Vector<MachSendRight> RemoteCompositorIntegrationProxy::recreateRenderBuffers(int height, int width)
+Vector<MachSendRight> RemoteCompositorIntegrationProxy::recreateRenderBuffers(int width, int height, WebCore::DestinationColorSpace&& destinationColorSpace, WebCore::AlphaPremultiplication alphaMode, WebCore::WebGPU::Device& device)
 {
-    auto sendResult = sendSync(Messages::RemoteCompositorIntegration::RecreateRenderBuffers(height, width));
+    RemoteDeviceProxy& proxyDevice = static_cast<RemoteDeviceProxy&>(device);
+    auto sendResult = sendSync(Messages::RemoteCompositorIntegration::RecreateRenderBuffers(width, height, WTFMove(destinationColorSpace), alphaMode, proxyDevice.backing()));
     if (!sendResult.succeeded())
         return { };
 
@@ -77,7 +78,7 @@ void RemoteCompositorIntegrationProxy::paintCompositedResultsToCanvas(WebCore::I
     UNUSED_VARIABLE(sendResult);
 }
 
-void RemoteCompositorIntegrationProxy::withDisplayBufferAsNativeImage(uint32_t, Function<void(WebCore::NativeImage&)>)
+void RemoteCompositorIntegrationProxy::withDisplayBufferAsNativeImage(uint32_t, Function<void(WebCore::NativeImage*)>)
 {
     RELEASE_ASSERT_NOT_REACHED();
 }

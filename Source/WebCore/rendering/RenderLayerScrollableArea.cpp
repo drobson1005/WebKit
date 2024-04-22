@@ -501,7 +501,7 @@ bool RenderLayerScrollableArea::scrollsOverflow() const
 bool RenderLayerScrollableArea::canUseCompositedScrolling() const
 {
     auto& renderer = m_layer.renderer();
-    bool isVisible = renderer.style().visibility() == Visibility::Visible;
+    bool isVisible = renderer.style().usedVisibility() == Visibility::Visible;
     if (renderer.settings().asyncOverflowScrollingEnabled())
         return isVisible && scrollsOverflow() && !m_layer.isInsideSVGForeignObject();
 
@@ -546,7 +546,7 @@ bool RenderLayerScrollableArea::handleWheelEventForScrolling(const PlatformWheel
 IntRect RenderLayerScrollableArea::visibleContentRectInternal(VisibleContentRectIncludesScrollbars scrollbarInclusion, VisibleContentRectBehavior) const
 {
     IntSize scrollbarSpace;
-    if (showsOverflowControls() && scrollbarInclusion == IncludeScrollbars)
+    if (showsOverflowControls() && scrollbarInclusion == VisibleContentRectIncludesScrollbars::Yes)
         scrollbarSpace = scrollbarIntrusion();
 
     auto visibleSize = this->visibleSize();
@@ -847,9 +847,11 @@ bool RenderLayerScrollableArea::canShowNonOverlayScrollbars() const
 
 void RenderLayerScrollableArea::createScrollbarsController()
 {
-    if (auto scrollbarController = m_layer.page().chrome().client().createScrollbarsController(m_layer.page(), *this)) {
-        setScrollbarsController(WTFMove(scrollbarController));
-        return;
+    if (usesAsyncScrolling()) {
+        if (auto scrollbarController = m_layer.page().chrome().client().createScrollbarsController(m_layer.page(), *this)) {
+            setScrollbarsController(WTFMove(scrollbarController));
+            return;
+        }
     }
 
     ScrollableArea::createScrollbarsController();
@@ -1024,14 +1026,14 @@ OverscrollBehavior RenderLayerScrollableArea::verticalOverscrollBehavior() const
 Color RenderLayerScrollableArea::scrollbarThumbColorStyle() const
 {
     if (auto* renderer = m_layer.renderBox())
-        return renderer->style().effectiveScrollbarThumbColor();
+        return renderer->style().usedScrollbarThumbColor();
     return { };
 }
 
 Color RenderLayerScrollableArea::scrollbarTrackColorStyle() const
 {
     if (auto* renderer = m_layer.renderBox())
-        return renderer->style().effectiveScrollbarTrackColor();
+        return renderer->style().usedScrollbarTrackColor();
     return { };
 }
 

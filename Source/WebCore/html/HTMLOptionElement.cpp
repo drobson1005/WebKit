@@ -173,7 +173,7 @@ void HTMLOptionElement::attributeChanged(const QualifiedName& name, const AtomSt
         if (m_disabled != newDisabled) {
             Style::PseudoClassChangeInvalidation disabledInvalidation(*this, { { CSSSelector::PseudoClass::Disabled, newDisabled },  { CSSSelector::PseudoClass::Enabled, !newDisabled } });
             m_disabled = newDisabled;
-            if (renderer() && renderer()->style().hasEffectiveAppearance())
+            if (renderer() && renderer()->style().hasUsedAppearance())
                 renderer()->repaint();
         }
         break;
@@ -249,7 +249,7 @@ void HTMLOptionElement::setSelectedState(bool selected, AllowStyleInvalidation a
     m_isSelected = selected;
 
     if (auto* cache = document().existingAXObjectCache())
-        cache->onSelectedChanged(this);
+        cache->onSelectedChanged(*this);
 }
 
 void HTMLOptionElement::childrenChanged(const ChildChange& change)

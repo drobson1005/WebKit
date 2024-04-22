@@ -201,6 +201,7 @@ public:
 
     // Input is like "foo.com" or "foo.com:8000".
     WTF_EXPORT_PRIVATE void setHostAndPort(StringView);
+    WTF_EXPORT_PRIVATE void removeHostAndPort();
 
     WTF_EXPORT_PRIVATE void setUser(StringView);
     WTF_EXPORT_PRIVATE void setPassword(StringView);
@@ -216,7 +217,7 @@ public:
 
     WTF_EXPORT_PRIVATE void setFragmentIdentifier(StringView);
     WTF_EXPORT_PRIVATE void removeFragmentIdentifier();
-    WTF_EXPORT_PRIVATE String consumefragmentDirective();
+    WTF_EXPORT_PRIVATE String consumeFragmentDirective();
     WTF_EXPORT_PRIVATE void removeQueryAndFragmentIdentifier();
 
     WTF_EXPORT_PRIVATE static bool hostIsIPAddress(StringView);

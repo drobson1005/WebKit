@@ -95,6 +95,7 @@
 #include "WebKitWebViewBasePrivate.h"
 #include <WebCore/GUniquePtrGtk.h>
 #include <WebCore/GdkCairoUtilities.h>
+#include <WebCore/GdkSkiaUtilities.h>
 #include <WebCore/RefPtrCairo.h>
 #endif
 
@@ -2715,7 +2716,7 @@ String webkitWebViewGetCurrentScriptDialogMessage(WebKitWebView* webView)
     if (!webView->priv->currentScriptDialog)
         return { };
 
-    return String::fromUTF8(webView->priv->currentScriptDialog->message);
+    return String::fromUTF8(webView->priv->currentScriptDialog->message.span());
 }
 
 void webkitWebViewSetCurrentScriptDialogUserInput(WebKitWebView* webView, const String& userInput)
@@ -3051,6 +3052,17 @@ void webkitWebViewPermissionStateQuery(WebKitWebView* webView, WebKitPermissionS
     g_signal_emit(webView, signals[QUERY_PERMISSION_STATE], 0, query, &result);
 }
 
+#if PLATFORM(GTK) || (PLATFORM(WPE) && ENABLE(WPE_PLATFORM))
+RendererBufferFormat webkitWebViewGetRendererBufferFormat(WebKitWebView* webView)
+{
+#if PLATFORM(GTK)
+    return webkitWebViewBaseGetRendererBufferFormat(WEBKIT_WEB_VIEW_BASE(webView));
+#elif PLATFORM(WPE) && ENABLE(WPE_PLATFORM)
+    return webView->priv->view->renderBufferFormat();
+#endif
+}
+#endif
+
 #if PLATFORM(WPE)
 /**
  * webkit_web_view_get_backend:
@@ -3327,7 +3339,7 @@ void webkit_web_view_load_alternate_html(WebKitWebView* webView, const gchar* co
     g_return_if_fail(content);
     g_return_if_fail(contentURI);
 
-    getPage(webView).loadAlternateHTML(WebCore::DataSegment::create(Vector<uint8_t>(reinterpret_cast<const uint8_t*>(content), content ? strlen(content) : 0)), "UTF-8"_s, URL { String::fromUTF8(baseURI) }, URL { String::fromUTF8(contentURI) });
+    getPage(webView).loadAlternateHTML(WebCore::DataSegment::create(Vector(std::span { reinterpret_cast<const uint8_t*>(content), content ? strlen(content) : 0 })), "UTF-8"_s, URL { String::fromUTF8(baseURI) }, URL { String::fromUTF8(contentURI) });
 }
 
 /**
@@ -3345,7 +3357,7 @@ void webkit_web_view_load_plain_text(WebKitWebView* webView, const gchar* plainT
     g_return_if_fail(WEBKIT_IS_WEB_VIEW(webView));
     g_return_if_fail(plainText);
 
-    getPage(webView).loadData({ reinterpret_cast<const uint8_t*>(plainText), plainText ? strlen(plainText) : 0 }, "text/plain"_s, "UTF-8"_s, aboutBlankURL().string());
+    getPage(webView).loadData(span8(plainText), "text/plain"_s, "UTF-8"_s, aboutBlankURL().string());
 }
 
 /**
@@ -4133,7 +4145,7 @@ static void webkitWebViewEvaluateJavascriptInternal(WebKitWebView* webView, cons
     g_return_if_fail(WEBKIT_IS_WEB_VIEW(webView));
     g_return_if_fail(script);
 
-    RunJavaScriptParameters params = { String::fromUTF8(script, length < 0 ? strlen(script) : length), JSC::SourceTaintedOrigin::Untainted, URL({ }, String::fromUTF8(sourceURI)), RunAsAsyncFunction::No, std::nullopt, ForceUserGesture::Yes, RemoveTransientActivation::Yes };
+    RunJavaScriptParameters params = { String::fromUTF8(std::span(script, length < 0 ? strlen(script) : length)), JSC::SourceTaintedOrigin::Untainted, URL({ }, String::fromUTF8(sourceURI)), RunAsAsyncFunction::No, std::nullopt, ForceUserGesture::Yes, RemoveTransientActivation::Yes };
     webkitWebViewRunJavaScriptWithParams(webView, WTFMove(params), worldName, returnType, adoptGRef(g_task_new(webView, cancellable, callback, userData)));
 }
 
@@ -4269,7 +4281,7 @@ static void webkitWebViewCallAsyncJavascriptFunctionInternal(WebKitWebView* webV
         return;
     }
 
-    RunJavaScriptParameters params = { String::fromUTF8(body, length < 0 ? strlen(body) : length), JSC::SourceTaintedOrigin::Untainted, URL({ }, String::fromUTF8(sourceURI)), RunAsAsyncFunction::Yes, WTFMove(argumentsMap), ForceUserGesture::Yes, RemoveTransientActivation::Yes };
+    RunJavaScriptParameters params = { String::fromUTF8(std::span(body, length < 0 ? strlen(body) : length)), JSC::SourceTaintedOrigin::Untainted, URL({ }, String::fromUTF8(sourceURI)), RunAsAsyncFunction::Yes, WTFMove(argumentsMap), ForceUserGesture::Yes, RemoveTransientActivation::Yes };
     webkitWebViewRunJavaScriptWithParams(webView, WTFMove(params), worldName, returnType, adoptGRef(g_task_new(webView, cancellable, callback, userData)));
 }
 
@@ -4489,75 +4501,6 @@ void webkit_web_view_run_javascript_in_world(WebKitWebView* webView, const gchar
     webkitWebViewEvaluateJavascriptInternal(webView, script, -1, worldName, nullptr, RunJavascriptReturnType::WebKitJavascriptResult, cancellable, callback, userData);
 }
 
-/**
- * webkit_web_view_run_async_javascript_function_in_world:
- * @web_view: a #WebKitWebView
- * @body: the JavaScript function body
- * @arguments: a #GVariant with format `{&sv}` storing the function arguments. Function argument values must be one of the following types, or contain only the following GVariant types: number, string, array, and dictionary.
- * @world_name (nullable): the name of a #WebKitScriptWorld, if no name (i.e. %NULL) is provided, the default world is used. Any value that is not %NULL is a distinct world.
- * @cancellable: (allow-none): a #GCancellable or %NULL to ignore
- * @callback: (scope async): a #GAsyncReadyCallback to call when the script finished
- * @user_data: the data to pass to callback function
- *
- * Asynchronously run @body in the script world with name @world_name of the current page context in
- * @web_view. If WebKitSettings:enable-javascript is FALSE, this method will do nothing. This API
- * differs from webkit_web_view_run_javascript_in_world() in that the JavaScript function can return a
- * Promise and its result will be properly passed to the callback.
- *
- * When the operation is finished, @callback will be called. You can then call
- * webkit_web_view_run_javascript_in_world_finish() to get the result of the operation.
- *
- * For instance here is a dummy example that shows how to pass arguments to a JS function that
- * returns a Promise that resolves with the passed argument:
- *
- * ```c
- * static void
- * web_view_javascript_finished (GObject      *object,
- *                               GAsyncResult *result,
- *                               gpointer      user_data)
- * {
- *     WebKitJavascriptResult *js_result;
- *     JSCValue               *value;
- *     GError                 *error = NULL;
- *
- *     js_result = webkit_web_view_run_javascript_finish (WEBKIT_WEB_VIEW (object), result, &error);
- *     if (!js_result) {
- *         g_warning ("Error running javascript: %s", error->message);
- *         g_error_free (error);
- *         return;
- *     }
- *
- *     value = webkit_javascript_result_get_js_value (js_result);
- *     if (jsc_value_is_number (value)) {
- *         gint32        int_value = jsc_value_to_string (value);
- *         JSCException *exception = jsc_context_get_exception (jsc_value_get_context (value));
- *         if (exception)
- *             g_warning ("Error running javascript: %s", jsc_exception_get_message (exception));
- *         else
- *             g_print ("Script result: %d\n", int_value);
- *         g_free (str_value);
- *     } else {
- *         g_warning ("Error running javascript: unexpected return value");
- *     }
- *     webkit_javascript_result_unref (js_result);
- * }
- *
- * static void
- * web_view_evaluate_promise (WebKitWebView *web_view)
- * {
- *     GVariantDict dict;
- *     g_variant_dict_init (&dict, NULL);
- *     g_variant_dict_insert (&dict, "count", "u", 42);
- *     GVariant *args = g_variant_dict_end (&dict);
- *     const gchar *body = "return new Promise((resolve) => { resolve(count); });";
- *     webkit_web_view_run_async_javascript_function_in_world (web_view, body, arguments, NULL, NULL, web_view_javascript_finished, NULL);
- * }
- * ```
- *
- * Since: 2.38
- *
- * Deprecated: 2.40: Use webkit_web_view_call_async_javascript_function() instead.
- */
 void webkit_web_view_run_async_javascript_function_in_world(WebKitWebView* webView, const gchar* body, GVariant* arguments, const char* worldName, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
 {
     webkitWebViewCallAsyncJavascriptFunctionInternal(webView, body, -1, arguments, worldName, nullptr, RunJavascriptReturnType::WebKitJavascriptResult, cancellable, callback, userData);
@@ -4753,7 +4696,7 @@ static void getContentsAsMHTMLDataCallback(API::Data* wkData, GTask* taskPtr)
     if (g_task_get_source_tag(task.get()) == webkit_web_view_save_to_file) {
         ASSERT(G_IS_FILE(data->file.get()));
         GCancellable* cancellable = g_task_get_cancellable(task.get());
-        g_file_replace_contents_async(data->file.get(), reinterpret_cast<const gchar*>(data->webData->bytes()), data->webData->size(),
+        g_file_replace_contents_async(data->file.get(), reinterpret_cast<const gchar*>(data->webData->span().data()), data->webData->size(),
             0, FALSE, G_FILE_CREATE_REPLACE_DESTINATION, cancellable, fileReplaceContentsCallback, task.leakRef());
         return;
     }
@@ -4819,9 +4762,9 @@ GInputStream* webkit_web_view_save_finish(WebKitWebView* webView, GAsyncResult* 
 
     GInputStream* dataStream = g_memory_input_stream_new();
     ViewSaveAsyncData* data = static_cast<ViewSaveAsyncData*>(g_task_get_task_data(task));
-    gsize length = data->webData->size();
-    if (length)
-        g_memory_input_stream_add_data(G_MEMORY_INPUT_STREAM(dataStream), fastMemDup(data->webData->bytes(), length), length, fastFree);
+    auto bytes = data->webData->span();
+    if (!bytes.empty())
+        g_memory_input_stream_add_data(G_MEMORY_INPUT_STREAM(dataStream), fastMemDup(bytes.data(), bytes.size()), bytes.size(), fastFree);
 
     return dataStream;
 }
@@ -4965,6 +4908,17 @@ gboolean webkit_web_view_get_tls_info(WebKitWebView* webView, GTlsCertificate** 
 }
 
 #if PLATFORM(GTK)
+#if USE(GTK4)
+#define SNAPSHOT_TYPE GdkTexture*
+#if USE(CAIRO)
+#define PLATFORM_IMAGE_TO_TEXTURE(image) cairoSurfaceToGdkTexture(image)
+#else
+#define PLATFORM_IMAGE_TO_TEXTURE(image) skiaImageToGdkTexture(*image)
+#endif
+#else
+#define SNAPSHOT_TYPE cairo_surface_t*
+#endif
+
 /**
  * webkit_web_view_get_snapshot:
  * @web_view: a #WebKitWebView
@@ -5003,19 +4957,26 @@ void webkit_web_view_get_snapshot(WebKitWebView* webView, WebKitSnapshotRegion r
 
     GRefPtr<GTask> task = adoptGRef(g_task_new(webView, cancellable, callback, userData));
     getPage(webView).takeSnapshot({ }, { }, snapshotOptions, [task = WTFMove(task)](std::optional<ShareableBitmap::Handle>&& handle) {
-#if USE(CAIRO)
         if (handle) {
             if (auto bitmap = ShareableBitmap::create(WTFMove(*handle), SharedMemory::Protection::ReadOnly)) {
-                if (auto surface = bitmap->createCairoSurface()) {
+#if USE(GTK4)
+                if (auto texture = PLATFORM_IMAGE_TO_TEXTURE(bitmap->createPlatformImage(BackingStoreCopy::DontCopyBackingStore).get())) {
+                    g_task_return_pointer(task.get(), texture.leakRef(), g_object_unref);
+                    return;
+                }
+#else
+#if USE(CAIRO)
+                auto surface = bitmap->createCairoSurface();
+#elif USE(SKIA)
+                auto surface = skiaImageToCairoSurface(*bitmap->createPlatformImage(BackingStoreCopy::DontCopyBackingStore));
+#endif
+                if (surface) {
                     g_task_return_pointer(task.get(), surface.leakRef(), reinterpret_cast<GDestroyNotify>(cairo_surface_destroy));
                     return;
                 }
+#endif
             }
         }
-#elif USE(SKIA)
-        notImplemented();
-        UNUSED_PARAM(handle);
-#endif
         g_task_return_new_error(task.get(), WEBKIT_SNAPSHOT_ERROR, WEBKIT_SNAPSHOT_ERROR_FAILED_TO_CREATE, _("There was an error creating the snapshot"));
     });
 }
@@ -5030,32 +4991,20 @@ void webkit_web_view_get_snapshot(WebKitWebView* webView, WebKitSnapshotRegion r
  *
  * Returns: (transfer full): an image with the retrieved snapshot, or %NULL in case of error.
  */
-#if USE(GTK4)
-GdkTexture* webkit_web_view_get_snapshot_finish(WebKitWebView* webView, GAsyncResult* result, GError** error)
-#else
-cairo_surface_t* webkit_web_view_get_snapshot_finish(WebKitWebView* webView, GAsyncResult* result, GError** error)
-#endif
+SNAPSHOT_TYPE webkit_web_view_get_snapshot_finish(WebKitWebView* webView, GAsyncResult* result, GError** error)
 {
     g_return_val_if_fail(WEBKIT_IS_WEB_VIEW(webView), nullptr);
     g_return_val_if_fail(g_task_is_valid(result, webView), nullptr);
 
-#if USE(GTK4)
-    auto image = adoptRef(static_cast<cairo_surface_t*>(g_task_propagate_pointer(G_TASK(result), error)));
-#if USE(CAIRO)
-    auto texture = image ? cairoSurfaceToGdkTexture(image.get()) : nullptr;
-    if (texture)
-        return texture.leakRef();
-#elif USE(SKIA)
-    notImplemented();
-#endif
+    auto snapshot = g_task_propagate_pointer(G_TASK(result), error);
+    if (snapshot)
+        return static_cast<SNAPSHOT_TYPE>(snapshot);
+
     if (error && !*error)
         g_set_error_literal(error, WEBKIT_SNAPSHOT_ERROR, WEBKIT_SNAPSHOT_ERROR_FAILED_TO_CREATE, _("There was an error creating the snapshot"));
     return nullptr;
-#else
-    return static_cast<cairo_surface_t*>(g_task_propagate_pointer(G_TASK(result), error));
-#endif
 }
-#endif
+#endif // PLATFORM(GTK)
 
 void webkitWebViewWebProcessTerminated(WebKitWebView* webView, WebKitWebProcessTerminationReason reason)
 {

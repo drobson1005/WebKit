@@ -94,6 +94,7 @@
 #include <WebCore/GamepadProvider.h>
 #include <WebCore/MockRealtimeMediaSourceCenter.h>
 #include <WebCore/NetworkStorageSession.h>
+#include <WebCore/PlatformMediaSessionManager.h>
 #include <WebCore/PlatformScreen.h>
 #include <WebCore/ProcessIdentifier.h>
 #include <WebCore/ProcessWarming.h>
@@ -313,24 +314,30 @@ WebProcessPool::WebProcessPool(API::ProcessPoolConfiguration& configuration)
 
 #if ENABLE(ADVANCED_PRIVACY_PROTECTIONS)
     m_storageAccessUserAgentStringQuirksDataUpdateObserver = StorageAccessUserAgentStringQuirkController::shared().observeUpdates([weakThis = WeakPtr { *this }] {
-        if (RefPtr protectedThis = weakThis.get()) {
-            if (StorageAccessUserAgentStringQuirkController::shared().cachedQuirks().isEmpty())
-                return;
-            // FIXME: Filter by process's site when site isolation is enabled
+        // FIXME: Filter by process's site when site isolation is enabled
+        if (RefPtr protectedThis = weakThis.get())
             protectedThis->sendToAllProcesses(Messages::WebProcess::UpdateStorageAccessUserAgentStringQuirks(StorageAccessUserAgentStringQuirkController::shared().cachedQuirks()));
-        }
     });
 
     m_storageAccessPromptQuirksDataUpdateObserver = StorageAccessPromptQuirkController::shared().observeUpdates([weakThis = WeakPtr { *this }] {
         if (RefPtr protectedThis = weakThis.get()) {
             HashSet<WebCore::RegistrableDomain> domainSet;
             for (auto&& entry : StorageAccessPromptQuirkController::shared().cachedQuirks()) {
-                for (auto&& domain : entry.domainPairings.keys())
+                if (!entry.triggerPages.isEmpty()) {
+                    for (auto&& page : entry.triggerPages)
+                        domainSet.add(RegistrableDomain::uncheckedCreateFromRegistrableDomainString(page.string()));
+                    continue;
+                }
+                for (auto&& domain : entry.quirkDomains.keys())
                     domainSet.add(domain);
             }
             protectedThis->sendToAllProcesses(Messages::WebProcess::UpdateDomainsWithStorageAccessQuirks(domainSet));
         }
     });
+    if (StorageAccessPromptQuirkController::shared().cachedQuirks().isEmpty())
+        StorageAccessPromptQuirkController::shared().initialize();
+    if (StorageAccessUserAgentStringQuirkController::shared().cachedQuirks().isEmpty())
+        StorageAccessUserAgentStringQuirkController::shared().initialize();
 #endif
 
 }
@@ -525,7 +532,7 @@ void WebProcessPool::gpuProcessDidFinishLaunching(ProcessID)
 
 void WebProcessPool::gpuProcessExited(ProcessID identifier, ProcessTerminationReason reason)
 {
-    WEBPROCESSPOOL_RELEASE_LOG(Process, "gpuProcessDidExit: PID=%d, reason=%" PUBLIC_LOG_STRING, identifier, processTerminationReasonToString(reason));
+    WEBPROCESSPOOL_RELEASE_LOG(Process, "gpuProcessDidExit: PID=%d, reason=%" PUBLIC_LOG_STRING, identifier, processTerminationReasonToString(reason).characters());
     m_gpuProcess = nullptr;
 
     if (shouldReportAuxiliaryProcessCrash(reason))
@@ -631,6 +638,7 @@ void WebProcessPool::establishRemoteWorkerContextConnectionToNetworkProcess(Remo
         static NeverDestroyed<Ref<WebProcessPool>> remoteWorkerProcessPool(WebProcessPool::create(API::ProcessPoolConfiguration::create().get()));
 
     RefPtr requestingProcess = requestingProcessIdentifier ? WebProcessProxy::processForIdentifier(*requestingProcessIdentifier) : nullptr;
+    auto lockdownMode = requestingProcess ? requestingProcess->lockdownMode() : (lockdownModeEnabledBySystem() ? WebProcessProxy::LockdownMode::Enabled : WebProcessProxy::LockdownMode::Disabled);
     Ref processPool = requestingProcess ? requestingProcess->processPool() : processPools()[0].get();
 
     RefPtr<WebProcessProxy> remoteWorkerProcessProxy;
@@ -665,6 +673,8 @@ void WebProcessPool::establishRemoteWorkerContextConnectionToNetworkProcess(Remo
                 continue;
             if (!process->isMatchingRegistrableDomain(registrableDomain))
                 continue;
+            if (process->lockdownMode() != lockdownMode)
+                continue;
 
             useProcessForRemoteWorkers(process);
 
@@ -673,39 +683,39 @@ void WebProcessPool::establishRemoteWorkerContextConnectionToNetworkProcess(Remo
         }
     }
 
-    CheckedPtr<const WebPreferencesStore> preferencesStore;
-    if (workerType == RemoteWorkerType::ServiceWorker) {
-        if (RefPtr preferences = websiteDataStore->serviceWorkerOverridePreferences())
-            preferencesStore = &preferences->store();
-    }
+    struct WebPreferencesStoreRef {
+        RefPtr<WebPreferences> webPreferences;
+        RefPtr<WebProcessPool> processPool;
+        RefPtr<WebPageGroup> webPageGroup;
+        const WebPreferencesStore& store;
+    } preferencesStore = [&] {
+        if (workerType == RemoteWorkerType::ServiceWorker && websiteDataStore->serviceWorkerOverridePreferences())
+            return WebPreferencesStoreRef { websiteDataStore->serviceWorkerOverridePreferences(), nullptr, nullptr, websiteDataStore->serviceWorkerOverridePreferences()->store() };
 
-    if (!preferencesStore && processPool->m_remoteWorkerPreferences)
-        preferencesStore = &processPool->m_remoteWorkerPreferences.value();
+        if (processPool->m_remoteWorkerPreferences)
+            return WebPreferencesStoreRef { nullptr, processPool.copyRef(), nullptr, *processPool->m_remoteWorkerPreferences };
 
-    if (!preferencesStore)
-        preferencesStore = &processPool->m_defaultPageGroup->preferences().store();
-
-    ASSERT(preferencesStore);
+        return WebPreferencesStoreRef { nullptr, nullptr, processPool->m_defaultPageGroup.copyRef(), processPool->m_defaultPageGroup->preferences().store() };
+    }();
 
     if (!remoteWorkerProcessProxy) {
-        Ref newProcessProxy = WebProcessProxy::createForRemoteWorkers(workerType, processPool, RegistrableDomain  { registrableDomain }, *websiteDataStore);
+        Ref newProcessProxy = WebProcessProxy::createForRemoteWorkers(workerType, processPool, RegistrableDomain  { registrableDomain }, *websiteDataStore, lockdownMode);
         remoteWorkerProcessProxy = newProcessProxy.copyRef();
 
         WEBPROCESSPOOL_RELEASE_LOG_STATIC(ServiceWorker, "establishRemoteWorkerContextConnectionToNetworkProcess creating a new service worker process (process=%p, workerType=%" PUBLIC_LOG_STRING ", PID=%d)", remoteWorkerProcessProxy.get(), workerType == RemoteWorkerType::ServiceWorker ? "service" : "shared", remoteWorkerProcessProxy->processID());
 
         processPool->initializeNewWebProcess(newProcessProxy, websiteDataStore.get());
         processPool->m_processes.append(WTFMove(newProcessProxy));
-        remoteWorkerProcessProxy->initializePreferencesForNetworkProcess(*preferencesStore);
+        remoteWorkerProcessProxy->initializePreferencesForNetworkProcess(preferencesStore.store);
     }
 
-    remoteWorkerProcessProxy->addAllowedFirstPartyForCookies(registrableDomain);
     auto aggregator = CallbackAggregator::create([completionHandler = WTFMove(completionHandler), remoteProcessIdentifier = remoteWorkerProcessProxy->coreProcessIdentifier()]() mutable {
         completionHandler(remoteProcessIdentifier);
     });
 
     websiteDataStore->networkProcess().sendWithAsyncReply(Messages::NetworkProcess::AddAllowedFirstPartyForCookies(remoteWorkerProcessProxy->coreProcessIdentifier(), registrableDomain, LoadedWebArchive::No), [aggregator] { });
 
-    remoteWorkerProcessProxy->establishRemoteWorkerContext(workerType, *preferencesStore, registrableDomain, serviceWorkerPageIdentifier, [aggregator] { });
+    remoteWorkerProcessProxy->establishRemoteWorkerContext(workerType, preferencesStore.store, registrableDomain, serviceWorkerPageIdentifier, [aggregator] { });
 
     if (!processPool->m_remoteWorkerUserAgent.isNull())
         remoteWorkerProcessProxy->setRemoteWorkerUserAgent(processPool->m_remoteWorkerUserAgent);
@@ -818,9 +828,8 @@ void WebProcessPool::registerHighDynamicRangeChangeCallback()
 
 WebProcessDataStoreParameters WebProcessPool::webProcessDataStoreParameters(WebProcessProxy& process, WebsiteDataStore& websiteDataStore)
 {
-    websiteDataStore.resolveDirectoriesIfNecessary();
-
-    String mediaCacheDirectory = websiteDataStore.resolvedMediaCacheDirectory();
+    auto& resolvedDirectories = websiteDataStore.resolvedDirectories();
+    String mediaCacheDirectory = resolvedDirectories.mediaCacheDirectory;
 #if !ENABLE(GPU_PROCESS)
     SandboxExtension::Handle mediaCacheDirectoryExtensionHandle;
     if (!mediaCacheDirectory.isEmpty()) {
@@ -829,7 +838,7 @@ WebProcessDataStoreParameters WebProcessPool::webProcessDataStoreParameters(WebP
     }
 #endif
 
-    String mediaKeyStorageDirectory = websiteDataStore.resolvedMediaKeysDirectory();
+    String mediaKeyStorageDirectory = resolvedDirectories.mediaKeysStorageDirectory;
     SandboxExtension::Handle mediaKeyStorageDirectoryExtensionHandle;
     if (!mediaKeyStorageDirectory.isEmpty()) {
         if (auto handle = SandboxExtension::createHandleWithoutResolvingPath(mediaKeyStorageDirectory, SandboxExtension::Type::ReadWrite))
@@ -841,7 +850,7 @@ WebProcessDataStoreParameters WebProcessPool::webProcessDataStoreParameters(WebP
     if (!m_javaScriptConfigurationDirectory.isEmpty())
         javaScriptConfigurationDirectory = resolvePathForSandboxExtension(m_javaScriptConfigurationDirectory);
     else if (javaScriptConfigurationFileEnabled())
-        javaScriptConfigurationDirectory = websiteDataStore.resolvedJavaScriptConfigurationDirectory();
+        javaScriptConfigurationDirectory = resolvedDirectories.javaScriptConfigurationDirectory;
 
     SandboxExtension::Handle javaScriptConfigurationDirectoryExtensionHandle;
     if (!javaScriptConfigurationDirectory.isEmpty()) {
@@ -850,7 +859,7 @@ WebProcessDataStoreParameters WebProcessPool::webProcessDataStoreParameters(WebP
     }
 
 #if ENABLE(ARKIT_INLINE_PREVIEW)
-    auto modelElementCacheDirectory = websiteDataStore.resolvedModelElementCacheDirectory();
+    auto modelElementCacheDirectory = resolvedDirectories.modelElementCacheDirectory;
     SandboxExtension::Handle modelElementCacheDirectoryExtensionHandle;
     if (!modelElementCacheDirectory.isEmpty()) {
         if (auto handle = SandboxExtension::createHandleWithoutResolvingPath(modelElementCacheDirectory, SandboxExtension::Type::ReadWrite))
@@ -1214,43 +1223,35 @@ Ref<WebPageProxy> WebProcessPool::createWebPage(PageClient& pageClient, Ref<API:
 {
     if (!pageConfiguration->pageGroup())
         pageConfiguration->setPageGroup(m_defaultPageGroup.copyRef());
-    if (!pageConfiguration->preferences())
-        pageConfiguration->setPreferences(pageConfiguration->pageGroup()->protectedPreferences());
-    if (!pageConfiguration->userContentController())
-        pageConfiguration->setUserContentController(pageConfiguration->pageGroup()->protectedUserContentController());
-    if (!pageConfiguration->visitedLinkStore())
-        pageConfiguration->setVisitedLinkStore(m_visitedLinkStore.copyRef());
-
-    if (!pageConfiguration->websiteDataStore()) {
-        // We try to avoid creating the default data store as long as possible.
-        // But if there is an attempt to create a web page without any specified data store, then we have to create it.
-        pageConfiguration->setWebsiteDataStore(WebKit::WebsiteDataStore::defaultDataStore());
-    }
 
     RefPtr<WebProcessProxy> process;
     auto lockdownMode = pageConfiguration->lockdownModeEnabled() ? WebProcessProxy::LockdownMode::Enabled : WebProcessProxy::LockdownMode::Disabled;
     RefPtr relatedPage = pageConfiguration->relatedPage();
-    if (relatedPage && !relatedPage->isClosed() && relatedPage->hasSameGPUAndNetworkProcessPreferencesAs(pageConfiguration)) {
+
+    if (pageConfiguration->openerProcess()) {
+        ASSERT(pageConfiguration->preferences().siteIsolationEnabled());
+        process = pageConfiguration->openerProcess();
+    } else if (relatedPage && !relatedPage->isClosed() && relatedPage->hasSameGPUAndNetworkProcessPreferencesAs(pageConfiguration)) {
         // Sharing processes, e.g. when creating the page via window.open().
         process = &relatedPage->ensureRunningProcess();
         // We do not support several WebsiteDataStores sharing a single process.
-        ASSERT(process->isDummyProcessProxy() || pageConfiguration->websiteDataStore() == process->websiteDataStore());
-        ASSERT(&pageConfiguration->relatedPage()->websiteDataStore() == pageConfiguration->websiteDataStore());
+        ASSERT(process->isDummyProcessProxy() || &pageConfiguration->websiteDataStore() == process->websiteDataStore());
+        ASSERT(&pageConfiguration->relatedPage()->websiteDataStore() == &pageConfiguration->websiteDataStore());
     } else if (pageConfiguration->delaysWebProcessLaunchUntilFirstLoad()) {
         WEBPROCESSPOOL_RELEASE_LOG(Process, "createWebPage: delaying WebProcess launch until first load");
         // In the common case, we delay process launch until something is actually loaded in the page.
-        process = dummyProcessProxy(pageConfiguration->websiteDataStore()->sessionID());
+        process = dummyProcessProxy(pageConfiguration->websiteDataStore().sessionID());
         if (!process) {
-            process = WebProcessProxy::create(*this, pageConfiguration->protectedWebsiteDataStore().get(), lockdownMode, WebProcessProxy::IsPrewarmed::No, CrossOriginMode::Shared, WebProcessProxy::ShouldLaunchProcess::No);
-            m_dummyProcessProxies.add(pageConfiguration->websiteDataStore()->sessionID(), *process);
+            process = WebProcessProxy::create(*this, pageConfiguration->protectedWebsiteDataStore().ptr(), lockdownMode, WebProcessProxy::IsPrewarmed::No, CrossOriginMode::Shared, WebProcessProxy::ShouldLaunchProcess::No);
+            m_dummyProcessProxies.add(pageConfiguration->websiteDataStore().sessionID(), *process);
             m_processes.append(*process);
         }
     } else {
         WEBPROCESSPOOL_RELEASE_LOG(Process, "createWebPage: Not delaying WebProcess launch");
-        process = processForRegistrableDomain(*pageConfiguration->protectedWebsiteDataStore(), { }, lockdownMode, pageConfiguration);
+        process = processForRegistrableDomain(pageConfiguration->protectedWebsiteDataStore(), { }, lockdownMode, pageConfiguration);
     }
 
-    RefPtr userContentController = pageConfiguration->userContentController();
+    Ref userContentController = pageConfiguration->userContentController();
     
     ASSERT(process);
     
@@ -1263,8 +1264,7 @@ Ref<WebPageProxy> WebProcessPool::createWebPage(PageClient& pageClient, Ref<API:
         for (Ref workerProcess : remoteWorkerProcesses())
             workerProcess->updateRemoteWorkerPreferencesStore(*m_remoteWorkerPreferences);
     }
-    if (userContentController)
-        m_userContentControllerForRemoteWorkers = userContentController;
+    m_userContentControllerForRemoteWorkers = userContentController.ptr();
 
     bool enableProcessSwapOnCrossSiteNavigation = page->preferences().processSwapOnCrossSiteNavigationEnabled();
 #if PLATFORM(IOS_FAMILY)
@@ -1279,6 +1279,9 @@ Ref<WebPageProxy> WebProcessPool::createWebPage(PageClient& pageClient, Ref<API:
         checkedWebProcessCache()->updateCapacity(*this);
 
 #if ENABLE(GPU_PROCESS)
+    if (page->preferences().useGPUProcessForDOMRenderingEnabled())
+        ensureGPUProcess();
+
     if (RefPtr gpuProcess = GPUProcessProxy::singletonIfCreated()) {
         gpuProcess->updatePreferences(*process);
         gpuProcess->updateScreenPropertiesIfNeeded();
@@ -1441,20 +1444,16 @@ void WebProcessPool::registerURLSchemeAsSecure(const String& urlScheme)
 {
     LegacyGlobalSettings::singleton().registerURLSchemeAsSecure(urlScheme);
     sendToAllProcesses(Messages::WebProcess::RegisterURLSchemeAsSecure(urlScheme));
-    WebsiteDataStore::forEachWebsiteDataStore([urlScheme] (WebsiteDataStore& dataStore) {
-        if (RefPtr networkProcess = dataStore.networkProcessIfExists())
-            networkProcess->send(Messages::NetworkProcess::RegisterURLSchemeAsSecure(urlScheme), 0);
-    });
+    for (Ref networkProcess : NetworkProcessProxy::allNetworkProcesses())
+        networkProcess->send(Messages::NetworkProcess::RegisterURLSchemeAsSecure(urlScheme), 0);
 }
 
 void WebProcessPool::registerURLSchemeAsBypassingContentSecurityPolicy(const String& urlScheme)
 {
     LegacyGlobalSettings::singleton().registerURLSchemeAsBypassingContentSecurityPolicy(urlScheme);
     sendToAllProcesses(Messages::WebProcess::RegisterURLSchemeAsBypassingContentSecurityPolicy(urlScheme));
-    WebsiteDataStore::forEachWebsiteDataStore([urlScheme] (WebsiteDataStore& dataStore) {
-        if (RefPtr networkProcess = dataStore.networkProcessIfExists())
-            networkProcess->send(Messages::NetworkProcess::RegisterURLSchemeAsBypassingContentSecurityPolicy(urlScheme), 0);
-    });
+    for (Ref networkProcess : NetworkProcessProxy::allNetworkProcesses())
+        networkProcess->send(Messages::NetworkProcess::RegisterURLSchemeAsBypassingContentSecurityPolicy(urlScheme), 0);
 }
 
 void WebProcessPool::setDomainRelaxationForbiddenForURLScheme(const String& urlScheme)
@@ -1467,18 +1466,16 @@ void WebProcessPool::registerURLSchemeAsLocal(const String& urlScheme)
 {
     LegacyGlobalSettings::singleton().registerURLSchemeAsLocal(urlScheme);
     sendToAllProcesses(Messages::WebProcess::RegisterURLSchemeAsLocal(urlScheme));
-    WebsiteDataStore::forEachWebsiteDataStore([urlScheme] (WebsiteDataStore& dataStore) {
-        dataStore.protectedNetworkProcess()->send(Messages::NetworkProcess::RegisterURLSchemeAsLocal(urlScheme), 0);
-    });
+    for (Ref networkProcess : NetworkProcessProxy::allNetworkProcesses())
+        networkProcess->send(Messages::NetworkProcess::RegisterURLSchemeAsLocal(urlScheme), 0);
 }
 
 void WebProcessPool::registerURLSchemeAsNoAccess(const String& urlScheme)
 {
     LegacyGlobalSettings::singleton().registerURLSchemeAsNoAccess(urlScheme);
     sendToAllProcesses(Messages::WebProcess::RegisterURLSchemeAsNoAccess(urlScheme));
-    WebsiteDataStore::forEachWebsiteDataStore([urlScheme] (WebsiteDataStore& dataStore) {
-        dataStore.protectedNetworkProcess()->send(Messages::NetworkProcess::RegisterURLSchemeAsNoAccess(urlScheme), 0);
-    });
+    for (Ref networkProcess : NetworkProcessProxy::allNetworkProcesses())
+        networkProcess->send(Messages::NetworkProcess::RegisterURLSchemeAsNoAccess(urlScheme), 0);
 }
 
 void WebProcessPool::registerURLSchemeAsDisplayIsolated(const String& urlScheme)
@@ -1546,18 +1543,16 @@ void WebProcessPool::setCacheModel(CacheModel cacheModel)
 
     sendToAllProcesses(Messages::WebProcess::SetCacheModel(cacheModel));
 
-    WebsiteDataStore::forEachWebsiteDataStore([cacheModel] (WebsiteDataStore& dataStore) {
-        dataStore.protectedNetworkProcess()->send(Messages::NetworkProcess::SetCacheModel(cacheModel), 0);
-    });
+    for (Ref networkProcess : NetworkProcessProxy::allNetworkProcesses())
+        networkProcess->send(Messages::NetworkProcess::SetCacheModel(cacheModel), 0);
 }
 
 void WebProcessPool::setCacheModelSynchronouslyForTesting(CacheModel cacheModel)
 {
     updateBackForwardCacheCapacity();
 
-    WebsiteDataStore::forEachWebsiteDataStore([cacheModel] (WebsiteDataStore& dataStore) {
-        dataStore.protectedNetworkProcess()->sendSync(Messages::NetworkProcess::SetCacheModelSynchronouslyForTesting(cacheModel), 0);
-    });
+    for (Ref networkProcess : NetworkProcessProxy::allNetworkProcesses())
+        networkProcess->sendSync(Messages::NetworkProcess::SetCacheModelSynchronouslyForTesting(cacheModel), 0);
 }
 
 void WebProcessPool::setDefaultRequestTimeoutInterval(double timeoutInterval)
@@ -1974,13 +1969,13 @@ void WebProcessPool::processForNavigation(WebPageProxy& page, WebFrameProxy& fra
 {
     RegistrableDomain registrableDomain { navigation.currentRequest().url() };
     if (page.preferences().siteIsolationEnabled() && !registrableDomain.isEmpty()) {
-        RegistrableDomain mainFrameDomain(URL(page.pageLoadState().activeURL()));
+        auto mainFrameDomain = frameInfo.isMainFrame ? registrableDomain : RegistrableDomain(URL(page.pageLoadState().activeURL()));
         if (!frame.isMainFrame() && registrableDomain == mainFrameDomain) {
             Ref mainFrameProcess = page.mainFrame()->protectedProcess();
             if (!mainFrameProcess->isInProcessCache())
                 return completionHandler(mainFrameProcess.copyRef(), nullptr, "Found process for the same registration domain as mainFrame domain"_s);
         }
-        RefPtr process = page.processForRegistrableDomain(registrableDomain);
+        RefPtr process = page.processForRegistrableDomain(registrableDomain, dataStore);
         if (process && !process->isInProcessCache()) {
             dataStore->networkProcess().addAllowedFirstPartyForCookies(*process, mainFrameDomain, LoadedWebArchive::No, [completionHandler = WTFMove(completionHandler), process] () mutable {
                 completionHandler(process.releaseNonNull(), nullptr, "Found process for the same registration domain"_s);
@@ -2011,8 +2006,6 @@ void WebProcessPool::processForNavigation(WebPageProxy& page, WebFrameProxy& fra
         LOG(ProcessSwapping, "(ProcessSwapping) Navigating from %s to %s, keeping around old process. Now holding on to old processes for %u origins.", sourceURL.string().utf8().data(), navigation.currentRequest().url().string().utf8().data(), m_swappedProcessesPerRegistrableDomain.size());
     }
 
-    process->addAllowedFirstPartyForCookies(registrableDomain);
-
     if (!frame.isMainFrame() && page.preferences().siteIsolationEnabled())
         return completionHandler(WTFMove(process), suspendedPage, reason);
 
@@ -2029,7 +2022,6 @@ void WebProcessPool::prepareProcessForNavigation(Ref<WebProcessProxy>&& process,
         if (process->state() == AuxiliaryProcessProxy::State::Terminated && previousAttemptsCount < maximumNumberOfAttempts) {
             // The destination process crashed during the IPC to the network process, use a new process.
             Ref fallbackProcess = processForRegistrableDomain(dataStore, registrableDomain, lockdownMode, page->protectedConfiguration());
-            fallbackProcess->addAllowedFirstPartyForCookies(registrableDomain);
             prepareProcessForNavigation(WTFMove(fallbackProcess), page, nullptr, reason, registrableDomain, navigation, lockdownMode, WTFMove(dataStore), WTFMove(completionHandler), previousAttemptsCount + 1);
             return;
         }
@@ -2259,7 +2251,7 @@ void WebProcessPool::setDomainsWithUserInteraction(HashSet<WebCore::RegistrableD
     m_domainsWithUserInteraction = WTFMove(domains);
 }
 
-void WebProcessPool::setDomainsWithCrossPageStorageAccess(HashMap<TopFrameDomain, SubResourceDomain>&& domains, CompletionHandler<void()>&& completionHandler)
+void WebProcessPool::setDomainsWithCrossPageStorageAccess(HashMap<TopFrameDomain, Vector<SubResourceDomain>>&& domains, CompletionHandler<void()>&& completionHandler)
 {    
     Ref callbackAggregator = CallbackAggregator::create(WTFMove(completionHandler));
 
@@ -2267,7 +2259,7 @@ void WebProcessPool::setDomainsWithCrossPageStorageAccess(HashMap<TopFrameDomain
         process->sendWithAsyncReply(Messages::WebProcess::SetDomainsWithCrossPageStorageAccess(domains), [callbackAggregator] { });
 
     for (auto& topDomain : domains.keys())
-        m_domainsWithCrossPageStorageAccessQuirk.add(topDomain, domains.get(topDomain));
+        m_domainsWithCrossPageStorageAccessQuirk.set(topDomain, domains.get(topDomain));
 }
 
 void WebProcessPool::seedResourceLoadStatisticsForTesting(const RegistrableDomain& firstPartyDomain, const RegistrableDomain& thirdPartyDomain, bool shouldScheduleNotification, CompletionHandler<void()>&& completionHandler)
@@ -2306,6 +2298,11 @@ void WebProcessPool::clearAudibleActivity()
 
 void WebProcessPool::updateAudibleMediaAssertions()
 {
+#if ENABLE(EXTENSION_CAPABILITIES)
+    if (PlatformMediaSessionManager::mediaCapabilityGrantsEnabled())
+        return;
+#endif
+
     if (!m_webProcessWithAudibleMediaCounter.value()) {
         WEBPROCESSPOOL_RELEASE_LOG(ProcessSuspension, "updateAudibleMediaAssertions: Starting timer to clear audible activity in %g seconds because we are no longer playing audio", audibleActivityClearDelay.seconds());
         // We clear the audible activity on a timer for 2 reasons:
@@ -2407,6 +2404,37 @@ size_t WebProcessPool::serviceWorkerProxiesCount() const
             ++count;
     });
     return count;
+}
+
+void WebProcessPool::isJITDisabledInAllRemoteWorkerProcesses(CompletionHandler<void(bool)>&& completionHandler) const
+{
+    class JITDisabledCallbackAggregator : public RefCounted<JITDisabledCallbackAggregator> {
+    public:
+        static auto create(CompletionHandler<void(bool)>&& callback) { return adoptRef(*new JITDisabledCallbackAggregator(WTFMove(callback))); }
+
+        ~JITDisabledCallbackAggregator()
+        {
+            if (m_callback)
+                m_callback(m_isJITDisabled);
+        }
+
+        void setJITEnabled(bool isJITEnabled) { m_isJITDisabled &= !isJITEnabled; }
+
+    private:
+        explicit JITDisabledCallbackAggregator(CompletionHandler<void(bool)>&& callback)
+            : m_callback(WTFMove(callback))
+        { }
+
+        CompletionHandler<void(bool)> m_callback;
+        bool m_isJITDisabled { true };
+    };
+
+    Ref callbackAggregator = JITDisabledCallbackAggregator::create(WTFMove(completionHandler));
+    remoteWorkerProcesses().forEach([&](auto& process) {
+        process.sendWithAsyncReply(Messages::WebProcess::IsJITEnabled(), [callbackAggregator](bool isJITEnabled) {
+            callbackAggregator->setJITEnabled(isJITEnabled);
+        }, 0);
+    });
 }
 
 bool WebProcessPool::hasServiceWorkerForegroundActivityForTesting() const

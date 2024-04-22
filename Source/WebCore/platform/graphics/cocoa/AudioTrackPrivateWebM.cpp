@@ -64,14 +64,14 @@ std::optional<bool> AudioTrackPrivateWebM::defaultEnabled() const
 AtomString AudioTrackPrivateWebM::label() const
 {
     if (m_label.isNull())
-        m_label = m_track.name.is_present() ? AtomString::fromUTF8(m_track.name.value().data(), m_track.name.value().length()) : emptyAtom();
+        m_label = m_track.name.is_present() ? AtomString::fromUTF8(m_track.name.value()) : emptyAtom();
     return m_label;
 }
 
 AtomString AudioTrackPrivateWebM::language() const
 {
     if (m_language.isNull())
-        m_language = m_track.language.is_present() ? AtomString::fromUTF8(m_track.language.value().data(), m_track.language.value().length()) : emptyAtom();
+        m_language = m_track.language.is_present() ? AtomString::fromUTF8(m_track.language.value()) : emptyAtom();
     return m_language;
 }
 
@@ -113,7 +113,7 @@ String AudioTrackPrivateWebM::codec() const
     if (!m_track.codec_id.is_present())
         return emptyString();
 
-    StringView codecID { m_track.codec_id.value().data(), (unsigned)m_track.codec_id.value().length() };
+    StringView codecID { std::span { m_track.codec_id.value() } };
 
     if (codecID == "A_VORBIS"_s)
         return "vorbis"_s;

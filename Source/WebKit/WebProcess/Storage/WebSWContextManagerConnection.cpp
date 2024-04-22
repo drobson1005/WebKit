@@ -41,6 +41,7 @@
 #include "WebCompiledContentRuleListData.h"
 #include "WebCookieJar.h"
 #include "WebCoreArgumentCoders.h"
+#include "WebCryptoClient.h"
 #include "WebDatabaseProvider.h"
 #include "WebLocalFrameLoaderClient.h"
 #include "WebMessagePortChannelProvider.h"
@@ -91,7 +92,7 @@ WebSWContextManagerConnection::WebSWContextManagerConnection(Ref<IPC::Connection
     , m_userAgent(standardUserAgent())
 #endif
     , m_userContentController(WebUserContentController::getOrCreate(initializationData.userContentControllerIdentifier))
-    , m_queue(WorkQueue::create("WebSWContextManagerConnection queue", WorkQueue::QOS::UserInitiated))
+    , m_queue(WorkQueue::create("WebSWContextManagerConnection queue"_s, WorkQueue::QOS::UserInitiated))
 {
 #if ENABLE(CONTENT_EXTENSIONS)
     m_userContentController->addContentRuleLists(WTFMove(initializationData.contentRuleLists));
@@ -161,6 +162,7 @@ void WebSWContextManagerConnection::installServiceWorker(ServiceWorkerContextDat
         pageConfiguration.broadcastChannelRegistry = WebProcess::singleton().broadcastChannelRegistry();
         pageConfiguration.userContentProvider = m_userContentController;
         pageConfiguration.cookieJar = WebCookieJar::create();
+        pageConfiguration.cryptoClient = makeUniqueRef<WebCryptoClient>();
 #if ENABLE(WEB_RTC)
         pageConfiguration.webRTCProvider = makeUniqueRef<RemoteWorkerLibWebRTCProvider>();
 #endif
@@ -186,6 +188,9 @@ void WebSWContextManagerConnection::installServiceWorker(ServiceWorkerContextDat
             WebPage::updateSettingsGenerated(*m_preferencesStore, page->settings());
             page->settings().setStorageBlockingPolicy(static_cast<StorageBlockingPolicy>(m_preferencesStore->getUInt32ValueForKey(WebPreferencesKey::storageBlockingPolicyKey())));
         }
+        if (WebProcess::singleton().isLockdownModeEnabled())
+            WebPage::adjustSettingsForLockdownMode(page->settings(), m_preferencesStore ? &m_preferencesStore.value() : nullptr);
+
         page->setupForRemoteWorker(contextData.scriptURL, contextData.registration.key.topOrigin(), contextData.referrerPolicy);
 #if ENABLE(REMOTE_INSPECTOR)
         page->setInspectable(inspectable == ServiceWorkerIsInspectable::Yes);
@@ -294,7 +299,7 @@ void WebSWContextManagerConnection::firePushEvent(ServiceWorkerIdentifier identi
 
     std::optional<Vector<uint8_t>> data;
     if (ipcData)
-        data = Vector<uint8_t> { ipcData->data(), ipcData->size() };
+        data = Vector<uint8_t> { *ipcData };
 
     auto inQueueCallback = [queue = m_queue, callback = WTFMove(callback)](bool result, std::optional<NotificationPayload>&& resultPayload) mutable {
         queue->dispatch([result, resultPayload = crossThreadCopy(WTFMove(resultPayload)), callback = WTFMove(callback)]() mutable {

@@ -1300,13 +1300,6 @@ struct FeaturesVk : FeatureSetBase
         &members, "https://issuetracker.google.com/288119108"
     };
 
-    FeatureInfo requireCachedBitForStagingBuffer = {
-        "requireCachedBitForStagingBuffer",
-        FeatureCategory::VulkanWorkarounds,
-        "use cached bit as required bit instead of preferred bit for staging buffers",
-        &members, "https://issuetracker.google.com/315836169"
-    };
-
     FeatureInfo supportsExternalFormatResolve = {
         "supportsExternalFormatResolve",
         FeatureCategory::VulkanFeatures,
@@ -1371,6 +1364,15 @@ struct FeaturesVk : FeatureSetBase
         FeatureCategory::VulkanFeatures,
         "Enable non-semantic info inside shader module via VK_KHR_shader_non_semantic_info extension",
         &members, "http://anglebug.com/8549"
+    };
+
+    FeatureInfo combineAllShadersInPipelineLibrary = {
+        "combineAllShadersInPipelineLibrary",
+        FeatureCategory::VulkanFeatures,
+        "For Vulkan ICDs that support VK_EXT_graphics_pipeline_library the shaders subset of the pipeline"
+        "can either be combined into a single pipeline or can be decoupled into separate pipelines. This feature"
+        "is enabled when the former is the case.",
+        &members, "http://anglebug.com/8601"
     };
 
 };

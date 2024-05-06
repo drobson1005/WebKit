@@ -58,6 +58,15 @@
 #endif
 
 namespace WebCore {
+class MockDisplayCapturer;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::MockDisplayCapturer> : std::true_type { };
+}
+
+namespace WebCore {
 
 static inline Vector<MockMediaDevice> defaultDevices()
 {
@@ -150,7 +159,7 @@ private:
     CaptureDevice::DeviceType deviceType() const final { return CaptureDevice::DeviceType::Screen; }
     IntSize intrinsicSize() const final;
 #if !RELEASE_LOG_DISABLED
-    const char* logClassName() const final { return "MockDisplayCapturer"; }
+    ASCIILiteral logClassName() const final { return "MockDisplayCapturer"_s; }
 #endif
     Ref<MockRealtimeVideoSource> m_source;
     RealtimeMediaSourceSettings m_settings;

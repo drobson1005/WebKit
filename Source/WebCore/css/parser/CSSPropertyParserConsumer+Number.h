@@ -24,11 +24,14 @@
 
 #pragma once
 
+#include "CSSParserMode.h"
 #include "CSSParserToken.h"
 #include "CSSPropertyParserConsumer+Meta.h"
 #include "CSSPropertyParserConsumer+None.h"
 #include "CSSPropertyParserConsumer+Primitives.h"
+#include "Length.h"
 #include <optional>
+
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -123,6 +126,15 @@ auto consumeNumberOrNoneRaw(CSSParserTokenRange& range, ValueRange valueRange = 
 {
     return consumeMetaConsumer<NumberOrNoneRawConsumer<Transformer>>(range, { }, valueRange, CSSParserMode::HTMLStandardMode, UnitlessQuirk::Forbid, UnitlessZeroQuirk::Forbid);
 }
+
+// MARK: Consumer Lookup
+
+template<> struct ConsumerLookup<NumberRaw> {
+    std::optional<NumberRaw> operator()(CSSParserTokenRange& args, CSSParserMode)
+    {
+        return consumeNumberRaw(args);
+    }
+};
 
 } // namespace CSSPropertyParserHelpers
 } // namespace WebCore

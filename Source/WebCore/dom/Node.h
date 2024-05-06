@@ -496,7 +496,7 @@ public:
     virtual String debugDescription() const;
 
 #if ENABLE(TREE_DEBUGGING)
-    void showNode(const char* prefix = "") const;
+    void showNode(ASCIILiteral prefix = ""_s) const;
     WEBCORE_EXPORT void showTreeForThis() const;
     void showNodePathForThis() const;
     void showTreeAndMark(const Node* markedNode1, const char* markedLabel1, const Node* markedNode2 = nullptr, const char* markedLabel2 = nullptr) const;
@@ -652,11 +652,10 @@ protected:
         NeedsSVGRendererUpdate = 1 << 3,
         NeedsUpdateQueryContainerDependentStyle = 1 << 4,
         EverHadSmoothScroll = 1 << 5,
-        CapturedInViewTransition = 1 << 6,
 #if ENABLE(FULLSCREEN_API)
-        IsFullscreen = 1 << 7,
+        IsFullscreen = 1 << 6,
 #endif
-        // 8-bits free.
+        // 9-bits free.
     };
 
     enum class TabIndexState : uint8_t {

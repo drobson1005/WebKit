@@ -95,7 +95,7 @@ GstStream* webkitMediaStreamNew(const MediaStreamTrackPrivate& track)
 
 static void webkitMediaStreamSrcCharacteristicsChanged(WebKitMediaStreamSrc*);
 
-class WebKitMediaStreamObserver : public MediaStreamPrivate::Observer {
+class WebKitMediaStreamObserver : public MediaStreamPrivateObserver {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~WebKitMediaStreamObserver() { };
@@ -133,8 +133,8 @@ struct InternalSourcePadProbeData {
 WEBKIT_DEFINE_ASYNC_DATA_STRUCT(InternalSourcePadProbeData)
 #endif
 
-class InternalSource final : public MediaStreamTrackPrivate::Observer,
-    public RealtimeMediaSource::Observer,
+class InternalSource final : public MediaStreamTrackPrivateObserver,
+    public RealtimeMediaSourceObserver,
     public RealtimeMediaSource::AudioSampleObserver,
     public RealtimeMediaSource::VideoFrameObserver,
     public CanMakeCheckedPtr<InternalSource> {
@@ -1034,6 +1034,11 @@ static GstPadProbeReturn webkitMediaStreamSrcPadProbeCb(GstPad* pad, GstPadProbe
         if (!g_strcmp0(streamId, data->trackId.get())) {
             GST_INFO_OBJECT(pad, "Event has been sticked already");
             return GST_PAD_PROBE_REMOVE;
+        }
+
+        if (data->sourceType == RealtimeMediaSource::Type::Video) {
+            GST_DEBUG_OBJECT(self, "Requesting a key-frame");
+            gst_pad_send_event(pad, gst_video_event_new_upstream_force_key_unit(GST_CLOCK_TIME_NONE, TRUE, 1));
         }
 
         auto* streamStart = gst_event_new_stream_start(data->trackId.get());

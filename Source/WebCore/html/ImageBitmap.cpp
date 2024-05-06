@@ -84,7 +84,9 @@ WTF_MAKE_ISO_ALLOCATED_IMPL(ImageBitmap);
 
 static inline RenderingMode bufferRenderingMode(ScriptExecutionContext& scriptExecutionContext)
 {
-#if USE(IOSURFACE_CANVAS_BACKING_STORE) || USE(SKIA)
+    // FIXME: We want to use Accelerated mode by default with skia, but we need to add support for having
+    // per thread skiaGLContexts for that. See https://bugs.webkit.org/show_bug.cgi?id=273316.
+#if USE(IOSURFACE_CANVAS_BACKING_STORE)
     static RenderingMode defaultRenderingMode = RenderingMode::Accelerated;
 #else
     static RenderingMode defaultRenderingMode = RenderingMode::Unaccelerated;
@@ -734,6 +736,10 @@ private:
 class PendingImageBitmap final : public RefCounted<PendingImageBitmap>, public ActiveDOMObject, public FileReaderLoaderClient {
     WTF_MAKE_FAST_ALLOCATED;
 public:
+    // ActiveDOMObject.
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
     static void fetch(ScriptExecutionContext& scriptExecutionContext, RefPtr<Blob>&& blob, ImageBitmapOptions&& options, std::optional<IntRect> rect, ImageBitmap::ImageBitmapCompletionHandler&& completionHandler)
     {
         if (scriptExecutionContext.activeDOMObjectsAreStopped()) {
@@ -769,7 +775,6 @@ private:
     }
 
     // ActiveDOMObject
-    const char* activeDOMObjectName() const final { return "PendingImageBitmap"; }
     void stop() final { m_pendingActivity = nullptr; }
 
     // FileReaderLoaderClient

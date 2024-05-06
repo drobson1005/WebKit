@@ -27,6 +27,7 @@
 
 #include "AffineTransform.h"
 #include "FloatRoundedRect.h"
+#include "IntRect.h"
 #include "IntRectHash.h"
 #include "InteractionRegion.h"
 #include "Node.h"
@@ -59,7 +60,7 @@ public:
     bool contains(const IntRect&) const;
 
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
-    void uniteInteractionRegions(RenderObject&, const FloatRect&);
+    void uniteInteractionRegions(RenderObject&, const FloatRect&, const FloatSize&, const std::optional<AffineTransform>&);
     bool shouldConsolidateInteractionRegion(RenderObject&, const IntRect&, const ElementIdentifier&);
     void removeSuperfluousInteractionRegions();
     void shrinkWrapInteractionRegions();

@@ -506,7 +506,7 @@ void LocalDOMWindow::frameDestroyed()
 
 void LocalDOMWindow::willDestroyCachedFrame()
 {
-    // It is necessary to copy m_observers to a separate vector because the Observer may
+    // It is necessary to copy m_observers to a separate vector because the LocalDOMWindowObserver may
     // unregister themselves from the LocalDOMWindow as a result of the call to willDestroyGlobalObjectInCachedFrame.
     m_observers.forEach([](auto& observer) {
         observer.willDestroyGlobalObjectInCachedFrame();
@@ -515,7 +515,7 @@ void LocalDOMWindow::willDestroyCachedFrame()
 
 void LocalDOMWindow::willDestroyDocumentInFrame()
 {
-    // It is necessary to copy m_observers to a separate vector because the Observer may
+    // It is necessary to copy m_observers to a separate vector because the LocalDOMWindowObserver may
     // unregister themselves from the LocalDOMWindow as a result of the call to willDestroyGlobalObjectInFrame.
     m_observers.forEach([](auto& observer) {
         observer.willDestroyGlobalObjectInFrame();
@@ -529,7 +529,7 @@ void LocalDOMWindow::willDetachDocumentFromFrame()
 
     RELEASE_ASSERT(!m_isSuspendingObservers);
 
-    // It is necessary to copy m_observers to a separate vector because the Observer may
+    // It is necessary to copy m_observers to a separate vector because the LocalDOMWindowObserver may
     // unregister themselves from the LocalDOMWindow as a result of the call to willDetachGlobalObjectFromFrame.
     m_observers.forEach([](auto& observer) {
         observer.willDetachGlobalObjectFromFrame();
@@ -562,12 +562,12 @@ void LocalDOMWindow::decrementGamepadEventListenerCount()
 
 #endif
 
-void LocalDOMWindow::registerObserver(Observer& observer)
+void LocalDOMWindow::registerObserver(LocalDOMWindowObserver& observer)
 {
     m_observers.add(observer);
 }
 
-void LocalDOMWindow::unregisterObserver(Observer& observer)
+void LocalDOMWindow::unregisterObserver(LocalDOMWindowObserver& observer)
 {
     m_observers.remove(observer);
 }
@@ -1048,7 +1048,7 @@ RefPtr<HTMLFrameOwnerElement> LocalDOMWindow::protectedFrameElement() const
 void LocalDOMWindow::focus(LocalDOMWindow& incumbentWindow)
 {
     RefPtr frame = this->frame();
-    RefPtr openerFrame = frame ? frame->loader().opener() : nullptr;
+    RefPtr openerFrame = frame ? frame->opener() : nullptr;
     focus([&] {
         if (!openerFrame || openerFrame == frame || incumbentWindow.frame() != openerFrame)
             return false;
@@ -1468,6 +1468,7 @@ void LocalDOMWindow::setName(const AtomString& string)
         return;
 
     frame->tree().setSpecifiedName(string);
+    frame->checkedLoader()->client().frameNameChanged(string.string());
 }
 
 void LocalDOMWindow::setStatus(const String& string)
@@ -1478,7 +1479,7 @@ void LocalDOMWindow::setStatus(const String& string)
 void LocalDOMWindow::disownOpener()
 {
     if (RefPtr frame = this->frame())
-        frame->checkedLoader()->setOpener(nullptr);
+        frame->setOpener(nullptr);
 }
 
 String LocalDOMWindow::origin() const
@@ -2565,15 +2566,15 @@ bool LocalDOMWindow::isInsecureScriptAccess(LocalDOMWindow& activeWindow, const 
     return true;
 }
 
-ExceptionOr<RefPtr<LocalFrame>> LocalDOMWindow::createWindow(const String& urlString, const AtomString& frameName, const WindowFeatures& initialWindowFeatures, LocalDOMWindow& activeWindow, LocalFrame& firstFrame, LocalFrame& openerFrame, const Function<void(LocalDOMWindow&)>& prepareDialogFunction)
+ExceptionOr<RefPtr<Frame>> LocalDOMWindow::createWindow(const String& urlString, const AtomString& frameName, const WindowFeatures& initialWindowFeatures, LocalDOMWindow& activeWindow, LocalFrame& firstFrame, LocalFrame& openerFrame, const Function<void(LocalDOMWindow&)>& prepareDialogFunction)
 {
     RefPtr activeFrame = activeWindow.frame();
     if (!activeFrame)
-        return RefPtr<LocalFrame> { nullptr };
+        return RefPtr<Frame> { nullptr };
 
     RefPtr activeDocument = activeWindow.document();
     if (!activeDocument)
-        return RefPtr<LocalFrame> { nullptr };
+        return RefPtr<Frame> { nullptr };
 
     URL completedURL = urlString.isEmpty() ? URL({ }, emptyString()) : firstFrame.protectedDocument()->completeURL(urlString);
     if (!completedURL.isEmpty() && !completedURL.isValid())
@@ -2597,7 +2598,7 @@ ExceptionOr<RefPtr<LocalFrame>> LocalDOMWindow::createWindow(const String& urlSt
     bool created;
     RefPtr newFrame = WebCore::createWindow(*activeFrame, openerFrame, WTFMove(frameLoadRequest), windowFeatures, created);
     if (!newFrame)
-        return RefPtr<LocalFrame> { nullptr };
+        return RefPtr<Frame> { nullptr };
 
     bool noopener = windowFeatures.wantsNoOpener();
     if (!noopener)
@@ -2608,7 +2609,7 @@ ExceptionOr<RefPtr<LocalFrame>> LocalDOMWindow::createWindow(const String& urlSt
 
     RefPtr localNewFrame = dynamicDowncast<LocalFrame>(newFrame);
     if (localNewFrame && localNewFrame->document()->protectedWindow()->isInsecureScriptAccess(activeWindow, completedURL.string()))
-        return noopener ? RefPtr<LocalFrame> { nullptr } : localNewFrame;
+        return noopener ? RefPtr<Frame> { nullptr } : newFrame;
 
     if (prepareDialogFunction && localNewFrame)
         prepareDialogFunction(*localNewFrame->document()->protectedWindow());
@@ -2626,9 +2627,9 @@ ExceptionOr<RefPtr<LocalFrame>> LocalDOMWindow::createWindow(const String& urlSt
 
     // Navigating the new frame could result in it being detached from its page by a navigation policy delegate.
     if (!newFrame->page())
-        return RefPtr<LocalFrame> { nullptr };
+        return RefPtr<Frame> { nullptr };
 
-    return noopener ? RefPtr<LocalFrame> { nullptr } : localNewFrame;
+    return noopener ? RefPtr<Frame> { nullptr } : newFrame;
 }
 
 ExceptionOr<RefPtr<WindowProxy>> LocalDOMWindow::open(LocalDOMWindow& activeWindow, LocalDOMWindow& firstWindow, const String& urlStringToOpen, const AtomString& frameName, const String& windowFeaturesString)

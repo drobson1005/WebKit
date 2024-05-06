@@ -378,7 +378,14 @@ String serializationForRenderTreeAsText(const ExtendedSRGBA<float>& color, bool)
 
 String serializationForCSS(const HSLA<float>& color, bool useColorFunctionSerialization)
 {
-    return serializationForCSS(convertColor<SRGBA<uint8_t>>(color), useColorFunctionSerialization);
+    // FIXME: The spec is not completely clear on whether missing components should be
+    // carried forward here, but it seems like people are leaning toward thinking they
+    // should be. See https://github.com/w3c/csswg-drafts/issues/10254.
+
+    if (useColorFunctionSerialization)
+        return serializationForCSS(convertColorCarryingForwardMissing<ExtendedSRGBA<float>>(color), true);
+
+    return serializationForCSS(convertColor<SRGBA<uint8_t>>(color), false);
 }
 
 String serializationForHTML(const HSLA<float>& color, bool useColorFunctionSerialization)
@@ -395,7 +402,14 @@ String serializationForRenderTreeAsText(const HSLA<float>& color, bool useColorF
 
 String serializationForCSS(const HWBA<float>& color, bool useColorFunctionSerialization)
 {
-    return serializationForCSS(convertColor<SRGBA<uint8_t>>(color), useColorFunctionSerialization);
+    // FIXME: The spec is not completely clear on whether missing components should be
+    // carried forward here, but it seems like people are leaning toward thinking they
+    // should be. See https://github.com/w3c/csswg-drafts/issues/10254.
+
+    if (useColorFunctionSerialization)
+        return serializationForCSS(convertColorCarryingForwardMissing<ExtendedSRGBA<float>>(color), true);
+
+    return serializationForCSS(convertColor<SRGBA<uint8_t>>(color), false);
 }
 
 String serializationForHTML(const HWBA<float>& color, bool useColorFunctionSerialization)
@@ -534,7 +548,7 @@ String serializationForCSS(const SRGBA<float>& color, bool useColorFunctionSeria
     if (useColorFunctionSerialization)
         return serializationUsingColorFunction(color);
 
-    return serializationForCSS(convertColor<SRGBA<uint8_t>>(color), useColorFunctionSerialization);
+    return serializationForCSS(convertColor<SRGBA<uint8_t>>(color), false);
 }
 
 String serializationForHTML(const SRGBA<float>& color, bool useColorFunctionSerialization)

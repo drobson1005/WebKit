@@ -102,6 +102,8 @@
 #include <WebCore/TextIndicator.h>
 #include <WebCore/TextRecognitionOptions.h>
 
+#include <WebCore/WindowFeatures.h>
+
 #if HAVE(WEBGPU_IMPLEMENTATION)
 #import <WebCore/WebGPUCreateImpl.h>
 #endif
@@ -529,7 +531,7 @@ void WebChromeClient::rootFrameRemoved(const WebCore::LocalFrame& frame)
 
 static bool shouldSuppressJavaScriptDialogs(LocalFrame& frame)
 {
-    if (frame.loader().opener() && frame.loader().stateMachine().isDisplayingInitialEmptyDocument() && frame.loader().provisionalDocumentLoader())
+    if (frame.opener() && frame.loader().stateMachine().isDisplayingInitialEmptyDocument() && frame.loader().provisionalDocumentLoader())
         return true;
 
     return false;
@@ -1334,6 +1336,11 @@ FloatSize WebChromeClient::availableScreenSize() const
 FloatSize WebChromeClient::overrideScreenSize() const
 {
     return protectedPage()->overrideScreenSize();
+}
+
+FloatSize WebChromeClient::overrideAvailableScreenSize() const
+{
+    return protectedPage()->overrideAvailableScreenSize();
 }
 
 #endif

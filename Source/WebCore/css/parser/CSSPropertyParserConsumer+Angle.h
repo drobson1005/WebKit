@@ -30,6 +30,7 @@
 #include "CSSPropertyParserConsumer+Number.h"
 #include "CSSPropertyParserConsumer+Percent.h"
 #include "CSSPropertyParserConsumer+Primitives.h"
+#include "Length.h"
 #include <optional>
 #include <wtf/RefPtr.h>
 
@@ -182,6 +183,20 @@ auto consumeAngleOrNumberOrNoneRawAllowingSymbolTableIdent(CSSParserTokenRange& 
 {
     return consumeMetaConsumer<AngleOrNumberOrNoneRawAllowingSymbolTableIdentConsumer<Transformer>>(range, symbolTable, ValueRange::All, parserMode, UnitlessQuirk::Forbid, UnitlessZeroQuirk::Forbid);
 }
+
+// MARK: Consumer Lookup
+
+template<> struct ConsumerLookup<AngleOrNumberOrNoneRaw> {
+    std::optional<AngleOrNumberOrNoneRaw> operator()(CSSParserTokenRange& args, CSSParserMode parserMode)
+    {
+        return consumeAngleOrNumberOrNoneRaw(args, parserMode);
+    }
+
+    std::optional<AngleOrNumberOrNoneRaw> operator()(CSSParserTokenRange& args, CSSParserMode parserMode, const CSSCalcSymbolTable& symbolTable)
+    {
+        return consumeAngleOrNumberOrNoneRawAllowingSymbolTableIdent(args, symbolTable, parserMode);
+    }
+};
 
 } // namespace CSSPropertyParserHelpers
 } // namespace WebCore

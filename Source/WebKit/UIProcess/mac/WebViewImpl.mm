@@ -34,7 +34,6 @@
 #import "APIPageConfiguration.h"
 #import "AppKitSPI.h"
 #import "CoreTextHelpers.h"
-#import "FontInfo.h"
 #import "FullscreenClient.h"
 #import "InsertTextOptions.h"
 #import "Logging.h"
@@ -45,11 +44,11 @@
 #import "PageClient.h"
 #import "PageClientImplMac.h"
 #import "PasteboardTypes.h"
+#import "PlatformFontInfo.h"
 #import "PlaybackSessionManagerProxy.h"
 #import "RemoteLayerTreeDrawingAreaProxyMac.h"
 #import "RemoteObjectRegistry.h"
 #import "RemoteObjectRegistryMessages.h"
-#import "StringUtilities.h"
 #import "TextChecker.h"
 #import "TextCheckerState.h"
 #import "TiledCoreAnimationDrawingAreaProxy.h"
@@ -69,6 +68,7 @@
 #import "WKSafeBrowsingWarning.h"
 #import "WKTextIndicatorStyleManager.h"
 #import "WKTextInputWindowController.h"
+#import "WKTextPlaceholder.h"
 #import "WKViewLayoutStrategy.h"
 #import "WKWebViewInternal.h"
 #import "WebBackForwardList.h"
@@ -3766,7 +3766,7 @@ void WebViewImpl::sendToolTipMouseEntered()
 
 NSString *WebViewImpl::stringForToolTip(NSToolTipTag tag)
 {
-    return nsStringFromWebCoreString(m_page->toolTip());
+    return m_page->toolTip();
 }
 
 void WebViewImpl::toolTipChanged(const String& oldToolTip, const String& newToolTip)
@@ -4547,6 +4547,26 @@ void WebViewImpl::saveBackForwardSnapshotForItem(WebBackForwardListItem& item)
     m_page->recordNavigationSnapshot(item);
 }
 
+void WebViewImpl::insertTextPlaceholderWithSize(CGSize size, void(^completionHandler)(NSTextPlaceholder *placeholder))
+{
+    m_page->insertTextPlaceholder(WebCore::IntSize { size }, [completionHandler = makeBlockPtr(completionHandler)](const std::optional<WebCore::ElementContext>& placeholder) {
+        if (!placeholder) {
+            completionHandler(nil);
+            return;
+        }
+        completionHandler(adoptNS([[WKTextPlaceholder alloc] initWithElementContext:*placeholder]).get());
+    });
+}
+
+void WebViewImpl::removeTextPlaceholder(NSTextPlaceholder *placeholder, bool willInsertText, void(^completionHandler)())
+{
+    // FIXME: Implement support for willInsertText. See <https://bugs.webkit.org/show_bug.cgi?id=208747>.
+    if (RetainPtr wkTextPlaceholder = dynamic_objc_cast<WKTextPlaceholder>(placeholder))
+        m_page->removeTextPlaceholder([wkTextPlaceholder elementContext], makeBlockPtr(completionHandler));
+    else
+        completionHandler();
+}
+
 #if ENABLE(UNIFIED_TEXT_REPLACEMENT_UI)
 void WebViewImpl::addTextIndicatorStyleForID(WTF::UUID uuid, WKTextIndicatorStyleType styleType)
 {
@@ -5265,24 +5285,18 @@ void WebViewImpl::setMarkedText(id string, NSRange selectedRange, NSRange replac
         return;
     }
 
-    m_page->setCompositionAsync(text, WTFMove(underlines), WTFMove(highlights), selectedRange, replacementRange);
+    m_page->setCompositionAsync(text, WTFMove(underlines), WTFMove(highlights), { }, selectedRange, replacementRange);
 }
 
 #if HAVE(INLINE_PREDICTIONS)
 bool WebViewImpl::allowsInlinePredictions() const
 {
-    const EditorState& editorState = m_page->editorState();
+    auto& editorState = m_page->editorState();
 
     if (editorState.hasPostLayoutData() && editorState.postLayoutData->canEnableWritingSuggestions)
         return NSSpellChecker.isAutomaticInlineCompletionEnabled;
 
-    if (!editorState.isContentEditable)
-        return false;
-
-    if (!inlinePredictionsEnabled() && !m_page->preferences().inlinePredictionsInAllEditableElementsEnabled())
-        return false;
-
-    return NSSpellChecker.isAutomaticInlineCompletionEnabled;
+    return editorState.isContentEditable && inlinePredictionsEnabled() && NSSpellChecker.isAutomaticInlineCompletionEnabled;
 }
 
 void WebViewImpl::showInlinePredictionsForCandidate(NSTextCheckingResult *candidate, NSRange absoluteSelectedRange, NSRange oldRelativeSelectedRange)

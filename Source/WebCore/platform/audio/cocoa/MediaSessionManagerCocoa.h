@@ -42,7 +42,7 @@ enum class MediaPlayerPitchCorrectionAlgorithm : uint8_t;
 
 class MediaSessionManagerCocoa
     : public PlatformMediaSessionManager
-    , private NowPlayingManager::Client
+    , private NowPlayingManagerClient
     , private AudioHardwareListener::Client {
     WTF_MAKE_FAST_ALLOCATED;
 public:
@@ -108,10 +108,10 @@ protected:
 
 private:
 #if !RELEASE_LOG_DISABLED
-    const char* logClassName() const override { return "MediaSessionManagerCocoa"; }
+    ASCIILiteral logClassName() const override { return "MediaSessionManagerCocoa"_s; }
 #endif
 
-    // NowPlayingManager::Client
+    // NowPlayingManagerClient
     void didReceiveRemoteControlCommand(PlatformMediaSession::RemoteControlCommandType type, const PlatformMediaSession::RemoteCommandArgument& argument) final { processDidReceiveRemoteControlCommand(type, argument); }
 
     // AudioHardwareListenerClient

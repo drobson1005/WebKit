@@ -58,6 +58,7 @@ OBJC_CLASS NSImmediateActionGestureRecognizer;
 OBJC_CLASS NSMenu;
 OBJC_CLASS NSPopover;
 OBJC_CLASS NSTextInputContext;
+OBJC_CLASS NSTextPlaceholder;
 OBJC_CLASS NSView;
 OBJC_CLASS QLPreviewPanel;
 OBJC_CLASS WKAccessibilitySettingsObserver;
@@ -528,6 +529,9 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     void saveBackForwardSnapshotForCurrentItem();
     void saveBackForwardSnapshotForItem(WebBackForwardListItem&);
 
+    void insertTextPlaceholderWithSize(CGSize, void(^completionHandler)(NSTextPlaceholder *));
+    void removeTextPlaceholder(NSTextPlaceholder *, bool willInsertText, void(^completionHandler)());
+
     WKSafeBrowsingWarning *safeBrowsingWarning() { return m_safeBrowsingWarning.get(); }
 
     ViewGestureController* gestureController() { return m_gestureController.get(); }
@@ -742,6 +746,10 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     void removeTextIndicatorStyleForID(WTF::UUID);
 #endif
 
+#if HAVE(INLINE_PREDICTIONS)
+    bool allowsInlinePredictions() const;
+#endif
+
 private:
 #if HAVE(TOUCH_BAR)
     void setUpTextTouchBar(NSTouchBar *);
@@ -814,7 +822,6 @@ private:
     void handleRequestedCandidates(NSInteger sequenceNumber, NSArray<NSTextCheckingResult *> *candidates);
 
 #if HAVE(INLINE_PREDICTIONS)
-    bool allowsInlinePredictions() const;
     void showInlinePredictionsForCandidates(NSArray<NSTextCheckingResult *> *);
     void showInlinePredictionsForCandidate(NSTextCheckingResult *, NSRange, NSRange);
 #endif

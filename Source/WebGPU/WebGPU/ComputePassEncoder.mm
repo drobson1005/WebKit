@@ -33,6 +33,7 @@
 #import "CommandEncoder.h"
 #import "ComputePipeline.h"
 #import "IsValidToUseWith.h"
+#import "Pipeline.h"
 #import "QuerySet.h"
 
 namespace WebGPU {
@@ -183,6 +184,10 @@ void ComputePassEncoder::executePreDispatchCommands(const Buffer* indirectBuffer
             return;
         }
         auto& group = *kvp.value.get();
+        if (!validateBindGroup(group)) {
+            makeInvalid(@"buffer is too small");
+            return;
+        }
         [m_computeCommandEncoder setBuffer:group.computeArgumentBuffer() offset:0 atIndex:bindGroupIndex];
     }
 
@@ -438,7 +443,7 @@ void ComputePassEncoder::setBindGroup(uint32_t groupIndex, const BindGroup& grou
 
     Vector<const BindableResources*> resourceList;
     for (const auto& resource : group.resources()) {
-        if (resource.renderStages == BindGroup::MTLRenderStageCompute)
+        if (resource.renderStages == BindGroup::MTLRenderStageCompute && resource.mtlResources.size())
             [m_computeCommandEncoder useResources:&resource.mtlResources[0] count:resource.mtlResources.size() usage:resource.usage];
 
         ASSERT(resource.mtlResources.size() == resource.resourceUsages.size());

@@ -440,15 +440,15 @@ bool URLParser::copyBaseWindowsDriveLetter(const URL& base)
     if (base.protocolIsFile()) {
         RELEASE_ASSERT(base.m_hostEnd + base.m_portLength < base.m_string.length());
         if (base.m_string.is8Bit()) {
-            const LChar* begin = base.m_string.characters8();
-            CodePointIterator<LChar> c({ begin + base.m_hostEnd + base.m_portLength + 1, begin + base.m_string.length() });
+            auto characters = base.m_string.span8();
+            CodePointIterator c { characters.subspan(base.m_hostEnd + base.m_portLength + 1) };
             if (isWindowsDriveLetter(c)) {
                 appendWindowsDriveLetter(c);
                 return true;
             }
         } else {
-            const UChar* begin = base.m_string.characters16();
-            CodePointIterator<UChar> c({ begin + base.m_hostEnd + base.m_portLength + 1, begin + base.m_string.length() });
+            auto characters = base.m_string.span16();
+            CodePointIterator c { characters.subspan(base.m_hostEnd + base.m_portLength + 1) };
             if (isWindowsDriveLetter(c)) {
                 appendWindowsDriveLetter(c);
                 return true;
@@ -791,11 +791,9 @@ void URLParser::copyASCIIStringUntil(const String& string, size_t length)
     if (string.is8Bit())
         appendToASCIIBuffer(string.span8().first(length));
     else {
-        const UChar* characters = string.characters16();
-        for (size_t i = 0; i < length; ++i) {
-            UChar c = characters[i];
-            ASSERT_WITH_SECURITY_IMPLICATION(isASCII(c));
-            appendToASCIIBuffer(c);
+        for (auto character : string.span16().first(length)) {
+            ASSERT_WITH_SECURITY_IMPLICATION(isASCII(character));
+            appendToASCIIBuffer(character);
         }
     }
 }
@@ -1094,11 +1092,13 @@ URLParser::URLParser(String&& input, const URL& base, const URLTextEncoding* non
     }
 
     if (m_inputString.is8Bit()) {
-        m_inputBegin = m_inputString.characters8();
-        parse(m_inputString.span8(), base, nonUTF8QueryEncoding);
+        auto characters = m_inputString.span8();
+        m_inputBegin = characters.data();
+        parse(characters, base, nonUTF8QueryEncoding);
     } else {
-        m_inputBegin = m_inputString.characters16();
-        parse(m_inputString.span16(), base, nonUTF8QueryEncoding);
+        auto characters = m_inputString.span16();
+        m_inputBegin = characters.data();
+        parse(characters, base, nonUTF8QueryEncoding);
     }
 
     ASSERT(!m_url.m_isValid
@@ -1109,7 +1109,7 @@ URLParser::URLParser(String&& input, const URL& base, const URLTextEncoding* non
 #if ASSERT_ENABLED
     if (!m_didSeeSyntaxViolation) {
         // Force a syntax violation at the beginning to make sure we get the same result.
-        URLParser parser(makeString(" ", m_inputString), base, nonUTF8QueryEncoding);
+        URLParser parser(makeString(' ', m_inputString), base, nonUTF8QueryEncoding);
         URL parsed = parser.result();
         if (parsed.isValid())
             ASSERT(allValuesEqual(parser.result(), m_url));
@@ -2544,14 +2544,14 @@ template<typename CharacterType> std::optional<URLParser::LCharBuffer> URLParser
     if (domain.containsOnlyASCII() && !subdomainStartsWithXNDashDash(domain)) {
         size_t length = domain.length();
         if (domain.is8Bit()) {
-            const LChar* characters = domain.characters8();
+            auto characters = domain.span8();
             ascii.appendUsingFunctor(length, [&](size_t i) {
                 if (UNLIKELY(isASCIIUpper(characters[i])))
                     syntaxViolation(iteratorForSyntaxViolationPosition);
                 return toASCIILower(characters[i]);
             });
         } else {
-            const UChar* characters = domain.characters16();
+            auto characters = domain.span16();
             ascii.appendUsingFunctor(length, [&](size_t i) {
                 if (UNLIKELY(isASCIIUpper(characters[i])))
                     syntaxViolation(iteratorForSyntaxViolationPosition);
@@ -2925,9 +2925,7 @@ std::optional<KeyValuePair<String, String>> URLParser::parseQueryNameAndValue(St
 static void serializeURLEncodedForm(const String& input, Vector<LChar>& output)
 {
     auto utf8 = input.utf8(StrictConversion);
-    const char* data = utf8.data();
-    for (size_t i = 0; i < utf8.length(); ++i) {
-        const char byte = data[i];
+    for (char byte : utf8.span()) {
         if (byte == 0x20)
             output.append(0x2B);
         else if (byte == 0x2A

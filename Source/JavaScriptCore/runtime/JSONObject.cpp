@@ -1072,9 +1072,7 @@ void FastStringifier<CharType>::append(JSValue value)
             }
             auto* cursor = m_buffer + m_length;
             *cursor++ = '"';
-            auto* characters = string.characters8();
-            for (unsigned i = 0; i < stringLength; ++i) {
-                auto character = characters[i];
+            for (auto character : string.span8()) {
                 if (UNLIKELY(WTF::escapedFormsForJSON[character])) {
                     recordFailure("string character needs escaping"_s);
                     return;
@@ -1092,9 +1090,7 @@ void FastStringifier<CharType>::append(JSValue value)
             auto* cursor = m_buffer + m_length;
             *cursor++ = '"';
             if (string.is8Bit()) {
-                auto* characters = string.characters8();
-                for (unsigned i = 0; i < stringLength; ++i) {
-                    auto character = characters[i];
+                for (auto character : string.span8()) {
                     if (UNLIKELY(WTF::escapedFormsForJSON[character])) {
                         recordFailure("string character needs escaping"_s);
                         return;
@@ -1102,9 +1098,7 @@ void FastStringifier<CharType>::append(JSValue value)
                     *cursor++ = character;
                 }
             } else {
-                auto* characters = string.characters16();
-                for (unsigned i = 0; i < stringLength; ++i) {
-                    auto character = characters[i];
+                for (auto character : string.span16()) {
                     if (UNLIKELY(U16_IS_SURROGATE(character))) {
                         recordFailure("string character is surrogate"_s);
                         return;
@@ -1187,7 +1181,7 @@ void FastStringifier<CharType>::append(JSValue value)
             if (needComma)
                 m_buffer[m_length++] = ',';
             m_buffer[m_length] = '"';
-            auto* characters = name.characters8();
+            auto characters = name.span8();
             for (unsigned i = 0; i < nameLength; ++i) {
                 auto character = characters[i];
                 if (UNLIKELY(WTF::escapedFormsForJSON[character])) {

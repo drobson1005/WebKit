@@ -675,7 +675,7 @@ String HTMLImageElement::completeURLsInAttributeValue(const URL& base, const Att
         StringBuilder result;
         for (const auto& candidate : imageCandidates) {
             if (&candidate != &imageCandidates[0])
-                result.append(", ");
+                result.append(", "_s);
             result.append(resolveURLStringIfNeeded(candidate.string.toString(), resolveURLs, base));
             if (candidate.density != UninitializedDescriptor)
                 result.append(' ', candidate.density, 'x');
@@ -854,12 +854,9 @@ String HTMLImageElement::crossOrigin() const
 
 bool HTMLImageElement::allowsOrientationOverride() const
 {
-    auto* cachedImage = this->cachedImage();
-    if (!cachedImage)
-        return true;
-
-    auto image = cachedImage->image();
-    return !image || image->sourceURL().protocolIsData() || cachedImage->isCORSSameOrigin();
+    if (auto* cachedImage = this->cachedImage())
+        return cachedImage->allowsOrientationOverride();
+    return true;
 }
 
 Image* HTMLImageElement::image() const
@@ -980,11 +977,6 @@ CachedImage* HTMLImageElement::cachedImage() const
 void HTMLImageElement::setLoadManually(bool loadManually)
 {
     m_imageLoader->setLoadManually(loadManually);
-}
-
-const char* HTMLImageElement::activeDOMObjectName() const
-{
-    return "HTMLImageElement";
 }
 
 bool HTMLImageElement::virtualHasPendingActivity() const

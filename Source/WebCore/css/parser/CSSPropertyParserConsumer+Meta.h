@@ -25,6 +25,7 @@
 #pragma once
 
 #include "CSSParserToken.h"
+#include "CSSParserTokenRange.h"
 #include "CSSPropertyParserConsumer+Primitives.h"
 #include <optional>
 #include <type_traits>
@@ -33,6 +34,8 @@
 namespace WebCore {
 
 class CSSCalcSymbolTable;
+enum CSSParserMode : uint8_t;
+enum class ValueRange : uint8_t;
 
 namespace CSSPropertyParserHelpers {
 
@@ -237,6 +240,15 @@ struct SameTokenMetaConsumer {
         return SameTokenMetaConsumerApplier<Transformer, ConsumersTuple, std::tuple_size_v<ConsumersTuple>>::consume(range, symbolTable, valueRange, parserMode, unitless, unitlessZero, std::forward<Args>(args)...);
     }
 };
+
+// MARK: - Generic Consumer Lookup
+
+// To allow users to find the appropriate consumer for a raw result type
+// each consumer should create a specializations of the ConsumerLookup
+// struct for their corresponding raw type and should implement at least
+// `operator()(CSSParserTokenRange& args)` to forward to their consume()
+// function.
+template<typename> struct ConsumerLookup;
 
 } // namespace CSSPropertyParserHelpers
 } // namespace WebCore

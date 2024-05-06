@@ -153,7 +153,6 @@
 #import <WebCore/StyleProperties.h>
 #import <WebCore/TextIndicator.h>
 #import <WebCore/TextIterator.h>
-#import <WebCore/TextPlaceholderElement.h>
 #import <WebCore/UserAgent.h>
 #import <WebCore/UserGestureIndicator.h>
 #import <WebCore/ViewportArguments.h>
@@ -453,6 +452,11 @@ FloatSize WebPage::overrideScreenSize() const
     return m_overrideScreenSize;
 }
 
+FloatSize WebPage::overrideAvailableScreenSize() const
+{
+    return m_overrideAvailableScreenSize;
+}
+
 void WebPage::didReceiveMobileDocType(bool isMobileDoctype)
 {
     m_isMobileDoctype = isMobileDoctype;
@@ -600,6 +604,8 @@ bool WebPage::handleEditingKeyboardEvent(KeyboardEvent& event)
 
     if (handleKeyEventByRelinquishingFocusToChrome(event))
         return true;
+
+    updateLastNodeBeforeWritingSuggestions(event);
 
     // FIXME: Interpret the event immediately upon receiving it in UI process, without sending to WebProcess first.
     auto sendResult = WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::InterpretKeyEvent(editorState(ShouldPerformLayout::Yes), platformEvent->type() == PlatformKeyboardEvent::Type::Char), m_identifier);
@@ -4857,9 +4863,10 @@ OptionSet<PointerCharacteristics> WebPage::pointerCharacteristicsOfAllAvailableP
     return result;
 }
 
-void WebPage::hardwareKeyboardAvailabilityChanged(bool keyboardIsAttached)
+void WebPage::hardwareKeyboardAvailabilityChanged(HardwareKeyboardState state)
 {
-    m_keyboardIsAttached = keyboardIsAttached;
+    m_keyboardIsAttached = state.isAttached;
+    setHardwareKeyboardState(state);
 
     if (RefPtr focusedFrame = m_page->checkedFocusController()->focusedLocalFrame())
         focusedFrame->eventHandler().capsLockStateMayHaveChanged();
@@ -4877,26 +4884,6 @@ bool WebPage::platformPrefersTextLegibilityBasedZoomScaling() const
 #else
     return false;
 #endif
-}
-
-void WebPage::insertTextPlaceholder(const IntSize& size, CompletionHandler<void(const std::optional<WebCore::ElementContext>&)>&& completionHandler)
-{
-    // Inserting the placeholder may run JavaScript, which can do anything, including frame destruction.
-    RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
-    if (!frame)
-        return completionHandler({ });
-
-    auto placeholder = frame->editor().insertTextPlaceholder(size);
-    completionHandler(placeholder ? contextForElement(*placeholder) : std::nullopt);
-}
-
-void WebPage::removeTextPlaceholder(const ElementContext& placeholder, CompletionHandler<void()>&& completionHandler)
-{
-    if (auto element = elementForContext(placeholder)) {
-        if (RefPtr frame = element->document().frame())
-            frame->editor().removeTextPlaceholder(downcast<TextPlaceholderElement>(*element));
-    }
-    completionHandler();
 }
 
 void WebPage::updateSelectionWithDelta(int64_t locationDelta, int64_t lengthDelta, CompletionHandler<void()>&& completionHandler)

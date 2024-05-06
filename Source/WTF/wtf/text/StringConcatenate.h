@@ -165,6 +165,7 @@ private:
     unsigned m_length;
 };
 
+// FIXME: Port call sites to use ASCIILiteral or std::span and remove.
 template<> class StringTypeAdapter<const char*, void> : public StringTypeAdapter<const LChar*, void> {
 public:
     StringTypeAdapter(const char* characters)
@@ -173,6 +174,7 @@ public:
     }
 };
 
+// FIXME: Port call sites to use ASCIILiteral or std::span and remove.
 template<> class StringTypeAdapter<char*, void> : public StringTypeAdapter<const char*, void> {
 public:
     StringTypeAdapter(const char* characters)
@@ -181,10 +183,10 @@ public:
     }
 };
 
-template<> class StringTypeAdapter<ASCIILiteral, void> : public StringTypeAdapter<const char*, void> {
+template<> class StringTypeAdapter<ASCIILiteral, void> : public StringTypeAdapter<const LChar*, void> {
 public:
     StringTypeAdapter(ASCIILiteral characters)
-        : StringTypeAdapter<const char*, void> { characters }
+        : StringTypeAdapter<const LChar*, void> { characters.characters8() }
     {
     }
 };
@@ -290,48 +292,28 @@ public:
     }
 };
 
-struct UTF8Adapter {
-    const char8_t* characters;
-    unsigned lengthUTF8 { 0 };
-    unsigned lengthUTF16 { 0 };
-    bool is8Bit { true };
-    bool conversionFailed { true };
-
-    UTF8Adapter(std::span<const char8_t> characters)
-        : characters { characters.data() }
-    {
-        auto result = Unicode::computeUTFLengths(characters);
-        if (result.result == Unicode::ConversionResult::SourceIllegal)
-            return;
-        if (result.lengthUTF16 > String::MaxLength)
-            return;
-        lengthUTF8 = result.lengthUTF8;
-        lengthUTF16 = result.lengthUTF16;
-        is8Bit = result.isAllASCII;
-        conversionFailed = false;
-    }
-};
-
-template<> class StringTypeAdapter<UTF8Adapter, void> {
+template<> class StringTypeAdapter<Unicode::CheckedUTF8, void> {
 public:
-    StringTypeAdapter(UTF8Adapter characters)
+    StringTypeAdapter(Unicode::CheckedUTF8 characters)
         : m_characters { characters }
     {
+        if (m_characters.lengthUTF16 > String::MaxLength)
+            m_characters.lengthUTF16 = 0;
     }
 
     unsigned length() const { return m_characters.lengthUTF16; }
-    bool is8Bit() const { return m_characters.is8Bit; }
-    void writeTo(LChar* destination) const { memcpy(destination, m_characters.characters, m_characters.lengthUTF16); }
-    void writeTo(UChar* destination) const { Unicode::convertUTF8ToUTF16({ m_characters.characters, m_characters.lengthUTF8 }, &destination, destination + m_characters.lengthUTF16); }
+    bool is8Bit() const { return m_characters.isAllASCII; }
+    void writeTo(LChar* destination) const { memcpy(destination, m_characters.characters.data(), m_characters.lengthUTF16); }
+    void writeTo(UChar* destination) const { Unicode::convert(m_characters.characters, std::span { destination, m_characters.lengthUTF16 }); }
 
 private:
-    UTF8Adapter m_characters;
+    Unicode::CheckedUTF8 m_characters;
 };
 
-template<size_t Extent> class StringTypeAdapter<std::span<const char8_t, Extent>, void> : public StringTypeAdapter<UTF8Adapter, void> {
+template<size_t Extent> class StringTypeAdapter<std::span<const char8_t, Extent>, void> : public StringTypeAdapter<Unicode::CheckedUTF8, void> {
 public:
     StringTypeAdapter(std::span<const char8_t, Extent> span)
-        : StringTypeAdapter<UTF8Adapter, void> { span }
+        : StringTypeAdapter<Unicode::CheckedUTF8, void> { Unicode::checkUTF8(span) }
     {
     }
 };
@@ -629,7 +611,6 @@ inline String WARN_UNUSED_RETURN makeStringByInserting(StringView originalString
 
 using WTF::Indentation;
 using WTF::IndentationScope;
-using WTF::UTF8Adapter;
 using WTF::makeAtomString;
 using WTF::makeString;
 using WTF::makeStringByInserting;

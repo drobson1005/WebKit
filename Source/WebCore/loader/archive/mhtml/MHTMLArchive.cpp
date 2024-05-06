@@ -57,8 +57,8 @@
 
 namespace WebCore {
 
-const char* const quotedPrintable = "quoted-printable";
-const char* const base64 = "base64";
+constexpr auto quotedPrintable = "quoted-printable"_s;
+constexpr auto base64 = "base64"_s;
 
 static String generateRandomBoundary()
 {
@@ -67,7 +67,7 @@ static String generateRandomBoundary()
     std::array<uint8_t, randomValuesLength> randomValues;
     cryptographicallyRandomValues(randomValues);
     StringBuilder stringBuilder;
-    stringBuilder.append("----=_NextPart_000_");
+    stringBuilder.append("----=_NextPart_000_"_s);
     for (size_t i = 0; i < randomValues.size(); ++i) {
         if (i == 2)
             stringBuilder.append('_');
@@ -144,27 +144,19 @@ Ref<FragmentedSharedBuffer> MHTMLArchive::generateMHTMLData(Page* page)
     String dateString = makeRFC2822DateString(now.weekDay(), now.monthDay(), now.month(), now.year(), now.hour(), now.minute(), now.second(), now.utcOffsetInMinute());
 
     StringBuilder stringBuilder;
-    stringBuilder.append("From: <Saved by WebKit>\r\n");
+    stringBuilder.append("From: <Saved by WebKit>\r\n"_s);
     auto* localMainFrame = dynamicDowncast<LocalFrame>(page->mainFrame());
     if (localMainFrame) {
-        stringBuilder.append("Subject: ");
+        stringBuilder.append("Subject: "_s);
         // We replace non ASCII characters with '?' characters to match IE's behavior.
         stringBuilder.append(replaceNonPrintableCharacters(localMainFrame->document()->title()));
     }
-    stringBuilder.append("\r\nDate: ");
-    stringBuilder.append(dateString);
-    stringBuilder.append("\r\nMIME-Version: 1.0\r\n");
-    stringBuilder.append("Content-Type: multipart/related;\r\n");
-    if (localMainFrame) {
-        stringBuilder.append("\ttype=\"");
-        stringBuilder.append(localMainFrame->document()->suggestedMIMEType());
-    }
-    stringBuilder.append("\";\r\n");
-    stringBuilder.append("\tboundary=\"");
-    stringBuilder.append(boundary);
-    stringBuilder.append("\"\r\n\r\n");
+    stringBuilder.append("\r\nDate: "_s, dateString,
+        "\r\nMIME-Version: 1.0\r\nContent-Type: multipart/related;\r\n"_s);
+    if (localMainFrame)
+        stringBuilder.append("\ttype=\""_s, localMainFrame->document()->suggestedMIMEType());
+    stringBuilder.append("\";\r\n\tboundary=\""_s, boundary, "\"\r\n\r\n"_s);
 
-    // We use utf8() below instead of ascii() as ascii() replaces CRLFs with ?? (we still only have put ASCII characters in it).
     ASSERT(stringBuilder.toString().containsOnlyASCII());
     CString asciiString = stringBuilder.toString().utf8();
     SharedBufferBuilder mhtmlData;
@@ -174,24 +166,24 @@ Ref<FragmentedSharedBuffer> MHTMLArchive::generateMHTMLData(Page* page)
         stringBuilder.clear();
         stringBuilder.append(endOfResourceBoundary, "Content-Type: ", resource.mimeType);
 
-        const char* contentEncoding = nullptr;
+        ASCIILiteral contentEncoding;
         if (MIMETypeRegistry::isSupportedJavaScriptMIMEType(resource.mimeType) || MIMETypeRegistry::isSupportedNonImageMIMEType(resource.mimeType))
             contentEncoding = quotedPrintable;
         else
             contentEncoding = base64;
 
-        stringBuilder.append("\r\nContent-Transfer-Encoding: ", contentEncoding, "\r\nContent-Location: ", resource.url.string(), "\r\n\r\n");
+        stringBuilder.append("\r\nContent-Transfer-Encoding: "_s, contentEncoding, "\r\nContent-Location: "_s, resource.url.string(), "\r\n\r\n"_s);
 
         asciiString = stringBuilder.toString().utf8();
         mhtmlData.append(asciiString.span());
 
         // FIXME: ideally we would encode the content as a stream without having to fetch it all.
-        if (!strcmp(contentEncoding, quotedPrintable)) {
+        if (contentEncoding == quotedPrintable) {
             auto encodedData = quotedPrintableEncode(resource.data->span());
             mhtmlData.append(encodedData.span());
             mhtmlData.append("\r\n"_span);
         } else {
-            ASSERT(!strcmp(contentEncoding, base64));
+            ASSERT(contentEncoding == base64);
             // We are not specifying insertLFs = true below as it would cut the lines with LFs and MHTML requires CRLFs.
             auto encodedData = base64EncodeToVector(resource.data->span());
             const size_t maximumLineLength = 76;

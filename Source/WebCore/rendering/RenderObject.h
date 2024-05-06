@@ -336,7 +336,7 @@ public:
     void setLayoutBox(Layout::Box&);
     void clearLayoutBox();
 
-    RenderTheme& theme() const;
+    WEBCORE_EXPORT RenderTheme& theme() const;
 
     virtual ASCIILiteral renderName() const = 0;
 
@@ -392,7 +392,7 @@ public:
     RenderFragmentedFlow* enclosingFragmentedFlow() const;
 
     WEBCORE_EXPORT bool useDarkAppearance() const;
-    OptionSet<StyleColorOptions> styleColorOptions() const;
+    WEBCORE_EXPORT OptionSet<StyleColorOptions> styleColorOptions() const;
 
 #if ASSERT_ENABLED
     void setHasAXObject(bool flag) { m_hasAXObject = flag; }
@@ -495,6 +495,8 @@ public:
     bool isHTMLMarquee() const;
 
     bool isTablePart() const { return isRenderTableCell() || isRenderTableCol() || isRenderTableCaption() || isRenderTableRow() || isRenderTableSection(); }
+
+    bool isViewTransitionPseudo() const { return isRenderViewTransitionCapture() || isRenderViewTransitionContainer(); }
 
     inline bool isBeforeContent() const;
     inline bool isAfterContent() const;
@@ -644,6 +646,7 @@ public:
     virtual bool hasIntrinsicAspectRatio() const { return isReplacedOrInlineBlock() && (isImage() || isRenderVideo() || isRenderHTMLCanvas() || isRenderViewTransitionCapture()); }
     bool isAnonymous() const { return m_typeFlags.contains(TypeFlag::IsAnonymous); }
     bool isAnonymousBlock() const;
+    bool isAnonymousForPercentageResolution() const { return isAnonymous() && !isViewTransitionPseudo(); }
     bool isBlockBox() const;
     inline bool isBlockLevelBox() const;
     bool isBlockContainer() const;
@@ -715,6 +718,9 @@ public:
     inline bool isTransformed() const;
     inline bool hasTransformOrPerspective() const;
 
+    bool capturedInViewTransition() const { return m_stateBitfields.hasFlag(StateFlag::CapturedInViewTransition); }
+    void setCapturedInViewTransition(bool captured) { m_stateBitfields.setFlag(StateFlag::CapturedInViewTransition, captured); }
+
     inline bool preservesNewline() const;
 
     RenderView& view() const { return *document().renderView(); }
@@ -727,7 +733,7 @@ public:
 
     Node* node() const
     { 
-        if (isAnonymous() || isRenderViewTransitionContainer())
+        if (isAnonymous())
             return nullptr;
         return m_node.ptr();
     }
@@ -1212,6 +1218,7 @@ private:
         PaintContainmentApplies = 1 << 18,
         HasSVGTransform = 1 << 19,
         EverHadSkippedContentLayout = 1 << 20,
+        CapturedInViewTransition = 1 << 21
     };
 
     class StateBitfields {
@@ -1223,7 +1230,7 @@ private:
         };
 
     private:
-        uint32_t m_flags : 21 { 0 };
+        uint32_t m_flags : 22 { 0 };
         uint32_t m_positionedState : 2 { IsStaticallyPositioned }; // PositionedState
         uint32_t m_selectionState : 3 { enumToUnderlyingType(HighlightState::None) }; // HighlightState
         uint32_t m_fragmentedFlowState : 1 { enumToUnderlyingType(FragmentedFlowState::NotInsideFlow) }; // FragmentedFlowState

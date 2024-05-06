@@ -36,6 +36,7 @@
 #include "GLFence.h"
 #include "PlatformDisplay.h"
 #include <skia/core/SkCanvas.h>
+#include <skia/core/SkColorSpace.h>
 #include <skia/core/SkImage.h>
 #include <skia/core/SkStream.h>
 #include <skia/gpu/GrBackendSurface.h>
@@ -159,9 +160,13 @@ void AcceleratedBuffer::completePainting()
     m_surface->getCanvas()->restore();
 
     auto* grContext = WebCore::PlatformDisplay::sharedDisplayForCompositing().skiaGrContext();
-    grContext->flush(m_surface.get());
-    m_fence = WebCore::GLFence::create();
-    grContext->submit(m_fence ? GrSyncCpu::kNo : GrSyncCpu::kYes);
+    if (WebCore::GLFence::isSupported()) {
+        grContext->flushAndSubmit(m_surface.get(), GrSyncCpu::kNo);
+        m_fence = WebCore::GLFence::create();
+        if (!m_fence)
+            grContext->submit(GrSyncCpu::kYes);
+    } else
+        grContext->flushAndSubmit(m_surface.get(), GrSyncCpu::kYes);
 
     auto texture = SkSurfaces::GetBackendTexture(m_surface.get(), SkSurface::BackendHandleAccess::kFlushRead);
     ASSERT(texture.isValid());

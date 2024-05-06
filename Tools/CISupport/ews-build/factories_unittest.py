@@ -69,6 +69,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'kill-old-processes',
             'jhbuild',
             'validate-change',
+            'clean-derived-sources',
             'compile-webkit',
             'install-built-product'
         ],
@@ -170,7 +171,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'trigger-crash-log-submission',
             'set-build-summary'
         ],
-        'macOS-AppleSilicon-Sonoma-Debug-Build-EWS': [
+        'macOS-Sonoma-Debug-Build-EWS': [
             'configure-build',
             'check-change-relevance',
             'validate-change',
@@ -186,7 +187,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'validate-change',
             'compile-webkit'
         ],
-        'macOS-AppleSilicon-Sonoma-Debug-WK2-Tests-EWS': [
+        'macOS-Sonoma-Debug-WK2-Tests-EWS': [
             'configure-build',
             'validate-change',
             'configuration',
@@ -208,21 +209,6 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'layout-tests',
             'trigger-crash-log-submission',
             'set-build-summary'
-        ],
-        'macOS-Monterey-Release-Build-EWS': [
-            'configure-build',
-            'validate-change',
-            'configuration',
-            'clean-up-git-repo',
-            'checkout-source',
-            'fetch-branch-references',
-            'checkout-specific-revision',
-            'show-identifier',
-            'apply-patch',
-            'checkout-pull-request',
-            'kill-old-processes',
-            'validate-change',
-            'compile-webkit'
         ],
         'macOS-Ventura-Release-Build-EWS': [
             'configure-build',
@@ -239,7 +225,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'validate-change',
             'compile-webkit'
         ],
-        'macOS-Monterey-Release-WK1-Tests-EWS': [
+        'macOS-Ventura-Release-WK1-Tests-EWS': [
             'configure-build',
             'check-change-relevance',
             'validate-change',
@@ -263,54 +249,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'trigger-crash-log-submission',
             'set-build-summary'
         ],
-        'macOS-AppleSilicon-Ventura-Release-WK1-Tests-EWS': [
-            'configure-build',
-            'check-change-relevance',
-            'validate-change',
-            'configuration',
-            'clean-up-git-repo',
-            'checkout-source',
-            'fetch-branch-references',
-            'checkout-specific-revision',
-            'get-test-expectations-baseline',
-            'show-identifier',
-            'apply-patch',
-            'checkout-pull-request',
-            'get-updated-test-expectations',
-            'find-modified-layout-tests',
-            'download-built-product',
-            'extract-built-product',
-            'wait-for-crash-collection',
-            'kill-old-processes',
-            'run-layout-tests-in-stress-mode',
-            'layout-tests',
-            'trigger-crash-log-submission',
-            'set-build-summary'
-        ],
-        'macOS-Monterey-Release-WK2-Tests-EWS': [
-            'configure-build',
-            'validate-change',
-            'configuration',
-            'clean-up-git-repo',
-            'checkout-source',
-            'fetch-branch-references',
-            'checkout-specific-revision',
-            'get-test-expectations-baseline',
-            'show-identifier',
-            'apply-patch',
-            'checkout-pull-request',
-            'get-updated-test-expectations',
-            'find-modified-layout-tests',
-            'download-built-product',
-            'extract-built-product',
-            'wait-for-crash-collection',
-            'kill-old-processes',
-            'run-layout-tests-in-stress-mode',
-            'layout-tests',
-            'trigger-crash-log-submission',
-            'set-build-summary'
-        ],
-        'macOS-AppleSilicon-Ventura-Release-WK2-Tests-EWS': [
+        'macOS-Ventura-Release-WK2-Tests-EWS': [
             'configure-build',
             'validate-change',
             'configuration',
@@ -334,28 +273,6 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'set-build-summary'
         ],
         'macOS-Release-WK2-Stress-Tests-EWS': [
-            'configure-build',
-            'validate-change',
-            'configuration',
-            'clean-up-git-repo',
-            'checkout-source',
-            'fetch-branch-references',
-            'checkout-specific-revision',
-            'get-test-expectations-baseline',
-            'show-identifier',
-            'apply-patch',
-            'checkout-pull-request',
-            'get-updated-test-expectations',
-            'find-modified-layout-tests',
-            'download-built-product',
-            'extract-built-product',
-            'wait-for-crash-collection',
-            'kill-old-processes',
-            'run-layout-tests-in-stress-mode',
-            'trigger-crash-log-submission',
-            'set-build-summary'
-        ],
-        'macOS-AppleSilicon-Ventura-Release-WK2-Stress-Tests-EWS': [
             'configure-build',
             'validate-change',
             'configuration',
@@ -485,6 +402,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'kill-old-processes',
             'jhbuild',
             'validate-change',
+            'clean-derived-sources',
             'compile-webkit'
         ],
         'WPE-Skia-Build-EWS': [
@@ -501,6 +419,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'kill-old-processes',
             'jhbuild',
             'validate-change',
+            'clean-derived-sources',
             'compile-webkit'
         ],
         'WPE-WK2-Tests-EWS': [
@@ -526,23 +445,6 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'set-build-summary'
         ],
         'JSC-Tests-arm64-EWS': [
-            'configure-build',
-            'check-change-relevance',
-            'validate-change',
-            'configuration',
-            'clean-up-git-repo',
-            'checkout-source',
-            'fetch-branch-references',
-            'checkout-specific-revision',
-            'show-identifier',
-            'apply-patch',
-            'checkout-pull-request',
-            'kill-old-processes',
-            'validate-change',
-            'compile-jsc',
-            'jscore-test'
-        ],
-        'JSC-Tests-Ventura-arm64-EWS': [
             'configure-build',
             'check-change-relevance',
             'validate-change',
@@ -672,22 +574,6 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'run-api-tests'
         ],
         'API-Tests-macOS-EWS': [
-            'configure-build',
-            'validate-change',
-            'configuration',
-            'clean-up-git-repo',
-            'checkout-source',
-            'fetch-branch-references',
-            'checkout-specific-revision',
-            'show-identifier',
-            'apply-patch',
-            'checkout-pull-request',
-            'download-built-product',
-            'extract-built-product',
-            'kill-old-processes',
-            'run-api-tests'
-        ],
-        'API-Tests-macOS-AppleSilicon-Ventura-EWS': [
             'configure-build',
             'validate-change',
             'configuration',

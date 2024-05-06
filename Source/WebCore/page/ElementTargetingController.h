@@ -28,13 +28,12 @@
 #include "ElementIdentifier.h"
 #include "ElementTargetingTypes.h"
 #include "EventTarget.h"
-#include "IntRect.h"
+#include "IntRectHash.h"
 #include "Region.h"
 #include "ScriptExecutionContextIdentifier.h"
 #include "Timer.h"
 #include <wtf/ApproximateTime.h>
 #include <wtf/CheckedPtr.h>
-#include <wtf/HashMap.h>
 #include <wtf/Ref.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakHashSet.h>
@@ -42,7 +41,9 @@
 
 namespace WebCore {
 
+class Element;
 class Document;
+class Node;
 class Page;
 
 class ElementTargetingController final : public CanMakeCheckedPtr<ElementTargetingController> {
@@ -65,11 +66,18 @@ private:
     void cleanUpAdjustmentClientRects();
     void applyVisibilityAdjustmentFromSelectors(Document&);
 
+    void dispatchVisibilityAdjustmentStateDidChange();
+
+    std::pair<Vector<Ref<Node>>, RefPtr<Element>> findNodes(FloatPoint location, bool shouldIgnorePointerEventsNone);
+    std::pair<Vector<Ref<Node>>, RefPtr<Element>> findNodes(const String& searchText);
+
+    Vector<TargetedElementInfo> extractTargets(Vector<Ref<Node>>&&, RefPtr<Element>&& innerElement, bool canIncludeNearbyElements);
+
     SingleThreadWeakPtr<Page> m_page;
     DeferrableOneShotTimer m_recentAdjustmentClientRectsCleanUpTimer;
     HashMap<ElementIdentifier, IntRect> m_recentAdjustmentClientRects;
-    std::optional<HashSet<String>> m_remainingVisibilityAdjustmentSelectors;
     ApproximateTime m_startTimeForSelectorBasedVisibilityAdjustment;
+    std::optional<Vector<Vector<HashSet<String>>>> m_remainingVisibilityAdjustmentSelectors;
     Region m_adjustmentClientRegion;
     Region m_repeatedAdjustmentClientRegion;
     WeakHashSet<Element, WeakPtrImplWithEventTargetData> m_adjustedElements;

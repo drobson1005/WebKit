@@ -596,6 +596,26 @@ bool nodeHasCellRole(Node* node)
     return node && (nodeHasRole(node, "gridcell"_s) || nodeHasRole(node, "cell"_s) || nodeHasRole(node, "columnheader"_s) || nodeHasRole(node, "rowheader"_s));
 }
 
+bool hasAccNameAttribute(Element& element)
+{
+    auto trimmed = [&] (const auto& attribute) {
+        const auto& value = element.attributeWithDefaultARIA(attribute);
+        if (value.isEmpty())
+            return emptyString();
+        auto copy = value.string();
+        return copy.trim(isASCIIWhitespace);
+    };
+
+    // Avoid calculating the actual description here (e.g. resolving aria-labelledby), as it's expensive.
+    // The spec is generally permissive in allowing user agents to not ensure complete validity of these attributes.
+    // For example, https://w3c.github.io/svg-aam/#include_elements:
+    // "It has an ‘aria-labelledby’ attribute or ‘aria-describedby’ attribute containing valid IDREF tokens. User agents MAY include elements with these attributes without checking for validity."
+    if (trimmed(aria_labelAttr).length() || trimmed(aria_labelledbyAttr).length() || trimmed(aria_labeledbyAttr).length() || trimmed(aria_descriptionAttr).length() || trimmed(aria_describedbyAttr).length())
+        return true;
+
+    return element.attributeWithoutSynchronization(titleAttr).length();
+}
+
 static RenderImage* toSimpleImage(RenderObject& renderer)
 {
     CheckedPtr renderImage = dynamicDowncast<RenderImage>(renderer);
@@ -1170,8 +1190,7 @@ void AXObjectCache::handleTextChanged(AccessibilityObject* object)
 
         if (isText) {
             bool dependsOnTextUnderElement = ancestor->dependsOnTextUnderElement();
-            auto role = ancestor->roleValue();
-            dependsOnTextUnderElement |= role == AccessibilityRole::ListItem || role == AccessibilityRole::Label;
+            dependsOnTextUnderElement |= ancestor->roleValue() == AccessibilityRole::Label;
 
             // If the starting object is a static text, its underlying text has changed.
             if (dependsOnTextUnderElement) {
@@ -1294,6 +1313,7 @@ void AXObjectCache::handleChildrenChanged(AccessibilityObject& object)
 
     // Go up the existing ancestors chain and fire the appropriate notifications.
     bool shouldUpdateParent = true;
+    bool foundTableCaption = false;
     for (RefPtr parent = &object; parent; parent = parent->parentObjectIfExists()) {
         if (shouldUpdateParent)
             parent->setNeedsToUpdateChildren();
@@ -1316,6 +1336,13 @@ void AXObjectCache::handleChildrenChanged(AccessibilityObject& object)
         if (parent->isLabel()) {
             // A label's descendant was added or removed. Update its LabelFor relationships.
             handleLabelChanged(parent.get());
+        }
+
+        if (parent->hasTagName(captionTag))
+            foundTableCaption = true;
+        else if (foundTableCaption && parent->isTable()) {
+            postNotification(parent.get(), nullptr, AXTextChanged);
+            foundTableCaption = false;
         }
     }
 
@@ -1395,6 +1422,16 @@ void AXObjectCache::deferNodeAddedOrRemoved(Node* node)
     if (!m_performCacheUpdateTimer.isActive())
         m_performCacheUpdateTimer.startOneShot(0_s);
 }
+
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+void AXObjectCache::deferAddUnconnectedNode(AccessibilityObject& axObject)
+{
+    m_deferredUnconnectedObjects.add(axObject);
+
+    if (!m_performCacheUpdateTimer.isActive())
+        m_performCacheUpdateTimer.startOneShot(0_s);
+}
+#endif
 
 void AXObjectCache::childrenChanged(Node* node, Node* changedChild)
 {
@@ -2340,7 +2377,6 @@ void AXObjectCache::handleActiveDescendantChange(Element& element, const AtomStr
 #endif
         target = object;
     } else if (object->isComboBox()) {
-#if PLATFORM(COCOA)
         // If the combobox's activeDescendant is inside a descendant owned or controlled by the combobox, that descendant should be the target of the notification and not the combobox itself.
         if (auto* ownedObject = Accessibility::findRelatedObjectInAncestry(*object, AXRelationType::OwnerFor, *activeDescendant))
             target = ownedObject;
@@ -2348,7 +2384,6 @@ void AXObjectCache::handleActiveDescendantChange(Element& element, const AtomStr
             target = controlledObject;
         else
             target = object;
-#endif
     } else if (object->supportsActiveDescendant())
         target = object;
     else {
@@ -2366,7 +2401,6 @@ void AXObjectCache::handleActiveDescendantChange(Element& element, const AtomStr
         return;
 
     if (target == object) {
-#if PLATFORM(COCOA)
         if (target->isComboBox()) {
             // The combobox does not own or control the element to which activeDescendant belongs.
             // Establish this implicit relationship.
@@ -2376,7 +2410,6 @@ void AXObjectCache::handleActiveDescendantChange(Element& element, const AtomStr
             if (controlled)
                 addRelation(target.get(), controlled.get(), AXRelationType::ControllerFor);
         }
-#endif // PLATFORM(COCOA)
     } else {
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
         updateIsolatedTree(target.get(), AXNotification::AXActiveDescendantChanged);
@@ -4125,6 +4158,16 @@ void AXObjectCache::performDeferredCacheUpdate(ForceLayout forceLayout)
     AXLOGDeferredCollection("ChildrenChangedList"_s, m_deferredChildrenChangedList);
     handleAllDeferredChildrenChanged();
 
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    AXLOGDeferredCollection("UnconnectedObjects"_s, m_deferredUnconnectedObjects);
+    if (auto tree = AXIsolatedTree::treeForPageID(m_pageID)) {
+        m_deferredUnconnectedObjects.forEach([&tree] (auto& object) {
+            tree->addUnconnectedNode(object);
+        });
+        m_deferredUnconnectedObjects.clear();
+    }
+#endif
+
     AXLOGDeferredCollection("RecomputeTableCellSlotsList"_s, m_deferredRecomputeTableCellSlotsList);
     m_deferredRecomputeTableCellSlotsList.forEach([this] (auto& axTable) {
         handleRecomputeCellSlots(axTable);
@@ -4878,6 +4921,13 @@ bool AXObjectCache::addRelation(AccessibilityObject* origin, AccessibilityObject
     if (relationCausesCycle(origin, target, relationType))
         return false;
 
+    if (relationType == AXRelationType::OwnerFor) {
+        // Before adding the new OwnerFor relationship, that alters the AX parent-child hierarchy, notify the current target-s parent that one child is being removed.
+        RefPtr targetParent = target->parentObject();
+        if (targetParent && targetParent.get() != origin)
+            childrenChanged(targetParent.get());
+    }
+
     AXID originID = origin->objectID();
     AXID targetID = target->objectID();
     auto relationsIterator = m_relations.find(originID);
@@ -4905,8 +4955,6 @@ bool AXObjectCache::addRelation(AccessibilityObject* origin, AccessibilityObject
                 continue;
 
             removeRelationByID(oldOwnerIterator->key, targetID, AXRelationType::OwnerFor);
-            if (auto* oldOwner = objectForID(oldOwnerIterator->key))
-                childrenChanged(oldOwner);
         }
 
         childrenChanged(origin);
@@ -4920,6 +4968,15 @@ bool AXObjectCache::addRelation(AccessibilityObject* origin, AccessibilityObject
         // If the IDs are still in the m_objects map, the objects should be still alive.
         if (auto symmetric = symmetricRelation(relationType); symmetric != AXRelationType::None)
             addRelation(target, origin, symmetric, AddSymmetricRelation::No);
+
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+        if (auto tree = AXIsolatedTree::treeForPageID(m_pageID)) {
+            if (origin && origin->accessibilityIsIgnored())
+                deferAddUnconnectedNode(*origin);
+            if (target && target->accessibilityIsIgnored())
+                deferAddUnconnectedNode(*target);
+        }
+#endif
     }
 
     return true;

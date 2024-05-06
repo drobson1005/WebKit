@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 Apple Inc. All rights reserved.
+# Copyright (c) 2020-2024 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -1389,7 +1389,7 @@ CanvasColorSpaceEnabled:
 
 CanvasFiltersEnabled:
   type: bool
-  status: unstable
+  status: testable
   category: dom
   webcoreOnChange: setNeedsRelayoutAllFrames
   humanReadableName: "Canvas Filters"
@@ -3098,19 +3098,6 @@ InlineMediaPlaybackRequiresPlaysInlineAttribute:
     WebCore:
       default: false
 
-InlinePredictionsInAllEditableElementsEnabled:
-  type: bool
-  status: internal
-  humanReadableName: "Inline Text Predictions"
-  humanReadableDescription: "Enable Inline Text Predictions in all editable elements"
-  defaultValue:
-    WebKitLegacy:
-      default: false
-    WebKit:
-      default: false
-    WebCore:
-      default: false
-
 InputTypeColorEnabled:
   type: bool
   status: embedder
@@ -3692,7 +3679,7 @@ LinearMediaPlayerEnabled:
     WebKit:
       # FIXME: this line can be removed when WebKitSwift is available in Simulators (see rdar://125735304)
       "PLATFORM(IOS_FAMILY_SIMULATOR)": false
-      default: true
+      default: WebKit::defaultLinearMediaPlayerEnabled()
     WebCore:
       default: false
 
@@ -4004,19 +3991,16 @@ ManagedMediaSourceNeedsAirPlay:
 
 MasonryEnabled:
   type: bool
-  status: stable
+  status: preview
   category: css
   humanReadableName: "CSS Masonry Layout"
   humanReadableDescription: "Enable Masonry Layout for CSS Grid"
   defaultValue:
     WebKitLegacy:
-      "PLATFORM(COCOA)": true
       default: false
     WebKit:
-      "PLATFORM(COCOA)": true
       default: false
     WebCore:
-      "PLATFORM(COCOA)": true
       default: false
 
 MathMLEnabled:
@@ -4707,6 +4691,21 @@ NotificationsEnabled:
       "PLATFORM(IOS_FAMILY)": false
       default: true
 
+OffscreenCanvasDeprecatedCommitEnabled:
+  type: bool
+  status: testable
+  category: dom
+  humanReadableName: "OffscreenCanvasRenderingContext2D's deprecated commit() method"
+  humanReadableDescription: "Support for OffscreenCanvasRenderingContext2D's deprecated commit() method"
+  condition: ENABLE(OFFSCREEN_CANVAS)
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
+
 OffscreenCanvasEnabled:
   type: bool
   status: stable
@@ -4984,7 +4983,7 @@ PhotoPickerPrefersOriginalImageFormat:
   exposed: [ WebKit ]
   defaultValue:
     WebKit:
-      default: true
+      default: false
 
 PictographFontFamily:
   type: String
@@ -5170,21 +5169,6 @@ ProcessSwapOnCrossSiteNavigationEnabled:
     WebKit:
       "PLATFORM(PLAYSTATION)": false
       default: true
-
-ProcessSwapOnCrossSiteWindowOpenEnabled:
-   type: bool
-   status: unstable
-   category: networking
-   humanReadableName: "Swap Processes on Cross-Site Window Open"
-   humanReadableDescription: "Swap WebContent Processes on cross-site window.open"
-   exposed: [ WebKit ]
-   defaultValue:
-     WebCore:
-       default: false
-     WebKitLegacy:
-       default: false
-     WebKit:
-       default: false
 
 PunchOutWhiteBackgroundsInDarkMode:
   type: bool

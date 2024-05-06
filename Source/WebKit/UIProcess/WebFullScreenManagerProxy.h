@@ -37,6 +37,15 @@
 #include <wtf/Seconds.h>
 #include <wtf/Vector.h>
 
+namespace WebKit {
+class WebFullScreenManagerProxy;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebKit::WebFullScreenManagerProxy> : std::true_type { };
+}
+
 namespace WebCore {
 class FloatSize;
 class IntRect;
@@ -123,7 +132,7 @@ private:
 #if !RELEASE_LOG_DISABLED
     const Logger& logger() const { return m_logger; }
     const void* logIdentifier() const { return m_logIdentifier; }
-    const char* logClassName() const { return "WebFullScreenManagerProxy"; }
+    ASCIILiteral logClassName() const { return "WebFullScreenManagerProxy"_s; }
     WTFLogChannel& logChannel() const;
 #endif
 

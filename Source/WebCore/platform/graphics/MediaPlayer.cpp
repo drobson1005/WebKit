@@ -1970,6 +1970,20 @@ void MediaPlayer::setSpatialTrackingLabel(const String& spatialTrackingLabel)
 }
 #endif
 
+void MediaPlayer::setInFullscreenOrPictureInPicture(bool isInFullscreenOrPictureInPicture)
+{
+    if (m_isInFullscreenOrPictureInPicture == isInFullscreenOrPictureInPicture)
+        return;
+
+    m_isInFullscreenOrPictureInPicture = isInFullscreenOrPictureInPicture;
+    m_private->isInFullscreenOrPictureInPictureChanged(isInFullscreenOrPictureInPicture);
+}
+
+bool MediaPlayer::isInFullscreenOrPictureInPicture() const
+{
+    return m_isInFullscreenOrPictureInPicture;
+}
+
 #if !RELEASE_LOG_DISABLED
 const Logger& MediaPlayer::mediaPlayerLogger()
 {
@@ -2084,13 +2098,9 @@ String MediaPlayer::lastErrorMessage() const
 
 String SeekTarget::toString() const
 {
-    StringBuilder builder;
-    builder.append("[");
-    builder.append(WTF::LogArgument<MediaTime>::toString(time));
-    builder.append(WTF::LogArgument<MediaTime>::toString(negativeThreshold));
-    builder.append(WTF::LogArgument<MediaTime>::toString(positiveThreshold));
-    builder.append("]");
-    return builder.toString();
+    return makeString('[', WTF::LogArgument<MediaTime>::toString(time),
+        WTF::LogArgument<MediaTime>::toString(negativeThreshold),
+        WTF::LogArgument<MediaTime>::toString(positiveThreshold), ']');
 }
 
 }

@@ -140,8 +140,9 @@ public:
     void queueTaskKeepingObjectAlive(TaskSource, Function<void()>&&) final;
     void dispatchEvent(Event&) final;
 
-    using HTMLElement::ref;
-    using HTMLElement::deref;
+    // ActiveDOMObject.
+    void ref() const final { HTMLElement::ref(); }
+    void deref() const final { HTMLElement::deref(); }
 
 private:
     HTMLCanvasElement(const QualifiedName&, Document&);
@@ -149,7 +150,6 @@ private:
     bool isHTMLCanvasElement() const final { return true; }
 
     // ActiveDOMObject.
-    const char* activeDOMObjectName() const final;
     bool virtualHasPendingActivity() const final;
 
     // EventTarget.
@@ -176,8 +176,8 @@ private:
 
     bool isGPUBased() const;
 
-    void refCanvasBase() final { HTMLElement::ref(); }
-    void derefCanvasBase() final { HTMLElement::deref(); }
+    void refCanvasBase() const final { HTMLElement::ref(); }
+    void derefCanvasBase() const final { HTMLElement::deref(); }
 
     ScriptExecutionContext* canvasBaseScriptExecutionContext() const final { return HTMLElement::scriptExecutionContext(); }
 

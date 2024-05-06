@@ -26,6 +26,8 @@
 #include "CSSPropertyParserConsumer+Percent.h"
 
 #include "CSSCalcParser.h"
+#include "CSSCalcValue.h"
+#include "CSSPropertyParserConsumer+Number.h"
 
 namespace WebCore {
 namespace CSSPropertyParserHelpers {

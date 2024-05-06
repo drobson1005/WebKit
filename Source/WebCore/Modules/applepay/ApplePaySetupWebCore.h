@@ -51,11 +51,14 @@ public:
     using BeginPromise = DOMPromiseDeferred<IDLBoolean>;
     void begin(Document&, Vector<Ref<ApplePaySetupFeature>>&&, BeginPromise&&);
 
+    // ActiveDOMObject.
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
 private:
     ApplePaySetup(ScriptExecutionContext&, ApplePaySetupConfiguration&&);
 
     // ActiveDOMObject
-    const char* activeDOMObjectName() const final { return "ApplePaySetup"; }
     void stop() final;
     void suspend(ReasonForSuspension) final;
 

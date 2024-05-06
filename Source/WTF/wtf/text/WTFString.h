@@ -100,13 +100,10 @@ public:
     RefPtr<StringImpl> releaseImpl() { return WTFMove(m_impl); }
 
     unsigned length() const { return m_impl ? m_impl->length() : 0; }
-    const LChar* characters8() const { return m_impl ? m_impl->characters8() : nullptr; }
-    const UChar* characters16() const { return m_impl ? m_impl->characters16() : nullptr; }
-    std::span<const LChar> span8() const { return { characters8(), length() }; }
-    std::span<const UChar> span16() const { return { characters16(), length() }; }
+    std::span<const LChar> span8() const { return m_impl ? m_impl->span8() : std::span<const LChar>(); }
+    std::span<const UChar> span16() const { return m_impl ? m_impl->span16() : std::span<const UChar>(); }
 
-    // Return characters8() or characters16() depending on CharacterType.
-    template<typename CharacterType> const CharacterType* characters() const;
+    // Return span8() or span16() depending on CharacterType.
     template<typename CharacterType> std::span<const CharacterType> span() const;
 
     bool is8Bit() const { return !m_impl || m_impl->is8Bit(); }
@@ -432,16 +429,6 @@ inline String::String(ASCIILiteral characters)
 {
 }
 
-template<> inline const LChar* String::characters<LChar>() const
-{
-    return characters8();
-}
-
-template<> inline const UChar* String::characters<UChar>() const
-{
-    return characters16();
-}
-
 template<> inline std::span<const LChar> String::span<LChar>() const
 {
     return span8();
@@ -456,7 +443,7 @@ inline UChar String::characterAt(unsigned index) const
 {
     if (!m_impl || index >= m_impl->length())
         return 0;
-    return m_impl->is8Bit() ? m_impl->characters8()[index] : m_impl->characters16()[index];
+    return m_impl->at(index);
 }
 
 inline String WARN_UNUSED_RETURN makeStringByReplacingAll(const String& string, UChar target, UChar replacement)

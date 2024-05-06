@@ -1417,14 +1417,6 @@
             "issue": "https://issuetracker.google.com/288119108"
         },
         {
-            "name": "require_cached_bit_for_staging_buffer",
-            "category": "Workarounds",
-            "description": [
-                "use cached bit as required bit instead of preferred bit for staging buffers"
-            ],
-            "issue": "https://issuetracker.google.com/315836169"
-        },
-        {
             "name": "supports_external_format_resolve",
             "category": "Features",
             "description": [
@@ -1496,6 +1488,16 @@
                 "Enable non-semantic info inside shader module via VK_KHR_shader_non_semantic_info extension"
             ],
             "issue": "http://anglebug.com/8549"
+        },
+        {
+            "name": "combine_all_shaders_in_pipeline_library",
+            "category": "Features",
+            "description": [
+                "For Vulkan ICDs that support VK_EXT_graphics_pipeline_library the shaders subset of the pipeline",
+                "can either be combined into a single pipeline or can be decoupled into separate pipelines. This feature",
+                "is enabled when the former is the case."
+            ],
+            "issue": "http://anglebug.com/8601"
         }
     ]
 }

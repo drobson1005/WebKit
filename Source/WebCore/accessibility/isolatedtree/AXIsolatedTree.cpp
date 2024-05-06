@@ -164,6 +164,12 @@ Ref<AXIsolatedTree> AXIsolatedTree::create(AXObjectCache& axObjectCache)
     const auto relations = axObjectCache.relations();
     tree->updateRelations(relations);
 
+    for (auto& relatedObjectID : relations.keys()) {
+        RefPtr axObject = axObjectCache.objectForID(relatedObjectID);
+        if (axObject && axObject->accessibilityIsIgnored())
+            tree->addUnconnectedNode(axObject.releaseNonNull());
+    }
+
     // Now that the tree is ready to take client requests, add it to the tree maps so that it can be found.
     storeTree(axObjectCache, tree);
     return tree;
@@ -562,12 +568,9 @@ void AXIsolatedTree::updateNodeProperties(AXCoreObject& axObject, const AXProper
             propertyMap.set(AXPropertyName::AccessibilityText, axTextValue);
             break;
         }
-        case AXPropertyName::ARIATreeRows: {
-            AXCoreObject::AccessibilityChildrenVector ariaTreeRows;
-            axObject.ariaTreeRows(ariaTreeRows);
-            propertyMap.set(AXPropertyName::ARIATreeRows, axIDs(ariaTreeRows));
+        case AXPropertyName::ARIATreeRows:
+            propertyMap.set(AXPropertyName::ARIATreeRows, axIDs(axObject.ariaTreeRows()));
             break;
-        }
         case AXPropertyName::ValueAutofillButtonType:
             propertyMap.set(AXPropertyName::ValueAutofillButtonType, static_cast<int>(axObject.valueAutofillButtonType()));
             propertyMap.set(AXPropertyName::IsValueAutofillAvailable, axObject.isValueAutofillAvailable());
@@ -768,14 +771,18 @@ void AXIsolatedTree::updateDependentProperties(AccessibilityObject& axObject)
 {
     ASSERT(isMainThread());
 
-    auto updateLabeledObjects = [this] (const AccessibilityObject& label) {
-        auto labeledObjects = label.labelForObjects();
-        for (const auto& labeledObject : labeledObjects) {
+    auto updateRelatedObjects = [this] (const AccessibilityObject& object) {
+        for (const auto& labeledObject : object.labelForObjects()) {
             if (RefPtr axObject = downcast<AccessibilityObject>(labeledObject.get()))
                 queueNodeUpdate(axObject->objectID(), NodeUpdateOptions::nodeUpdate());
         }
+
+        for (const auto& describedByObject : object.descriptionForObjects()) {
+            if (RefPtr axObject = downcast<AccessibilityObject>(describedByObject.get()))
+                queueNodeUpdate(axObject->objectID(), { { AXPropertyName::AccessibilityText, AXPropertyName::ExtendedDescription } });
+        }
     };
-    updateLabeledObjects(axObject);
+    updateRelatedObjects(axObject);
 
     // When a row gains or loses cells, the column count of the table can change.
     bool updateTableAncestorColumns = is<AccessibilityTableRow>(axObject);
@@ -795,7 +802,7 @@ void AXIsolatedTree::updateDependentProperties(AccessibilityObject& axObject)
             break;
         }
 
-        updateLabeledObjects(*ancestor);
+        updateRelatedObjects(*ancestor);
     }
 }
 

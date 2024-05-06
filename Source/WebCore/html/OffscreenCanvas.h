@@ -155,13 +155,13 @@ public:
 
     void commitToPlaceholderCanvas();
 
-    const char* activeDOMObjectName() const final { return "OffscreenCanvas"_s; }
-
     void queueTaskKeepingObjectAlive(TaskSource, Function<void()>&&) final;
     void dispatchEvent(Event&) final;
-    using RefCounted::ref;
-    using RefCounted::deref;
     bool isDetached() const { return m_detached; };
+
+    // ActiveDOMObject.
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
 
 private:
     OffscreenCanvas(ScriptExecutionContext&, IntSize, RefPtr<OffscreenCanvasPlaceholderData>);
@@ -172,11 +172,11 @@ private:
     ScriptExecutionContext* canvasBaseScriptExecutionContext() const final { return ContextDestructionObserver::scriptExecutionContext(); }
 
     enum EventTargetInterfaceType eventTargetInterface() const final { return EventTargetInterfaceType::OffscreenCanvas; }
-    void refEventTarget() final { ref(); }
-    void derefEventTarget() final { deref(); }
+    void refEventTarget() final { RefCounted::ref(); }
+    void derefEventTarget() final { RefCounted::deref(); }
 
-    void refCanvasBase() final { ref(); }
-    void derefCanvasBase() final { deref(); }
+    void refCanvasBase() const final { RefCounted::ref(); }
+    void derefCanvasBase() const final { RefCounted::deref(); }
 
     void setSize(const IntSize&) final;
 

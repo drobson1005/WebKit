@@ -38,6 +38,7 @@
 #include "LegacySchemeRegistry.h"
 #include "LocalFrame.h"
 #include "LocalFrameLoaderClient.h"
+#include "Quirks.h"
 #include "SecurityOrigin.h"
 
 #if PLATFORM(IOS_FAMILY)
@@ -84,23 +85,23 @@ static bool foundMixedContentInFrameTree(const LocalFrame& frame, const URL& url
 
 static void logConsoleWarning(const LocalFrame& frame, bool allowed, ASCIILiteral action, const URL& target)
 {
-    const char* errorString = allowed ? " was allowed to " : " was not allowed to ";
-    auto message = makeString((allowed ? "" : "[blocked] "), "The page at ", frame.document()->url().stringCenterEllipsizedToLength(), errorString, action, " insecure content from ", target.stringCenterEllipsizedToLength(), ".\n");
+    auto errorString = allowed ? " was allowed to "_s : " was not allowed to "_s;
+    auto message = makeString((allowed ? ""_s : "[blocked] "_s), "The page at "_s, frame.document()->url().stringCenterEllipsizedToLength(), errorString, action, " insecure content from "_s, target.stringCenterEllipsizedToLength(), ".\n"_s);
     frame.protectedDocument()->addConsoleMessage(MessageSource::Security, MessageLevel::Warning, message);
 }
 
 static void logConsoleWarningForUpgrade(const LocalFrame& frame, bool blocked, const URL& target, bool isUpgradingIPAddressAndLocalhostEnabled)
 {
     auto isUpgradingLocalhostDisabled = !isUpgradingIPAddressAndLocalhostEnabled && SecurityOrigin::isLocalhostAddress(target.host());
-    const char* errorString;
+    ASCIILiteral errorString = [&] {
     if (blocked)
-        errorString = "blocked and must";
-    else if (isUpgradingLocalhostDisabled)
-        errorString = "not upgraded to HTTPS and must be served from the local host.";
-    else
-        errorString = "automatically upgraded and should";
+        return "blocked and must"_s;
+    if (isUpgradingLocalhostDisabled)
+        return "not upgraded to HTTPS and must be served from the local host."_s;
+    return "automatically upgraded and should"_s;
+    }();
 
-    auto message = makeString((!blocked ? "" : "[blocked] "), "The page at ", frame.document()->url().stringCenterEllipsizedToLength(), " requested insecure content from ", target.stringCenterEllipsizedToLength(), ". This content was ", errorString, !isUpgradingLocalhostDisabled ? " be served over HTTPS.\n" : "\n"_s);
+    auto message = makeString((!blocked ? ""_s : "[blocked] "_s), "The page at "_s, frame.document()->url().stringCenterEllipsizedToLength(), " requested insecure content from "_s, target.stringCenterEllipsizedToLength(), ". This content was "_s, errorString, !isUpgradingLocalhostDisabled ? " be served over HTTPS.\n"_s : "\n"_s);
     frame.document()->addConsoleMessage(MessageSource::Security, MessageLevel::Warning, message);
 }
 
@@ -161,6 +162,11 @@ bool MixedContentChecker::frameAndAncestorsCanRunInsecureContent(LocalFrame& fra
     return allowed;
 }
 
+static bool destinationIsImageAudioOrVideo(FetchOptions::Destination destination)
+{
+    return destination == FetchOptions::Destination::Audio || destination == FetchOptions::Destination::Image || destination == FetchOptions::Destination::Video;
+}
+
 bool MixedContentChecker::shouldUpgradeInsecureContent(LocalFrame& frame, IsUpgradable isUpgradable, const URL& url, FetchOptions::Mode mode, FetchOptions::Destination destination, Initiator initiator)
 {
     RefPtr document = frame.document();
@@ -184,11 +190,11 @@ bool MixedContentChecker::shouldUpgradeInsecureContent(LocalFrame& frame, IsUpgr
         // 4.1.2 request’s URL’s host is an IP address.
         || (!shouldUpgradeIPAddressAndLocalhostForTesting && URL::hostIsIPAddress(url.host()))
         // 4.1.4 request’s destination is not "image", "audio", or "video".
-        || (destination != FetchOptions::Destination::Audio && destination != FetchOptions::Destination::Image && destination != FetchOptions::Destination::Video)
+        || (!destinationIsImageAudioOrVideo(destination))
         // 4.1.5 request’s destination is "image" and request’s initiator is "imageset".
         || (destination == FetchOptions::Destination::Image && initiator == Initiator::Imageset)
         // and CORS is excluded
-        || mode == FetchOptions::Mode::Cors)
+        || (mode == FetchOptions::Mode::Cors && !(document->quirks().needsRelaxedCorsMixedContentCheckQuirk() && destinationIsImageAudioOrVideo(destination))))
         return false;
     logConsoleWarningForUpgrade(frame, /* blocked */ false, url, shouldUpgradeIPAddressAndLocalhostForTesting);
     return true;

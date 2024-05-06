@@ -863,7 +863,7 @@ public:
     Ref<CookieJar> protectedCookieJar() const;
 
     StorageNamespaceProvider& storageNamespaceProvider() { return m_storageNamespaceProvider.get(); }
-    Ref<StorageNamespaceProvider> protectedStorageNamespaceProvider() const;
+    WEBCORE_EXPORT Ref<StorageNamespaceProvider> protectedStorageNamespaceProvider() const;
 
     PluginInfoProvider& pluginInfoProvider();
     Ref<PluginInfoProvider> protectedPluginInfoProvider() const;
@@ -1052,6 +1052,9 @@ public:
     void resetTextRecognitionResult(const HTMLElement&);
     void resetImageAnalysisQueue();
 #endif
+
+    bool hasEverSetVisibilityAdjustment() const { return m_hasEverSetVisibilityAdjustment; }
+    void didSetVisibilityAdjustment() { m_hasEverSetVisibilityAdjustment = true; }
 
     WEBCORE_EXPORT StorageConnection& storageConnection();
 
@@ -1380,6 +1383,7 @@ private:
     bool m_hasResourceLoadClient { false };
     bool m_delegatesScaling { false };
 
+    bool m_hasEverSetVisibilityAdjustment { false };
 
 #if ENABLE(EDITABLE_REGION)
     bool m_isEditableRegionEnabled { false };

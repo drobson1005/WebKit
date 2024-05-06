@@ -40,6 +40,7 @@ header: <WebCore/DOMCacheEngine.h>
 
 #if ENABLE(APPLE_PAY)
 header: <WebCore/ApplePayFeature.h>
+header: <WebCore/ApplePayContactField.h>
 enum class WebCore::ApplePayFeature : uint8_t {
 #if ENABLE(APPLE_PAY_LATER)
     ApplePayLater,
@@ -885,8 +886,9 @@ enum class WebCore::ShareDataOriginator : bool
 
 header: <WebCore/ElementTargetingTypes.h>
 [CustomHeader] struct WebCore::TargetedElementRequest {
-    WebCore::FloatPoint pointInRootView
+    std::variant<WebCore::FloatPoint, String> data
     bool canIncludeNearbyElements
+    bool shouldIgnorePointerEventsNone
 };
 
 header: <WebCore/ElementTargetingTypes.h>
@@ -895,13 +897,16 @@ header: <WebCore/ElementTargetingTypes.h>
     WebCore::ScriptExecutionContextIdentifier documentIdentifier
     WebCore::RectEdges<bool> offsetEdges
     String renderedText
-    Vector<String> selectors
+    String searchableText
+    Vector<Vector<String>> selectors
     WebCore::FloatRect boundsInRootView
     WebCore::FloatRect boundsInClientCoordinates
     WebCore::PositionType positionType
     Vector<WebCore::FrameIdentifier> childFrameIdentifiers
-    bool isUnderPoint
+    bool isNearbyTarget
     bool isPseudoElement
+    bool isInShadowTree
+    bool hasAudibleMedia
 };
 
 header: <WebCore/RenderStyleConstants.h>
@@ -1042,11 +1047,6 @@ struct WebCore::ApplePayDeferredPaymentRequest {
     String managementURL
     String paymentDescription
     String tokenNotificationURL
-};
-#endif
-
-#if ENABLE(APPLE_PAY_DISBURSEMENTS)
-struct WebCore::ApplePayDisbursementPaymentRequest {
 };
 #endif
 
@@ -1216,6 +1216,14 @@ enum class WebCore::ApplePayErrorContactField : uint8_t {
     CountryCode,
 };
 
+enum class WebCore::ApplePayContactField : uint8_t {
+    Email,
+    Name,
+    PhoneticName,
+    Phone,
+    PostalAddress,
+};
+
 enum class WebCore::ApplePayErrorCode : uint8_t {
     Unknown,
     ShippingContactInvalid,
@@ -1227,6 +1235,12 @@ enum class WebCore::ApplePayErrorCode : uint8_t {
 #endif
 };
 #endif // ENABLE(APPLE_PAY)
+
+#if ENABLE(APPLE_PAY_DISBURSEMENTS)
+struct WebCore::ApplePayDisbursementPaymentRequest {
+    std::optional<Vector<WebCore::ApplePayContactField>> requiredRecipientContactFields
+};
+#endif
 
 #if ENABLE(APPLE_PAY_INSTALLMENTS)
 header: <WebCore/ApplePayInstallmentConfigurationWebCore.h>
@@ -1409,13 +1423,11 @@ struct WebCore::WebCodecsEncodedAudioChunkData {
 #endif
 
 header: <WebCore/VideoEncoderScalabilityMode.h>
-#if ENABLE(WEB_CODECS)
 enum class WebCore::VideoEncoderScalabilityMode : uint8_t {
     L1T1,
     L1T2,
     L1T3
 }
-#endif
 
 struct WebCore::HTMLModelElementCamera {
     double pitch;
@@ -2069,7 +2081,7 @@ struct WebCore::WindowFeatures {
 
     std::optional<bool> fullscreen;
     std::optional<bool> dialog;
-    [NotSerialized] std::optional<bool> noopener;
+    std::optional<bool> noopener;
     [NotSerialized] std::optional<bool> noreferrer;
 
     [NotSerialized] Vector<String> additionalFeatures;
@@ -3897,13 +3909,6 @@ header: <WebCore/FontAttributes.h>
     Natural
 };
 
-#if USE(CORE_TEXT)
-[RefCounted] class WebCore::Font {
-    WebCore::FontInternalAttributes attributes();
-    WebCore::FontPlatformData platformData();
-}
-#endif
-
 [CustomHeader] struct WebCore::FontAttributes {
     RefPtr<WebCore::Font> font
     WebCore::Color backgroundColor
@@ -3916,6 +3921,27 @@ header: <WebCore/FontAttributes.h>
     bool hasStrikeThrough
     bool hasMultipleFonts
 };
+
+#if USE(CORE_TEXT)
+using WebCore::FontPlatformData::IPCData = std::variant<WebCore::FontPlatformSerializedData, WebCore::FontPlatformSerializedCreationData>;
+#endif
+
+#if USE(CORE_TEXT)
+[RefCounted] class WebCore::Font {
+    WebCore::FontInternalAttributes attributes();
+    WebCore::FontPlatformData platformData();
+}
+
+[CreateUsing=fromIPCData] class WebCore::FontPlatformData {
+    float size();
+    WebCore::FontOrientation orientation();
+    WebCore::FontWidthVariant widthVariant();
+    WebCore::TextRenderingMode textRenderingMode();
+    bool syntheticBold();
+    bool syntheticOblique();
+    WebCore::FontPlatformData::IPCData toIPCData();
+}
+#endif
 
 header: <WebCore/WritingDirection.h>
 enum class WebCore::WritingDirection : uint8_t {

@@ -37,7 +37,6 @@ namespace WebKit {
 enum class WebTextReplacementDataState : uint8_t {
     Pending,
     Active,
-    Committed,
     Reverted,
     Invalid,
 };
@@ -58,8 +57,6 @@ struct WebTextReplacementData {
     String replacement;
     String description;
     State state;
-
-    WebCore::AttributedString originalString;
 };
 
 }

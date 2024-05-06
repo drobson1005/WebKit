@@ -129,8 +129,9 @@ public:
 
     const ResourceResponse& resourceResponse() const { return m_response; }
 
-    using RefCounted<XMLHttpRequest>::ref;
-    using RefCounted<XMLHttpRequest>::deref;
+    // ActiveDOMObject.
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
 
     size_t memoryCost() const;
 
@@ -154,7 +155,6 @@ private:
     void suspend(ReasonForSuspension) override;
     void resume() override;
     void stop() override;
-    const char* activeDOMObjectName() const override;
     bool virtualHasPendingActivity() const final;
 
     void refEventTarget() override { ref(); }

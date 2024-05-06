@@ -41,6 +41,7 @@
 #include "PathUtilities.h"
 #include "PlatformMouseEvent.h"
 #include "Region.h"
+#include "RemoteFrame.h"
 #include "RenderLayer.h"
 #include "RenderLayerBacking.h"
 #include "RenderView.h"
@@ -52,7 +53,7 @@ namespace WebCore {
 
 DebugPageOverlays* DebugPageOverlays::sharedDebugOverlays;
 
-class RegionOverlay : public RefCounted<RegionOverlay>, public PageOverlay::Client {
+class RegionOverlay : public RefCounted<RegionOverlay>, public PageOverlayClient {
 public:
     static Ref<RegionOverlay> create(Page&, DebugPageOverlays::RegionType);
     virtual ~RegionOverlay();

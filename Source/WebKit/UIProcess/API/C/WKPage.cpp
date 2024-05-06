@@ -2686,7 +2686,7 @@ void WKPageGetContentsAsMHTMLData(WKPageRef pageRef, void* context, WKPageGetCon
 void WKPageForceRepaint(WKPageRef pageRef, void* context, WKPageForceRepaintFunction callback)
 {
     CRASH_IF_SUSPENDED;
-    toImpl(pageRef)->forceRepaint([context, callback]() {
+    toImpl(pageRef)->updateRenderingWithForcedRepaint([context, callback]() {
         callback(nullptr, context);
     });
 }
@@ -3040,20 +3040,18 @@ ProcessID WKPageGetGPUProcessIdentifier(WKPageRef page)
 #endif
 }
 
-#ifdef __BLOCKS__
-void WKPageGetApplicationManifest_b(WKPageRef pageRef, WKPageGetApplicationManifestBlock block)
+void WKPageGetApplicationManifest(WKPageRef pageRef, void* context, WKPageGetApplicationManifestFunction function)
 {
     CRASH_IF_SUSPENDED;
 #if ENABLE(APPLICATION_MANIFEST)
-    toImpl(pageRef)->getApplicationManifest([block](const std::optional<WebCore::ApplicationManifest>& manifest) {
-        block();
+    toImpl(pageRef)->getApplicationManifest([function, context](const std::optional<WebCore::ApplicationManifest>& manifest) {
+        function(context);
     });
-#else // ENABLE(APPLICATION_MANIFEST)
+#else
     UNUSED_PARAM(pageRef);
-    block();
-#endif // not ENABLE(APPLICATION_MANIFEST)
-}
+    function(context);
 #endif
+}
 
 void WKPageDumpPrivateClickMeasurement(WKPageRef pageRef, WKPageDumpPrivateClickMeasurementFunction callback, void* callbackContext)
 {

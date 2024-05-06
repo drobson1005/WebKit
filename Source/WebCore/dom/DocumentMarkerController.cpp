@@ -258,6 +258,8 @@ static bool shouldInsertAsSeparateMarker(const DocumentMarker& marker)
     case DocumentMarker::Type::UnifiedTextReplacement:
         return true;
 #endif
+    case DocumentMarker::Type::TransparentContent:
+        return true;
 
     case DocumentMarker::Type::DraggedContent:
         return is<RenderReplaced>(std::get<RefPtr<Node>>(marker.data())->renderer());
@@ -488,7 +490,8 @@ Vector<WeakPtr<RenderedDocumentMarker>> DocumentMarkerController::markersFor(Nod
     return result;
 }
 
-void DocumentMarkerController::forEach(const SimpleRange& range, OptionSet<DocumentMarker::Type> types, Function<bool(Node&, RenderedDocumentMarker&)> function)
+template<>
+void DocumentMarkerController::forEach<DocumentMarkerController::IterationDirection::Forwards>(const SimpleRange& range, OptionSet<DocumentMarker::Type> types, Function<bool(Node&, RenderedDocumentMarker&)>&& function)
 {
     if (!possiblyHasMarkers(types))
         return;
@@ -510,7 +513,33 @@ void DocumentMarkerController::forEach(const SimpleRange& range, OptionSet<Docum
     }
 }
 
-void DocumentMarkerController::forEachOfTypes(OptionSet<DocumentMarker::Type> types, const Function<bool(Node&, RenderedDocumentMarker&)> function)
+template<>
+void DocumentMarkerController::forEach<DocumentMarkerController::IterationDirection::Backwards>(const SimpleRange& range, OptionSet<DocumentMarker::Type> types, Function<bool(Node&, RenderedDocumentMarker&)>&& function)
+{
+    if (!possiblyHasMarkers(types))
+        return;
+    ASSERT(!m_markers.isEmpty());
+
+    Vector<Ref<WebCore::Node>> nodes;
+    for (Ref node : intersectingNodes(range))
+        nodes.append(node);
+
+    for (auto nodeIterator = nodes.rbegin(); nodeIterator != nodes.rend(); ++nodeIterator) {
+        auto node = *nodeIterator;
+        auto markers = markersFor(node, types);
+
+        for (auto markerIterator = markers.rbegin(); markerIterator != markers.rend(); ++markerIterator) {
+            auto marker = *markerIterator;
+            if (!marker)
+                continue;
+
+            if (function(node.get(), *marker))
+                return;
+        }
+    }
+}
+
+void DocumentMarkerController::forEachOfTypes(OptionSet<DocumentMarker::Type> types, Function<bool(Node&, RenderedDocumentMarker&)>&& function)
 {
     if (!possiblyHasMarkers(types))
         return;

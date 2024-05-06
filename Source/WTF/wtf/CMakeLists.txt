@@ -27,6 +27,7 @@ set(WTF_PUBLIC_HEADERS
     ButterflyArray.h
     ByteOrder.h
     CPUTime.h
+    CanMakeWeakPtr.h
     CagedPtr.h
     CagedUniquePtr.h
     CallbackAggregator.h
@@ -344,6 +345,8 @@ set(WTF_PUBLIC_HEADERS
     WeakListHashSet.h
     WeakObjCPtr.h
     WeakPtr.h
+    WeakPtrFactory.h
+    WeakPtrImpl.h
     WeakRandom.h
     WeakRandomNumber.h
     WeakRef.h
@@ -424,6 +427,10 @@ set(WTF_PUBLIC_HEADERS
     persistence/PersistentCoders.h
     persistence/PersistentDecoder.h
     persistence/PersistentEncoder.h
+
+    simde/simde.h
+    simde/arm/neon.h
+    simde/arm/sve.h
 
     spi/cf/CFBundleSPI.h
     spi/cf/CFStringSPI.h

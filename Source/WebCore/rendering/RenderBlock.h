@@ -38,6 +38,7 @@ class RenderText;
 
 struct BidiRun;
 struct PaintInfo;
+struct RenderBlockRareData;
 
 using TrackedRendererListHashSet = SingleThreadWeakListHashSet<RenderBox>;
 
@@ -346,6 +347,8 @@ protected:
 
     static LayoutUnit layoutOverflowLogicalBottom(const RenderBlock&);
 
+    String debugDescription() const override;
+
 public:
     virtual void computeOverflow(LayoutUnit oldClientAfterEdge, bool recomputeFloats = false);
     void clearLayoutOverflow();
@@ -388,8 +391,6 @@ protected:
     void preparePaginationBeforeBlockLayout(bool&);
 
     void computeChildPreferredLogicalWidths(RenderObject&, LayoutUnit& minPreferredLogicalWidth, LayoutUnit& maxPreferredLogicalWidth) const;
-
-    void blockWillBeDestroyed();
 
     virtual void computeChildIntrinsicLogicalWidths(RenderObject&, LayoutUnit& minPreferredLogicalWidth, LayoutUnit& maxPreferredLogicalWidth) const;
 
@@ -463,11 +464,11 @@ private:
 
     void absoluteQuadsIgnoringContinuation(const FloatRect&, Vector<FloatQuad>&, bool* wasFixed) const override;
 
-private:
-    bool hasRareData() const;
-    
 protected:
     void dirtyForLayoutFromPercentageHeightDescendants();
+
+    RenderBlockRareData& ensureBlockRareData();
+    RenderBlockRareData* getBlockRareData() const;
 
 protected:
     bool recomputeLogicalWidth();

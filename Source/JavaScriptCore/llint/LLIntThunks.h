@@ -36,11 +36,11 @@ struct ProtoCallFrame;
 typedef int64_t EncodedJSValue;
 
 extern "C" {
-    EncodedJSValue vmEntryToJavaScript(void*, VM*, ProtoCallFrame*);
-    EncodedJSValue vmEntryToNative(void*, VM*, ProtoCallFrame*);
-    EncodedJSValue vmEntryCustomGetter(CPURegister, CPURegister, CPURegister, CPURegister);
-    EncodedJSValue vmEntryCustomSetter(CPURegister, CPURegister, CPURegister, CPURegister, CPURegister);
-    EncodedJSValue vmEntryHostFunction(JSGlobalObject*, CallFrame*, void*);
+    EncodedJSValue SYSV_ABI vmEntryToJavaScript(void*, VM*, ProtoCallFrame*);
+    EncodedJSValue SYSV_ABI vmEntryToNative(void*, VM*, ProtoCallFrame*);
+    EncodedJSValue SYSV_ABI vmEntryCustomGetter(JSGlobalObject*, EncodedJSValue, PropertyName, void*);
+    void SYSV_ABI vmEntryCustomSetter(JSGlobalObject*, EncodedJSValue, EncodedJSValue, PropertyName, void*);
+    EncodedJSValue SYSV_ABI vmEntryHostFunction(JSGlobalObject*, CallFrame*, void*);
 
 #if CPU(ARM64) && CPU(ADDRESS64) && !ENABLE(C_LOOP)
     EncodedJSValue vmEntryToJavaScriptWith0Arguments(void*, VM*, CodeBlock*, JSObject*, JSValue);

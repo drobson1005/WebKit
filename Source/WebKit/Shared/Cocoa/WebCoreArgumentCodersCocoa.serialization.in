@@ -210,8 +210,16 @@ class WebCore::PaymentSessionError {
     std::optional<WebCore::ApplePayDeferredPaymentRequest> deferredPaymentRequest();
 #endif
 
+#if ENABLE(APPLE_PAY_DISBURSEMENTS)
+    std::optional<WebCore::ApplePayDisbursementRequest> disbursementRequest();
+#endif
+
 #if ENABLE(APPLE_PAY_LATER_AVAILABILITY)
     std::optional<WebCore::ApplePayLaterAvailability> applePayLaterAvailability();
+#endif
+
+#if ENABLE(APPLE_PAY_MERCHANT_CATEGORY_CODE)
+    String merchantCategoryCode();
 #endif
 };
 

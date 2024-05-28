@@ -135,12 +135,15 @@ void FileReaderLoader::cleanup()
     }
 }
 
-void FileReaderLoader::didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse& response)
+bool FileReaderLoader::processResponse(const ResourceResponse& response)
 {
     if (response.httpStatusCode() != httpStatus200OK) {
         failed(httpStatusCodeToErrorCode(response.httpStatusCode()));
-        return;
+        return false;
     }
+
+    if (m_readType == ReadType::ReadAsBinaryChunks)
+        return true;
 
     long long length = response.expectedContentLength();
 
@@ -155,7 +158,7 @@ void FileReaderLoader::didReceiveResponse(ResourceLoaderIdentifier, const Resour
     // FIXME: Support reading more than the current size limit of ArrayBuffer.
     if (length > std::numeric_limits<unsigned>::max()) {
         failed(ExceptionCode::NotReadableError);
-        return;
+        return false;
     }
 
     ASSERT(!m_rawData);
@@ -163,10 +166,17 @@ void FileReaderLoader::didReceiveResponse(ResourceLoaderIdentifier, const Resour
 
     if (!m_rawData) {
         failed(ExceptionCode::NotReadableError);
-        return;
+        return false;
     }
 
     m_totalBytes = static_cast<unsigned>(length);
+    return true;
+}
+
+void FileReaderLoader::didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse& response)
+{
+    if (!processResponse(response))
+        return;
 
     if (m_client)
         m_client->didStartLoading();
@@ -220,7 +230,7 @@ void FileReaderLoader::didReceiveData(const SharedBuffer& buffer)
     if (length <= 0)
         return;
 
-    memcpy(static_cast<char*>(m_rawData->data()) + m_bytesLoaded, buffer.data(), length);
+    memcpy(static_cast<char*>(m_rawData->data()) + m_bytesLoaded, buffer.span().data(), length);
     m_bytesLoaded += length;
 
     m_isRawDataConverted = false;
@@ -348,7 +358,7 @@ void FileReaderLoader::convertToText()
 
 void FileReaderLoader::convertToDataURL()
 {
-    m_stringResult = makeString("data:", m_dataType.isEmpty() ? "application/octet-stream"_s : m_dataType, ";base64,", base64Encoded(m_rawData ? m_rawData->data() : nullptr, m_bytesLoaded));
+    m_stringResult = makeString("data:"_s, m_dataType.isEmpty() ? "application/octet-stream"_s : m_dataType, ";base64,"_s, base64Encoded(m_rawData ? m_rawData->span().first(m_bytesLoaded) : std::span<const uint8_t>()));
 }
 
 bool FileReaderLoader::isCompleted() const

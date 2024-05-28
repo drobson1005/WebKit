@@ -50,7 +50,7 @@ public:
     WEBCORE_EXPORT static Ref<SecurityOrigin> create(const URL&);
     WEBCORE_EXPORT static Ref<SecurityOrigin> createForBlobURL(const URL&);
     WEBCORE_EXPORT static Ref<SecurityOrigin> createOpaque();
-    static SecurityOrigin& opaqueOrigin();
+    WEBCORE_EXPORT static SecurityOrigin& opaqueOrigin();
 
     WEBCORE_EXPORT static Ref<SecurityOrigin> createFromString(const String&);
     WEBCORE_EXPORT static Ref<SecurityOrigin> create(const String& protocol, const String& host, std::optional<uint16_t> port);
@@ -213,8 +213,7 @@ private:
     explicit SecurityOrigin(SecurityOriginData&&);
     void initializeShared(const URL&);
 
-    // FIXME: Rename this function to something more semantic.
-    bool passesFileCheck(const SecurityOrigin&) const;
+    bool hasLocalUnseparatedPath(const SecurityOrigin&) const;
 
     // This method checks that the scheme for this origin is an HTTP-family
     // scheme, e.g. HTTP and HTTPS.

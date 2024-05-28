@@ -259,11 +259,6 @@ void WebPageProxy::scrollingNodeScrollViewWillStartPanGesture(ScrollingNodeID no
     protectedPageClient()->scrollingNodeScrollViewWillStartPanGesture(nodeID);
 }
 
-void WebPageProxy::scrollingNodeScrollViewDidScroll(ScrollingNodeID nodeID)
-{
-    protectedPageClient()->scrollingNodeScrollViewDidScroll(nodeID);
-}
-
 void WebPageProxy::scrollingNodeScrollWillStartScroll(std::optional<ScrollingNodeID> nodeID)
 {
     protectedPageClient()->scrollingNodeScrollWillStartScroll(nodeID.value_or(ScrollingNodeID { }));
@@ -1350,7 +1345,10 @@ static RecommendDesktopClassBrowsingForRequest desktopClassBrowsingRecommendedFo
     // FIXME: This should be additionally gated on site-specific quirks being enabled.
     // See also: <rdar://problem/50035167>.
     // The list of domain names is currently available in Source/WebCore/page/Quirks.cpp
-    if (Quirks::needsIpadMiniUserAgent(request.url()))
+    if (Quirks::needsIPadMiniUserAgent(request.url()))
+        return RecommendDesktopClassBrowsingForRequest::No;
+
+    if (Quirks::needsIPhoneUserAgent(request.url()))
         return RecommendDesktopClassBrowsingForRequest::No;
 
     return RecommendDesktopClassBrowsingForRequest::Auto;
@@ -1430,12 +1428,17 @@ WebContentMode WebPageProxy::effectiveContentModeAfterAdjustingPolicies(API::Web
         policies.setMediaSourcePolicy(WebsiteMediaSourcePolicy::Enable);
     }
 
+    if (Quirks::needsIPhoneUserAgent(request.url())) {
+        policies.setCustomUserAgent(makeStringByReplacingAll(standardUserAgentWithApplicationName(m_applicationNameForUserAgent), "iPad"_s, "iPhone"_s));
+        policies.setCustomNavigatorPlatform("iPhone"_s);
+        return WebContentMode::Mobile;
+    }
+
     bool useDesktopBrowsingMode = useDesktopClassBrowsing(policies, request);
 
     m_preferFasterClickOverDoubleTap = false;
 
     if (!useDesktopBrowsingMode) {
-        policies.setAllowContentChangeObserverQuirk(true);
         policies.setIdempotentModeAutosizingOnlyHonorsPercentages(true);
         return WebContentMode::Mobile;
     }
@@ -1545,12 +1548,12 @@ void WebPageProxy::Internals::isUserFacingChanged(bool isUserFacing)
 
 #endif
 
-void WebPageProxy::willPerformPasteCommand(DOMPasteAccessCategory pasteAccessCategory)
+void WebPageProxy::willPerformPasteCommand(DOMPasteAccessCategory pasteAccessCategory, std::optional<FrameIdentifier> frameID)
 {
     switch (pasteAccessCategory) {
     case DOMPasteAccessCategory::General:
     case DOMPasteAccessCategory::Fonts:
-        grantAccessToCurrentPasteboardData(UIPasteboardNameGeneral);
+        grantAccessToCurrentPasteboardData(UIPasteboardNameGeneral, frameID);
         return;
     }
 }

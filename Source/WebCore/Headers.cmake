@@ -374,6 +374,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
 
     Modules/gamepad/GamepadEffectParameters.h
     Modules/gamepad/GamepadHapticEffectType.h
+    Modules/gamepad/NavigatorGamepad.h
 
     Modules/geolocation/Geolocation.h
     Modules/geolocation/GeolocationClient.h
@@ -728,6 +729,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     bindings/js/JSDOMConvertNumbers.h
     bindings/js/JSDOMConvertObject.h
     bindings/js/JSDOMConvertRecord.h
+    bindings/js/JSDOMConvertResult.h
     bindings/js/JSDOMConvertSequences.h
     bindings/js/JSDOMConvertSerializedScriptValue.h
     bindings/js/JSDOMConvertStrings.h
@@ -869,7 +871,6 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     css/Rect.h
     css/RectBase.h
     css/ShorthandSerializer.h
-    css/StyleColor.h
     css/StyleProperties.h
     css/StylePropertiesInlines.h
     css/StyleRule.h
@@ -878,7 +879,13 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     css/StyleSheetContents.h
     css/StyleSheetList.h
 
+    css/calc/CSSCalcSymbolsAllowed.h
     css/calc/CSSCalcValue.h
+
+    css/color/CSSColorDescriptors.h
+    css/color/StyleAbsoluteColor.h
+    css/color/StyleColor.h
+    css/color/StyleCurrentColor.h
 
     css/parser/CSSParser.h
     css/parser/CSSParserContext.h
@@ -886,6 +893,9 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     css/parser/CSSParserMode.h
     css/parser/CSSParserToken.h
     css/parser/CSSParserTokenRange.h
+    css/parser/CSSPropertyParserConsumer+Primitives.h
+    css/parser/CSSPropertyParserConsumer+RawTypes.h
+    css/parser/CSSPropertyParserConsumer+UnevaluatedCalc.h
     css/parser/CSSSelectorParser.h
     css/parser/CSSSelectorParserContext.h
     css/parser/MutableCSSSelector.h
@@ -1513,6 +1523,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/EventHandler.h
     page/FocusController.h
     page/FocusDirection.h
+    page/FragmentDirective.h
     page/Frame.h
     page/FrameDestructionObserver.h
     page/FrameDestructionObserverInlines.h
@@ -1750,6 +1761,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/ProcessIdentity.h
     platform/ProcessQualified.h
     platform/PromisedAttachmentInfo.h
+    platform/PublicSuffix.h
     platform/PublicSuffixStore.h
     platform/RectEdges.h
     platform/ReferrerPolicy.h
@@ -1995,6 +2007,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/MediaPlaybackTargetClient.h
     platform/graphics/MediaPlaybackTargetPicker.h
     platform/graphics/MediaPlayer.h
+    platform/graphics/MediaPlayerClientIdentifier.h
     platform/graphics/MediaPlayerEnums.h
     platform/graphics/MediaPlayerIdentifier.h
     platform/graphics/MediaPlayerPrivate.h
@@ -2058,6 +2071,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/TabSize.h
     platform/graphics/TextRun.h
     platform/graphics/TextTrackRepresentation.h
+    platform/graphics/TileGridIdentifier.h
     platform/graphics/TiledBacking.h
     platform/graphics/TrackBuffer.h
     platform/graphics/TrackPrivateBase.h
@@ -2066,6 +2080,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/VelocityData.h
     platform/graphics/VideoLayerManager.h
     platform/graphics/VideoPlaybackQualityMetrics.h
+    platform/graphics/VideoTarget.h
     platform/graphics/VideoTrackPrivate.h
     platform/graphics/VideoTrackPrivateClient.h
     platform/graphics/WidthCache.h

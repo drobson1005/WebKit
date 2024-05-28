@@ -75,7 +75,8 @@ public:
 
     Device& device() const { return m_device; }
 
-    bool isValid() const { return m_computeCommandEncoder; }
+    bool isValid() const;
+    id<MTLComputeCommandEncoder> computeCommandEncoder() const;
 
 private:
     ComputePassEncoder(id<MTLComputeCommandEncoder>, const WGPUComputePassDescriptor&, CommandEncoder&, Device&);
@@ -93,7 +94,6 @@ private:
         Ref<QuerySet> querySet;
         uint32_t queryIndex;
     };
-    Vector<PendingTimestampWrites> m_pendingTimestampWrites;
     uint64_t m_debugGroupStackSize { 0 };
 
     const Ref<Device> m_device;

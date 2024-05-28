@@ -157,9 +157,9 @@ static const LocalFrame& rootFrame(const LocalFrame& frame)
     return frame;
 }
 
-LocalFrame::LocalFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& frameLoaderClient, FrameIdentifier identifier, HTMLFrameOwnerElement* ownerElement, Frame* parent, Frame* opener)
+LocalFrame::LocalFrame(Page& page, ClientCreator&& clientCreator, FrameIdentifier identifier, HTMLFrameOwnerElement* ownerElement, Frame* parent, Frame* opener)
     : Frame(page, identifier, FrameType::Local, ownerElement, parent, opener)
-    , m_loader(makeUniqueRef<FrameLoader>(*this, WTFMove(frameLoaderClient)))
+    , m_loader(makeUniqueRef<FrameLoader>(*this, clientCreator(*this)))
     , m_script(makeUniqueRef<ScriptController>(*this))
     , m_pageZoomFactor(parentPageZoomFactor(this))
     , m_textZoomFactor(parentTextZoomFactor(this))
@@ -191,19 +191,19 @@ void LocalFrame::init()
     checkedLoader()->init();
 }
 
-Ref<LocalFrame> LocalFrame::createMainFrame(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier, Frame* opener)
+Ref<LocalFrame> LocalFrame::createMainFrame(Page& page, ClientCreator&& clientCreator, FrameIdentifier identifier, Frame* opener)
 {
-    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, nullptr, nullptr, opener));
+    return adoptRef(*new LocalFrame(page, WTFMove(clientCreator), identifier, nullptr, nullptr, opener));
 }
 
-Ref<LocalFrame> LocalFrame::createSubframe(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier, HTMLFrameOwnerElement& ownerElement)
+Ref<LocalFrame> LocalFrame::createSubframe(Page& page, ClientCreator&& clientCreator, FrameIdentifier identifier, HTMLFrameOwnerElement& ownerElement)
 {
-    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, &ownerElement, ownerElement.document().frame(), nullptr));
+    return adoptRef(*new LocalFrame(page, WTFMove(clientCreator), identifier, &ownerElement, ownerElement.document().frame(), nullptr));
 }
 
-Ref<LocalFrame> LocalFrame::createSubframeHostedInAnotherProcess(Page& page, UniqueRef<LocalFrameLoaderClient>&& client, FrameIdentifier identifier, Frame& parent)
+Ref<LocalFrame> LocalFrame::createProvisionalSubframe(Page& page, ClientCreator&& clientCreator, FrameIdentifier identifier, Frame& parent)
 {
-    return adoptRef(*new LocalFrame(page, WTFMove(client), identifier, nullptr, &parent, nullptr));
+    return adoptRef(*new LocalFrame(page, WTFMove(clientCreator), identifier, nullptr, &parent, nullptr));
 }
 
 LocalFrame::~LocalFrame()
@@ -232,10 +232,7 @@ LocalFrame::~LocalFrame()
     if (!isMainFrame() && localMainFrame)
         localMainFrame->selfOnlyDeref();
 
-    if (isRootFrame()) {
-        if (RefPtr page = this->page())
-            page->removeRootFrame(*this);
-    }
+    detachFromPage();
 }
 
 void LocalFrame::addDestructionObserver(FrameDestructionObserver& observer)
@@ -433,7 +430,7 @@ static JSC::Yarr::RegularExpression createRegExpForLabels(const Vector<String>& 
 
         // Search for word boundaries only if label starts/ends with "word characters".
         // If we always searched for word boundaries, this wouldn't work for languages such as Japanese.
-        pattern.append(i ? "|" : "", startsWithWordCharacter ? "\\b" : "", label, endsWithWordCharacter ? "\\b" : "");
+        pattern.append(i ? "|"_s : ""_s, startsWithWordCharacter ? "\\b"_s : ""_s, label, endsWithWordCharacter ? "\\b"_s : ""_s);
     }
     pattern.append(')');
     return JSC::Yarr::RegularExpression(pattern.toString(), { JSC::Yarr::Flags::IgnoreCase });
@@ -623,7 +620,7 @@ bool LocalFrame::requestDOMPasteAccess(DOMPasteAccessCategory pasteAccessCategor
         if (!client)
             return false;
 
-        auto response = client->requestDOMPasteAccess(pasteAccessCategory, m_doc->originIdentifierForPasteboard());
+        auto response = client->requestDOMPasteAccess(pasteAccessCategory, frameID(), m_doc->originIdentifierForPasteboard());
         gestureToken->didRequestDOMPasteAccess(response);
         switch (response) {
         case DOMPasteAccessResponse::GrantedForCommand:

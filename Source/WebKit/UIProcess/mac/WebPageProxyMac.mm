@@ -442,7 +442,9 @@ static NSString *pathToPDFOnDisk(const String& suggestedFilename)
         return nil;
     }
 
-    NSString *path = [pdfDirectoryPath stringByAppendingPathComponent:suggestedFilename];
+    // The NSFileManager expects a path string, while NSWorkspace uses file URLs, and will decode any percent encoding
+    // in its passed URLs before loading from disk. Create the files using decoded file paths so they match up.
+    NSString *path = [[pdfDirectoryPath stringByAppendingPathComponent:suggestedFilename] stringByRemovingPercentEncoding];
 
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if ([fileManager fileExistsAtPath:path]) {
@@ -475,7 +477,6 @@ void WebPageProxy::savePDFToTemporaryFolderAndOpenWithNativeApplication(const St
         WTFLogAlways("Cannot save file without .pdf extension to the temporary directory.");
         return;
     }
-
     auto nsPath = retainPtr(pathToPDFOnDisk(sanitizedFilename));
 
     if (!nsPath)
@@ -637,15 +638,14 @@ void WebPageProxy::platformDidSelectItemFromActiveContextMenu(const WebContextMe
 
 #endif
 
-void WebPageProxy::willPerformPasteCommand(DOMPasteAccessCategory pasteAccessCategory)
+void WebPageProxy::willPerformPasteCommand(DOMPasteAccessCategory pasteAccessCategory, std::optional<FrameIdentifier> frameID)
 {
     switch (pasteAccessCategory) {
     case DOMPasteAccessCategory::General:
-        grantAccessToCurrentPasteboardData(NSPasteboardNameGeneral);
+        grantAccessToCurrentPasteboardData(NSPasteboardNameGeneral, frameID);
         return;
-
     case DOMPasteAccessCategory::Fonts:
-        grantAccessToCurrentPasteboardData(NSPasteboardNameFont);
+        grantAccessToCurrentPasteboardData(NSPasteboardNameFont, frameID);
         return;
     }
 }

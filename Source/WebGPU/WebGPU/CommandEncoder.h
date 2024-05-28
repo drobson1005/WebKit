@@ -57,9 +57,9 @@ class Texture;
 class CommandEncoder : public WGPUCommandEncoderImpl, public RefCounted<CommandEncoder>, public CommandsMixin, public CanMakeWeakPtr<CommandEncoder> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    static Ref<CommandEncoder> create(id<MTLCommandBuffer> commandBuffer, Device& device)
+    static Ref<CommandEncoder> create(id<MTLCommandBuffer> commandBuffer, id<MTLSharedEvent> event, Device& device)
     {
-        return adoptRef(*new CommandEncoder(commandBuffer, device));
+        return adoptRef(*new CommandEncoder(commandBuffer, event, device));
     }
     static Ref<CommandEncoder> createInvalid(Device& device)
     {
@@ -70,11 +70,11 @@ public:
 
     Ref<ComputePassEncoder> beginComputePass(const WGPUComputePassDescriptor&);
     Ref<RenderPassEncoder> beginRenderPass(const WGPURenderPassDescriptor&);
-    void copyBufferToBuffer(const Buffer& source, uint64_t sourceOffset, const Buffer& destination, uint64_t destinationOffset, uint64_t size);
+    void copyBufferToBuffer(const Buffer& source, uint64_t sourceOffset, Buffer& destination, uint64_t destinationOffset, uint64_t size);
     void copyBufferToTexture(const WGPUImageCopyBuffer& source, const WGPUImageCopyTexture& destination, const WGPUExtent3D& copySize);
     void copyTextureToBuffer(const WGPUImageCopyTexture& source, const WGPUImageCopyBuffer& destination, const WGPUExtent3D& copySize);
     void copyTextureToTexture(const WGPUImageCopyTexture& source, const WGPUImageCopyTexture& destination, const WGPUExtent3D& copySize);
-    void clearBuffer(const Buffer&, uint64_t offset, uint64_t size);
+    void clearBuffer(Buffer&, uint64_t offset, uint64_t size);
     Ref<CommandBuffer> finish(const WGPUCommandBufferDescriptor&);
     void insertDebugMarker(String&& markerLabel);
     void popDebugGroup();
@@ -104,9 +104,10 @@ public:
     void setLastError(NSString*);
     void waitForCommandBufferCompletion();
     bool encoderIsCurrent(id<MTLCommandEncoder>) const;
+    bool submitWillBeInvalid() const;
 
 private:
-    CommandEncoder(id<MTLCommandBuffer>, Device&);
+    CommandEncoder(id<MTLCommandBuffer>, id<MTLSharedEvent>, Device&);
     CommandEncoder(Device&);
 
     NSString* errorValidatingCopyBufferToBuffer(const Buffer& source, uint64_t sourceOffset, const Buffer& destination, uint64_t destinationOffset, uint64_t size);
@@ -123,13 +124,13 @@ private:
     NSString* errorValidatingCopyTextureToBuffer(const WGPUImageCopyTexture&, const WGPUImageCopyBuffer&, const WGPUExtent3D&) const;
 
     id<MTLCommandBuffer> m_commandBuffer { nil };
+    id<MTLSharedEvent> m_abortCommandBuffer { nil };
     id<MTLBlitCommandEncoder> m_blitCommandEncoder { nil };
     id<MTLCommandEncoder> m_existingCommandEncoder { nil };
     struct PendingTimestampWrites {
         Ref<QuerySet> querySet;
         uint32_t queryIndex;
     };
-    Vector<PendingTimestampWrites> m_pendingTimestampWrites;
     uint64_t m_debugGroupStackSize { 0 };
     WeakPtr<CommandBuffer> m_cachedCommandBuffer;
     NSString* m_lastErrorString { nil };

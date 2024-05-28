@@ -68,11 +68,6 @@ size_t ImageBufferIOSurfaceBackend::calculateMemoryCost(const Parameters& parame
     return ImageBufferBackend::calculateMemoryCost(parameters.backendSize, calculateBytesPerRow(parameters.backendSize));
 }
 
-size_t ImageBufferIOSurfaceBackend::calculateExternalMemoryCost(const Parameters& parameters)
-{
-    return calculateMemoryCost(parameters);
-}
-
 std::unique_ptr<ImageBufferIOSurfaceBackend> ImageBufferIOSurfaceBackend::create(const Parameters& parameters, const ImageBufferCreationContext& creationContext)
 {
     IntSize backendSize = calculateSafeBackendSize(parameters);
@@ -197,6 +192,11 @@ void ImageBufferIOSurfaceBackend::putPixelBuffer(const PixelBuffer& pixelBuffer,
     prepareForExternalWrite();
     if (auto lock = m_surface->lock<IOSurface::AccessMode::ReadWrite>())
         ImageBufferBackend::putPixelBuffer(pixelBuffer, srcRect, destPoint, destFormat, lock->surfaceBaseAddress());
+}
+
+bool ImageBufferIOSurfaceBackend::canMapBackingStore() const
+{
+    return true;
 }
 
 IOSurface* ImageBufferIOSurfaceBackend::surface()

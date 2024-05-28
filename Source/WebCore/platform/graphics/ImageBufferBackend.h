@@ -28,6 +28,7 @@
 #include "CopyImageOptions.h"
 #include "DestinationColorSpace.h"
 #include "FloatRect.h"
+#include "GraphicsLayerContentsDisplayDelegate.h"
 #include "GraphicsTypesGL.h"
 #include "ImageBufferAllocator.h"
 #include "ImageBufferBackendParameters.h"
@@ -101,17 +102,14 @@ public:
 
     struct Info {
         RenderingMode renderingMode;
-        bool canMapBackingStore;
         AffineTransform baseTransform;
         size_t memoryCost;
-        size_t externalMemoryCost;
     };
 
     WEBCORE_EXPORT virtual ~ImageBufferBackend();
 
     WEBCORE_EXPORT static size_t calculateMemoryCost(const IntSize& backendSize, unsigned bytesPerRow);
-    static size_t calculateExternalMemoryCost(const Parameters&) { return 0; }
-    WEBCORE_EXPORT static AffineTransform calculateBaseTransform(const Parameters&, bool originAtBottomLeftCorner);
+    WEBCORE_EXPORT static AffineTransform calculateBaseTransform(const Parameters&);
 
     virtual GraphicsContext& context() = 0;
     virtual void flushContext() { }
@@ -147,15 +145,14 @@ public:
 
     virtual std::unique_ptr<ThreadSafeImageBufferFlusher> createFlusher() { return nullptr; }
 
-    static constexpr bool isOriginAtBottomLeftCorner = false;
-    virtual bool originAtBottomLeftCorner() const { return isOriginAtBottomLeftCorner; }
-
-    static constexpr bool canMapBackingStore = true;
     static constexpr RenderingMode renderingMode = RenderingMode::Unaccelerated;
 
+    virtual bool canMapBackingStore() const = 0;
     virtual void ensureNativeImagesHaveCopiedBackingStore() { }
 
     virtual ImageBufferBackendSharing* toBackendSharing() { return nullptr; }
+
+    virtual RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() const { return nullptr; }
 
     const Parameters& parameters() { return m_parameters; }
 

@@ -289,12 +289,13 @@ public:
     void fire(Frame& frame) override
     {
         // If the destination HistoryItem is no longer in the back/forward list, then we don't proceed.
-        if (!frame.page()->backForward().containsItem(m_historyItem))
+        RefPtr page { frame.page() };
+        if (!page || !page->backForward().containsItem(m_historyItem))
             return;
 
         UserGestureIndicator gestureIndicator(userGestureToForward());
 
-        if (frame.page()->backForward().currentItem() == m_historyItem.ptr()) {
+        if (page->backForward().currentItem() == m_historyItem.ptr()) {
             // Special case for go(0) from a frame -> reload only the frame
             // To follow Firefox and IE's behavior, history reload can only navigate the self frame.
             if (RefPtr localFrame = dynamicDowncast<LocalFrame>(frame))
@@ -304,7 +305,10 @@ public:
         
         // go(i!=0) from a frame navigates into the history of the frame only,
         // in both IE and NS (but not in Mozilla). We can't easily do that.
-        frame.protectedPage()->goToItem(m_historyItem, FrameLoadType::IndexedBackForward, ShouldTreatAsContinuingLoad::No);
+        RefPtr localMainFrame = dynamicDowncast<LocalFrame>(page->mainFrame());
+        if (!localMainFrame)
+            return;
+        page->goToItem(*localMainFrame, m_historyItem, FrameLoadType::IndexedBackForward, ShouldTreatAsContinuingLoad::No);
     }
 
 private:
@@ -512,7 +516,7 @@ LockBackForwardList NavigationScheduler::mustLockBackForwardList(Frame& targetFr
     return LockBackForwardList::No;
 }
 
-void NavigationScheduler::scheduleLocationChange(Document& initiatingDocument, SecurityOrigin& securityOrigin, const URL& url, const String& referrer, LockHistory lockHistory, LockBackForwardList lockBackForwardList, CompletionHandler<void(ScheduleLocationChangeResult)>&& completionHandler)
+void NavigationScheduler::scheduleLocationChange(Document& initiatingDocument, SecurityOrigin& securityOrigin, const URL& url, const String& referrer, LockHistory lockHistory, LockBackForwardList lockBackForwardList, NavigationHistoryBehavior historyHandling, CompletionHandler<void(ScheduleLocationChangeResult)>&& completionHandler)
 {
     if (!shouldScheduleNavigation(url))
         return completionHandler(ScheduleLocationChangeResult::Stopped);
@@ -537,6 +541,7 @@ void NavigationScheduler::scheduleLocationChange(Document& initiatingDocument, S
         frameLoadRequest.setLockBackForwardList(lockBackForwardList);
         frameLoadRequest.disableNavigationToInvalidURL();
         frameLoadRequest.setShouldOpenExternalURLsPolicy(initiatingDocument.shouldOpenExternalURLsPolicyToPropagate());
+        frameLoadRequest.setNavigationHistoryBehavior(historyHandling);
         if (loader)
             loader->changeLocation(WTFMove(frameLoadRequest));
         return completionHandler(ScheduleLocationChangeResult::Completed);

@@ -143,8 +143,10 @@ public:
     IPC::Connection& connection() { return m_connection.get(); }
     Ref<IPC::Connection> protectedConnection() { return m_connection; }
     NetworkProcess& networkProcess() { return m_networkProcess.get(); }
+    Ref<NetworkProcess> protectedNetworkProcess();
 
     bool isWebTransportEnabled() const { return m_preferencesForWebProcess.isWebTransportEnabled; }
+    bool usesSingleWebProcess() const { return m_preferencesForWebProcess.usesSingleWebProcess; }
 
     void didCleanupResourceLoader(NetworkResourceLoader&);
     void transferKeptAliveLoad(NetworkResourceLoader&);

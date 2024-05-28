@@ -719,7 +719,11 @@ public:
     inline bool hasTransformOrPerspective() const;
 
     bool capturedInViewTransition() const { return m_stateBitfields.hasFlag(StateFlag::CapturedInViewTransition); }
-    void setCapturedInViewTransition(bool captured) { m_stateBitfields.setFlag(StateFlag::CapturedInViewTransition, captured); }
+    void setCapturedInViewTransition(bool);
+
+    // When the document element is captured, the captured contents uses the RenderView
+    // instead. Returns the capture state with this adjustment applied.
+    bool effectiveCapturedInViewTransition() const;
 
     inline bool preservesNewline() const;
 
@@ -821,6 +825,7 @@ public:
 
     // Convert the given local point to absolute coordinates. If OptionSet<MapCoordinatesMode> includes UseTransforms, take transforms into account.
     WEBCORE_EXPORT FloatPoint localToAbsolute(const FloatPoint& localPoint = FloatPoint(), OptionSet<MapCoordinatesMode> = { }, bool* wasFixed = nullptr) const;
+    std::unique_ptr<TransformationMatrix> viewTransitionTransform() const;
     FloatPoint absoluteToLocal(const FloatPoint&, OptionSet<MapCoordinatesMode> = { }) const;
 
     // Convert a local quad to absolute coordinates, taking transforms into account.
@@ -891,8 +896,8 @@ public:
     RepaintContainerStatus containerForRepaint() const;
     // Actually do the repaint of rect r for this object which has been computed in the coordinate space
     // of repaintContainer. If repaintContainer is nullptr, repaint via the view.
-    void repaintUsingContainer(const RenderLayerModelObject* repaintContainer, const LayoutRect&, bool shouldClipToLayer = true) const;
-    
+    void repaintUsingContainer(SingleThreadWeakPtr<const RenderLayerModelObject>&& repaintContainer, const LayoutRect&, bool shouldClipToLayer = true) const;
+
     // Repaint the entire object.  Called when, e.g., the color of a border changes, or when a border
     // style changes.
     enum class ForceRepaint : bool { No, Yes };

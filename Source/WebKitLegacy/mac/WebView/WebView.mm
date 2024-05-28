@@ -1514,7 +1514,9 @@ static WebCore::ApplicationCacheStorage& webApplicationCacheStorage()
         BackForwardList::create(self),
         WebCore::CookieJar::create(storageProvider.copyRef()),
         makeUniqueRef<WebProgressTrackerClient>(self),
-        UniqueRef<WebCore::LocalFrameLoaderClient>(makeUniqueRef<WebFrameLoaderClient>()),
+        CompletionHandler<UniqueRef<WebCore::LocalFrameLoaderClient>(WebCore::LocalFrame&)> { [] (auto&) {
+            return makeUniqueRef<WebFrameLoaderClient>();
+        } },
         WebCore::FrameIdentifier::generate(),
         nullptr,
         makeUniqueRef<WebCore::DummySpeechRecognitionProvider>(),
@@ -1775,7 +1777,9 @@ static WebCore::ApplicationCacheStorage& webApplicationCacheStorage()
         BackForwardList::create(self),
         WebCore::CookieJar::create(storageProvider.copyRef()),
         makeUniqueRef<WebProgressTrackerClient>(self),
-        UniqueRef<WebCore::LocalFrameLoaderClient>(makeUniqueRef<WebFrameLoaderClient>()),
+        CompletionHandler<UniqueRef<WebCore::LocalFrameLoaderClient>(WebCore::LocalFrame&)> { [] (auto&) {
+            return makeUniqueRef<WebFrameLoaderClient>();
+        } },
         WebCore::FrameIdentifier::generate(),
         nullptr,
         makeUniqueRef<WebCore::DummySpeechRecognitionProvider>(),
@@ -2781,11 +2785,12 @@ ALLOW_DEPRECATED_DECLARATIONS_END
         Ref<WebCore::HistoryItem> newItem = otherBackForward.itemAtIndex(i)->copy();
         if (i == 0)
             newItemToGoTo = newItem.ptr();
-        backForward.client().addItem(WTFMove(newItem));
+        backForward.client().addItem(_private->page->mainFrame().frameID(), WTFMove(newItem));
     }
 
     ASSERT(newItemToGoTo);
-    _private->page->goToItem(*newItemToGoTo, WebCore::FrameLoadType::IndexedBackForward, WebCore::ShouldTreatAsContinuingLoad::No);
+    if (RefPtr localMainFrame = dynamicDowncast<WebCore::LocalFrame>(_private->page->mainFrame()))
+        _private->page->goToItem(*localMainFrame, *newItemToGoTo, WebCore::FrameLoadType::IndexedBackForward, WebCore::ShouldTreatAsContinuingLoad::No);
 }
 
 - (void)_setFormDelegate: (id<WebFormDelegate>)delegate
@@ -5948,7 +5953,8 @@ static bool needsWebViewInitThreadWorkaround()
         return NO;
 
     ASSERT(item);
-    _private->page->goToItem(*core(item), WebCore::FrameLoadType::IndexedBackForward, WebCore::ShouldTreatAsContinuingLoad::No);
+    if (RefPtr localMainFrame = dynamicDowncast<WebCore::LocalFrame>(_private->page->mainFrame()))
+        _private->page->goToItem(*localMainFrame, *core(item), WebCore::FrameLoadType::IndexedBackForward, WebCore::ShouldTreatAsContinuingLoad::No);
     return YES;
 }
 
@@ -7421,7 +7427,7 @@ static NSAppleEventDescriptor* aeDescFromJSValue(JSC::JSGlobalObject* lexicalGlo
     if (jsValue.isBoolean())
         return [NSAppleEventDescriptor descriptorWithBoolean:jsValue.asBoolean()];
     if (jsValue.isString())
-        return [NSAppleEventDescriptor descriptorWithString:asString(jsValue)->value(lexicalGlobalObject)];
+        return [NSAppleEventDescriptor descriptorWithString:asString(jsValue)->value(lexicalGlobalObject).data];
     if (jsValue.isNumber()) {
         double value = jsValue.asNumber();
         int intValue = value;

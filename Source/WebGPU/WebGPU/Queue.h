@@ -75,12 +75,13 @@ public:
 
     const Device& device() const;
     void clearTextureIfNeeded(const WGPUImageCopyTexture&, NSUInteger);
-    id<MTLCommandBuffer> commandBufferWithDescriptor(MTLCommandBufferDescriptor*);
+    std::pair<id<MTLCommandBuffer>, id<MTLSharedEvent>> commandBufferWithDescriptor(MTLCommandBufferDescriptor*);
     void commitMTLCommandBuffer(id<MTLCommandBuffer>);
     void setEncoderForBuffer(id<MTLCommandBuffer>, id<MTLCommandEncoder>);
     id<MTLCommandEncoder> encoderForBuffer(id<MTLCommandBuffer>) const;
     void clearTextureViewIfNeeded(TextureView&);
     static bool writeWillCompletelyClear(WGPUTextureDimension, uint32_t widthForMetal, uint32_t logicalSizeWidth, uint32_t heightForMetal, uint32_t logicalSizeHeight, uint32_t depthForMetal, uint32_t logicalSizeDepthOrArrayLayers);
+    void endEncoding(id<MTLCommandEncoder>, id<MTLCommandBuffer>) const;
 
 private:
     Queue(id<MTLCommandQueue>, Device&);
@@ -101,6 +102,7 @@ private:
 
     id<MTLCommandQueue> m_commandQueue { nil };
     id<MTLCommandBuffer> m_commandBuffer { nil };
+    id<MTLSharedEvent> m_commandBufferEvent { nil };
     id<MTLBlitCommandEncoder> m_blitCommandEncoder { nil };
     ThreadSafeWeakPtr<Device> m_device; // The only kind of queues that exist right now are default queues, which are owned by Devices.
 

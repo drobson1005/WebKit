@@ -183,15 +183,6 @@ void NetworkDataTaskCocoa::updateFirstPartyInfoForSession(const URL& requestURL)
         session->setFirstPartyHostIPAddress(requestURL.host().toString(), ipAddress);
 }
 
-static void adjustNetworkServiceTypeIfNecessary(WebCore::ResourceRequestRequester requester, NSMutableURLRequest *mutableRequest)
-{
-    if (requester == WebCore::ResourceRequestRequester::Media) {
-        if (mutableRequest.networkServiceType == NSURLNetworkServiceTypeDefault || mutableRequest.networkServiceType == NSURLNetworkServiceTypeBackground)
-            mutableRequest.networkServiceType = NSURLNetworkServiceTypeVideo;
-    } else if (requester == WebCore::ResourceRequestRequester::Beacon)
-        mutableRequest.networkServiceType = NSURLNetworkServiceTypeBackground;
-}
-
 NetworkDataTaskCocoa::NetworkDataTaskCocoa(NetworkSession& session, NetworkDataTaskClient& client, const NetworkLoadParameters& parameters)
     : NetworkDataTask(session, client, parameters.request, parameters.storedCredentialsPolicy, parameters.shouldClearReferrerOnHTTPSToHTTPRedirect, parameters.isMainFrameNavigation)
     , NetworkTaskCocoa(session, parameters.shouldRelaxThirdPartyCookieBlocking)
@@ -234,8 +225,6 @@ NetworkDataTaskCocoa::NetworkDataTaskCocoa(NetworkSession& session, NetworkDataT
     RetainPtr<NSURLRequest> nsRequest = request.nsURLRequest(WebCore::HTTPBodyUpdatePolicy::UpdateHTTPBody);
     ASSERT(nsRequest);
     RetainPtr<NSMutableURLRequest> mutableRequest = adoptNS([nsRequest.get() mutableCopy]);
-
-    adjustNetworkServiceTypeIfNecessary(request.requester(), mutableRequest.get());
 
     if (parameters.isMainFrameNavigation
         || parameters.hadMainFrameMainResourcePrivateRelayed
@@ -680,19 +669,9 @@ void NetworkDataTaskCocoa::setEmulatedConditions(const std::optional<int64_t>& b
 
 #endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)
 
-void NetworkDataTaskCocoa::checkTAO(const WebCore::ResourceResponse& response)
+void NetworkDataTaskCocoa::setTimingAllowFailedFlag()
 {
-    if (networkLoadMetrics().failsTAOCheck)
-        return;
-
-    RefPtr<WebCore::SecurityOrigin> origin;
-    if (isTopLevelNavigation())
-        origin = WebCore::SecurityOrigin::create(firstRequest().url());
-    else
-        origin = m_sourceOrigin;
-
-    if (origin)
-        networkLoadMetrics().failsTAOCheck = !passesTimingAllowOriginCheck(response, *origin);
+    networkLoadMetrics().failsTAOCheck = true;
 }
 
 NSURLSessionTask* NetworkDataTaskCocoa::task() const

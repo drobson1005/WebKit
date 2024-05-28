@@ -317,7 +317,7 @@ void AssemblyHelpers::jitReleaseAssertNoException(VM& vm)
     noException.link(this);
 }
 
-void AssemblyHelpers::callExceptionFuzz(VM& vm)
+void AssemblyHelpers::callExceptionFuzz(VM& vm, GPRReg exceptionReg)
 {
     RELEASE_ASSERT(Options::useExceptionFuzz());
 
@@ -352,6 +352,9 @@ void AssemblyHelpers::callExceptionFuzz(VM& vm)
         load32(buffer + i, GPRInfo::toRegister(i));
 #endif
     }
+
+    if (exceptionReg != InvalidGPRReg)
+        loadPtr(vm.addressOfException(), exceptionReg);
 }
 
 AssemblyHelpers::Jump AssemblyHelpers::emitJumpIfException(VM& vm)
@@ -359,20 +362,28 @@ AssemblyHelpers::Jump AssemblyHelpers::emitJumpIfException(VM& vm)
     return emitExceptionCheck(vm, NormalExceptionCheck);
 }
 
-AssemblyHelpers::Jump AssemblyHelpers::emitExceptionCheck(VM& vm, ExceptionCheckKind kind, ExceptionJumpWidth width)
+AssemblyHelpers::Jump AssemblyHelpers::emitExceptionCheck(VM& vm, ExceptionCheckKind kind, ExceptionJumpWidth width, GPRReg exceptionReg)
 {
     if (UNLIKELY(Options::useExceptionFuzz()))
-        callExceptionFuzz(vm);
+        callExceptionFuzz(vm, exceptionReg);
 
     if (width == FarJumpWidth)
         kind = (kind == NormalExceptionCheck ? InvertedExceptionCheck : NormalExceptionCheck);
 
     Jump result;
-#if USE(JSVALUE64)
-    result = branchTest64(kind == NormalExceptionCheck ? NonZero : Zero, AbsoluteAddress(vm.addressOfException()));
-#elif USE(JSVALUE32_64)
-    result = branch32(kind == NormalExceptionCheck ? NotEqual : Equal, AbsoluteAddress(vm.addressOfException()), TrustedImm32(0));
+    if (exceptionReg != InvalidGPRReg) {
+#if ASSERT_ENABLED
+        JIT_COMMENT(*this, "Exception validation");
+        Jump ok = branchPtr(Equal, AbsoluteAddress(vm.addressOfException()), exceptionReg);
+        breakpoint();
+        ok.link(this);
 #endif
+        JIT_COMMENT(*this, "Exception check from operation result register");
+        result = branchTestPtr(kind == NormalExceptionCheck ? NonZero : Zero, exceptionReg);
+    } else {
+        JIT_COMMENT(*this, "Exception check from vm");
+        result = branchTestPtr(kind == NormalExceptionCheck ? NonZero : Zero, AbsoluteAddress(vm.addressOfException()));
+    }
 
     if (width == NormalJumpWidth)
         return result;
@@ -383,19 +394,9 @@ AssemblyHelpers::Jump AssemblyHelpers::emitExceptionCheck(VM& vm, ExceptionCheck
     return realJump.m_jump;
 }
 
-AssemblyHelpers::Jump AssemblyHelpers::emitNonPatchableExceptionCheck(VM& vm)
+AssemblyHelpers::Jump AssemblyHelpers::emitNonPatchableExceptionCheck(VM& vm, GPRReg exceptionReg)
 {
-    if (UNLIKELY(Options::useExceptionFuzz()))
-        callExceptionFuzz(vm);
-
-    Jump result;
-#if USE(JSVALUE64)
-    result = branchTest64(NonZero, AbsoluteAddress(vm.addressOfException()));
-#elif USE(JSVALUE32_64)
-    result = branch32(NotEqual, AbsoluteAddress(vm.addressOfException()), TrustedImm32(0));
-#endif
-
-    return result;
+    return emitExceptionCheck(vm, NormalExceptionCheck, NormalJumpWidth, exceptionReg);
 }
 
 void AssemblyHelpers::emitStoreStructureWithTypeInfo(AssemblyHelpers& jit, TrustedImmPtr structure, RegisterID dest)
@@ -949,9 +950,9 @@ void AssemblyHelpers::emitAllocateWithNonNullAllocator(GPRReg resultGPR, const J
     // and extracting interval information use less instructions.
 
     // Assert that we can use loadPairPtr for the interval bounds and nextInterval/secret.
-    ASSERT(FreeList::offsetOfIntervalEnd() - FreeList::offsetOfIntervalStart() == sizeof(uintptr_t));
-    ASSERT(FreeList::offsetOfNextInterval() - FreeList::offsetOfIntervalEnd() == sizeof(uintptr_t));
-    ASSERT(FreeList::offsetOfSecret() - FreeList::offsetOfNextInterval() == sizeof(uintptr_t));
+    static_assert(FreeList::offsetOfIntervalEnd() - FreeList::offsetOfIntervalStart() == sizeof(uintptr_t));
+    static_assert(FreeList::offsetOfNextInterval() - FreeList::offsetOfIntervalEnd() == sizeof(uintptr_t));
+    static_assert(FreeList::offsetOfSecret() - FreeList::offsetOfNextInterval() == sizeof(uintptr_t));
 
     // Bump allocation (fast path)
     loadPairPtr(allocatorGPR, TrustedImm32(LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalStart()), resultGPR, scratchGPR);

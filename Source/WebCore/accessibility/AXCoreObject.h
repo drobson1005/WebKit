@@ -116,8 +116,8 @@ enum class AXAncestorFlag : uint8_t {
     // Bit 7 is free.
 };
 
-enum class AccessibilityRole {
-    Application = 1,
+enum class AccessibilityRole : uint8_t {
+    Application,
     ApplicationAlert,
     ApplicationAlertDialog,
     ApplicationDialog,
@@ -1056,7 +1056,6 @@ public:
     AccessibilityChildrenVector ownedObjects() const { return relatedObjects(AXRelationType::OwnerFor); }
     AccessibilityChildrenVector owners() const { return relatedObjects(AXRelationType::OwnedBy); }
     virtual AccessibilityChildrenVector relatedObjects(AXRelationType) const = 0;
-    bool canBeControlledBy(AccessibilityRole) const;
 
     virtual AXCoreObject* internalLinkElement() const = 0;
     void appendRadioButtonGroupMembers(AccessibilityChildrenVector& linkedUIElements) const;

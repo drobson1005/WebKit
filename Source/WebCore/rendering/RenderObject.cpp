@@ -588,6 +588,8 @@ void RenderObject::scheduleLayout(RenderElement* layoutRoot)
 RenderElement* RenderObject::markContainingBlocksForLayout(RenderElement* layoutRoot)
 {
     ASSERT(!isSetNeedsLayoutForbidden());
+    if (is<RenderView>(*this))
+        return downcast<RenderElement>(this);
 
     CheckedPtr ancestor = container();
 
@@ -747,7 +749,8 @@ RenderBlock* RenderObject::containingBlockForPositionType(PositionType positionT
 
 RenderBlock* RenderObject::containingBlock() const
 {
-    if (is<RenderText>(*this))
+    // FIXME: See https://bugs.webkit.org/show_bug.cgi?id=270977 for RenderLineBreak special treatment.
+    if (is<RenderText>(*this) || is<RenderLineBreak>(*this))
         return containingBlockForPositionType(PositionType::Static, *this);
 
     auto containingBlockForRenderer = [](const auto& renderer) -> RenderBlock* {
@@ -974,7 +977,7 @@ void RenderObject::propagateRepaintToParentWithOutlineAutoIfNeeded(const RenderL
     ASSERT_NOT_REACHED();
 }
 
-void RenderObject::repaintUsingContainer(const RenderLayerModelObject* repaintContainer, const LayoutRect& r, bool shouldClipToLayer) const
+void RenderObject::repaintUsingContainer(SingleThreadWeakPtr<const RenderLayerModelObject>&& repaintContainer, const LayoutRect& r, bool shouldClipToLayer) const
 {
     if (r.isEmpty())
         return;
@@ -986,6 +989,9 @@ void RenderObject::repaintUsingContainer(const RenderLayerModelObject* repaintCo
         fragmentedFlow->repaintRectangleInFragments(r);
         return;
     }
+
+    if (!repaintContainer)
+        return;
 
     propagateRepaintToParentWithOutlineAutoIfNeeded(*repaintContainer, r);
 
@@ -1477,6 +1483,19 @@ FloatPoint RenderObject::localToAbsolute(const FloatPoint& localPoint, OptionSet
     return transformState.lastPlanarPoint();
 }
 
+std::unique_ptr<TransformationMatrix> RenderObject::viewTransitionTransform() const
+{
+    // Compute the accumulated local to absolute TransformationMatrix, using the
+    // 'TrackSVGCTMMatrix' option. This computes a single matrix, applying flatten()
+    // to the matrix at 3d rendering context boundaries.
+    TransformState transformState(TransformState::ApplyTransformDirection, FloatPoint { });
+    transformState.setTransformMatrixTracking(TransformState::TrackSVGCTMMatrix);
+    OptionSet<MapCoordinatesMode> mode { UseTransforms, ApplyContainerFlip };
+    mapLocalToContainer(nullptr, transformState, mode, nullptr);
+    transformState.flatten();
+    return transformState.releaseTrackedTransform();
+}
+
 FloatPoint RenderObject::absoluteToLocal(const FloatPoint& containerPoint, OptionSet<MapCoordinatesMode> mode) const
 {
     TransformState transformState(TransformState::UnapplyInverseTransformDirection, containerPoint);
@@ -1699,9 +1718,15 @@ static inline RenderElement* containerForElement(const RenderObject& renderer, c
     // (2) For absolute positioned elements, it will return a relative positioned inline, while
     // containingBlock() skips to the non-anonymous containing block.
     // This does mean that computePositionedLogicalWidth and computePositionedLogicalHeight have to use container().
-    auto* renderElement = dynamicDowncast<RenderElement>(renderer);
-    if (!renderElement)
+    // FIXME: See https://bugs.webkit.org/show_bug.cgi?id=270977 for RenderLineBreak special treatment.
+    if (!is<RenderElement>(renderer) || is<RenderText>(renderer) || is<RenderLineBreak>(renderer))
         return renderer.parent();
+
+    auto* renderElement = dynamicDowncast<RenderElement>(renderer);
+    if (!renderElement) {
+        ASSERT_NOT_REACHED();
+        return renderer.parent();
+    }
     auto updateRepaintContainerSkippedFlagIfApplicable = [&] {
         if (!repaintContainerSkipped)
             return;
@@ -1760,6 +1785,17 @@ bool RenderObject::isSelectionBorder() const
         || st == HighlightState::Both
         || view().selection().start() == this
         || view().selection().end() == this;
+}
+
+void RenderObject::setCapturedInViewTransition(bool captured)
+{
+    if (capturedInViewTransition() != captured) {
+        m_stateBitfields.setFlag(StateFlag::CapturedInViewTransition, captured);
+        if (isDocumentElementRenderer())
+            view().layer()->setNeedsPostLayoutCompositingUpdate();
+        else if (hasLayer())
+            downcast<RenderLayerModelObject>(*this).layer()->setNeedsPostLayoutCompositingUpdate();
+    }
 }
 
 void RenderObject::willBeDestroyed()
@@ -2159,6 +2195,8 @@ RenderObject::RenderObjectRareData& RenderObject::ensureRareData()
 
 void RenderObject::removeRareData()
 {
+    if (!hasRareData())
+        return;
     rareDataMap().remove(*this);
     m_stateBitfields.clearFlag(StateFlag::HasRareData);
 }
@@ -2370,6 +2408,15 @@ void RenderObject::RepaintRects::transform(const TransformationMatrix& matrix, f
         *outlineBoundsRect = clippedOverflowRect;
     else if (outlineBoundsRect)
         *outlineBoundsRect = LayoutRect(encloseRectToDevicePixels(matrix.mapRect(*outlineBoundsRect), deviceScaleFactor));
+}
+
+bool RenderObject::effectiveCapturedInViewTransition() const
+{
+    if (isDocumentElementRenderer())
+        return false;
+    if (isRenderView())
+        return document().activeViewTransitionCapturedDocumentElement();
+    return capturedInViewTransition();
 }
 
 #if PLATFORM(IOS_FAMILY)
@@ -2733,8 +2780,8 @@ void printPaintOrderTreeForLiveDocuments()
         if (!document->renderView())
             continue;
         if (document->frame() && document->frame()->isMainFrame())
-            fprintf(stderr, "----------------------main frame--------------------------\n");
-        fprintf(stderr, "%s", document->url().string().utf8().data());
+            WTFLogAlways("----------------------main frame--------------------------\n");
+        WTFLogAlways("%s", document->url().string().utf8().data());
         showPaintOrderTree(document->renderView());
     }
 }
@@ -2745,8 +2792,8 @@ void printRenderTreeForLiveDocuments()
         if (!document->renderView())
             continue;
         if (document->frame() && document->frame()->isMainFrame())
-            fprintf(stderr, "----------------------main frame--------------------------\n");
-        fprintf(stderr, "%s", document->url().string().utf8().data());
+            WTFLogAlways("----------------------main frame--------------------------\n");
+        WTFLogAlways("%s", document->url().string().utf8().data());
         showRenderTree(document->renderView());
     }
 }
@@ -2757,8 +2804,8 @@ void printLayerTreeForLiveDocuments()
         if (!document->renderView())
             continue;
         if (document->frame() && document->frame()->isMainFrame())
-            fprintf(stderr, "----------------------main frame--------------------------\n");
-        fprintf(stderr, "%s", document->url().string().utf8().data());
+            WTFLogAlways("----------------------main frame--------------------------\n");
+        WTFLogAlways("%s", document->url().string().utf8().data());
         showLayerTree(document->renderView());
     }
 }

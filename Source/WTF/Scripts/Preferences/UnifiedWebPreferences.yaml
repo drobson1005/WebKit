@@ -875,6 +875,20 @@ CSS3DTransformBackfaceVisibilityInteroperabilityEnabled:
     WebCore:
       default: false
 
+CSSAnchorPositioningEnabled:
+  type: bool
+  status: testable
+  category: css
+  humanReadableName: "CSS Anchor Positioning"
+  humanReadableDescription: "Enable CSS Anchor Positioning"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
+
 CSSColorContrastEnabled:
   type: bool
   status: testable
@@ -930,6 +944,20 @@ CSSCounterStyleAtRulesEnabled:
       default: true
     WebCore:
       default: true
+
+CSSDPropertyEnabled:
+  type: bool
+  status: testable
+  category: css
+  humanReadableName: "CSS d property"
+  humanReadableDescription: "Enable support for the CSS d property and SVG d presentation attribute"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
 
 CSSFieldSizingEnabled:
   type: bool

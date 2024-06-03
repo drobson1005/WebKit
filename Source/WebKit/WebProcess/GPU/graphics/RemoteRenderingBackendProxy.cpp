@@ -47,6 +47,7 @@
 #include "WebProcess.h"
 #include <JavaScriptCore/TypedArrayInlines.h>
 #include <WebCore/FontCustomPlatformData.h>
+#include <wtf/StdLibExtras.h>
 #include <wtf/text/TextStream.h>
 
 #if HAVE(IOSURFACE)
@@ -111,8 +112,8 @@ void RemoteRenderingBackendProxy::ensureGPUProcessConnection()
         });
     }
 }
-template<typename T, typename U, typename V>
-auto RemoteRenderingBackendProxy::send(T&& message, ObjectIdentifierGeneric<U, V> destination)
+template<typename T, typename U, typename V, typename W>
+auto RemoteRenderingBackendProxy::send(T&& message, ObjectIdentifierGeneric<U, V, W> destination)
 {
     auto result = streamConnection().send(std::forward<T>(message), destination, defaultTimeout);
     if (UNLIKELY(result != IPC::Error::NoError)) {
@@ -122,8 +123,8 @@ auto RemoteRenderingBackendProxy::send(T&& message, ObjectIdentifierGeneric<U, V
     return result;
 }
 
-template<typename T, typename U, typename V>
-auto RemoteRenderingBackendProxy::sendSync(T&& message, ObjectIdentifierGeneric<U, V> destination)
+template<typename T, typename U, typename V, typename W>
+auto RemoteRenderingBackendProxy::sendSync(T&& message, ObjectIdentifierGeneric<U, V, W> destination)
 {
     auto result = streamConnection().sendSync(std::forward<T>(message), destination, defaultTimeout);
     if (UNLIKELY(!result.succeeded())) {
@@ -256,7 +257,7 @@ bool RemoteRenderingBackendProxy::getPixelBufferForImageBuffer(RenderingResource
         if (!sendResult.succeeded())
             return false;
     }
-    memcpy(result.data(), m_getPixelBufferSharedMemory->data(), result.size());
+    memcpySpan(result, m_getPixelBufferSharedMemory->span().first(result.size()));
     return true;
 }
 

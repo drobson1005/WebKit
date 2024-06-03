@@ -531,10 +531,6 @@ void WebGLRenderingContextBase::initializeContextState()
     m_stencilEnabled = false;
     m_stencilMask = 0xFFFFFFFF;
     m_stencilMaskBack = 0xFFFFFFFF;
-    m_stencilFuncRef = 0;
-    m_stencilFuncRefBack = 0;
-    m_stencilFuncMask = 0xFFFFFFFF;
-    m_stencilFuncMaskBack = 0xFFFFFFFF;
 
     m_rasterizerDiscardEnabled = false;
 
@@ -772,15 +768,16 @@ bool WebGLRenderingContextBase::clearIfComposited(WebGLRenderingContextBase::Cal
     return combinedClear;
 }
 
-void WebGLRenderingContextBase::drawBufferToCanvas(SurfaceBuffer sourceBuffer)
+
+RefPtr<ImageBuffer> WebGLRenderingContextBase::surfaceBufferToImageBuffer(SurfaceBuffer sourceBuffer)
 {
-    if (isContextLost())
-        return;
-    if (m_canvasBufferContents == sourceBuffer)
-        return;
     auto buffer = canvasBase().buffer();
+    if (isContextLost())
+        return buffer;
     if (!buffer)
-        return;
+        return buffer;
+    if (m_canvasBufferContents == sourceBuffer)
+        return buffer;
     if (sourceBuffer == SurfaceBuffer::DrawingBuffer)
         clearIfComposited(CallerTypeOther);
     m_canvasBufferContents = sourceBuffer;
@@ -789,6 +786,7 @@ void WebGLRenderingContextBase::drawBufferToCanvas(SurfaceBuffer sourceBuffer)
     // canvas element repeatedly.
     buffer->flushDrawingContext();
     m_context->drawSurfaceBufferToImageBuffer(toGCGLSurfaceBuffer(sourceBuffer), *buffer);
+    return buffer;
 }
 
 RefPtr<PixelBuffer> WebGLRenderingContextBase::drawingBufferToPixelBuffer(GraphicsContextGL::FlipY flipY)
@@ -810,9 +808,12 @@ RefPtr<VideoFrame> WebGLRenderingContextBase::surfaceBufferToVideoFrame(SurfaceB
 }
 #endif
 
-WebGLTexture::TextureExtensionFlag WebGLRenderingContextBase::textureExtensionFlags() const
+void WebGLRenderingContextBase::markDrawingBuffersDirtyAfterTransfer()
 {
-    return static_cast<WebGLTexture::TextureExtensionFlag>((m_oesTextureFloatLinear ? WebGLTexture::TextureExtensionFloatLinearEnabled : 0) | (m_oesTextureHalfFloatLinear ? WebGLTexture::TextureExtensionHalfFloatLinearEnabled : 0));
+    // Any draw or read sees cleared drawing buffer.
+    m_defaultFramebuffer->markAllBuffersDirty();
+    // Next transfer uses the cleared drawing buffer.
+    m_compositingResultsNeedUpdating = true;
 }
 
 void WebGLRenderingContextBase::reshape(int width, int height, int oldWidth, int oldHeight)
@@ -1089,14 +1090,14 @@ void WebGLRenderingContextBase::blendColor(GCGLfloat red, GCGLfloat green, GCGLf
 
 void WebGLRenderingContextBase::blendEquation(GCGLenum mode)
 {
-    if (isContextLost() || !validateBlendEquation("blendEquation"_s, mode))
+    if (isContextLost())
         return;
     m_context->blendEquation(mode);
 }
 
 void WebGLRenderingContextBase::blendEquationSeparate(GCGLenum modeRGB, GCGLenum modeAlpha)
 {
-    if (isContextLost() || !validateBlendEquation("blendEquation"_s, modeRGB) || !validateBlendEquation("blendEquation"_s, modeAlpha))
+    if (isContextLost())
         return;
     m_context->blendEquationSeparate(modeRGB, modeAlpha);
 }
@@ -2858,7 +2859,7 @@ void WebGLRenderingContextBase::makeXRCompatible(MakeXRCompatiblePromise&& promi
 
     // 1. If the requesting document’s origin is not allowed to use the "xr-spatial-tracking"
     // permissions policy, resolve promise and return it.
-    if (!isPermissionsPolicyAllowedByDocumentAndAllOwners(PermissionsPolicy::Feature::XRSpatialTracking, canvas->document(), LogPermissionsPolicyFailure::Yes)) {
+    if (!PermissionsPolicy::isFeatureEnabled(PermissionsPolicy::Feature::XRSpatialTracking, canvas->document())) {
         promise.resolve();
         return;
     }
@@ -3087,10 +3088,6 @@ void WebGLRenderingContextBase::stencilFunc(GCGLenum func, GCGLint ref, GCGLuint
         return;
     if (!validateStencilFunc("stencilFunc"_s, func))
         return;
-    m_stencilFuncRef = ref;
-    m_stencilFuncRefBack = ref;
-    m_stencilFuncMask = mask;
-    m_stencilFuncMaskBack = mask;
     m_context->stencilFunc(func, ref, mask);
 }
 
@@ -3102,18 +3099,8 @@ void WebGLRenderingContextBase::stencilFuncSeparate(GCGLenum face, GCGLenum func
         return;
     switch (face) {
     case GraphicsContextGL::FRONT_AND_BACK:
-        m_stencilFuncRef = ref;
-        m_stencilFuncRefBack = ref;
-        m_stencilFuncMask = mask;
-        m_stencilFuncMaskBack = mask;
-        break;
     case GraphicsContextGL::FRONT:
-        m_stencilFuncRef = ref;
-        m_stencilFuncMask = mask;
-        break;
     case GraphicsContextGL::BACK:
-        m_stencilFuncRefBack = ref;
-        m_stencilFuncMaskBack = mask;
         break;
     default:
         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "stencilFuncSeparate"_s, "invalid face"_s);
@@ -4968,15 +4955,6 @@ bool WebGLRenderingContextBase::validateDrawMode(ASCIILiteral functionName, GCGL
     }
 }
 
-bool WebGLRenderingContextBase::validateStencilSettings(ASCIILiteral functionName)
-{
-    if (m_stencilMask != m_stencilMaskBack || m_stencilFuncRef != m_stencilFuncRefBack || m_stencilFuncMask != m_stencilFuncMaskBack) {
-        synthesizeGLError(GraphicsContextGL::INVALID_OPERATION, functionName, "front and back stencils settings do not match"_s);
-        return false;
-    }
-    return true;
-}
-
 bool WebGLRenderingContextBase::validateStencilFunc(ASCIILiteral functionName, GCGLenum func)
 {
     switch (func) {
@@ -5682,6 +5660,7 @@ void WebGLRenderingContextBase::prepareForDisplay()
         return;
     ASSERT(m_compositingResultsNeedUpdating);
 
+    clearIfComposited(CallerTypeOther);
     m_context->prepareForDisplay();
     m_defaultFramebuffer->markAllUnpreservedBuffersDirty();
 

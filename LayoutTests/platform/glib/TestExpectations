@@ -1596,8 +1596,6 @@ webkit.org/b/273396 imported/w3c/web-platform-tests/css/css-view-transitions/cap
 webkit.org/b/273396 imported/w3c/web-platform-tests/css/css-view-transitions/new-content-captures-spans.html [ ImageOnlyFailure ]
 webkit.org/b/273396 imported/w3c/web-platform-tests/css/css-view-transitions/rotated-cat-off-top-edge.html [ ImageOnlyFailure ]
 webkit.org/b/273396 imported/w3c/web-platform-tests/css/filter-effects/background-image-blur-repaint.html [ ImageOnlyFailure ]
-webkit.org/b/273396 imported/w3c/web-platform-tests/css/motion/offset-path-shape-circle-003.html [ ImageOnlyFailure ]
-webkit.org/b/273396 imported/w3c/web-platform-tests/css/motion/offset-path-shape-circle-007.html [ ImageOnlyFailure ]
 webkit.org/b/273396 imported/w3c/web-platform-tests/css/motion/offset-path-shape-inset-002.html [ ImageOnlyFailure ]
 webkit.org/b/273396 imported/w3c/web-platform-tests/css/motion/offset-path-shape-polygon-002.html [ ImageOnlyFailure ]
 webkit.org/b/273396 mathml/presentation/mo-stacked-glyphs.html [ ImageOnlyFailure ]
@@ -1625,8 +1623,6 @@ webkit.org/b/273482 imported/w3c/web-platform-tests/svg/shapes/scripted/stroke-d
 webkit.org/b/273483 imported/w3c/web-platform-tests/svg/text/scripted/transform-dynamic-update.html [ Failure ]
 
 webkit.org/b/273484 inspector/model/font-calculate-properties.html [ Failure ]
-
-webkit.org/b/273485 svg/dom/SVGGeometry-circle.xhtml [ Failure ]
 
 webkit.org/b/273486 svg/filters/svg-gaussianblur-edgeMode-duplicate.svg [ ImageOnlyFailure ]
 
@@ -2793,6 +2789,7 @@ imported/w3c/web-platform-tests/credential-management/ [ Skip ]
 
 # Digital Crendentials API
 http/wpt/identity/ [ Skip ]
+imported/w3c/web-platform-tests/digital-credentials/ [ Skip ]
 
 # WebGL2
 webkit.org/b/166536 fast/canvas/webgl/webgl-transformed-varying-name-crash.html [ Skip ]
@@ -3960,6 +3957,32 @@ imported/w3c/web-platform-tests/svg/text/reftests/transform-dynamic-change.html 
 
 # This test hits some infinite-loop condition inside Cairo
 fast/css/repeating-conic-gradient-small-range.html [ Skip ]
+
+# Kerning for SVG not working as expected.
+webkit.org/b/156148 fast/text/svg-font-face-with-kerning.html [ Failure ]
+webkit.org/b/156148 svg/custom/glyph-selection-lang-attribute.svg [ Failure ]
+webkit.org/b/156148 svg/text/kerning.svg [ Failure ]
+webkit.org/b/156148 svg/text/multichar-glyph.svg [ Failure ]
+webkit.org/b/156148 svg/text/text-hkern.svg [ Failure ]
+webkit.org/b/156148 svg/text/text-overflow-ellipsis-svgfont-kerning-ligatures.html [ Failure ]
+webkit.org/b/156148 svg/text/text-text-04-t.svg [ Failure ]
+webkit.org/b/156148 svg/text/text-text-06-t.svg [ Failure ]
+webkit.org/b/156148 svg/text/text-vkern.svg [ Failure ]
+webkit.org/b/156148 svg/W3C-SVG-1.1/text-text-05-t.svg [ Failure ]
+webkit.org/b/156148 svg/W3C-SVG-1.1/text-text-06-t.svg [ Failure ]
+
+webkit.org/b/190990 fast/block/basic/inline-content-with-floating-image.html [ Failure ]
+
+webkit.org/b/191400 fast/block/basic/child-block-level-box-with-height-percent.html [ Failure ]
+webkit.org/b/191400 fast/block/basic/inline-content-with-floating-images2.html [ Failure ]
+webkit.org/b/191400 fast/block/basic/quirk-mode-percent-height.html [ Failure ]
+
+webkit.org/b/191885 fast/inline/simple-inline-inflow-positioned.html [ Failure ]
+webkit.org/b/191885 fast/inline/simple-inline-with-out-of-flow-descendant.html [ Failure ]
+webkit.org/b/191885 fast/inline/simple-inline-with-out-of-flow-descendant2.html [ Failure ]
+webkit.org/b/191885 fast/inline/simple-intruding-floats3.html [ Failure ]
+
+webkit.org/b/195259 compositing/geometry/fixed-position-composited-page-scale-smaller-than-viewport.html [ ImageOnlyFailure Pass ]
 
 # End: Common failures between GTK and WPE.
 

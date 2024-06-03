@@ -283,7 +283,7 @@ bool RenderBundleEncoder::executePreDrawCommands()
     if (!icbCommand)
         return true;
 
-    if (NSString* error = m_pipeline->pipelineLayout().errorValidatingBindGroupCompatibility(m_bindGroups, m_pipeline->vertexStageInBufferCount())) {
+    if (NSString* error = m_pipeline->pipelineLayout().errorValidatingBindGroupCompatibility(m_bindGroups)) {
         makeInvalid(error);
         return false;
     }
@@ -445,12 +445,15 @@ bool RenderBundleEncoder::runIndexBufferValidation(uint32_t firstInstance, uint3
         return false;
     }
 
-    auto strideCount = firstInstance + instanceCount;
+    auto checkedStrideCount = checkedSum<NSUInteger>(firstInstance, instanceCount);
+    if (checkedStrideCount.hasOverflowed())
+        return false;
+
+    auto strideCount = checkedStrideCount.value();
     if (!strideCount)
         return true;
 
     auto& requiredBufferIndices = m_pipeline->requiredBufferIndices();
-    bool abortDraw = false;
     for (auto& [bufferIndex, bufferData] : requiredBufferIndices) {
         RELEASE_ASSERT(bufferIndex < m_vertexBuffers.size());
         auto& vertexBuffer = m_vertexBuffers[bufferIndex];
@@ -458,17 +461,21 @@ bool RenderBundleEncoder::runIndexBufferValidation(uint32_t firstInstance, uint3
         auto stride = bufferData.stride;
         auto lastStride = bufferData.lastStride;
         if (bufferData.stepMode == WGPUVertexStepMode_Instance) {
-            if ((strideCount - 1) * stride + lastStride > bufferSize) {
-                makeInvalid([NSString stringWithFormat:@"(RenderBundle) Buffer[%d] fails: (strideCount(%d) - 1) * stride(%llu) + lastStride(%llu) > bufferSize(%llu), metalBufferLength(%lu)", bufferIndex, strideCount, stride, lastStride, bufferSize, static_cast<unsigned long>(vertexBuffer.buffer.length)]);
+            auto product = checkedProduct<NSUInteger>(strideCount - 1, stride);
+            if (product.hasOverflowed())
+                return false;
+            auto sum = checkedSum<NSUInteger>(product.value(), lastStride);
+            if (sum.hasOverflowed())
+                return false;
+
+            if (sum.value() > bufferSize) {
+                makeInvalid([NSString stringWithFormat:@"(RenderBundle) Buffer[%d] fails: (strideCount(%lu) - 1) * stride(%llu) + lastStride(%llu) > bufferSize(%llu), metalBufferLength(%lu)", bufferIndex, static_cast<unsigned long>(strideCount), stride, lastStride, bufferSize, static_cast<unsigned long>(vertexBuffer.buffer.length)]);
                 return false;
             }
-
-            if (stride && m_indexBuffer->maxIndex(m_indexType) >= (bufferSize / stride))
-                abortDraw = true;
         }
     }
 
-    return !abortDraw;
+    return true;
 }
 
 bool RenderBundleEncoder::runVertexBufferValidation(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
@@ -480,18 +487,26 @@ bool RenderBundleEncoder::runVertexBufferValidation(uint32_t vertexCount, uint32
 
     auto& requiredBufferIndices = m_pipeline->requiredBufferIndices();
     for (auto& [bufferIndex, bufferData] : requiredBufferIndices) {
-        uint64_t strideCount = 0;
+        Checked<int64_t, WTF::RecordOverflow> strideCount = 0;
         switch (bufferData.stepMode) {
         case WGPUVertexStepMode_Vertex:
-            strideCount = firstVertex + vertexCount;
+            strideCount = checkedSum<uint32_t>(firstVertex, vertexCount);
+            if (strideCount.hasOverflowed()) {
+                makeInvalid(@"StrideCount invalid");
+                return false;
+            }
             break;
         case WGPUVertexStepMode_Instance:
-            strideCount = firstInstance + instanceCount;
+            strideCount = checkedSum<uint32_t>(firstInstance, instanceCount);
+            if (strideCount.hasOverflowed()) {
+                makeInvalid(@"StrideCount invalid");
+                return false;
+            }
             break;
         default:
             break;
         }
-        if (!strideCount)
+        if (!strideCount.value())
             continue;
 
         if (bufferIndex >= m_vertexBuffers.size()) {
@@ -500,8 +515,8 @@ bool RenderBundleEncoder::runVertexBufferValidation(uint32_t vertexCount, uint32
         }
         auto& vertexBuffer = m_vertexBuffers[bufferIndex];
         auto bufferSize = vertexBuffer.size;
-        if ((strideCount - 1) * bufferData.stride + bufferData.lastStride > bufferSize) {
-            makeInvalid([NSString stringWithFormat:@"Buffer[%d] fails: (strideCount(%llu) - 1) * bufferData.stride(%llu) + bufferData.lastStride(%llu) > bufferSize(%llu)", bufferIndex, strideCount, bufferData.stride,  bufferData.lastStride, bufferSize]);
+        if ((strideCount.value() - 1) * bufferData.stride + bufferData.lastStride > bufferSize) {
+            makeInvalid([NSString stringWithFormat:@"Buffer[%d] fails: (strideCount(%llu) - 1) * bufferData.stride(%llu) + bufferData.lastStride(%llu) > bufferSize(%llu)", bufferIndex, strideCount.value(), bufferData.stride,  bufferData.lastStride, bufferSize]);
             return false;
         }
     }
@@ -602,7 +617,7 @@ void RenderBundleEncoder::drawIndexedIndirect(Buffer& indirectBuffer, uint64_t i
     id<MTLBuffer> mtlIndirectBuffer = nil;
     uint64_t modifiedIndirectOffset = 0;
     if (m_renderPassEncoder) {
-        auto result = RenderPassEncoder::clampIndirectIndexBufferToValidValues(m_indexBuffer.get(), indirectBuffer, m_indexType, m_indexBufferOffset, indirectOffset, computeMininumVertexCount(), m_device.get(), m_descriptor.sampleCount, m_renderPassEncoder->renderCommandEncoder());
+        auto result = RenderPassEncoder::clampIndirectIndexBufferToValidValues(m_indexBuffer.get(), indirectBuffer, m_indexType, m_indexBufferOffset, indirectOffset, computeMininumVertexCount(), m_primitiveType, m_device.get(), m_descriptor.sampleCount, m_renderPassEncoder->renderCommandEncoder());
         mtlIndirectBuffer = result.first;
         modifiedIndirectOffset = result.second;
     }
@@ -966,7 +981,8 @@ void RenderBundleEncoder::setIndexBuffer(Buffer& buffer, WGPUIndexFormat format,
             return;
         }
 
-        if (offset + size > buffer.initialSize()) {
+        auto sum = checkedSum<uint64_t>(offset + size);
+        if (sum.hasOverflowed() || sum.value() > buffer.initialSize()) {
             makeInvalid(@"setIndexBuffer: offset + size > buffer.size()");
             return;
         }
@@ -1138,7 +1154,8 @@ void RenderBundleEncoder::setVertexBuffer(uint32_t slot, Buffer* optionalBuffer,
                 makeInvalid(@"setVertexBuffer: validation failed");
                 return;
             }
-            if (offset + size > buffer.initialSize()) {
+            auto sum = checkedSum<uint64_t>(offset + size);
+            if (sum.hasOverflowed() || sum.value() > buffer.initialSize()) {
                 makeInvalid(@"offset + size > buffer.size()");
                 return;
             }

@@ -356,19 +356,11 @@ ExceptionOr<RefPtr<ImageBitmap>> OffscreenCanvas::transferToImageBitmap()
         auto buffer = allocateImageBuffer();
         if (!buffer)
             return { RefPtr<ImageBitmap> { nullptr } };
-
+        if (webGLContext->compositingResultsNeedUpdating())
+            webGLContext->prepareForDisplay();
         RefPtr gc3d = webGLContext->graphicsContextGL();
-        gc3d->drawSurfaceBufferToImageBuffer(GraphicsContextGL::SurfaceBuffer::DrawingBuffer, *buffer);
-
-        // FIXME: The transfer algorithm requires that the canvas effectively
-        // creates a new backing store. Since we're not doing that yet, we
-        // need to erase what's there.
-
-        GCGLfloat clearColor[4] { };
-        gc3d->getFloatv(GraphicsContextGL::COLOR_CLEAR_VALUE, clearColor);
-        gc3d->clearColor(0, 0, 0, 0);
-        gc3d->clear(GraphicsContextGL::COLOR_BUFFER_BIT | GraphicsContextGL::DEPTH_BUFFER_BIT | GraphicsContextGL::STENCIL_BUFFER_BIT);
-        gc3d->clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+        gc3d->drawSurfaceBufferToImageBuffer(GraphicsContextGL::SurfaceBuffer::DisplayBuffer, *buffer);
+        webGLContext->markDrawingBuffersDirtyAfterTransfer();
         return { ImageBitmap::create(buffer.releaseNonNull(), originClean()) };
     }
 #endif
@@ -488,19 +480,15 @@ std::unique_ptr<DetachedOffscreenCanvas> OffscreenCanvas::detach()
 
 void OffscreenCanvas::commitToPlaceholderCanvas()
 {
-    RefPtr imageBuffer = buffer();
-    if (!imageBuffer)
-        return;
     if (!m_placeholderData)
         return;
-
-    // FIXME: Transfer texture over if we're using accelerated compositing
-    if (m_context && (m_context->isWebGL() || m_context->isAccelerated())) {
-        if (m_context->compositingResultsNeedUpdating())
-            m_context->prepareForDisplay();
-        m_context->drawBufferToCanvas(CanvasRenderingContext::SurfaceBuffer::DisplayBuffer);
-    }
-
+    if  (!m_context)
+        return;
+    if (m_context->compositingResultsNeedUpdating())
+        m_context->prepareForDisplay();
+    RefPtr imageBuffer = m_context->surfaceBufferToImageBuffer(CanvasRenderingContext::SurfaceBuffer::DisplayBuffer);
+    if (!imageBuffer)
+        return;
     if (auto pipeSource = m_placeholderData->pipeSource())
         pipeSource->handle(*imageBuffer);
 

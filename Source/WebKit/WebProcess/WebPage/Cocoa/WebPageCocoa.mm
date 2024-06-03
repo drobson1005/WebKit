@@ -125,13 +125,20 @@ void WebPage::platformInitialize(const WebPageCreationParameters& parameters)
 #if USE(LIBWEBRTC)
     LibWebRTCCodecs::setCallbacks(m_page->settings().webRTCPlatformCodecsInGPUProcessEnabled(), m_page->settings().webRTCRemoteVideoFrameEnabled());
     LibWebRTCCodecs::setWebRTCMediaPipelineAdditionalLoggingEnabled(m_page->settings().webRTCMediaPipelineAdditionalLoggingEnabled());
-#endif    
+#endif
+
 #if PLATFORM(MAC)
     // In order to be able to block launchd on macOS, we need to eagerly open up a connection to CARenderServer here.
-    // This is because PDF rendering on macOS requires access to CARenderServer, unless we're in Lockdown mode.
-    if (!WebProcess::singleton().isLockdownModeEnabled())
-        CARenderServerGetServerPort(nullptr);
+    // This is because PDF rendering on macOS requires access to CARenderServer, unless unified PDF is enabled.
+    // In Lockdown mode we always block access to CARenderServer.
+    bool pdfRenderingRequiresRenderServerAccess = true;
+#if ENABLE(UNIFIED_PDF)
+    pdfRenderingRequiresRenderServerAccess = !m_page->settings().unifiedPDFEnabled();
 #endif
+    if (pdfRenderingRequiresRenderServerAccess && !WebProcess::singleton().isLockdownModeEnabled())
+        CARenderServerGetServerPort(nullptr);
+#endif // PLATFORM(MAC)
+
 #if PLATFORM(IOS_FAMILY)
     setInsertionPointColor(parameters.insertionPointColor);
     setHardwareKeyboardState(parameters.hardwareKeyboardState);
@@ -272,7 +279,7 @@ DictionaryPopupInfo WebPage::dictionaryPopupInfoForRange(LocalFrame& frame, cons
     dictionaryPopupInfo.origin = FloatPoint(rangeRect.x(), rangeRect.y() + scaledAscent);
 
 #if PLATFORM(MAC)
-    auto attributedString = editingAttributedString(range, IncludeImages::No).nsAttributedString();
+    auto attributedString = editingAttributedString(range, { }).nsAttributedString();
     auto scaledAttributedString = adoptNS([[NSMutableAttributedString alloc] initWithString:[attributedString string]]);
     NSFontManager *fontManager = [NSFontManager sharedFontManager];
     [attributedString enumerateAttributesInRange:NSMakeRange(0, [attributedString length]) options:0 usingBlock:^(NSDictionary *attributes, NSRange range, BOOL *stop) {

@@ -1818,6 +1818,7 @@ imported/w3c/web-platform-tests/credential-management/ [ Skip ]
 
 # Skip Digital Credentials API
 http/wpt/identity/ [ Skip ]
+imported/w3c/web-platform-tests/digital-credentials/ [ Skip ]
 
 webkit.org/b/182554 transitions/transition-display-property.html [ Pass ImageOnlyFailure ]
 
@@ -1935,6 +1936,7 @@ imported/w3c/web-platform-tests/html/rendering/replaced-elements/embedded-conten
 
 # "reftest-wait" blocks attachment rendering.
 webkit.org/b/263367 fast/attachment/attachment-icon-from-file-extension.html [ Skip ]
+webkit.org/b/263367 fast/attachment/attachment-icon-update-after-type-change.html [ Skip ]
 webkit.org/b/263367 fast/attachment/attachment-uti.html [ Skip ]
 webkit.org/b/265962 fast/attachment/attachment-folder-icon.html [ Skip ]
 webkit.org/b/265962 fast/attachment/attachment-type-attribute.html [ Skip ]
@@ -2800,3 +2802,5 @@ imported/w3c/web-platform-tests/media-source/mediasource-config-change-webm-v-fr
 webkit.org/b/260883 inspector/timeline/timeline-recording.html [ Skip ]
 
 webkit.org/b/274409 imported/w3c/web-platform-tests/content-security-policy/reporting-api/reporting-api-works-on-frame-src.https.sub.html [ Pass Failure ]
+
+webkit.org/b/274792 compositing/repaint/iframes/compositing-iframe-with-fixed-background-doc-repaint.html [ Pass Failure ]

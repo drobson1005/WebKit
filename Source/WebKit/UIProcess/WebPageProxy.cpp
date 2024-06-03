@@ -2670,15 +2670,20 @@ void WebPageProxy::activityStateDidChange(OptionSet<ActivityState> mayHaveChange
 void WebPageProxy::viewDidLeaveWindow()
 {
     closeOverlayedViews();
-#if ENABLE(VIDEO_PRESENTATION_MODE) && !PLATFORM(APPLETV) && !PLATFORM(VISION)
+#if ENABLE(VIDEO_PRESENTATION_MODE) && !PLATFORM(APPLETV)
     // When leaving the current page, close the video fullscreen.
     // FIXME: On tvOS, modally presenting the AVPlayerViewController when entering fullscreen causes
     // the web view to become invisible, resulting in us exiting fullscreen as soon as we entered it.
     // Find a way to track web view visibility on tvOS that accounts for this behavior.
     // FIXME: The tvOS behavior applies to visionOS as well when AVPlayerViewController is used for
     // iPad compatability apps. So the same fix for tvOS should be made for visionOS.
-    if (m_videoPresentationManager && m_videoPresentationManager->hasMode(WebCore::HTMLMediaElementEnums::VideoFullscreenModeStandard))
+    if (m_videoPresentationManager && m_videoPresentationManager->hasMode(WebCore::HTMLMediaElementEnums::VideoFullscreenModeStandard)
+#if PLATFORM(VISION)
+        && PAL::currentUserInterfaceIdiomIsVision()
+#endif
+        ) {
         m_videoPresentationManager->requestHideAndExitFullscreen();
+    }
 #endif
 
 #if HAVE(SPATIAL_TRACKING_LABEL)
@@ -3113,7 +3118,8 @@ void WebPageProxy::executeEditCommand(const String& commandName, const String& a
     if (auto pasteAccessCategory = pasteAccessCategoryForCommand(commandName))
         willPerformPasteCommand(*pasteAccessCategory);
 
-    sendWithAsyncReply(Messages::WebPage::ExecuteEditCommandWithCallback(commandName, argument), [callbackFunction = WTFMove(callbackFunction), backgroundActivity = m_process->throttler().backgroundActivity("WebPageProxy::executeEditCommand"_s)] () mutable {
+    auto targetFrameID = focusedOrMainFrame() ? std::optional(focusedOrMainFrame()->frameID()) : std::nullopt;
+    sendToProcessContainingFrame(targetFrameID, Messages::WebPage::ExecuteEditCommandWithCallback(commandName, argument), [callbackFunction = WTFMove(callbackFunction), backgroundActivity = m_process->throttler().backgroundActivity("WebPageProxy::executeEditCommand"_s)] () mutable {
         callbackFunction();
     });
 }
@@ -4444,8 +4450,7 @@ void WebPageProxy::receivedNavigationActionPolicyDecision(WebProcessProxy& proce
 
         Ref pageClientProtector = pageClient();
 
-        Ref processNavigatingFrom = frame->provisionalFrame() ? frame->provisionalFrame()->process()
-            : preferences().siteIsolationEnabled() && frame->isMainFrame() && m_provisionalPage ? m_provisionalPage->process() : frame->process();
+        Ref processNavigatingFrom = preferences().siteIsolationEnabled() && frame->isMainFrame() && m_provisionalPage ? m_provisionalPage->process() : frame->process();
 
         const bool navigationChangesFrameProcess = processNavigatingTo->coreProcessIdentifier() != processNavigatingFrom->coreProcessIdentifier();
         const bool loadContinuingInNonInitiatingProcess = processInitiatingNavigation->coreProcessIdentifier() != processNavigatingTo->coreProcessIdentifier();
@@ -4453,8 +4458,10 @@ void WebPageProxy::receivedNavigationActionPolicyDecision(WebProcessProxy& proce
             policyAction = PolicyAction::LoadWillContinueInAnotherProcess;
             WEBPAGEPROXY_RELEASE_LOG(ProcessSwapping, "decidePolicyForNavigationAction, swapping process %i with process %i for navigation, reason=%" PUBLIC_LOG_STRING, processID(), processNavigatingTo->processID(), reason.characters());
             LOG(ProcessSwapping, "(ProcessSwapping) Switching from process %i to new process (%i) for navigation %" PRIu64 " '%s'", processID(), processNavigatingTo->processID(), navigation->navigationID(), navigation->loggingString().utf8().data());
-        } else
+        } else {
             WEBPAGEPROXY_RELEASE_LOG(ProcessSwapping, "decidePolicyForNavigationAction: keep using process %i for navigation, reason=%" PUBLIC_LOG_STRING, processID(), reason.characters());
+            frame->takeProvisionalFrame();
+        }
 
         if (navigationChangesFrameProcess) {
             // Make sure the process to be used for the navigation does not get shutDown now due to destroying SuspendedPageProxy or ProvisionalPageProxy objects.
@@ -4582,6 +4589,8 @@ void WebPageProxy::commitProvisionalPage(FrameIdentifier frameID, FrameInfoData&
     WEBPAGEPROXY_RELEASE_LOG(Loading, "commitProvisionalPage: newPID=%i", m_provisionalPage->process().processID());
 
     RefPtr mainFrameInPreviousProcess = m_mainFrame;
+    if (mainFrameInPreviousProcess && preferences().siteIsolationEnabled())
+        mainFrameInPreviousProcess->removeChildFrames();
 
     ASSERT(m_process.ptr() != &m_provisionalPage->process());
 
@@ -4666,24 +4675,16 @@ void WebPageProxy::continueNavigationInNewProcess(API::Navigation& navigation, W
         loadParameters.isRequestFromClientOrUserInput = navigation.isRequestFromClientOrUserInput();
         loadParameters.navigationID = navigation.navigationID();
 
+        Ref processNavigatingFrom = frame.isMainFrame() && m_provisionalPage ? m_provisionalPage->process() : frame.process();
+        frame.setHasPendingBackForwardItem(frame.parentFrame() && frame.parentFrame()->process() == processNavigatingFrom);
+
         auto webPageID = webPageIDInProcess(newProcess);
-        frame.setHasPendingBackForwardItem(!frame.isMainFrame() && !m_browsingContextGroup->processForDomain(navigationDomain));
         frame.prepareForProvisionalLoadInProcess(newProcess, navigation, m_browsingContextGroup, [
-            this,
-            protectedThis = Ref { *this },
-            frame = Ref { frame },
             loadParameters = WTFMove(loadParameters),
             newProcess = newProcess.copyRef(),
             webPageID,
-            preventProcessShutdownScope = newProcess->shutdownPreventingScope(),
-            navigation = Ref { navigation },
-            previousProvisionalLoadProcess = Ref { frame.provisionalLoadProcess() }
+            preventProcessShutdownScope = newProcess->shutdownPreventingScope()
         ] () mutable {
-            if (frame->frameLoadState().state() == FrameLoadState::State::Provisional) {
-                sendToWebPageInProcess(previousProvisionalLoadProcess, Messages::WebPage::DestroyProvisionalFrame(frame->frameID()));
-                if (!navigation->currentRequestIsCrossSiteRedirect())
-                    frame->didFailProvisionalLoad();
-            }
             newProcess->send(Messages::WebPage::LoadRequest(WTFMove(loadParameters)), webPageID);
         });
         return;
@@ -6025,10 +6026,16 @@ void WebPageProxy::didStartProvisionalLoadForFrameShared(Ref<WebProcessProxy>&& 
     MESSAGE_CHECK_URL(process, unreachableURL);
 
     // If a provisional load has since been started in another process, ignore this message.
-    if (frame->provisionalLoadProcess().coreProcessIdentifier() != process->coreProcessIdentifier() && m_preferences->siteIsolationEnabled()) {
-        // FIXME: The API test ProcessSwap.DoSameSiteNavigationAfterCrossSiteProvisionalLoadStarted
-        // is probably not handled correctly with site isolation on.
-        return;
+    if (m_preferences->siteIsolationEnabled()) {
+        if (frame->provisionalLoadProcess().coreProcessIdentifier() != process->coreProcessIdentifier()) {
+            // FIXME: The API test ProcessSwap.DoSameSiteNavigationAfterCrossSiteProvisionalLoadStarted
+            // is probably not handled correctly with site isolation on.
+            return;
+        }
+        if (frame->frameLoadState().state() == FrameLoadState::State::Provisional) {
+            // FIXME: We need to actually notify m_navigationClient somehow.
+            frame->frameLoadState().didFailProvisionalLoad();
+        }
     }
 
     // If the page starts a new main frame provisional load, then cancel any pending one in a provisional process.
@@ -6207,21 +6214,6 @@ void WebPageProxy::didFailProvisionalLoadForFrame(FrameInfoData&& frameInfo, Web
 
     didFailProvisionalLoadForFrameShared(protectedProcess(), *frame, WTFMove(frameInfo), WTFMove(request), navigationID, provisionalURL, error, willContinueLoading, userData, willInternallyHandleFailure);
 }
-
-template<typename M>
-void WebPageProxy::sendToWebPageInProcess(WebProcessProxy& process, M&& message)
-{
-    if (auto* remotePage = m_browsingContextGroup->remotePageInProcess(*this, process))
-        return remotePage->send(std::forward<M>(message));
-    if (process.coreProcessIdentifier() != this->process().coreProcessIdentifier()) {
-        // If there is no longer a remote page in a process that is not the main frame process,
-        // not sending the message is the correct thing to do.
-        return;
-    }
-    send(std::forward<M>(message));
-}
-
-template void WebPageProxy::sendToWebPageInProcess<Messages::WebPage::DestroyProvisionalFrame>(WebProcessProxy&, Messages::WebPage::DestroyProvisionalFrame&&);
 
 void WebPageProxy::didFailProvisionalLoadForFrameShared(Ref<WebProcessProxy>&& process, WebFrameProxy& frame, FrameInfoData&& frameInfo, WebCore::ResourceRequest&& request, uint64_t navigationID, const String& provisionalURL, const ResourceError& error, WillContinueLoading willContinueLoading, const UserData& userData, WillInternallyHandleFailure willInternallyHandleFailure)
 {
@@ -8366,7 +8358,8 @@ void WebPageProxy::didChooseDate(StringView date)
     if (!hasRunningProcess())
         return;
 
-    send(Messages::WebPage::DidChooseDate(date.toString()));
+    auto targetFrameID = focusedOrMainFrame() ? std::optional(focusedOrMainFrame()->frameID()) : std::nullopt;
+    sendToProcessContainingFrame(targetFrameID, Messages::WebPage::DidChooseDate(date.toString()));
 }
 
 void WebPageProxy::didEndDateTimePicker()
@@ -8375,7 +8368,8 @@ void WebPageProxy::didEndDateTimePicker()
     if (!hasRunningProcess())
         return;
 
-    send(Messages::WebPage::DidEndDateTimePicker());
+    auto targetFrameID = focusedOrMainFrame() ? std::optional(focusedOrMainFrame()->frameID()) : std::nullopt;
+    sendToProcessContainingFrame(targetFrameID, Messages::WebPage::DidEndDateTimePicker());
 }
 
 #endif

@@ -1072,16 +1072,13 @@ public:
 
     inline OptionSet<SpeakAs> speakAs() const;
 
-    inline FilterOperations& mutableFilter();
     inline const FilterOperations& filter() const;
     inline bool hasFilter() const;
     bool hasReferenceFilterOnly() const;
 
-    inline FilterOperations& mutableAppleColorFilter();
     inline const FilterOperations& appleColorFilter() const;
     inline bool hasAppleColorFilter() const;
 
-    inline FilterOperations& mutableBackdropFilter();
     inline const FilterOperations& backdropFilter() const;
     inline bool hasBackdropFilter() const;
 
@@ -1484,7 +1481,7 @@ public:
     inline void setColumnSpan(ColumnSpan);
     inline void inheritColumnPropertiesFrom(const RenderStyle& parent);
 
-    inline void setTransform(const TransformOperations&);
+    inline void setTransform(TransformOperations&&);
     inline void setTransformOriginX(Length&&);
     inline void setTransformOriginY(Length&&);
     inline void setTransformOriginZ(float);
@@ -1513,10 +1510,10 @@ public:
     inline void setColorScheme(StyleColorScheme);
 #endif
 
-    inline void setFilter(const FilterOperations&);
-    inline void setAppleColorFilter(const FilterOperations&);
+    inline void setFilter(FilterOperations&&);
+    inline void setAppleColorFilter(FilterOperations&&);
 
-    inline void setBackdropFilter(const FilterOperations&);
+    inline void setBackdropFilter(FilterOperations&&);
 
     inline void setTabSize(const TabSize&);
 
@@ -2193,6 +2190,14 @@ public:
     inline void setBlockStepInsert(BlockStepInsert);
     bool scrollAnchoringSuppressionStyleDidChange(const RenderStyle*) const;
     bool outOfFlowPositionStyleDidChange(const RenderStyle*) const;
+
+    static Vector<AtomString> initialAnchorNames();
+    inline const Vector<AtomString>& anchorNames() const;
+    inline void setAnchorNames(const Vector<AtomString>&);
+
+    static inline const AtomString& initialPositionAnchor();
+    inline const AtomString& positionAnchor() const;
+    inline void setPositionAnchor(const AtomString&);
 
 private:
     struct NonInheritedFlags {

@@ -1125,6 +1125,12 @@ css-typedom [ Skip ]
 css-dark-mode [ Pass ]
 css-dark-mode/older-systems [ Skip ]
 
+imported/w3c/web-platform-tests/css/css-anchor-position/anchor-getComputedStyle-002.html [ Pass ]
+imported/w3c/web-platform-tests/css/css-anchor-position/anchor-position-borders-002.html [ Pass ]
+imported/w3c/web-platform-tests/css/css-anchor-position/anchor-scroll-position-try-007.html [ Pass ]
+imported/w3c/web-platform-tests/css/css-anchor-position/anchor-scroll-position-try-008.html [ Pass ]
+imported/w3c/web-platform-tests/css/css-anchor-position/anchor-scroll-position-try-010.html [ Pass ]
+
 ################################################################################
 ##############################   End CSS Issues   ##############################
 ################################################################################
@@ -1691,6 +1697,7 @@ imported/w3c/web-platform-tests/console [ Skip ]
 imported/w3c/web-platform-tests/content-security-policy [ Skip ]
 imported/w3c/web-platform-tests/cors [ Skip ]
 imported/w3c/web-platform-tests/credential-management [ Skip ]
+imported/w3c/web-platform-tests/digital-credentials [ Skip ]
 
 imported/w3c/web-platform-tests/css/compositing [ Skip ]
 imported/w3c/web-platform-tests/css/css-align [ Skip ]
@@ -3315,18 +3322,10 @@ fast/text/font-load-data-partitioned-alphabet.html [ Failure ]
 
 imported/w3c/web-platform-tests/navigation-api [ Skip ]
 
-webkit.org/b/271408 [ Debug ] fast/images/decode-render-animated-image.html [ Skip ] # Crash
-
 # Makes a subsequent test crash
 webkit.org/b/272127 fast/text/remove-renderer-and-select-crash.html [ Skip ]
 
 http/tests/navigation/keyboard-events-during-provisional-subframe-navigation.html [ Failure ]
-
-# Pass on Buildbot, Failure on my PC
-webkit.org/b/272445 http/tests/inspector/network/resource-sizes-network.html [ Failure Pass ]
-webkit.org/b/272445 http/tests/xmlhttprequest/onabort-response-getters.html [ Failure Pass ]
-webkit.org/b/272445 http/tests/xmlhttprequest/onload-progressevent-attributes.html [ Failure Pass ]
-webkit.org/b/272445 http/tests/xmlhttprequest/xmlhttprequest-LSProgressEvent-ProgressEvent-should-match.html [ Failure Pass ]
 
 fast/forms/form-submission-crash-4.html [ Timeout Failure Pass ]
 

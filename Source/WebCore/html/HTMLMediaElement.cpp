@@ -48,6 +48,7 @@
 #include "ContentSecurityPolicy.h"
 #include "ContentType.h"
 #include "CookieJar.h"
+#include "DNS.h"
 #include "DeprecatedGlobalSettings.h"
 #include "DiagnosticLoggingClient.h"
 #include "DiagnosticLoggingKeys.h"
@@ -2572,12 +2573,16 @@ bool HTMLMediaElement::isSafeToLoadURL(const URL& url, InvalidURLAction actionIf
         return false;
     }
 
-    if (!portAllowed(url)) {
+    if (!portAllowed(url) || isIPAddressDisallowed(url)) {
         if (actionIfInvalid == Complain) {
             if (frame)
                 FrameLoader::reportBlockedLoadFailed(*frame, url);
-            if (shouldLog)
-                ERROR_LOG(LOGIDENTIFIER, url , " was rejected because the port is not allowed");
+            if (shouldLog) {
+                if (isIPAddressDisallowed(url))
+                    ERROR_LOG(LOGIDENTIFIER, url , " was rejected because the address not allowed");
+                else
+                    ERROR_LOG(LOGIDENTIFIER, url , " was rejected because the port is not allowed");
+            }
         }
         return false;
     }
@@ -5991,7 +5996,7 @@ void HTMLMediaElement::mediaPlayerDidInitializeMediaEngine() WTF_IGNORES_THREAD_
 
 void HTMLMediaElement::mediaPlayerCharacteristicChanged()
 {
-    ALWAYS_LOG(LOGIDENTIFIER);
+    ALWAYS_LOG(LOGIDENTIFIER, m_mediaSession ? m_mediaSession->description() : emptyString());
 
     beginProcessingMediaPlayerCallback();
 
@@ -7616,6 +7621,9 @@ void HTMLMediaElement::privateBrowsingStateDidChange(PAL::SessionID sessionID)
 
 bool HTMLMediaElement::shouldForceControlsDisplay() const
 {
+    if (isFullscreen() && videoUsesElementFullscreen())
+        return true;
+
     // Always create controls for autoplay video that requires user gesture due to being in low power mode.
     return isVideo() && autoplay() && mediaSession().hasBehaviorRestriction(MediaElementSession::RequireUserGestureForVideoDueToLowPowerMode);
 }

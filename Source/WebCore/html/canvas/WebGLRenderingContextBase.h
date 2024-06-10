@@ -445,7 +445,7 @@ public:
 #if ENABLE(MEDIA_STREAM) || ENABLE(WEB_CODECS)
     RefPtr<VideoFrame> surfaceBufferToVideoFrame(SurfaceBuffer);
 #endif
-    void markDrawingBuffersDirtyAfterTransfer();
+    RefPtr<ImageBuffer> transferToImageBuffer() final;
 
     void removeSharedObject(WebGLObject&);
     void removeContextObject(WebGLObject&);
@@ -458,7 +458,8 @@ public:
     void vertexAttribDivisor(GCGLuint index, GCGLuint divisor);
 
     // GraphicsContextGL::Client
-    void forceContextLost() override;
+    void forceContextLost() final;
+    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, const String&) final;
 
     void recycleContext();
 
@@ -703,10 +704,8 @@ protected:
     GCGLfloat m_clearDepth;
     GCGLint m_clearStencil;
     GCGLboolean m_colorMask[4];
+    GCGLuint m_stencilMask;
     GCGLboolean m_depthMask;
-
-    bool m_stencilEnabled;
-    GCGLuint m_stencilMask, m_stencilMaskBack;
 
     bool m_rasterizerDiscardEnabled { false };
 
@@ -946,12 +945,6 @@ protected:
 
     // Helper function for validating compressed texture formats.
     bool validateCompressedTexFormat(ASCIILiteral functionName, GCGLenum format);
-
-    // Helper function to validate mode for draw{Arrays/Elements}.
-    bool validateDrawMode(ASCIILiteral functionName, GCGLenum);
-
-    // Helper function to validate stencil func.
-    bool validateStencilFunc(ASCIILiteral functionName, GCGLenum);
 
     // Helper function for texParameterf and texParameteri.
     void texParameter(GCGLenum target, GCGLenum pname, GCGLfloat paramf, GCGLint parami, bool isFloat);

@@ -639,7 +639,7 @@ TEST_P(ConnectionRunLoopTest, RunLoopSendWithPromisedReply)
     dispatchAndWait(runLoop, [&] {
         ASSERT_TRUE(openB());
         for (uint64_t i = 100u; i < 160u; ++i) {
-            b()->sendWithPromisedReply<MockTestMessageWithAsyncReply1>({ }, i)->then(runLoop,
+            b()->sendWithPromisedReply(MockTestMessageWithAsyncReply1 { }, i)->then(runLoop,
                 [&, j = i] (uint64_t value) {
                     if (!value)
                         WTFLogAlways("GOT: %llu", j);
@@ -662,9 +662,10 @@ TEST_P(ConnectionRunLoopTest, RunLoopSendWithPromisedReply)
 }
 
 struct PromiseConverter {
-    using Promise = NativePromise<String, uint64_t>;
-    static typename Promise::Result convertResult(uint64_t result) { return { "1"_s }; }
-    static typename Promise::RejectValueType convertError(IPC::Error error) { return 2; }
+    static auto convertError(IPC::Error)
+    {
+        return makeUnexpected(String { "2"_s });
+    }
 };
 
 TEST_P(ConnectionRunLoopTest, SendWithConvertedPromisedReply)
@@ -677,57 +678,23 @@ TEST_P(ConnectionRunLoopTest, SendWithConvertedPromisedReply)
         a()->sendSyncReply(WTFMove(encoder));
         return true;
     });
-    HashSet<uint64_t> replies;
+    std::atomic<bool> isFinished = false;
 
     auto runLoop = createRunLoop(RUN_LOOP_NAME);
     dispatchAndWait(runLoop, [&] {
         ASSERT_TRUE(openB());
-        b()->sendWithPromisedReply<MockTestMessageWithAsyncReply1, PromiseConverter>({ }, 1)->then(runLoop, [] (String&& value) {
-            EXPECT_EQ(value, "1"_s);
-        }, [] (uint64_t error) {
-            EXPECT_EQ(error, 2u);
+        b()->sendWithPromisedReply<PromiseConverter>(MockTestMessageWithAsyncReply1 { }, 1)->then(runLoop, [&] (uint64_t value) {
+            EXPECT_EQ(value, 1u);
+            isFinished = true;
+        }, [&] (String&& error) {
+            EXPECT_EQ(error, "2"_s);
+            isFinished = true;
         });
+        while (!isFinished)
+            RunLoop::current().cycle();
+        b()->invalidate();
     });
 
-    localReferenceBarrier();
-}
-
-TEST_P(ConnectionRunLoopTest, RunLoopSendWithPromisedReplyOnDispatcher)
-{
-    HashSet<uint64_t> replies;
-
-    {
-        AutoWorkQueue awq;
-        ASSERT_TRUE(openA());
-        aClient().setAsyncMessageHandler([&] (IPC::Decoder& decoder) -> bool {
-            auto listenerID = decoder.decode<uint64_t>();
-            auto encoder = makeUniqueRef<IPC::Encoder>(MockTestMessageWithAsyncReply1::asyncMessageReplyName(), *listenerID);
-            encoder.get() << decoder.destinationID();
-            a()->sendSyncReply(WTFMove(encoder));
-            return true;
-        });
-
-        auto runLoop = createRunLoop(RUN_LOOP_NAME);
-        dispatchAndWait(runLoop, [&] {
-            ASSERT_TRUE(openB());
-            for (uint64_t i = 100u; i < 160u; ++i) {
-                b()->sendWithPromisedReply<MockTestMessageWithAsyncReply1>({ }, i)->whenSettled(awq.queue(), [&, j = i] (auto&& result) {
-                    EXPECT_TRUE(result);
-                    auto value = *result;
-                    if (!value)
-                        WTFLogAlways("GOT: %llu", j);
-                    EXPECT_GE(value, 100u);
-                    replies.add(value);
-                });
-            }
-            while (replies.size() < 60u)
-                RunLoop::current().cycle();
-            b()->invalidate();
-        });
-        awq.queue()->beginShutdown();
-    }
-    for (uint64_t i = 100u; i < 160u; ++i)
-        EXPECT_TRUE(replies.contains(i));
     localReferenceBarrier();
 }
 
@@ -750,7 +717,7 @@ TEST_P(ConnectionRunLoopTest, RunLoopSendWithPromisedReplyOnMixAndMatchDispatche
         dispatchAndWait(runLoop, [&] {
             ASSERT_TRUE(openB());
             for (uint64_t i = 100u; i < 160u; ++i) {
-                b()->sendWithPromisedReply<MockTestMessageWithAsyncReply1>({ }, i)->whenSettled(runLoop, [&, j = i] (auto&& result) {
+                b()->sendWithPromisedReply(MockTestMessageWithAsyncReply1 { }, i)->whenSettled(runLoop, [&, j = i] (auto&& result) {
                     EXPECT_TRUE(result);
                     auto value = *result;
                     if (!value)
@@ -920,7 +887,7 @@ TEST_P(ConnectionRunLoopTest, RunLoopSendWithPromisedReplyOrder)
         ASSERT_TRUE(openB());
         for (uint64_t i = 0; i < counter; ++i) {
             if (!(i % 2)) {
-                b()->sendWithPromisedReply<MockTestMessageWithAsyncReply1>({ }, 100)->whenSettled(runLoop, [&, i] (Promise::Result result) {
+                b()->sendWithPromisedReply(MockTestMessageWithAsyncReply1 { }, 100)->whenSettled(runLoop, [&, i] (Promise::Result result) {
                     EXPECT_TRUE(result.has_value());
                     EXPECT_EQ(result.value(), i);
                     replies.append(i);

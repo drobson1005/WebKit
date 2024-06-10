@@ -567,15 +567,19 @@ static inline bool objectIsRelayoutBoundary(const RenderElement* object)
 
 void RenderObject::clearNeedsLayout(EverHadSkippedContentLayout everHadSkippedContentLayout)
 {
-    m_stateBitfields.clearFlag(StateFlag::NeedsLayout);
     setEverHadLayout();
     setEverHadSkippedContentLayout(everHadSkippedContentLayout == EverHadSkippedContentLayout::Yes);
+
+    if (auto* renderElement = dynamicDowncast<RenderElement>(*this)) {
+        renderElement->setAncestorLineBoxDirty(false);
+        renderElement->setLayoutIdentifier(renderElement->view().frameView().layoutContext().layoutIdentifier());
+    }
+    m_stateBitfields.clearFlag(StateFlag::NeedsLayout);
     setPosChildNeedsLayoutBit(false);
     setNeedsSimplifiedNormalFlowLayoutBit(false);
     setNormalChildNeedsLayoutBit(false);
+    setOutOfFlowChildNeedsStaticPositionLayoutBit(false);
     setNeedsPositionedMovementLayoutBit(false);
-    if (auto* renderElement = dynamicDowncast<RenderElement>(*this))
-        renderElement->setAncestorLineBoxDirty(false);
 #if ASSERT_ENABLED
     checkBlockPositionedObjectsNeedLayout();
 #endif
@@ -843,7 +847,7 @@ IntRect RenderObject::absoluteBoundingBoxRect(bool useTransforms, bool* wasFixed
     if (useTransforms) {
         Vector<FloatQuad> quads;
         absoluteQuads(quads, wasFixed);
-        return enclosingIntRect(unitedBoundingBoxes(quads));
+        return enclosingIntRect(unitedBoundingBoxes(quads)).toRectWithExtentsClippedToNumericLimits();
     }
 
     FloatPoint absPos = localToAbsolute(FloatPoint(), { } /* ignore transforms */, wasFixed);
@@ -855,7 +859,7 @@ IntRect RenderObject::absoluteBoundingBoxRect(bool useTransforms, bool* wasFixed
         return IntRect();
 
     LayoutRect result = unionRect(rects);
-    return snappedIntRect(result);
+    return snappedIntRect(result).toRectWithExtentsClippedToNumericLimits();
 }
 
 void RenderObject::absoluteFocusRingQuads(Vector<FloatQuad>& quads)
@@ -1460,7 +1464,14 @@ void RenderObject::outputRenderObject(TextStream& stream, bool mark, int depth) 
             stream << "[simplified]";
         if (needsPositionedMovementLayout())
             stream << "[positioned movement]";
+        if (outOfFlowChildNeedsStaticPositionLayout())
+            stream << "[out of flow child needs parent layout]";
     }
+    stream << " layout id->";
+    if (auto* renderElement = dynamicDowncast<RenderElement>(*this))
+        stream << "[" << renderElement->layoutIdentifier() << "]";
+    else
+        stream << "[n/a]";
     stream.nextLine();
 }
 
@@ -2422,6 +2433,13 @@ bool RenderObject::effectiveCapturedInViewTransition() const
     if (isRenderView())
         return document().activeViewTransitionCapturedDocumentElement();
     return capturedInViewTransition();
+}
+
+PointerEvents RenderObject::usedPointerEvents() const
+{
+    if (document().renderingIsSuppressedForViewTransition() && !isDocumentElementRenderer())
+        return PointerEvents::None;
+    return style().usedPointerEvents();
 }
 
 #if PLATFORM(IOS_FAMILY)

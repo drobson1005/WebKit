@@ -75,7 +75,7 @@ static bool processStillRunning(pid_t pid)
     return !kill(pid, 0);
 }
 
-static bool frameTreesMatch(_WKFrameTreeNode *actualRoot, const ExpectedFrameTree& expectedRoot)
+static bool frameTreesMatch(_WKFrameTreeNode *actualRoot, ExpectedFrameTree&& expectedRoot)
 {
     WKFrameInfo *info = actualRoot.info;
     if (info._isLocalFrame != std::holds_alternative<String>(expectedRoot.remoteOrOrigin))
@@ -90,11 +90,15 @@ static bool frameTreesMatch(_WKFrameTreeNode *actualRoot, const ExpectedFrameTre
 
     if (actualRoot.childFrames.count != expectedRoot.children.size())
         return false;
-    for (size_t i = 0; i < expectedRoot.children.size(); i++) {
-        if (!frameTreesMatch(actualRoot.childFrames[i], expectedRoot.children[i]))
+    for (_WKFrameTreeNode *actualChild in actualRoot.childFrames) {
+        auto index = expectedRoot.children.findIf([&] (auto& expectedFrameTree) {
+            return frameTreesMatch(actualChild, ExpectedFrameTree { expectedFrameTree });
+        });
+        if (index == WTF::notFound)
             return false;
+        expectedRoot.children.remove(index);
     }
-    return true;
+    return expectedRoot.children.isEmpty();
 }
 
 static bool frameTreesMatch(NSSet<_WKFrameTreeNode *> *actualFrameTrees, Vector<ExpectedFrameTree>&& expectedFrameTrees)
@@ -104,7 +108,7 @@ static bool frameTreesMatch(NSSet<_WKFrameTreeNode *> *actualFrameTrees, Vector<
 
     for (_WKFrameTreeNode *root in actualFrameTrees) {
         auto index = expectedFrameTrees.findIf([&] (auto& expectedFrameTree) {
-            return frameTreesMatch(root, expectedFrameTree);
+            return frameTreesMatch(root, ExpectedFrameTree { expectedFrameTree });
         });
         if (index == WTF::notFound)
             return false;
@@ -2533,6 +2537,19 @@ TEST(SiteIsolation, NavigateOpenerToProvisionalNavigationFailure)
     checkFrameTreesInProcesses(opened.webView.get(), { { RemoteFrame }, { "https://webkit.org"_s } });
 }
 
+TEST(SiteIsolation, OpenProvisionalFailure)
+{
+    HTTPServer server({
+        { "/example"_s, { "<script>w = window.open('https://webkit.org/webkit')</script>"_s } },
+        { "/webkit"_s, { HTTPResponse::Behavior::TerminateConnectionAfterReceivingResponse } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    auto [opener, opened] = openerAndOpenedViews(server, @"https://example.com/example", false);
+    [opened.navigationDelegate waitForDidFailProvisionalNavigation];
+    checkFrameTreesInProcesses(opener.webView.get(), { { "https://example.com"_s } });
+    checkFrameTreesInProcesses(opened.webView.get(), { { "https://example.com"_s } });
+}
+
 TEST(SiteIsolation, NavigateIframeToProvisionalNavigationFailure)
 {
     HTTPServer server({
@@ -2701,9 +2718,6 @@ TEST(SiteIsolation, CancelProvisionalLoad)
             { { RemoteFrame }, { "https://apple.com"_s } }
         }
     });
-
-    // FIXME: Test cases for provisional loads that respond after a short delay to give a chance
-    // that the load commits during the time another provisional navigation starts.
 }
 
 // FIXME: If a provisional load happens in a RemoteFrame with frame children, does anything clear out those
@@ -3260,6 +3274,122 @@ TEST(SiteIsolation, NavigateIframeSameOriginBackForward)
         done = true;
     }];
     Util::run(&done);
+}
+
+TEST(SiteIsolation, NavigateIframeCrossOriginBackForward)
+{
+    HTTPServer server({
+        { "/example"_s, { "<iframe src='https://a.com/a'></iframe>"_s } },
+        { "/a"_s, { "<script> alert('a'); </script>"_s } },
+        { "/b"_s, { "<script> alert('b'); </script>"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+    auto [webView, navigationDelegate] = siteIsolatedViewAndDelegate(server);
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example"]]];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "a");
+
+    __block RetainPtr<WKFrameInfo> childFrameInfo;
+    [webView _frames:^(_WKFrameTreeNode *mainFrame) {
+        childFrameInfo = mainFrame.childFrames.firstObject.info;
+    }];
+    while (!childFrameInfo)
+        Util::spinRunLoop();
+
+    [webView evaluateJavaScript:@"location.href = 'https://b.com/b'" inFrame:childFrameInfo.get() inContentWorld:WKContentWorld.pageWorld completionHandler:nil];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "b");
+    [webView goBack];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "a");
+    [webView goForward];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "b");
+}
+
+TEST(SiteIsolation, ProtocolProcessSeparation)
+{
+    HTTPServer secureServer({
+        { "/subdomain"_s, { "hi"_s } },
+        { "/no_subdomain"_s, { "hi"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+
+    HTTPServer plaintextServer({
+        { "http://a.com/"_s, {
+            "<iframe src='https://a.com/no_subdomain'></iframe>"
+            "<iframe src='https://subdomain.a.com/subdomain'></iframe>"_s
+        } }
+    });
+
+    auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
+    [navigationDelegate allowAnyTLSCertificate];
+    auto storeConfiguration = adoptNS([[_WKWebsiteDataStoreConfiguration alloc] initNonPersistentConfiguration]);
+    [storeConfiguration setHTTPSProxy:[NSURL URLWithString:[NSString stringWithFormat:@"https://127.0.0.1:%d/", secureServer.port()]]];
+    [storeConfiguration setHTTPProxy:[NSURL URLWithString:[NSString stringWithFormat:@"https://127.0.0.1:%d/", plaintextServer.port()]]];
+    auto viewConfiguration = adoptNS([WKWebViewConfiguration new]);
+    [viewConfiguration setWebsiteDataStore:adoptNS([[WKWebsiteDataStore alloc] _initWithConfiguration:storeConfiguration.get()]).get()];
+    enableSiteIsolation(viewConfiguration.get());
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectZero configuration:viewConfiguration.get()]);
+    webView.get().navigationDelegate = navigationDelegate.get();
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"http://a.com/"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    checkFrameTreesInProcesses(webView.get(), {
+        { "http://a.com"_s,
+            { { RemoteFrame }, { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://subdomain.a.com"_s }, { "https://a.com"_s } }
+        },
+    });
+}
+
+TEST(SiteIsolation, GoBackToPageWithIframe)
+{
+    HTTPServer server({
+        { "/a"_s, { "<iframe src='https://frame.com/frame'></iframe>"_s } },
+        { "/b"_s, { ""_s } },
+        { "/frame"_s, { ""_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+    auto [webView, navigationDelegate] = siteIsolatedViewAndDelegate(server);
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://a.com/a"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://b.com/b"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    [webView goBack];
+    [navigationDelegate waitForDidFinishNavigation];
+    checkFrameTreesInProcesses(webView.get(), {
+        { "https://a.com"_s,
+            { { RemoteFrame } }
+        }, { RemoteFrame,
+            { { "https://frame.com"_s } }
+        },
+    });
+}
+
+TEST(SiteIsolation, NavigateNestedIframeSameOriginBackForward)
+{
+    HTTPServer server({
+        { "/example"_s, { "<iframe src='https://a.com/nest'></iframe>"_s } },
+        { "/nest"_s, { "<iframe src='https://a.com/a'></iframe>"_s } },
+        { "/a"_s, { "<script> alert('a'); </script>"_s } },
+        { "/b"_s, { "<script> alert('b'); </script>"_s } }
+    }, HTTPServer::Protocol::HttpsProxy);
+    auto [webView, navigationDelegate] = siteIsolatedViewAndDelegate(server);
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/example"]]];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "a");
+
+    __block RetainPtr<WKFrameInfo> childFrameInfo;
+    [webView _frames:^(_WKFrameTreeNode *mainFrame) {
+        childFrameInfo = mainFrame.childFrames.firstObject.childFrames.firstObject.info;
+    }];
+    while (!childFrameInfo)
+        Util::spinRunLoop();
+
+    [webView evaluateJavaScript:@"location.href = 'https://a.com/b'" inFrame:childFrameInfo.get() inContentWorld:WKContentWorld.pageWorld completionHandler:nil];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "b");
+    [webView goBack];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "a");
+    [webView goForward];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "b");
 }
 
 }

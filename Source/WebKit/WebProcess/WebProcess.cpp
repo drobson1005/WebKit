@@ -162,7 +162,6 @@
 #endif
 
 #if PLATFORM(COCOA)
-#include "ObjCObjectGraph.h"
 #include "UserMediaCaptureManager.h"
 #endif
 
@@ -1034,21 +1033,6 @@ void WebProcess::removeWebFrame(FrameIdentifier frameID, std::optional<WebPagePr
     parentProcessConnection()->send(Messages::WebProcessProxy::DidDestroyFrame(frameID, *pageID), 0);
 }
 
-WebPageGroupProxy* WebProcess::webPageGroup(PageGroup* pageGroup)
-{
-    for (auto& page : m_pageGroupMap.values()) {
-        if (page->corePageGroup() == pageGroup)
-            return page.get();
-    }
-
-    return 0;
-}
-
-WebPageGroupProxy* WebProcess::webPageGroup(PageGroupIdentifier pageGroupID)
-{
-    return m_pageGroupMap.get(pageGroupID);
-}
-
 WebPageGroupProxy* WebProcess::webPageGroup(const WebPageGroupData& pageGroupData)
 {
     auto result = m_pageGroupMap.add(pageGroupData.pageGroupID, nullptr);
@@ -1385,11 +1369,9 @@ GPUProcessConnection& WebProcess::ensureGPUProcessConnection()
     return *m_gpuProcessConnection;
 }
 
-void WebProcess::gpuProcessConnectionClosed(GPUProcessConnection& connection)
+void WebProcess::gpuProcessConnectionClosed()
 {
     ASSERT(m_gpuProcessConnection);
-    ASSERT_UNUSED(connection, m_gpuProcessConnection == &connection);
-
     m_gpuProcessConnection = nullptr;
 
     for (auto& page : m_pageMap.values()) {
@@ -1401,6 +1383,12 @@ void WebProcess::gpuProcessConnectionClosed(GPUProcessConnection& connection)
     if (m_audioMediaStreamTrackRendererInternalUnitManager)
         m_audioMediaStreamTrackRendererInternalUnitManager->restartAllUnits();
 #endif
+}
+
+void WebProcess::gpuProcessConnectionDidBecomeUnresponsive()
+{
+    ASSERT(m_gpuProcessConnection);
+    parentProcessConnection()->send(Messages::WebProcessProxy::GPUProcessConnectionDidBecomeUnresponsive(), 0);
 }
 
 #if PLATFORM(COCOA) && USE(LIBWEBRTC)
@@ -1889,11 +1877,6 @@ RefPtr<API::Object> WebProcess::transformHandlesToObjects(API::Object* object)
             case API::Object::Type::PageHandle:
                 return static_cast<const API::PageHandle&>(object).isAutoconverting();
 
-#if PLATFORM(COCOA)
-            case API::Object::Type::ObjCObjectGraph:
-#endif
-                return true;
-
             default:
                 return false;
             }
@@ -1908,10 +1891,6 @@ RefPtr<API::Object> WebProcess::transformHandlesToObjects(API::Object* object)
             case API::Object::Type::PageHandle:
                 return WebProcess::singleton().webPage(static_cast<const API::PageHandle&>(object).webPageID());
 
-#if PLATFORM(COCOA)
-            case API::Object::Type::ObjCObjectGraph:
-                return WebProcess::singleton().transformHandlesToObjects(static_cast<ObjCObjectGraph&>(object));
-#endif
             default:
                 return &object;
             }
@@ -1929,9 +1908,6 @@ RefPtr<API::Object> WebProcess::transformObjectsToHandles(API::Object* object)
             switch (object.type()) {
             case API::Object::Type::BundleFrame:
             case API::Object::Type::BundlePage:
-#if PLATFORM(COCOA)
-            case API::Object::Type::ObjCObjectGraph:
-#endif
                 return true;
 
             default:
@@ -1947,11 +1923,6 @@ RefPtr<API::Object> WebProcess::transformObjectsToHandles(API::Object* object)
 
             case API::Object::Type::BundlePage:
                 return API::PageHandle::createAutoconverting(static_cast<const WebPage&>(object).webPageProxyIdentifier(), static_cast<const WebPage&>(object).identifier());
-
-#if PLATFORM(COCOA)
-            case API::Object::Type::ObjCObjectGraph:
-                return transformObjectsToHandles(static_cast<ObjCObjectGraph&>(object));
-#endif
 
             default:
                 return &object;

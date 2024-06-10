@@ -28,6 +28,7 @@
 
 #if ENABLE(VIDEO_PRESENTATION_MODE)
 
+#import "APIPageConfiguration.h"
 #import "APIUIClient.h"
 #import "DrawingAreaProxy.h"
 #import "GPUProcessProxy.h"
@@ -72,7 +73,7 @@
 #import <BrowserEngineKit/BELayerHierarchyHostingView.h>
 #endif
 
-#define MESSAGE_CHECK(assertion) MESSAGE_CHECK_BASE(assertion, m_page->process().connection())
+#define MESSAGE_CHECK(assertion) MESSAGE_CHECK_BASE(assertion, m_page->legacyMainFrameProcess().connection())
 
 @interface WKLayerHostView : PlatformView
 @property (nonatomic, assign) uint32_t contextID;
@@ -499,7 +500,7 @@ VideoPresentationManagerProxy::VideoPresentationManagerProxy(WebPageProxy& page,
     , m_playbackSessionManagerProxy(playbackSessionManagerProxy)
 {
     ALWAYS_LOG(LOGIDENTIFIER);
-    m_page->process().addMessageReceiver(Messages::VideoPresentationManagerProxy::messageReceiverName(), m_page->webPageID(), *this);
+    m_page->legacyMainFrameProcess().addMessageReceiver(Messages::VideoPresentationManagerProxy::messageReceiverName(), m_page->webPageID(), *this);
 }
 
 VideoPresentationManagerProxy::~VideoPresentationManagerProxy()
@@ -514,7 +515,7 @@ void VideoPresentationManagerProxy::invalidate()
 {
     ALWAYS_LOG(LOGIDENTIFIER);
     if (m_page) {
-        m_page->process().removeMessageReceiver(Messages::VideoPresentationManagerProxy::messageReceiverName(), m_page->webPageID());
+        m_page->legacyMainFrameProcess().removeMessageReceiver(Messages::VideoPresentationManagerProxy::messageReceiverName(), m_page->webPageID());
         m_page = nullptr;
     }
 
@@ -714,7 +715,7 @@ void VideoPresentationManagerProxy::requestBitmapImageForCurrentTime(PlaybackSes
         return;
     }
 
-    gpuProcess->requestBitmapImageForCurrentTime(m_page->process().coreProcessIdentifier(), playerIdentifier, WTFMove(completionHandler));
+    gpuProcess->requestBitmapImageForCurrentTime(m_page->legacyMainFrameProcess().coreProcessIdentifier(), playerIdentifier, WTFMove(completionHandler));
 }
 
 void VideoPresentationManagerProxy::addVideoInPictureInPictureDidChangeObserver(const VideoInPictureInPictureDidChangeObserver& observer)
@@ -798,7 +799,7 @@ RetainPtr<WKLayerHostView> VideoPresentationManagerProxy::createLayerHostViewWit
 
 #if USE(EXTENSIONKIT)
     RefPtr page = m_page.get();
-    if (RefPtr gpuProcess = page ? page->process().processPool().gpuProcess() : nullptr) {
+    if (RefPtr gpuProcess = page ? page->configuration().processPool().gpuProcess() : nullptr) {
         RetainPtr handle = LayerHostingContext::createHostingHandle(gpuProcess->processID(), videoLayerID);
         [view->_hostingView setHandle:handle.get()];
     } else

@@ -1209,30 +1209,12 @@ public:
         return Base::appendCall(function);
     }
 
-#if OS(WINDOWS) && CPU(X86_64)
-    JITCompiler::Call appendCallWithUGPRPair(const CodePtr<OperationPtrTag> function)
-    {
-        prepareForExternalCall();
-        emitStoreCodeOrigin(m_currentNode->origin.semantic);
-        return Base::appendCallWithUGPRPair(function);
-    }
-#endif
-
     void appendCall(Address address)
     {
         prepareForExternalCall();
         emitStoreCodeOrigin(m_currentNode->origin.semantic);
         Base::appendCall(address);
     }
-
-#if OS(WINDOWS) && CPU(X86_64)
-    void appendCallWithUGPRPair(Address address)
-    {
-        prepareForExternalCall();
-        emitStoreCodeOrigin(m_currentNode->origin.semantic);
-        Base::appendCallWithUGPRPair(address);
-    }
-#endif
 
     JITCompiler::Call appendOperationCall(const CodePtr<OperationPtrTag> function)
     {
@@ -1244,11 +1226,7 @@ public:
     // FIXME: We can remove this when we don't support MSVC since on clang-cl we could use systemV ABI for JIT operations.
     JITCompiler::Call appendCallSetResult(const CodePtr<OperationPtrTag> function, GPRReg result1, GPRReg result2)
     {
-#if OS(WINDOWS) && CPU(X86_64)
-        JITCompiler::Call call = appendCallWithUGPRPair(function);
-#else
         JITCompiler::Call call = appendCall(function);
-#endif
         setupResults(result1, result2);
         return call;
     }
@@ -1500,16 +1478,24 @@ public:
     void compileCallCustomAccessorGetter(Node*);
     void compileCallCustomAccessorSetter(Node*);
     void compileNormalizeMapKey(Node*);
-    void compileGetMapBucketHead(Node*);
-    void compileGetMapBucketNext(Node*);
+    template<typename MapOrSet>
+    ALWAYS_INLINE void compileGetMapIndexImpl(Node*);
+    void compileMapKeyIndex(Node*);
+    void compileMapValue(Node*);
+    void compileMapIteratorNext(Node*);
+    void compileMapIteratorKey(Node*);
+    void compileMapIteratorValue(Node*);
+    void compileMapStorage(Node*);
+    void compileMapIterationNext(Node*);
+    void compileMapIterationEntry(Node*);
+    void compileMapIterationEntryKey(Node*);
+    void compileMapIterationEntryValue(Node*);
     void compileSetAdd(Node*);
     void compileMapSet(Node*);
     void compileMapOrSetDelete(Node*);
     void compileWeakMapGet(Node*);
     void compileWeakSetAdd(Node*);
     void compileWeakMapSet(Node*);
-    void compileLoadKeyFromMapBucket(Node*);
-    void compileLoadValueFromMapBucket(Node*);
     void compileExtractValueFromWeakMapGet(Node*);
     void compileGetPrototypeOf(Node*);
     void compileGetWebAssemblyInstanceExports(Node*);
@@ -1922,9 +1908,15 @@ public:
     void speculateDateObject(Edge);
     void speculateDateObject(Edge, GPRReg cell);
     void speculateMapObject(Edge);
+    void speculateImmutableButterfly(Edge, GPRReg);
+    void speculateImmutableButterfly(Edge);
     void speculateMapObject(Edge, GPRReg cell);
     void speculateSetObject(Edge);
     void speculateSetObject(Edge, GPRReg cell);
+    void speculateMapIteratorObject(Edge);
+    void speculateMapIteratorObject(Edge, GPRReg cell);
+    void speculateSetIteratorObject(Edge);
+    void speculateSetIteratorObject(Edge, GPRReg cell);
     void speculateWeakMapObject(Edge);
     void speculateWeakMapObject(Edge, GPRReg cell);
     void speculateWeakSetObject(Edge);

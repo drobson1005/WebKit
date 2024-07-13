@@ -314,6 +314,7 @@
 #include <wtf/SetForScope.h>
 #include <wtf/SystemTracing.h>
 #include <wtf/UUID.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuffer.h>
 #include <wtf/text/TextStream.h>
 
@@ -1824,7 +1825,7 @@ void Document::setReadyState(ReadyState readyState)
                 eventTiming->domLoading = now;
             // We do this here instead of in the Document constructor because monotonicTimestamp() is 0 when the Document constructor is running.
             if (!url().isEmpty())
-                WTFBeginSignpostWithTimeDelta(this, NavigationAndPaintTiming, -Seconds(monotonicTimestamp()), "Loading %{public}s | isMainFrame: %d", url().string().utf8().data(), frame() && frame()->isMainFrame());
+                WTFBeginSignpostWithTimeDelta(this, NavigationAndPaintTiming, -Seconds(monotonicTimestamp()), "Loading %" PUBLIC_LOG_STRING " | isMainFrame: %d", url().string().utf8().data(), frame() && frame()->isMainFrame());
             WTFEmitSignpost(this, NavigationAndPaintTiming, "domLoading");
         }
         break;
@@ -2570,9 +2571,10 @@ void Document::resolveStyle(ResolveStyleType type)
         Style::TreeResolver resolver(*this, WTFMove(m_pendingRenderTreeUpdate));
         auto styleUpdate = resolver.resolve();
 
-        while (resolver.hasUnresolvedQueryContainers()) {
+        while (resolver.hasUnresolvedQueryContainers() || resolver.hasUnresolvedAnchorPositionedElements()) {
             if (styleUpdate) {
-                SetForScope resolvingContainerQueriesScope(m_isResolvingContainerQueries, true);
+                SetForScope resolvingContainerQueriesScope(m_isResolvingContainerQueries, resolver.hasUnresolvedQueryContainers());
+                SetForScope resolvingAnchorPositionedElementsScope(m_isResolvingAnchorPositionedElements, resolver.hasUnresolvedAnchorPositionedElements());
 
                 updateRenderTree(WTFMove(styleUpdate));
 
@@ -2748,9 +2750,14 @@ auto Document::updateLayout(OptionSet<LayoutOptions> layoutOptions, const Elemen
 
         if (frameView && renderView()) {
             if (context && layoutOptions.contains(LayoutOptions::ContentVisibilityForceLayout)) {
-                if (context->renderer() && context->renderer()->style().hasSkippedContent() && !context->renderer()->everHadSkippedContentLayout())
-                    context->renderer()->setNeedsLayout();
-                else
+                if (context->renderer() && context->renderer()->style().hasSkippedContent()) {
+                    if (auto wasSkippedDuringLastLayout = context->renderer()->wasSkippedDuringLastLayoutDueToContentVisibility()) {
+                        if (*wasSkippedDuringLastLayout)
+                            context->renderer()->setNeedsLayout();
+                        else
+                            context = nullptr;
+                    }
+                } else
                     context = nullptr;
             }
             if (frameView->layoutContext().isLayoutPending() || renderView()->needsLayout()) {
@@ -2990,6 +2997,15 @@ bool Document::isResolvingContainerQueriesForSelfOrAncestor() const
         return true;
     if (RefPtr owner = ownerElement())
         return owner->document().isResolvingContainerQueriesForSelfOrAncestor();
+    return false;
+}
+
+bool Document::isInStyleInterleavedLayoutForSelfOrAncestor() const
+{
+    if (isInStyleInterleavedLayout())
+        return true;
+    if (RefPtr owner = ownerElement())
+        return owner->document().isInStyleInterleavedLayoutForSelfOrAncestor();
     return false;
 }
 
@@ -3524,7 +3540,7 @@ ExceptionOr<void> Document::open(Document* entryDocument)
     if (entryDocument && !entryDocument->securityOrigin().isSameOriginAs(securityOrigin()))
         return Exception { ExceptionCode::SecurityError };
 
-    if (m_ignoreOpensDuringUnloadCount)
+    if (m_unloadCounter)
         return { };
 
     if (m_activeParserWasAborted)
@@ -3911,6 +3927,9 @@ void Document::enqueuePaintTimingEntryIfNeeded()
 
 ExceptionOr<void> Document::write(Document* entryDocument, SegmentedString&& text)
 {
+    if (!isHTMLDocument() || m_throwOnDynamicMarkupInsertionCount)
+        return Exception { ExceptionCode::InvalidStateError };
+
     if (m_activeParserWasAborted)
         return { };
 
@@ -3923,7 +3942,7 @@ ExceptionOr<void> Document::write(Document* entryDocument, SegmentedString&& tex
         return { };
 
     bool hasInsertionPoint = m_parser && m_parser->hasInsertionPoint();
-    if (!hasInsertionPoint && (m_ignoreOpensDuringUnloadCount || m_ignoreDestructiveWriteCount))
+    if (!hasInsertionPoint && (m_unloadCounter || m_ignoreDestructiveWriteCount))
         return { };
 
     if (!hasInsertionPoint) {
@@ -3937,27 +3956,59 @@ ExceptionOr<void> Document::write(Document* entryDocument, SegmentedString&& tex
     return { };
 }
 
+ExceptionOr<void> Document::write(Document* entryDocument, FixedVector<std::variant<RefPtr<TrustedHTML>, String>>&& strings, ASCIILiteral lineFeed)
+{
+    auto isTrusted = true;
+    SegmentedString text;
+    for (auto& entry : strings) {
+        text.append(WTF::switchOn(WTFMove(entry),
+            [&isTrusted](const String& string) {
+                isTrusted = false;
+                return string;
+            },
+            [](const RefPtr<TrustedHTML>& html) {
+                return html->toString();
+            }
+        ));
+    }
+
+    if (isTrusted || !scriptExecutionContext()->settingsValues().trustedTypesEnabled) {
+        text.append(lineFeed);
+        return write(entryDocument, WTFMove(text));
+    }
+
+    String textString = text.toString();
+    auto stringValueHolder = trustedTypeCompliantString(TrustedType::TrustedHTML, *scriptExecutionContext(), textString, lineFeed.isEmpty() ? "Document write"_s : "Document writeln"_s);
+    if (stringValueHolder.hasException())
+        return stringValueHolder.releaseException();
+    SegmentedString trustedText(stringValueHolder.releaseReturnValue());
+    trustedText.append(lineFeed);
+    return write(entryDocument, WTFMove(trustedText));
+}
+
+ExceptionOr<void> Document::write(Document* entryDocument, FixedVector<std::variant<RefPtr<TrustedHTML>, String>>&& strings)
+{
+    return write(entryDocument, WTFMove(strings), ""_s);
+}
+
 ExceptionOr<void> Document::write(Document* entryDocument, FixedVector<String>&& strings)
 {
-    if (!isHTMLDocument() || m_throwOnDynamicMarkupInsertionCount)
-        return Exception { ExceptionCode::InvalidStateError };
-
     SegmentedString text;
     for (auto& string : strings)
         text.append(WTFMove(string));
-
     return write(entryDocument, WTFMove(text));
+}
+
+ExceptionOr<void> Document::writeln(Document* entryDocument, FixedVector<std::variant<RefPtr<TrustedHTML>, String>>&& strings)
+{
+    return write(entryDocument, WTFMove(strings), "\n"_s);
 }
 
 ExceptionOr<void> Document::writeln(Document* entryDocument, FixedVector<String>&& strings)
 {
-    if (!isHTMLDocument() || m_throwOnDynamicMarkupInsertionCount)
-        return Exception { ExceptionCode::InvalidStateError };
-
     SegmentedString text;
     for (auto& string : strings)
         text.append(WTFMove(string));
-
     text.append("\n"_s);
     return write(entryDocument, WTFMove(text));
 }
@@ -7187,12 +7238,6 @@ Ref<HTMLCollection> Document::applets()
 
 Ref<HTMLCollection> Document::embeds()
 {
-    return ensureCachedCollection<CollectionType::DocEmbeds>();
-}
-
-Ref<HTMLCollection> Document::plugins()
-{
-    // This is an alias for embeds() required for the JS DOM bindings.
     return ensureCachedCollection<CollectionType::DocEmbeds>();
 }
 
@@ -10547,6 +10592,9 @@ bool Document::activeViewTransitionCapturedDocumentElement() const
 
 void Document::setActiveViewTransition(RefPtr<ViewTransition>&& viewTransition)
 {
+    std::optional<Style::PseudoClassChangeInvalidation> styleInvalidation;
+    if (documentElement())
+        styleInvalidation.emplace(*documentElement(), CSSSelector::PseudoClass::ActiveViewTransition, !!viewTransition);
     clearRenderingIsSuppressedForViewTransition();
     m_activeViewTransition = WTFMove(viewTransition);
 }
@@ -10662,7 +10710,7 @@ PermissionsPolicy Document::permissionsPolicy() const
     // because Document may not be set on Frame yet, and it would affect the computation
     // of PermissionsPolicy.
     if (!m_permissionsPolicy)
-        m_permissionsPolicy = makeUnique<PermissionsPolicy>(ownerElement(), securityOrigin().data());
+        m_permissionsPolicy = makeUnique<PermissionsPolicy>(*this);
 
     return *m_permissionsPolicy;
 }

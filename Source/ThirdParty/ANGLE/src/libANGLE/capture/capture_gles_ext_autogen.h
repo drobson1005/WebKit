@@ -1149,6 +1149,28 @@ angle::CallCapture CaptureBufferStorageEXT(const State &glState,
                                            const void *data,
                                            GLbitfield flags);
 
+// GL_EXT_clear_texture
+angle::CallCapture CaptureClearTexImageEXT(const State &glState,
+                                           bool isCallValid,
+                                           TextureID texturePacked,
+                                           GLint level,
+                                           GLenum format,
+                                           GLenum type,
+                                           const void *data);
+angle::CallCapture CaptureClearTexSubImageEXT(const State &glState,
+                                              bool isCallValid,
+                                              TextureID texturePacked,
+                                              GLint level,
+                                              GLint xoffset,
+                                              GLint yoffset,
+                                              GLint zoffset,
+                                              GLsizei width,
+                                              GLsizei height,
+                                              GLsizei depth,
+                                              GLenum format,
+                                              GLenum type,
+                                              const void *data);
+
 // GL_EXT_clip_control
 angle::CallCapture CaptureClipControlEXT(const State &glState,
                                          bool isCallValid,
@@ -2050,6 +2072,8 @@ angle::CallCapture CaptureTexStorage3DEXT(const State &glState,
 // GL_KHR_blend_equation_advanced
 angle::CallCapture CaptureBlendBarrierKHR(const State &glState, bool isCallValid);
 
+// GL_KHR_blend_equation_advanced_coherent
+
 // GL_KHR_debug
 angle::CallCapture CaptureDebugMessageCallbackKHR(const State &glState,
                                                   bool isCallValid,
@@ -2490,6 +2514,8 @@ angle::CallCapture CaptureProgramBinaryOES(const State &glState,
                                            const void *binary,
                                            GLint length);
 
+// GL_OES_gpu_shader5
+
 // GL_OES_mapbuffer
 angle::CallCapture CaptureGetBufferPointervOES(const State &glState,
                                                bool isCallValid,
@@ -2572,6 +2598,12 @@ angle::CallCapture CaptureMinSampleShadingOES(const State &glState,
 // GL_OES_standard_derivatives
 
 // GL_OES_surfaceless_context
+
+// GL_OES_tessellation_shader
+angle::CallCapture CapturePatchParameteriOES(const State &glState,
+                                             bool isCallValid,
+                                             GLenum pname,
+                                             GLint value);
 
 // GL_OES_texture_3D
 angle::CallCapture CaptureCompressedTexImage3DOES(const State &glState,
@@ -2841,6 +2873,26 @@ angle::CallCapture CaptureTextureFoveationParametersQCOM(const State &glState,
                                                          GLfloat gainX,
                                                          GLfloat gainY,
                                                          GLfloat foveaArea);
+
+// GL_QCOM_tiled_rendering
+angle::CallCapture CaptureEndTilingQCOM(const State &glState,
+                                        bool isCallValid,
+                                        GLbitfield preserveMask);
+angle::CallCapture CaptureStartTilingQCOM(const State &glState,
+                                          bool isCallValid,
+                                          GLuint x,
+                                          GLuint y,
+                                          GLuint width,
+                                          GLuint height,
+                                          GLbitfield preserveMask);
+
+// GL_WEBKIT_explicit_resolve_target
+angle::CallCapture CaptureFramebufferResolveRenderbufferWEBKIT(const State &glState,
+                                                               bool isCallValid,
+                                                               GLenum target,
+                                                               GLenum attachment,
+                                                               GLenum renderbuffertarget,
+                                                               RenderbufferID renderbufferPacked);
 
 // Parameter Captures
 
@@ -4454,6 +4506,28 @@ void CaptureBufferStorageEXT_data(const State &glState,
                                   const void *data,
                                   GLbitfield flags,
                                   angle::ParamCapture *paramCapture);
+void CaptureClearTexImageEXT_data(const State &glState,
+                                  bool isCallValid,
+                                  TextureID texturePacked,
+                                  GLint level,
+                                  GLenum format,
+                                  GLenum type,
+                                  const void *data,
+                                  angle::ParamCapture *paramCapture);
+void CaptureClearTexSubImageEXT_data(const State &glState,
+                                     bool isCallValid,
+                                     TextureID texturePacked,
+                                     GLint level,
+                                     GLint xoffset,
+                                     GLint yoffset,
+                                     GLint zoffset,
+                                     GLsizei width,
+                                     GLsizei height,
+                                     GLsizei depth,
+                                     GLenum format,
+                                     GLenum type,
+                                     const void *data,
+                                     angle::ParamCapture *paramCapture);
 void CaptureGetObjectLabelEXT_length(const State &glState,
                                      bool isCallValid,
                                      GLenum type,

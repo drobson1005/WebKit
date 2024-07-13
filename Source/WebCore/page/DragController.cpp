@@ -98,6 +98,7 @@
 #include "WebContentReader.h"
 #include "markup.h"
 #include <wtf/SetForScope.h>
+#include <wtf/text/MakeString.h>
 #endif
 
 #if ENABLE(DATA_DETECTION)
@@ -1052,7 +1053,6 @@ bool DragController::startDrag(LocalFrame& src, const DragState& state, OptionSe
 
     bool mustUseLegacyDragClient = hasData == HasNonDefaultPasteboardData::Yes || client().useLegacyDragClient();
 
-    IntRect dragImageBounds;
     RefPtr image = getImage(element);
     if (state.type == DragSourceAction::Selection) {
         PasteboardWriterData pasteboardWriterData;

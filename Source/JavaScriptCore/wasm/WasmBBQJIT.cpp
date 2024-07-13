@@ -69,6 +69,7 @@
 #include <wtf/PlatformRegisters.h>
 #include <wtf/SmallSet.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/MakeString.h>
 
 namespace JSC { namespace Wasm {
 
@@ -384,7 +385,9 @@ RegisterBinding RegisterBinding::fromValue(Value value)
 
 RegisterBinding RegisterBinding::none()
 {
-    return RegisterBinding();
+    RegisterBinding binding;
+    binding.m_kind = None;
+    return binding;
 }
 
 RegisterBinding RegisterBinding::scratch()
@@ -1398,7 +1401,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addArrayNewDefault(uint32_t typeIndex, 
     return { };
 }
 
-using arraySegmentOperation = EncodedJSValue (&)(JSC::Wasm::Instance*, uint32_t, uint32_t, uint32_t, uint32_t);
+using arraySegmentOperation = EncodedJSValue SYSV_ABI (&)(JSC::Wasm::Instance*, uint32_t, uint32_t, uint32_t, uint32_t);
 void BBQJIT::pushArrayNewFromSegment(arraySegmentOperation operation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType exceptionType, ExpressionType& result)
 {
     Vector<Value, 8> arguments = {
@@ -3209,7 +3212,7 @@ StackMap BBQJIT::makeStackMap(const ControlData& data, Stack& enclosingStack)
     for (unsigned i = 0; i < m_locals.size(); i ++)
         stackMap[stackMapIndex ++] = OSREntryValue(toB3Rep(m_locals[i]), toB3Type(m_localTypes[i]));
 
-    if (Options::useWasmIPInt()) {
+    if (Options::useWebAssemblyIPInt()) {
         // Do rethrow slots first because IPInt has them in a shadow stack.
         for (const ControlEntry& entry : m_parser->controlStack()) {
             for (unsigned i = 0; i < entry.controlData.implicitSlots(); i ++) {
@@ -3520,20 +3523,18 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addDelegateToUnreachable(ControlType& t
 
 PartialResult WARN_UNUSED_RETURN BBQJIT::addThrow(unsigned exceptionIndex, Vector<ExpressionType>& arguments, Stack&)
 {
-    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), arguments.size() * sizeof(uint64_t));
-    m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
     LOG_INSTRUCTION("Throw", arguments);
 
-    for (unsigned i = 0; i < arguments.size(); i++) {
-        Location stackLocation = Location::fromStackArgument(i * sizeof(uint64_t));
-        Value argument = arguments[i];
-        if (argument.type() == TypeKind::V128)
-            emitMove(Value::fromF64(0), stackLocation);
-        else
-            emitMove(argument, stackLocation);
-        consume(argument);
+    unsigned offset = 0;
+    for (auto arg : arguments) {
+        Location stackLocation = Location::fromStackArgument(offset * sizeof(uint64_t));
+        emitMove(arg, stackLocation);
+        consume(arg);
+        offset += arg.type() == TypeKind::V128 ? 2 : 1;
     }
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(offset * sizeof(uint64_t));
+    m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
     ++m_callSiteIndex;
     bool mayHaveExceptionHandlers = !m_hasExceptionHandlers || m_hasExceptionHandlers.value();
@@ -3990,7 +3991,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addCall(unsigned functionIndex, const T
     UNUSED_PARAM(callType); // TODO: handle tail calls
     const FunctionSignature& functionType = *signature.as<FunctionSignature>();
     CallInformation callInfo = wasmCallingConvention().callInformationFor(signature, CallRole::Caller);
-    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(callInfo.headerAndArgumentStackSizeInBytes);
     m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
     // Preserve caller-saved registers and other info
@@ -4034,7 +4035,7 @@ void BBQJIT::emitIndirectCall(const char* opcode, const Value& calleeIndex, GPRR
 
     const auto& callingConvention = wasmCallingConvention();
     CallInformation wasmCalleeInfo = callingConvention.callInformationFor(signature, CallRole::Caller);
-    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), wasmCalleeInfo.headerAndArgumentStackSizeInBytes);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(wasmCalleeInfo.headerAndArgumentStackSizeInBytes);
     m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
     // Do a context switch if needed.

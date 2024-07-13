@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
- * Copyright (C) 2013-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -176,6 +176,7 @@
 #include "PseudoElement.h"
 #include "PushSubscription.h"
 #include "PushSubscriptionData.h"
+#include "RTCNetworkManager.h"
 #include "RTCRtpSFrameTransform.h"
 #include "Range.h"
 #include "ReadableStream.h"
@@ -259,8 +260,8 @@
 #include <wtf/ProcessID.h>
 #include <wtf/RunLoop.h>
 #include <wtf/URLHelpers.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
-#include <wtf/text/StringConcatenateNumbers.h>
 #include <wtf/text/StringToIntegerConversion.h>
 
 #if USE(CG)
@@ -502,9 +503,9 @@ static bool markerTypeFrom(const String& markerType, DocumentMarker::Type& resul
     else if (equalLettersIgnoringASCIICase(markerType, "telephonenumber"_s))
         result = DocumentMarker::Type::TelephoneNumber;
 #endif
-#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
-    else if (equalLettersIgnoringASCIICase(markerType, "unifiedtextreplacement"_s))
-        result = DocumentMarker::Type::UnifiedTextReplacement;
+#if ENABLE(WRITING_TOOLS)
+    else if (equalLettersIgnoringASCIICase(markerType, "writingtoolstextsuggestion"_s))
+        result = DocumentMarker::Type::WritingToolsTextSuggestion;
 #endif
     else if (equalLettersIgnoringASCIICase(markerType, "transparentcontent"_s))
         result = DocumentMarker::Type::TransparentContent;
@@ -601,6 +602,8 @@ void Internals::resetToConsistentState(Page& page)
     PlatformMediaSessionManager::sharedManager().resetSessionState();
     PlatformMediaSessionManager::sharedManager().setWillIgnoreSystemInterruptions(true);
     PlatformMediaSessionManager::sharedManager().applicationWillEnterForeground(false);
+    if (page.mediaPlaybackIsSuspended())
+        page.resumeAllMediaPlayback();
 #endif
 #if ENABLE(VIDEO) || ENABLE(WEB_AUDIO)
     PlatformMediaSessionManager::sharedManager().setIsPlayingToAutomotiveHeadUnit(false);
@@ -840,6 +843,8 @@ static String styleValidityToToString(Style::Validity validity)
         return "NoStyleChange"_s;
     case Style::Validity::AnimationInvalid:
         return "AnimationInvalid"_s;
+    case Style::Validity::InlineStyleInvalid:
+        return "InlineStyleInvalid"_s;
     case Style::Validity::ElementInvalid:
         return "InlineStyleChange"_s;
     case Style::Validity::SubtreeInvalid:
@@ -1864,19 +1869,6 @@ void Internals::setEnableWebRTCEncryption(bool value)
 #endif
 }
 
-void Internals::setUseDTLS10(bool useDTLS10)
-{
-#if USE(LIBWEBRTC)
-    auto* document = contextDocument();
-    if (!document || !document->page())
-        return;
-    auto& rtcProvider = static_cast<LibWebRTCProvider&>(document->page()->webRTCProvider());
-    rtcProvider.setUseDTLS10(useDTLS10);
-#else
-    UNUSED_PARAM(useDTLS10);
-#endif
-}
-
 #endif // ENABLE(WEB_RTC)
 
 #if ENABLE(MEDIA_STREAM)
@@ -2797,10 +2789,10 @@ bool Internals::hasCorrectionIndicatorMarker(int from, int length)
     return hasMarkerFor(DocumentMarker::Type::CorrectionIndicator, from, length);
 }
 
-#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
-bool Internals::hasUnifiedTextReplacementMarker(int from, int length)
+#if ENABLE(WRITING_TOOLS)
+bool Internals::hasWritingToolsTextSuggestionMarker(int from, int length)
 {
-    return hasMarkerFor(DocumentMarker::Type::UnifiedTextReplacement, from, length);
+    return hasMarkerFor(DocumentMarker::Type::WritingToolsTextSuggestion, from, length);
 }
 #endif
 
@@ -3325,9 +3317,6 @@ ExceptionOr<ScrollableArea*> Internals::scrollableAreaForNode(Node* node) const
             return Exception { ExceptionCode::InvalidAccessError };
 
         auto& renderBox = *element.renderBox();
-        if (!renderBox.canBeScrolledAndHasScrollableArea())
-            return Exception { ExceptionCode::InvalidAccessError };
-
         if (is<RenderListBox>(renderBox))
             scrollableArea = &downcast<RenderListBox>(renderBox);
         else {
@@ -4992,6 +4981,32 @@ void Internals::suspendAllMediaBuffering()
     page->suspendAllMediaBuffering();
 }
 
+void Internals::suspendAllMediaPlayback()
+{
+    auto frame = this->frame();
+    if (!frame)
+        return;
+
+    auto page = frame->page();
+    if (!page)
+        return;
+
+    page->suspendAllMediaPlayback();
+}
+
+void Internals::resumeAllMediaPlayback()
+{
+    auto frame = this->frame();
+    if (!frame)
+        return;
+
+    auto page = frame->page();
+    if (!page)
+        return;
+
+    page->resumeAllMediaPlayback();
+}
+
 #endif // ENABLE(VIDEO)
 
 #if ENABLE(WEB_AUDIO)
@@ -5033,6 +5048,13 @@ void Internals::simulateSystemWake() const
 #if ENABLE(VIDEO)
     PlatformMediaSessionManager::sharedManager().processSystemDidWake();
 #endif
+}
+
+std::optional<Internals::NowPlayingMetadata> Internals::nowPlayingMetadata() const
+{
+    if (auto nowPlayingInfo = PlatformMediaSessionManager::sharedManager().nowPlayingInfo())
+        return nowPlayingInfo->metadata;
+    return std::nullopt;
 }
 
 ExceptionOr<Internals::NowPlayingState> Internals::nowPlayingState() const
@@ -6120,7 +6142,19 @@ bool Internals::shouldAudioTrackPlay(const AudioTrack& track)
         return false;
     return downcast<AudioTrackPrivateMediaStream>(track.privateTrack()).shouldPlay();
 }
-#endif
+#endif // ENABLE(MEDIA_STREAM)
+
+#if ENABLE(WEB_RTC)
+String Internals::rtcNetworkInterfaceName() const
+{
+    RefPtr document = contextDocument();
+    RefPtr rtcNetworkManager = document ? document->rtcNetworkManager() : nullptr;
+    if (!rtcNetworkManager)
+        return { };
+
+    return rtcNetworkManager->interfaceNameForTesting();
+}
+#endif // ENABLE(WEB_RTC)
 
 bool Internals::isHardwareVP9DecoderExpected()
 {
@@ -6963,11 +6997,6 @@ String Internals::encodedPreferenceValue(const String&, const String&)
     return emptyString();
 }
 
-String Internals::getUTIFromTag(const String&, const String&, const String&)
-{
-    return emptyString();
-}
-
 bool Internals::isRemoteUIAppForAccessibility()
 {
     return false;
@@ -7454,6 +7483,19 @@ void Internals::setPDFDisplayModeForTesting(Element& element, const String& disp
         return;
 
     pluginViewBase->setPDFDisplayModeForTesting(displayMode);
+}
+
+bool Internals::sendEditingCommandToPDFForTesting(Element& element, const String& commandName, const String& argument) const
+{
+    RefPtr pluginElement = dynamicDowncast<HTMLPlugInElement>(element);
+    if (!pluginElement)
+        return false;
+
+    RefPtr pluginViewBase = pluginElement->pluginWidget();
+    if (!pluginViewBase)
+        return false;
+
+    return pluginViewBase->sendEditingCommandToPDFForTesting(commandName, argument);
 }
 
 Vector<Internals::PDFAnnotationRect> Internals::pdfAnnotationRectsForTesting(Element& element) const

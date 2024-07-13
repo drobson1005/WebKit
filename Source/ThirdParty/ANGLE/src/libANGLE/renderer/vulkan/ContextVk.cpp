@@ -530,7 +530,7 @@ void OnTextureBufferRead(ContextVk *contextVk,
 {
     ASSERT(stages.any());
 
-    // TODO: accept multiple stages in bufferRead.  http://anglebug.com/3573
+    // TODO: accept multiple stages in bufferRead.  http://anglebug.com/42262235
     for (gl::ShaderType stage : stages)
     {
         // Note: if another range of the same buffer is simultaneously used for storage,
@@ -548,7 +548,7 @@ void OnImageBufferWrite(ContextVk *contextVk,
 {
     vk::BufferHelper &buffer = bufferVk->getBuffer();
 
-    // TODO: accept multiple stages in bufferWrite.  http://anglebug.com/3573
+    // TODO: accept multiple stages in bufferWrite.  http://anglebug.com/42262235
     for (gl::ShaderType stage : stages)
     {
         commandBufferHelper->bufferWrite(contextVk,
@@ -1400,7 +1400,7 @@ angle::Result ContextVk::initialize(const angle::ImageLoadContext &imageLoadCont
     angle::PlatformMethods *platform = ANGLEPlatformCurrent();
     ASSERT(platform);
 
-    // GPU tracing workaround for anglebug.com/2927.  The renderer should not emit gpu events
+    // GPU tracing workaround for anglebug.com/42261625.  The renderer should not emit gpu events
     // during platform discovery.
     const unsigned char *gpuEventsEnabled =
         platform->getTraceCategoryEnabledFlag(platform, "gpu.angle.gpu");
@@ -1505,8 +1505,7 @@ angle::Result ContextVk::flush(const gl::Context *context)
     const bool frontBufferRenderingEnabled =
         isSingleBufferedWindow || drawFramebufferVk->hasFrontBufferUsage();
 
-    if (mRenderer->getFeatures().deferFlushUntilEndRenderPass.enabled && hasActiveRenderPass() &&
-        !frontBufferRenderingEnabled)
+    if (hasActiveRenderPass() && !frontBufferRenderingEnabled)
     {
         mHasDeferredFlush = true;
         return angle::Result::Continue;
@@ -1814,7 +1813,7 @@ angle::Result ContextVk::setupDispatch(const gl::Context *context)
 {
     // Note: numerous tests miss a glMemoryBarrier call between the initial texture data upload and
     // the dispatch call.  Flush the outside render pass command buffer as a workaround.
-    // TODO: Remove this and fix tests.  http://anglebug.com/5070
+    // TODO: Remove this and fix tests.  http://anglebug.com/42263639
     ANGLE_TRY(flushOutsideRenderPassCommands());
 
     ProgramExecutableVk *executableVk = vk::GetImpl(mState.getProgramExecutable());
@@ -2081,7 +2080,7 @@ angle::Result ContextVk::createGraphicsPipeline()
     ASSERT(executableVk);
 
     // Wait for any warmup task if necessary
-    executableVk->waitForPostLinkTasksIfNecessary(this, mGraphicsPipelineDesc.get());
+    executableVk->waitForGraphicsPostLinkTasks(this, *mGraphicsPipelineDesc);
 
     vk::PipelineCacheAccess pipelineCache;
     ANGLE_TRY(mRenderer->getPipelineCache(this, &pipelineCache));
@@ -2482,7 +2481,7 @@ angle::Result ContextVk::handleDirtyComputePipelineDesc(DirtyBits::Iterator *dir
         ProgramExecutableVk *executableVk = vk::GetImpl(mState.getProgramExecutable());
         ASSERT(executableVk);
 
-        executableVk->waitForPostLinkTasksIfNecessary(this, nullptr);
+        executableVk->waitForComputePostLinkTasks(this);
         ANGLE_TRY(executableVk->getOrCreateComputePipeline(
             this, &pipelineCache, PipelineSource::Draw, pipelineRobustness(),
             pipelineProtectedAccess(), &mCurrentComputePipeline));
@@ -2740,6 +2739,11 @@ angle::Result ContextVk::handleDirtyGraphicsFramebufferFetchBarrier(
 angle::Result ContextVk::handleDirtyGraphicsBlendBarrier(DirtyBits::Iterator *dirtyBitsIterator,
                                                          DirtyBits dirtyBitMask)
 {
+    if (getFeatures().supportsBlendOperationAdvancedCoherent.enabled)
+    {
+        return angle::Result::Continue;
+    }
+
     VkMemoryBarrier memoryBarrier = {};
     memoryBarrier.sType           = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     memoryBarrier.srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -3433,6 +3437,11 @@ angle::Result ContextVk::handleDirtyDescriptorSetsImpl(CommandBufferHelperT *com
 
 void ContextVk::syncObjectPerfCounters(const angle::VulkanPerfCounters &commandQueuePerfCounters)
 {
+    if (!mState.isPerfMonitorActive())
+    {
+        return;
+    }
+
     mPerfCounters.descriptorSetCacheTotalSize                = 0;
     mPerfCounters.descriptorSetCacheKeySizeBytes             = 0;
     mPerfCounters.uniformsAndXfbDescriptorSetCacheHits       = 0;
@@ -4598,7 +4607,7 @@ gl::GraphicsResetStatus ContextVk::getResetStatus()
     {
         // TODO(geofflang): It may be possible to track which context caused the device lost and
         // return either GL_GUILTY_CONTEXT_RESET or GL_INNOCENT_CONTEXT_RESET.
-        // http://anglebug.com/2787
+        // http://anglebug.com/42261488
         return gl::GraphicsResetStatus::UnknownContextReset;
     }
 
@@ -5444,6 +5453,7 @@ angle::Result ContextVk::syncState(const gl::Context *context,
                 mGraphicsPipelineDesc->updateBlendEnabled(
                     &mGraphicsPipelineTransition, glState.getBlendStateExt().getEnabledMask());
                 updateDither();
+                updateAdvancedBlendEquations(programExecutable);
                 break;
             case gl::state::DIRTY_BIT_BLEND_COLOR:
                 mGraphicsDirtyBits.set(DIRTY_BIT_DYNAMIC_BLEND_CONSTANTS);
@@ -5788,7 +5798,8 @@ angle::Result ContextVk::syncState(const gl::Context *context,
                 // When disabled, this should configure the pipeline to render as if single-sampled,
                 // and write the results to all samples of a pixel regardless of coverage. See
                 // EXT_multisample_compatibility.  This is not possible in Vulkan without some
-                // gymnastics, so continue multisampled rendering anyway.  http://anglebug.com/7657
+                // gymnastics, so continue multisampled rendering anyway.
+                // http://anglebug.com/42266123
                 //
                 // Potentially, the GLES1 renderer can switch rendering between two images and blit
                 // from one to the other when the mode changes.  Then this extension wouldn't need
@@ -5798,7 +5809,7 @@ angle::Result ContextVk::syncState(const gl::Context *context,
             case gl::state::DIRTY_BIT_SAMPLE_ALPHA_TO_ONE:
                 // This is part of EXT_multisample_compatibility, and requires the alphaToOne Vulkan
                 // feature.
-                // http://anglebug.com/7657
+                // http://anglebug.com/42266123
                 mGraphicsPipelineDesc->updateAlphaToOneEnable(
                     &mGraphicsPipelineTransition,
                     glState.isMultisamplingEnabled() && glState.isSampleAlphaToOneEnabled());
@@ -5853,14 +5864,14 @@ angle::Result ContextVk::syncState(const gl::Context *context,
                             invalidateGraphicsDriverUniforms();
                             break;
                         case gl::state::EXTENDED_DIRTY_BIT_DEPTH_CLAMP_ENABLED:
-                            // TODO(https://anglebug.com/7713): Use EDS3
+                            // TODO(https://anglebug.com/42266182): Use EDS3
                             mGraphicsPipelineDesc->updateDepthClampEnabled(
                                 &mGraphicsPipelineTransition, glState.isDepthClampEnabled());
                             break;
                         case gl::state::EXTENDED_DIRTY_BIT_MIPMAP_GENERATION_HINT:
                             break;
                         case gl::state::EXTENDED_DIRTY_BIT_POLYGON_MODE:
-                            // TODO(https://anglebug.com/7713): Use EDS3
+                            // TODO(https://anglebug.com/42266182): Use EDS3
                             mGraphicsPipelineDesc->updatePolygonMode(&mGraphicsPipelineTransition,
                                                                      glState.getPolygonMode());
                             // When polygon mode is changed, depth bias might need to be toggled.
@@ -5907,8 +5918,7 @@ angle::Result ContextVk::syncState(const gl::Context *context,
                                 mGraphicsDirtyBits.set(DIRTY_BIT_DYNAMIC_FRAGMENT_SHADING_RATE);
                             }
                             break;
-                        case gl::state::EXTENDED_DIRTY_BIT_FOVEATED_RENDERING:
-                            // Noop until addition of backend support for QCOM foveated extensions
+                        case gl::state::EXTENDED_DIRTY_BIT_BLEND_ADVANCED_COHERENT:
                             break;
                         case gl::state::EXTENDED_DIRTY_BIT_VARIABLE_RASTERIZATION_RATE:
                             // Noop until addition of backend support for
@@ -6764,7 +6774,7 @@ angle::Result ContextVk::memoryBarrierByRegion(const gl::Context *context, GLbit
     // otherwise similar to memoryBarrier in function.
     //
     // TODO: Optimize memoryBarrierByRegion by issuing an in-subpass pipeline barrier instead of
-    // breaking the render pass.  http://anglebug.com/5132
+    // breaking the render pass.  http://anglebug.com/42263695
     return memoryBarrier(context, barriers);
 }
 
@@ -6995,7 +7005,7 @@ angle::Result ContextVk::handleDirtyGraphicsDriverUniforms(DirtyBits::Iterator *
     const uint32_t numSamples  = drawFramebufferVk->getSamples();
 
     uint32_t advancedBlendEquation = 0;
-    if (getFeatures().emulateAdvancedBlendEquations.enabled)
+    if (getFeatures().emulateAdvancedBlendEquations.enabled && mState.isBlendEnabled())
     {
         // Pass the advanced blend equation to shader as-is.  If the equation is not one of the
         // advanced ones, 0 is expected.
@@ -7513,7 +7523,7 @@ angle::Result ContextVk::updateActiveImages(CommandBufferHelperT *commandBufferH
 
     // Note: currently, the image layout is transitioned entirely even if only one level or layer is
     // used.  This is an issue if one subresource of the image is used as framebuffer attachment and
-    // the other as image.  This is a similar issue to http://anglebug.com/2914.  Another issue
+    // the other as image.  This is a similar issue to http://anglebug.com/40096531.  Another issue
     // however is if multiple subresources of the same image are used at the same time.
     // Inefficiencies aside, setting write dependency on the same image multiple times is not
     // supported.  The following makes sure write dependencies are set only once per image.
@@ -7615,21 +7625,9 @@ angle::Result ContextVk::flushImpl(const vk::Semaphore *signalSemaphore,
         memoryBarrier.srcAccessMask   = VK_ACCESS_MEMORY_WRITE_BIT;
         memoryBarrier.dstAccessMask   = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT;
 
-        const VkPipelineStageFlags supportedShaderStages =
-            (VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-             VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |
-             VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT |
-             VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) &
-            mRenderer->getSupportedVulkanPipelineStageMask();
-        const VkPipelineStageFlags bufferWriteStages =
-            VK_PIPELINE_STAGE_TRANSFER_BIT | supportedShaderStages |
-            (getFeatures().supportsTransformFeedbackExtension.enabled
-                 ? VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT
-                 : 0);
-
         mOutsideRenderPassCommands->getCommandBuffer().memoryBarrier(
-            bufferWriteStages, VK_PIPELINE_STAGE_HOST_BIT, memoryBarrier);
+            mRenderer->getSupportedBufferWritePipelineStageMask(), VK_PIPELINE_STAGE_HOST_BIT,
+            memoryBarrier);
         mIsAnyHostVisibleBufferWritten = false;
     }
 
@@ -8148,7 +8146,7 @@ angle::Result ContextVk::onSyncObjectInit(vk::SyncHelper *syncHelper, SyncFenceS
     // cause a submission in this context if another context wants to wait on the fence while the
     // original context never issued a submission naturally.  Note that this also takes care of
     // contexts that think they issued a submission (through glFlush) but that the submission got
-    // deferred (due to the deferFlushUntilEndRenderPass feature).
+    // deferred.
     mHasDeferredFlush = true;
 
     return angle::Result::Continue;
@@ -8497,7 +8495,7 @@ void ContextVk::onProgramExecutableReset(ProgramExecutableVk *executableVk)
     // here, the program executable in the context's state has already been updated.
     // Reset ContextVk::mCurrentGraphicsPipeline, since programInfo.release() freed the
     // PipelineHelper that it's currently pointing to.
-    // TODO(http://anglebug.com/5624): rework updateActiveTextures(), createPipelineLayout(),
+    // TODO(http://anglebug.com/42264159): rework updateActiveTextures(), createPipelineLayout(),
     // handleDirtyGraphicsPipeline(), and ProgramPipelineVk::link().
     resetCurrentGraphicsPipeline();
     invalidateCurrentComputePipeline();
@@ -8684,7 +8682,7 @@ angle::Result ContextVk::flushCommandBuffersIfNecessary(const vk::CommandBufferA
         // Note that different read methods are not compatible. A shader read uses a different
         // layout than a transfer read. So we cannot support simultaneous read usage as easily as
         // for Buffers.  TODO: Don't close the render pass if the image was only used read-only in
-        // the render pass.  http://anglebug.com/4984
+        // the render pass.  http://anglebug.com/42263557
         if (isRenderPassStartedAndUsesImage(*imageAccess.image))
         {
             return flushCommandsAndEndRenderPass(RenderPassClosureReason::ImageUseThenOutOfRPRead);
@@ -8980,22 +8978,6 @@ void ContextVk::resetPerFramePerfCounters()
         .resetDescriptorCacheStats();
     mShareGroupVk->getMetaDescriptorPools()[DescriptorSetIndex::ShaderResource]
         .resetDescriptorCacheStats();
-}
-
-vk::ComputePipelineFlags ContextVk::getComputePipelineFlags() const
-{
-    vk::ComputePipelineFlags pipelineFlags = {};
-
-    if (pipelineRobustness() == vk::PipelineRobustness::Robust)
-    {
-        pipelineFlags.set(vk::ComputePipelineFlag::Robust);
-    }
-    if (pipelineProtectedAccess() == vk::PipelineProtectedAccess::Protected)
-    {
-        pipelineFlags.set(vk::ComputePipelineFlag::Protected);
-    }
-
-    return pipelineFlags;
 }
 
 angle::Result ContextVk::ensureInterfacePipelineCache()

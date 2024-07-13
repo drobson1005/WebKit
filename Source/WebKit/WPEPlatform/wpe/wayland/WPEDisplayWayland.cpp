@@ -32,6 +32,7 @@
 #include "WPEInputMethodContextWaylandV1.h"
 #include "WPEInputMethodContextWaylandV3.h"
 #include "WPEMonitorWaylandPrivate.h"
+#include "WPEToplevelWayland.h"
 #include "WPEViewWayland.h"
 #include "WPEWaylandCursor.h"
 #include "WPEWaylandSeat.h"
@@ -182,14 +183,6 @@ static void wpeDisplayWaylandDispose(GObject* object)
         auto monitor = priv->monitors.takeLast();
         wpe_monitor_invalidate(monitor.get());
     }
-#if USE(LIBDRM)
-    g_clear_pointer(&priv->dmabufFeedback, zwp_linux_dmabuf_feedback_v1_destroy);
-#endif
-    g_clear_pointer(&priv->linuxDMABuf, zwp_linux_dmabuf_v1_destroy);
-    g_clear_pointer(&priv->wlSHM, wl_shm_destroy);
-    g_clear_pointer(&priv->xdgWMBase, xdg_wm_base_destroy);
-    g_clear_pointer(&priv->wlCompositor, wl_compositor_destroy);
-    g_clear_pointer(&priv->wlDisplay, wl_display_disconnect);
     if (priv->textInputManagerV1) {
         g_clear_pointer(&priv->textInputV1, zwp_text_input_v1_destroy);
         g_clear_pointer(&priv->textInputManagerV1, zwp_text_input_manager_v1_destroy);
@@ -198,6 +191,15 @@ static void wpeDisplayWaylandDispose(GObject* object)
         g_clear_pointer(&priv->textInputV3, zwp_text_input_v3_destroy);
         g_clear_pointer(&priv->textInputManagerV3, zwp_text_input_manager_v3_destroy);
     }
+#if USE(LIBDRM)
+    g_clear_pointer(&priv->dmabufFeedback, zwp_linux_dmabuf_feedback_v1_destroy);
+#endif
+    g_clear_pointer(&priv->linuxDMABuf, zwp_linux_dmabuf_v1_destroy);
+    g_clear_pointer(&priv->wlSHM, wl_shm_destroy);
+    g_clear_pointer(&priv->xdgWMBase, xdg_wm_base_destroy);
+    g_clear_pointer(&priv->wlCompositor, wl_compositor_destroy);
+    g_clear_pointer(&priv->wlDisplay, wl_display_disconnect);
+
     G_OBJECT_CLASS(wpe_display_wayland_parent_class)->dispose(object);
 }
 
@@ -229,7 +231,6 @@ const struct wl_registry_listener registryListener = {
             priv->textInputV1 = zwp_text_input_manager_v1_create_text_input(priv->textInputManagerV1);
         } else if (!std::strcmp(interface, "zwp_text_input_manager_v3")) {
             priv->textInputManagerV3 = static_cast<struct zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1));
-            priv->textInputV3 = zwp_text_input_manager_v3_get_text_input(priv->textInputManagerV3, priv->wlSeat->seat());
         }
     },
     // global_remove
@@ -339,6 +340,52 @@ static void wpeDisplayWaylandInitializeDRMDeviceFromEGL(WPEDisplayWayland* displ
         priv->drmRenderNode = eglQueryDeviceStringEXT(eglDevice, EGL_DRM_RENDER_NODE_FILE_EXT);
 }
 
+static gboolean wpeDisplayWaylandSetup(WPEDisplayWayland* display, GError** error)
+{
+    auto* priv = display->priv;
+    priv->eventSource = wpeDisplayWaylandCreateEventSource(display);
+
+    auto* registry = wl_display_get_registry(priv->wlDisplay);
+    wl_registry_add_listener(registry, &registryListener, display);
+    if (wl_display_roundtrip(priv->wlDisplay) < 0) {
+        g_clear_pointer(&priv->wlDisplay, wl_display_disconnect);
+        g_set_error_literal(error, WPE_DISPLAY_ERROR, WPE_DISPLAY_ERROR_CONNECTION_FAILED, "Failed to connect to default Wayland display");
+        return FALSE;
+    }
+
+    if (priv->xdgWMBase)
+        xdg_wm_base_add_listener(priv->xdgWMBase, &xdgWMBaseListener, nullptr);
+    if (priv->wlSeat) {
+        priv->wlCursor = makeUnique<WPE::WaylandCursor>(display);
+        priv->wlSeat->startListening();
+    }
+
+    if (priv->textInputManagerV3) {
+        // Using this interface needs a valid seat. Do not keep around the object
+        // without a seat, to give a chance for a different IM interface to be used.
+        if (priv->wlSeat)
+            priv->textInputV3 = zwp_text_input_manager_v3_get_text_input(priv->textInputManagerV3, priv->wlSeat->seat());
+        else
+            g_clear_pointer(&priv->textInputManagerV3, zwp_text_input_manager_v3_destroy);
+    }
+
+    if (priv->linuxDMABuf) {
+#if USE(LIBDRM)
+        if (zwp_linux_dmabuf_v1_get_version(priv->linuxDMABuf) >= ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) {
+            priv->dmabufFeedback = zwp_linux_dmabuf_v1_get_default_feedback(priv->linuxDMABuf);
+            zwp_linux_dmabuf_feedback_v1_add_listener(priv->dmabufFeedback, &linuxDMABufFeedbackListener, display);
+        }
+#endif
+        zwp_linux_dmabuf_v1_add_listener(priv->linuxDMABuf, &linuxDMABufListener, display);
+        wl_display_roundtrip(priv->wlDisplay);
+    }
+
+    if (priv->drmDevice.isNull())
+        wpeDisplayWaylandInitializeDRMDeviceFromEGL(display);
+
+    return TRUE;
+}
+
 static gboolean wpeDisplayWaylandConnect(WPEDisplay* display, GError** error)
 {
     auto* displayWayland = WPE_DISPLAY_WAYLAND(display);
@@ -354,47 +401,19 @@ static gboolean wpeDisplayWaylandConnect(WPEDisplay* display, GError** error)
         return FALSE;
     }
 
-    priv->eventSource = wpeDisplayWaylandCreateEventSource(displayWayland);
-
-    auto* registry = wl_display_get_registry(priv->wlDisplay);
-    wl_registry_add_listener(registry, &registryListener, display);
-    if (wl_display_roundtrip(priv->wlDisplay) < 0) {
-        g_clear_pointer(&priv->wlDisplay, wl_display_disconnect);
-        g_set_error_literal(error, WPE_DISPLAY_ERROR, WPE_DISPLAY_ERROR_CONNECTION_FAILED, "Failed to connect to default Wayland display");
-        return FALSE;
-    }
-
-    if (priv->xdgWMBase)
-        xdg_wm_base_add_listener(priv->xdgWMBase, &xdgWMBaseListener, nullptr);
-    if (priv->wlSeat) {
-        priv->wlCursor = makeUnique<WPE::WaylandCursor>(displayWayland);
-        priv->wlSeat->startListening();
-    }
-
-    if (priv->linuxDMABuf) {
-#if USE(LIBDRM)
-        if (zwp_linux_dmabuf_v1_get_version(priv->linuxDMABuf) >= ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) {
-            priv->dmabufFeedback = zwp_linux_dmabuf_v1_get_default_feedback(priv->linuxDMABuf);
-            zwp_linux_dmabuf_feedback_v1_add_listener(priv->dmabufFeedback, &linuxDMABufFeedbackListener, display);
-        }
-#endif
-        zwp_linux_dmabuf_v1_add_listener(priv->linuxDMABuf, &linuxDMABufListener, display);
-        wl_display_roundtrip(priv->wlDisplay);
-    }
-
-    if (priv->drmDevice.isNull())
-        wpeDisplayWaylandInitializeDRMDeviceFromEGL(displayWayland);
-
-    return TRUE;
+    return wpeDisplayWaylandSetup(displayWayland, error);
 }
 
 static WPEView* wpeDisplayWaylandCreateView(WPEDisplay* display)
 {
-    auto* priv = WPE_DISPLAY_WAYLAND(display)->priv;
-    if (!priv->wlDisplay || !priv->wlCompositor)
-        return nullptr;
+    auto* displayWayland = WPE_DISPLAY_WAYLAND(display);
+    auto* view = wpe_view_wayland_new(displayWayland);
 
-    return wpe_view_wayland_new(WPE_DISPLAY_WAYLAND(display));
+    // FIXME: create the toplevel conditionally.
+    GRefPtr<WPEToplevel> toplevel = adoptGRef(wpe_toplevel_wayland_new(displayWayland));
+    wpe_view_set_toplevel(view, toplevel.get());
+
+    return view;
 }
 
 static WPEInputMethodContext* wpeDisplayWaylandCreateInputMethodContext(WPEDisplay* display)
@@ -578,7 +597,7 @@ gboolean wpe_display_wayland_connect(WPEDisplayWayland* display, const char* nam
         return FALSE;
     }
 
-    return TRUE;
+    return wpeDisplayWaylandSetup(display, error);
 }
 
 /**

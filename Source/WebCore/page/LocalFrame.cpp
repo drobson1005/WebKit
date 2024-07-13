@@ -1304,14 +1304,10 @@ void LocalFrame::didAccessWindowProxyPropertyViaOpener(WindowProxyProperty prope
     if (origin.isNull() || origin.isOpaque())
         return;
 
-    if (!opener())
+    if (!opener() || !opener()->page())
         return;
 
-    auto openerMainFrame = dynamicDowncast<LocalFrame>(opener()->mainFrame());
-    if (!openerMainFrame)
-        return;
-
-    auto openerMainFrameOrigin = SecurityOriginData::fromFrame(openerMainFrame);
+    auto openerMainFrameOrigin = opener()->page()->mainFrameOrigin().data();
     if (openerMainFrameOrigin.isNull() || openerMainFrameOrigin.isOpaque())
         return;
 
@@ -1337,6 +1333,20 @@ String LocalFrame::customUserAgentAsSiteSpecificQuirks() const
 {
     if (RefPtr documentLoader = loader().activeDocumentLoader())
         return documentLoader->customUserAgentAsSiteSpecificQuirks();
+    return { };
+}
+
+String LocalFrame::customNavigatorPlatform() const
+{
+    if (RefPtr documentLoader = loader().activeDocumentLoader())
+        return documentLoader->customNavigatorPlatform();
+    return { };
+}
+
+OptionSet<AdvancedPrivacyProtections> LocalFrame::advancedPrivacyProtections() const
+{
+    if (auto* documentLoader = loader().activeDocumentLoader())
+        return documentLoader->advancedPrivacyProtections();
     return { };
 }
 

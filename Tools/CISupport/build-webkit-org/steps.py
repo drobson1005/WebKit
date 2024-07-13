@@ -774,7 +774,7 @@ class RunJavaScriptCoreTests(TestWithFailureCount, CustomFlagsMixin):
             self.command += ['--test-writer=ruby']
 
         self.appendCustomBuildFlags(platform, self.getProperty('fullPlatform'))
-        self.command = ['/bin/sh', '-c', ' '.join(self.command) + ' 2>&1 | python3 Tools/Scripts/filter-jsc-tests']
+        self.command = ['/bin/sh', '-c', ' '.join(self.command) + ' 2>&1 | python3 Tools/Scripts/filter-test-logs jsc']
 
         steps_to_add = [
             GenerateS3URL(
@@ -1632,7 +1632,7 @@ class ScanBuildSmartPointer(steps.ShellSequence, ShellMixin):
         build_command = f"Tools/Scripts/build-and-analyze --output-dir {os.path.join(self.getProperty('builddir'), f'build/{SCAN_BUILD_OUTPUT_DIR}')} "
         build_command += f"--only-smart-pointers --analyzer-path={os.path.join(self.getProperty('builddir'), 'llvm-project/build/bin/clang')} "
         build_command += '--scan-build-path=../llvm-project/clang/tools/scan-build/bin/scan-build --sdkroot=macosx --preprocessor-additions=CLANG_WEBKIT_BRANCH=1 '
-        build_command += '2>&1 | python3 Tools/Scripts/filter-static-analyzer'
+        build_command += '2>&1 | python3 Tools/Scripts/filter-test-logs scan-build --output build-log.txt'
 
         for command in [
             self.shell_command(f"/bin/rm -rf {os.path.join(self.getProperty('builddir'), f'build/{SCAN_BUILD_OUTPUT_DIR}')}"),
@@ -2000,6 +2000,29 @@ class SetPermissions(master.MasterShellCommandNewStyle):
         kwargs['command'] = ['chmod', 'a+rx', resultDirectory]
         kwargs['logEnviron'] = False
         super().__init__(**kwargs)
+
+
+class PrintClangVersion(shell.ShellCommandNewStyle):
+    name = 'print-clang-version'
+    haltOnFailure = False
+    flunkOnFailure = False
+    warnOnFailure = False
+
+    @defer.inlineCallbacks
+    def run(self):
+        self.log_observer = logobserver.BufferLogObserver()
+        self.addLogObserver('stdio', self.log_observer)
+        self.command = ['../llvm-project/build/bin/clang', '--version']
+        rc = yield super().run()
+        return defer.returnValue(rc)
+
+    def getResultSummary(self):
+        if self.results != SUCCESS:
+            return {'step': 'Failed to print clang version'}
+        log_text = self.log_observer.getStdout()
+        match = re.search('(.*clang version.+) (\\(.+?\\))', log_text)
+        if match:
+            return {'step': match.group(0)}
 
 
 class ShowIdentifier(shell.ShellCommandNewStyle):

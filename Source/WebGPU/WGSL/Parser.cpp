@@ -35,6 +35,7 @@
 #include <wtf/HashSet.h>
 #include <wtf/SetForScope.h>
 #include <wtf/SortedArrayMap.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WGSL {
@@ -835,6 +836,7 @@ Result<AST::Structure::Ref> Parser<Lexer>::parseStructure(AST::Attribute::List&&
         static constexpr unsigned maximumNumberOfStructMembers = 1023;
         if (UNLIKELY(members.size() > maximumNumberOfStructMembers))
             FAIL(makeString("struct cannot have more than "_s, String::number(maximumNumberOfStructMembers), " members"_s));
+
         if (current().type == TokenType::Comma)
             consume();
         else
@@ -866,6 +868,13 @@ template<typename Lexer>
 Result<AST::Expression::Ref> Parser<Lexer>::parseTypeName()
 {
     START_PARSE();
+
+    auto scope = SetForScope(m_compositeTypeDepth, m_compositeTypeDepth + 1);
+    //
+    // https://www.w3.org/TR/WGSL/#limits
+    static constexpr unsigned maximumCompositeTypeNestingDepth = 15;
+    if (UNLIKELY(m_compositeTypeDepth > maximumCompositeTypeNestingDepth))
+        FAIL(makeString("composite type may not be nested more than "_s, String::number(maximumCompositeTypeNestingDepth), " levels"_s));
 
     if (current().type == TokenType::Identifier) {
         PARSE(name, Identifier);
@@ -1081,6 +1090,12 @@ Result<AST::Function::Ref> Parser<Lexer>::parseFunction(AST::Attribute::List&& a
     while (current().type != TokenType::ParenRight) {
         PARSE(parameter, Parameter);
         parameters.append(WTFMove(parameter));
+
+        // https://www.w3.org/TR/WGSL/#limits
+        static constexpr unsigned maximumNumberOfFunctionParameters = 255;
+        if (UNLIKELY(parameters.size() > maximumNumberOfFunctionParameters))
+            FAIL(makeString("function cannot have more than "_s, String::number(maximumNumberOfFunctionParameters), " parameters"_s));
+
         if (current().type == TokenType::Comma)
             consume();
         else
@@ -1163,7 +1178,9 @@ Result<AST::Statement::Ref> Parser<Lexer>::parseStatement()
     case TokenType::ParenLeft:
     case TokenType::And:
     case TokenType::Star: {
-        return parseVariableUpdatingStatement();
+        PARSE(variableUpdatingStatement, VariableUpdatingStatement);
+        CONSUME_TYPE(Semicolon);
+        return { variableUpdatingStatement };
     }
     case TokenType::KeywordFor: {
         // FIXME: Handle attributes attached to statement.
@@ -1397,6 +1414,7 @@ Result<AST::Statement::Ref> Parser<Lexer>::parseSwitchStatement()
 
     Vector<AST::SwitchClause> clauses;
     std::optional<AST::SwitchClause> defaultClause;
+    unsigned selectorCount = 0;
     while (current().type != TokenType::BraceRight) {
         AST::Expression::List selectors;
         bool hasDefault = false;
@@ -1407,6 +1425,7 @@ Result<AST::Statement::Ref> Parser<Lexer>::parseSwitchStatement()
                     consume();
                     hasDefault = true;
                 } else {
+                    ++selectorCount;
                     PARSE(selector, Expression);
                     selectors.append(WTFMove(selector));
                 }
@@ -1432,6 +1451,11 @@ Result<AST::Statement::Ref> Parser<Lexer>::parseSwitchStatement()
             defaultClause = { WTFMove(selectors), body };
         else
             clauses.append({ WTFMove(selectors), body });
+
+        // https://www.w3.org/TR/WGSL/#limits
+        static constexpr unsigned maximumNumberOfCaseSelectors = 1023;
+        if (UNLIKELY(selectorCount > maximumNumberOfCaseSelectors))
+            FAIL(makeString("switch statement cannot have more than "_s, String::number(maximumNumberOfCaseSelectors), " case selector values"_s));
     }
     CONSUME_TYPE(BraceRight);
 

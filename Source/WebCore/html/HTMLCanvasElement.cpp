@@ -551,27 +551,11 @@ GPUCanvasContext* HTMLCanvasElement::getContextWebGPU(const String& type, GPU* g
     return static_cast<GPUCanvasContext*>(m_context.get());
 }
 
-bool HTMLCanvasElement::shouldNotifyRendererOnDidDraw() const
-{
-    if (!renderBox()->hasAcceleratedCompositing())
-        return false;
-
-    if (isGPUBased())
-        return true;
-
-#if USE(SKIA) && USE(NICOSIA)
-    if (m_context && m_context->isAccelerated())
-        return true;
-#endif
-
-    return false;
-}
-
 void HTMLCanvasElement::didDraw(const std::optional<FloatRect>& rect, ShouldApplyPostProcessingToDirtyRect shouldApplyPostProcessingToDirtyRect)
 {
     clearCopiedImage();
     if (CheckedPtr renderer = renderBox()) {
-        if (shouldNotifyRendererOnDidDraw())
+        if (usesContentsAsLayerContents())
             renderer->contentChanged(CanvasPixelsChanged);
         else if (rect) {
             FloatRect destRect;
@@ -609,7 +593,7 @@ void HTMLCanvasElement::reset()
     IntSize newSize(w, h);
     // If the size of an existing buffer matches, we can just clear it instead of reallocating.
     // This optimization is only done for 2D canvases for now.
-    if (m_hasCreatedImageBuffer && oldSize == newSize && m_context && m_context->is2d() && buffer() && m_context->colorSpace() == buffer()->colorSpace() && m_context->pixelFormat() == buffer()->pixelFormat()) {
+    if (hasCreatedImageBuffer() && oldSize == newSize && m_context && m_context->is2d() && buffer() && m_context->colorSpace() == buffer()->colorSpace() && m_context->pixelFormat() == buffer()->pixelFormat()) {
         if (!m_didClearImageBuffer)
             clearImageBuffer();
         return;
@@ -619,7 +603,7 @@ void HTMLCanvasElement::reset()
 
     if (m_context) {
         if (auto* context = dynamicDowncast<GPUBasedCanvasRenderingContext>(*m_context))
-            context->reshape(width(), height(), oldSize.width(), oldSize.height());
+            context->reshape();
     }
 
     if (CheckedPtr canvasRenderer = dynamicDowncast<RenderHTMLCanvas>(renderer())) {
@@ -635,24 +619,15 @@ void HTMLCanvasElement::reset()
     notifyObserversCanvasResized();
 }
 
-bool HTMLCanvasElement::paintsIntoCanvasBuffer() const
+bool HTMLCanvasElement::usesContentsAsLayerContents() const
 {
-    ASSERT(m_context);
-#if USE(IOSURFACE_CANVAS_BACKING_STORE) || (USE(SKIA) && !USE(NICOSIA))
-    if (m_context->is2d() || m_context->isBitmapRenderer())
-        return true;
-#endif
-
-    if (!m_context->isAccelerated())
-        return true;
-
-    if (renderBox() && renderBox()->hasAcceleratedCompositing())
+    auto* renderBox = this->renderBox();
+    if (!renderBox)
         return false;
-
-    return true;
+    if (!m_context)
+        return false;
+    return renderBox->hasAcceleratedCompositing() && m_context->delegatesDisplay();
 }
-
-
 
 void HTMLCanvasElement::paint(GraphicsContext& context, const LayoutRect& r)
 {
@@ -661,7 +636,7 @@ void HTMLCanvasElement::paint(GraphicsContext& context, const LayoutRect& r)
     m_context->clearAccumulatedDirtyRect();
 
     if (!context.paintingDisabled()) {
-        if (paintsIntoCanvasBuffer() || document().printing() || m_isSnapshotting) {
+        if (!usesContentsAsLayerContents() || document().printing() || m_isSnapshotting) {
             if (m_context->compositingResultsNeedUpdating())
                 m_context->prepareForDisplay();
             const bool skipTransparentBlackDraw = context.compositeMode() == CompositeMode { CompositeOperator::SourceOver, BlendMode::Normal };
@@ -677,15 +652,10 @@ void HTMLCanvasElement::paint(GraphicsContext& context, const LayoutRect& r)
         InspectorInstrumentation::didFinishRecordingCanvasFrame(*m_context);
 }
 
-bool HTMLCanvasElement::isGPUBased() const
-{
-    return m_context && m_context->isGPUBased();
-}
-
 void HTMLCanvasElement::setSurfaceSize(const IntSize& size)
 {
     CanvasBase::setSize(size);
-    m_hasCreatedImageBuffer = false;
+    setHasCreatedImageBuffer(false);
     setImageBuffer(nullptr);
     clearCopiedImage();
 }
@@ -791,11 +761,12 @@ ExceptionOr<Ref<OffscreenCanvas>> HTMLCanvasElement::transferControlToOffscreen(
     if (m_context)
         return Exception { ExceptionCode::InvalidStateError };
 
-    m_context = makeUniqueWithoutRefCountedCheck<PlaceholderRenderingContext>(*this);
-    if (m_context->isAccelerated())
+    std::unique_ptr placeholderContext = PlaceholderRenderingContext::create(*this);
+    Ref offscreen = OffscreenCanvas::create(document(), *placeholderContext);
+    m_context = WTFMove(placeholderContext);
+    if (m_context->delegatesDisplay())
         invalidateStyleAndLayerComposition();
-
-    return OffscreenCanvas::create(document(), *this);
+    return offscreen;
 }
 #endif
 
@@ -809,7 +780,7 @@ RefPtr<ImageData> HTMLCanvasElement::getImageData()
     if (document().settings().webAPIStatisticsEnabled())
         ResourceLoadObserver::shared().logCanvasRead(document());
 
-    RefPtr pixelBuffer = dynamicDowncast<ByteArrayPixelBuffer>(context->drawingBufferToPixelBuffer(GraphicsContextGL::FlipY::Yes));
+    RefPtr pixelBuffer = context->drawingBufferToPixelBuffer();
     if (!pixelBuffer)
         return nullptr;
 
@@ -888,7 +859,7 @@ void HTMLCanvasElement::createImageBuffer() const
 {
     ASSERT(!hasCreatedImageBuffer());
 
-    m_hasCreatedImageBuffer = true;
+    const_cast<HTMLCanvasElement*>(this)->setHasCreatedImageBuffer(true);
     m_didClearImageBuffer = true;
     setImageBuffer(allocateImageBuffer());
 
@@ -903,7 +874,7 @@ void HTMLCanvasElement::createImageBuffer() const
 void HTMLCanvasElement::setImageBufferAndMarkDirty(RefPtr<ImageBuffer>&& buffer)
 {
     IntSize oldSize = size();
-    m_hasCreatedImageBuffer = true;
+    setHasCreatedImageBuffer(true);
     setImageBuffer(WTFMove(buffer));
 
     if (isControlledByOffscreen() && oldSize != size()) {
@@ -933,7 +904,7 @@ Image* HTMLCanvasElement::copiedImage() const
 
 void HTMLCanvasElement::clearImageBuffer() const
 {
-    ASSERT(m_hasCreatedImageBuffer);
+    ASSERT(hasCreatedImageBuffer());
     ASSERT(!m_didClearImageBuffer);
     ASSERT(m_context);
 

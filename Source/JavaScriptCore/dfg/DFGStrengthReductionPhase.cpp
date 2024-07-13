@@ -44,6 +44,7 @@
 #include "WasmCallingConvention.h"
 #include "WebAssemblyFunction.h"
 #include <cstdlib>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace JSC { namespace DFG {
@@ -908,7 +909,7 @@ private:
                 if (codeSize > Options::maximumRegExpTestInlineCodesize())
                     return false;
 
-                unsigned alignedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), inlineCodeStats8Bit.stackSize());
+                unsigned alignedFrameSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(inlineCodeStats8Bit.stackSize());
 
                 if (alignedFrameSize)
                     m_graph.m_parameterSlots = std::max(m_graph.m_parameterSlots, argumentCountForStackSize(alignedFrameSize));
@@ -1257,10 +1258,9 @@ private:
                 auto* wasmFunction = jsDynamicCast<WebAssemblyFunction*>(function);
                 if (!wasmFunction)
                     break;
-                const auto& typeDefinition = Wasm::TypeInformation::get(wasmFunction->typeIndex()).expand();
-                const auto& signature = *typeDefinition.as<Wasm::FunctionSignature>();
+                const auto& signature = Wasm::TypeInformation::getFunctionSignature(wasmFunction->typeIndex());
                 const Wasm::WasmCallingConvention& wasmCC = Wasm::wasmCallingConvention();
-                Wasm::CallInformation wasmCallInfo = wasmCC.callInformationFor(typeDefinition);
+                Wasm::CallInformation wasmCallInfo = wasmCC.callInformationFor(signature);
                 if (wasmCallInfo.argumentsOrResultsIncludeV128)
                     break;
 

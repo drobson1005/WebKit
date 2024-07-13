@@ -76,6 +76,7 @@
 #import <WebCore/ValidationBubble.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/cocoa/Entitlements.h>
+#import <wtf/cocoa/SpanCocoa.h>
 
 #define MESSAGE_CHECK(assertion) do { \
     if (auto webView = this->webView()) { \
@@ -400,8 +401,7 @@ void PageClientImpl::executeUndoRedo(UndoOrRedo undoOrRedo)
 
 void PageClientImpl::accessibilityWebProcessTokenReceived(std::span<const uint8_t> data, WebCore::FrameIdentifier, pid_t)
 {
-    NSData *remoteToken = [NSData dataWithBytes:data.data() length:data.size()];
-    [contentView() _setAccessibilityWebProcessToken:remoteToken];
+    [contentView() _setAccessibilityWebProcessToken:toNSData(data).get()];
 }
 
 bool PageClientImpl::interpretKeyEvent(const NativeWebKeyboardEvent& event, bool isCharEvent)
@@ -713,11 +713,6 @@ void PageClientImpl::didUpdateEditorState()
     [contentView() _didUpdateEditorState];
 }
 
-void PageClientImpl::didClearEditorStateAfterPageTransition()
-{
-    [contentView() _didClearEditorStateAfterPageTransition];
-}
-
 void PageClientImpl::showPlaybackTargetPicker(bool hasVideo, const IntRect& elementRect, WebCore::RouteSharingPolicy policy, const String& contextUID)
 {
     [contentView() _showPlaybackTargetPicker:hasVideo fromRect:elementRect routeSharingPolicy:policy routingContextUID:contextUID];
@@ -844,8 +839,7 @@ void PageClientImpl::beganExitFullScreen(const IntRect& initialFrame, const IntR
 
 void PageClientImpl::didFinishLoadingDataForCustomContentProvider(const String& suggestedFilename, std::span<const uint8_t> dataReference)
 {
-    RetainPtr<NSData> data = adoptNS([[NSData alloc] initWithBytes:dataReference.data() length:dataReference.size()]);
-    [webView() _didFinishLoadingDataForCustomContentProviderWithSuggestedFilename:suggestedFilename data:data.get()];
+    [webView() _didFinishLoadingDataForCustomContentProviderWithSuggestedFilename:suggestedFilename data:toNSData(dataReference).get()];
 }
 
 void PageClientImpl::scrollingNodeScrollViewWillStartPanGesture(ScrollingNodeID)
@@ -946,6 +940,7 @@ void PageClientImpl::didChangeBackgroundColor()
 
 void PageClientImpl::videoControlsManagerDidChange()
 {
+    PageClientImplCocoa::videoControlsManagerDidChange();
     [webView() _videoControlsManagerDidChange];
 }
 
@@ -1065,9 +1060,9 @@ void PageClientImpl::requestPasswordForQuickLookDocument(const String& fileName,
 }
 #endif
 
-void PageClientImpl::requestDOMPasteAccess(WebCore::DOMPasteAccessCategory pasteAccessCategory, const WebCore::IntRect& elementRect, const String& originIdentifier, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&& completionHandler)
+void PageClientImpl::requestDOMPasteAccess(WebCore::DOMPasteAccessCategory pasteAccessCategory, WebCore::DOMPasteRequiresInteraction requiresInteraction, const WebCore::IntRect& elementRect, const String& originIdentifier, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&& completionHandler)
 {
-    [contentView() _requestDOMPasteAccessForCategory:pasteAccessCategory elementRect:elementRect originIdentifier:originIdentifier completionHandler:WTFMove(completionHandler)];
+    [contentView() _requestDOMPasteAccessForCategory:pasteAccessCategory requiresInteraction:requiresInteraction elementRect:elementRect originIdentifier:originIdentifier completionHandler:WTFMove(completionHandler)];
 }
 
 void PageClientImpl::cancelPointersForGestureRecognizer(UIGestureRecognizer* gestureRecognizer)
@@ -1253,6 +1248,11 @@ const String& PageClientImpl::spatialTrackingLabel() const
     return [contentView() spatialTrackingLabel];
 }
 #endif
+
+void PageClientImpl::scheduleVisibleContentRectUpdate()
+{
+    [webView() _scheduleVisibleContentRectUpdate];
+}
 
 } // namespace WebKit
 

@@ -267,10 +267,13 @@ public:
     WriteBarrier<JSFunction> m_objectProtoValueOfFunction;
     WriteBarrier<JSFunction> m_functionProtoHasInstanceSymbolFunction;
     WriteBarrier<JSFunction> m_performProxyObjectHasFunction;
+    WriteBarrier<JSFunction> m_performProxyObjectHasByValFunction;
     WriteBarrier<JSFunction> m_performProxyObjectGetFunction;
     WriteBarrier<JSFunction> m_performProxyObjectGetByValFunction;
     WriteBarrier<JSFunction> m_performProxyObjectSetStrictFunction;
     WriteBarrier<JSFunction> m_performProxyObjectSetSloppyFunction;
+    WriteBarrier<JSFunction> m_performProxyObjectSetByValStrictFunction;
+    WriteBarrier<JSFunction> m_performProxyObjectSetByValSloppyFunction;
     WriteBarrier<JSObject> m_regExpProtoSymbolReplace;
     LazyProperty<JSGlobalObject, GetterSetter> m_throwTypeErrorArgumentsCalleeGetterSetter;
 
@@ -506,10 +509,9 @@ public:
 #undef DECLARE_TYPED_ARRAY_TYPE_WATCHPOINT
     Vector<std::unique_ptr<ObjectAdaptiveStructureWatchpoint>> m_missWatchpoints;
 
-    void addObjectsForTicket(DeferredWorkTimer::Ticket, JSObject* scriptExecutionOwner, FixedVector<Weak<JSCell>>& dependencies);
-    void removeObjectsForTicket(DeferredWorkTimer::Ticket);
-    void clearObjectsForTicket();
-    std::unique_ptr<HashMap<DeferredWorkTimer::Ticket, FixedVector<WriteBarrier<JSCell>>>> m_objectsForTicket;
+    void addWeakTicket(DeferredWorkTimer::Ticket);
+    void clearWeakTickets();
+    std::unique_ptr<ThreadSafeWeakHashSet<DeferredWorkTimer::TicketData>> m_weakTickets;
 
     inline std::unique_ptr<ObjectAdaptiveStructureWatchpoint>& typedArrayConstructorSpeciesAbsenceWatchpoint(TypedArrayType);
     inline std::unique_ptr<ObjectAdaptiveStructureWatchpoint>& typedArrayPrototypeSymbolIteratorAbsenceWatchpoint(TypedArrayType);
@@ -566,8 +568,6 @@ public:
     bool m_requiresTrustedTypes { true };
     bool m_needsSiteSpecificQuirks { false };
     unsigned m_globalLexicalBindingEpoch { 1 };
-    ScopeOffset m_lastStaticGlobalOffset;
-    IdentifierSet m_varNamesDeclaredViaEval;
     String m_evalDisabledErrorMessage;
     String m_webAssemblyDisabledErrorMessage;
     RuntimeFlags m_runtimeFlags;
@@ -648,9 +648,6 @@ public:
     JS_EXPORT_PRIVATE static bool getOwnPropertySlot(JSObject*, JSGlobalObject*, PropertyName, PropertySlot&);
     JS_EXPORT_PRIVATE static bool put(JSCell*, JSGlobalObject*, PropertyName, JSValue, PutPropertySlot&);
     JS_EXPORT_PRIVATE static bool defineOwnProperty(JSObject*, JSGlobalObject*, PropertyName, const PropertyDescriptor&, bool shouldThrow);
-    JS_EXPORT_PRIVATE static bool deleteProperty(JSCell*, JSGlobalObject*, PropertyName, DeletePropertySlot&);
-
-    bool hasVarDeclaration(const RefPtr<UniquedStringImpl>&);
 
     bool canDeclareGlobalFunction(const Identifier&);
     template<BindingCreationContext> void createGlobalFunctionBinding(const Identifier&);
@@ -710,6 +707,8 @@ public:
     JSFunction* regExpProtoExecFunction() const;
     JSFunction* stringProtoSubstringFunction() const;
     JSFunction* performProxyObjectHasFunction() const;
+    JSFunction* performProxyObjectHasByValFunction() const;
+    JSFunction* performProxyObjectHasByValFunctionConcurrently() const;
     JSFunction* performProxyObjectGetFunction() const;
     JSFunction* performProxyObjectGetFunctionConcurrently() const;
     JSFunction* performProxyObjectGetByValFunction() const;
@@ -718,6 +717,10 @@ public:
     JSFunction* performProxyObjectSetSloppyFunctionConcurrently() const;
     JSFunction* performProxyObjectSetStrictFunction() const;
     JSFunction* performProxyObjectSetStrictFunctionConcurrently() const;
+    JSFunction* performProxyObjectSetByValSloppyFunction() const;
+    JSFunction* performProxyObjectSetByValSloppyFunctionConcurrently() const;
+    JSFunction* performProxyObjectSetByValStrictFunction() const;
+    JSFunction* performProxyObjectSetByValStrictFunctionConcurrently() const;
     JSObject* regExpProtoSymbolReplaceFunction() const { return m_regExpProtoSymbolReplace.get(); }
     GetterSetter* regExpProtoGlobalGetter() const;
     GetterSetter* regExpProtoUnicodeGetter() const;
@@ -900,10 +903,13 @@ public:
     static constexpr ptrdiff_t offsetOfVarReadOnlyWatchpoint() { return OBJECT_OFFSETOF(JSGlobalObject, m_varReadOnlyWatchpointSet); }
     static constexpr ptrdiff_t offsetOfFunctionProtoHasInstanceSymbolFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_functionProtoHasInstanceSymbolFunction); }
     static constexpr ptrdiff_t offsetOfPerformProxyObjectHasFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectHasFunction); }
+    static constexpr ptrdiff_t offsetOfPerformProxyObjectHasByValFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectHasByValFunction); }
     static constexpr ptrdiff_t offsetOfPerformProxyObjectGetFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectGetFunction); }
     static constexpr ptrdiff_t offsetOfPerformProxyObjectGetByValFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectGetByValFunction); }
     static constexpr ptrdiff_t offsetOfPerformProxyObjectSetStrictFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectSetStrictFunction); }
     static constexpr ptrdiff_t offsetOfPerformProxyObjectSetSloppyFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectSetSloppyFunction); }
+    static constexpr ptrdiff_t offsetOfPerformProxyObjectSetByValStrictFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectSetByValStrictFunction); }
+    static constexpr ptrdiff_t offsetOfPerformProxyObjectSetByValSloppyFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_performProxyObjectSetByValSloppyFunction); }
     static constexpr ptrdiff_t offsetOfNullSetterStrictFunction() { return OBJECT_OFFSETOF(JSGlobalObject, m_nullSetterStrictFunction); }
     static constexpr ptrdiff_t offsetOfStringPrototype() { return OBJECT_OFFSETOF(JSGlobalObject, m_stringPrototype); }
     static constexpr ptrdiff_t offsetOfBigIntPrototype() { return OBJECT_OFFSETOF(JSGlobalObject, m_bigIntPrototype); }

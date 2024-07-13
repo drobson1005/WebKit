@@ -25,6 +25,7 @@
 
 #include "LayoutSize.h"
 #include "TransformOperation.h"
+#include <algorithm>
 #include <wtf/ArgumentCoder.h>
 #include <wtf/Ref.h>
 #include <wtf/Vector.h>
@@ -76,6 +77,7 @@ public:
 
     bool isInvertible(const LayoutSize&) const;
 
+    bool containsNonInvertibleMatrix(const LayoutSize&) const;
     bool shouldFallBackToDiscreteAnimation(const TransformOperations&, const LayoutSize&) const;
 
     Ref<TransformOperation> createBlendedMatrixOperationFromOperationsSuffix(const TransformOperations& from, unsigned start, const BlendingContext&, const LayoutSize& referenceBoxSize) const;
@@ -91,7 +93,7 @@ private:
 template<TransformOperation::Type operationType>
 bool TransformOperations::hasTransformOfType() const
 {
-    return WTF::anyOf(m_operations, [](auto& op) { return op->type() == operationType; });
+    return std::ranges::any_of(m_operations, [](auto& op) { return op->type() == operationType; });
 }
 
 WTF::TextStream& operator<<(WTF::TextStream&, const TransformOperations&);

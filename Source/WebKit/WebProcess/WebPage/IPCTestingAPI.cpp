@@ -65,7 +65,7 @@
 #include <wtf/PageBlock.h>
 #include <wtf/Scope.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/text/StringConcatenate.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebKit::IPCTestingAPI {
 
@@ -527,8 +527,8 @@ static JSValueRef jsSendWithAsyncReply(IPC::Connection& connection, uint64_t des
                 jsResult = jsResultFromReplyDecoder(globalObject, messageName, *replyDecoder);
             JSValueRef arguments[1] = { nullptr };
             if (auto* exception = scope.exception()) {
-                scope.clearException();
                 arguments[0] = toRef(globalObject, exception);
+                scope.clearException();
             } else
                 arguments[0] = toRef(globalObject, jsResult);
             JSObjectCallAsFunction(context, callback, callback, 1, arguments, nullptr);

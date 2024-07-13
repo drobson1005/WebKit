@@ -61,7 +61,7 @@ StreamingCompiler::~StreamingCompiler()
 {
     if (m_ticket) {
         auto ticket = std::exchange(m_ticket, nullptr);
-        m_vm.deferredWorkTimer->scheduleWorkSoon(ticket, [](DeferredWorkTimer::Ticket) mutable { });
+        m_vm.deferredWorkTimer->scheduleWorkSoon(ticket, [](DeferredWorkTimer::Ticket) { });
     }
 }
 
@@ -141,7 +141,7 @@ void StreamingCompiler::didComplete()
     case CompilerMode::Validation: {
         m_vm.deferredWorkTimer->scheduleWorkSoon(ticket, [result = WTFMove(result)](DeferredWorkTimer::Ticket ticket) mutable {
             JSPromise* promise = jsCast<JSPromise*>(ticket->target());
-            JSGlobalObject* globalObject = jsCast<JSGlobalObject*>(ticket->dependencies[0].get());
+            JSGlobalObject* globalObject = jsCast<JSGlobalObject*>(ticket->dependencies()[0].get());
             VM& vm = globalObject->vm();
             auto scope = DECLARE_THROW_SCOPE(vm);
 
@@ -162,8 +162,8 @@ void StreamingCompiler::didComplete()
     case CompilerMode::FullCompile: {
         m_vm.deferredWorkTimer->scheduleWorkSoon(ticket, [result = WTFMove(result)](DeferredWorkTimer::Ticket ticket) mutable {
             JSPromise* promise = jsCast<JSPromise*>(ticket->target());
-            JSGlobalObject* globalObject = jsCast<JSGlobalObject*>(ticket->dependencies[0].get());
-            JSObject* importObject = jsCast<JSObject*>(ticket->dependencies[1].get());
+            JSGlobalObject* globalObject = jsCast<JSGlobalObject*>(ticket->dependencies()[0].get());
+            JSObject* importObject = jsCast<JSObject*>(ticket->dependencies()[1].get());
             VM& vm = globalObject->vm();
             auto scope = DECLARE_THROW_SCOPE(vm);
 

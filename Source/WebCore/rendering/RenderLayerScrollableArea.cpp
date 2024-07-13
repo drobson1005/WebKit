@@ -78,6 +78,7 @@
 #include "ScrollingCoordinator.h"
 #include "ShadowRoot.h"
 #include <wtf/SetForScope.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
@@ -1576,7 +1577,6 @@ bool RenderLayerScrollableArea::hitTestOverflowControls(HitTestResult& result, c
 
     auto rects = overflowControlsRects();
 
-    IntRect resizeControlRect;
     auto& renderer = m_layer.renderer();
     if (renderer.style().resize() != Resize::None) {
         if (rects.resizer.contains(localPoint))

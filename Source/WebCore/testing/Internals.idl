@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
- * Copyright (C) 2013-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -153,6 +153,27 @@ enum AutoplayPolicy {
     boolean hasActiveSession;
     boolean registeredAsNowPlayingApplication;
     boolean haveEverRegisteredAsNowPlayingApplication;
+};
+
+[
+    ExportMacro=WEBCORE_TESTSUPPORT_EXPORT,
+    Conditional=VIDEO,
+    JSGenerateToJSObject,
+] dictionary NowPlayingInfoArtwork {
+    DOMString src;
+    DOMString mimeType;
+};
+
+[
+    ExportMacro=WEBCORE_TESTSUPPORT_EXPORT,
+    Conditional=VIDEO,
+    JSGenerateToJSObject,
+] dictionary NowPlayingMetadata {
+    DOMString title;
+    DOMString artist;
+    DOMString album;
+    DOMString sourceApplicationIdentifier;
+    NowPlayingInfoArtwork? artwork;
 };
 
 [
@@ -631,8 +652,8 @@ typedef (FetchRequest or FetchResponse) FetchObject;
     boolean hasAutocorrectedMarker(long from, long length);
     boolean hasDictationAlternativesMarker(long from, long length);
     boolean hasCorrectionIndicatorMarker(long from, long length);
-#if defined(ENABLE_UNIFIED_TEXT_REPLACEMENT) && ENABLE_UNIFIED_TEXT_REPLACEMENT
-    boolean hasUnifiedTextReplacementMarker(long from, long length);
+#if defined(ENABLE_WRITING_TOOLS) && ENABLE_WRITING_TOOLS
+    boolean hasWritingToolsTextSuggestionMarker(long from, long length);
 #endif
     undefined setContinuousSpellCheckingEnabled(boolean enabled);
     undefined setAutomaticQuoteSubstitutionEnabled(boolean enabled);
@@ -964,6 +985,8 @@ typedef (FetchRequest or FetchResponse) FetchObject;
     [Conditional=VIDEO] undefined endAudioSessionInterruption();
     [Conditional=VIDEO] undefined clearAudioSessionInterruptionFlag();
     [Conditional=VIDEO] undefined suspendAllMediaBuffering();
+    [Conditional=VIDEO] undefined suspendAllMediaPlayback();
+    [Conditional=VIDEO] undefined resumeAllMediaPlayback();
 
     [Conditional=WIRELESS_PLAYBACK_TARGET] undefined setMockMediaPlaybackTargetPickerEnabled(boolean enabled);
     [Conditional=WIRELESS_PLAYBACK_TARGET] undefined setMockMediaPlaybackTargetPickerState(DOMString deviceName, DOMString deviceState);
@@ -981,7 +1004,6 @@ typedef (FetchRequest or FetchResponse) FetchObject;
     [Conditional=WEB_RTC] undefined stopPeerConnection(RTCPeerConnection connection);
     [Conditional=WEB_RTC] undefined clearPeerConnectionFactory();
     [Conditional=WEB_RTC] undefined setEnableWebRTCEncryption(boolean enabled);
-    [Conditional=WEB_RTC] undefined setUseDTLS10(boolean use);
 
     [Conditional=VIDEO] undefined simulateSystemSleep();
     [Conditional=VIDEO] undefined simulateSystemWake();
@@ -1107,6 +1129,8 @@ typedef (FetchRequest or FetchResponse) FetchObject;
     [Conditional=MEDIA_STREAM] boolean isMockRealtimeMediaSourceCenterEnabled();
     [Conditional=MEDIA_STREAM] boolean shouldAudioTrackPlay(AudioTrack track);
 
+    [Conditional=WEB_RTC] readonly attribute DOMString rtcNetworkInterfaceName;
+
     boolean isHardwareVP9DecoderExpected();
 
     DOMString documentIdentifier(Document document);
@@ -1184,6 +1208,7 @@ typedef (FetchRequest or FetchResponse) FetchObject;
 
     undefined setMaxCanvasArea(unsigned long size);
 
+    [Conditional=VIDEO] readonly attribute NowPlayingMetadata? nowPlayingMetadata;
     [Conditional=VIDEO] readonly attribute NowPlayingState nowPlayingState;
 
     [Conditional=VIDEO] HTMLMediaElement bestMediaElementForRemoteControls(PlaybackControlsPurpose purpose);
@@ -1269,8 +1294,6 @@ typedef (FetchRequest or FetchResponse) FetchObject;
     long readPreferenceInteger(DOMString domain, DOMString key);
     DOMString encodedPreferenceValue(DOMString domain, DOMString key);
 
-    DOMString getUTIFromTag(DOMString tagClass, DOMString tag, DOMString conformingToUTI);
-
     boolean supportsPictureInPicture();
 
     boolean isRemoteUIAppForAccessibility();
@@ -1347,6 +1370,7 @@ typedef (FetchRequest or FetchResponse) FetchObject;
     sequence<PDFAnnotationRect> pdfAnnotationRectsForTesting(Element element);
     undefined registerPDFTest(VoidCallback callback, Element element);
     undefined setPDFDisplayModeForTesting(Element element, DOMString mode);
+    boolean sendEditingCommandToPDFForTesting(Element element, DOMString commandName, optional DOMString argument = "");
 
     readonly attribute DOMString defaultSpatialTrackingLabel;
 

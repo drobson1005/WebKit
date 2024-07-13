@@ -708,6 +708,7 @@ bindings/js/JSRTCRtpSFrameTransformCustom.cpp
 bindings/js/JSRangeCustom.cpp
 bindings/js/JSReadableStreamSourceCustom.cpp
 bindings/js/JSReportBodyCustom.cpp
+bindings/js/JSReportingObserverCustom.cpp
 bindings/js/JSResizeObserverCustom.cpp
 bindings/js/JSResizeObserverEntryCustom.cpp
 bindings/js/JSSVGPathSegCustom.cpp
@@ -728,6 +729,10 @@ bindings/js/JSCSSStyleValueCustom.cpp
 bindings/js/JSCSSTransformComponentCustom.cpp
 bindings/js/JSUndoItemCustom.cpp
 bindings/js/JSWebAnimationCustom.cpp
+bindings/js/JSWebCodecsAudioDecoderCustom.cpp
+bindings/js/JSWebCodecsVideoDecoderCustom.cpp
+bindings/js/JSWebCodecsAudioEncoderCustom.cpp
+bindings/js/JSWebCodecsVideoEncoderCustom.cpp
 bindings/js/JSWebGL2RenderingContextCustom.cpp
 bindings/js/JSWebGLRenderingContextCustom.cpp
 bindings/js/JSWebXRSessionCustom.cpp
@@ -818,6 +823,7 @@ crypto/keys/CryptoKeyRSA.cpp
 crypto/keys/CryptoKeyRSAComponents.cpp
 crypto/keys/CryptoKeyRaw.cpp
 css/BasicShapeFunctions.cpp
+css/CSSAnchorValue.cpp
 css/CSSAspectRatioValue.cpp
 css/CSSBackgroundRepeatValue.cpp
 css/CSSBasicShapes.cpp
@@ -991,17 +997,21 @@ css/parser/CSSPropertyParserConsumer+CSSPrimitiveValueResolver.cpp
 css/parser/CSSPropertyParserConsumer+Color.cpp
 css/parser/CSSPropertyParserConsumer+ColorInterpolationMethod.cpp
 css/parser/CSSPropertyParserConsumer+Ident.cpp
+css/parser/CSSPropertyParserConsumer+Image.cpp
 css/parser/CSSPropertyParserConsumer+Integer.cpp
 css/parser/CSSPropertyParserConsumer+Length.cpp
 css/parser/CSSPropertyParserConsumer+None.cpp
 css/parser/CSSPropertyParserConsumer+Number.cpp
 css/parser/CSSPropertyParserConsumer+Percent.cpp
+css/parser/CSSPropertyParserConsumer+Position.cpp
 css/parser/CSSPropertyParserConsumer+Primitives.cpp
 css/parser/CSSPropertyParserConsumer+RawResolver.cpp
 css/parser/CSSPropertyParserConsumer+RawTypes.cpp
 css/parser/CSSPropertyParserConsumer+Resolution.cpp
+css/parser/CSSPropertyParserConsumer+String.cpp
 css/parser/CSSPropertyParserConsumer+Symbol.cpp
 css/parser/CSSPropertyParserConsumer+Time.cpp
+css/parser/CSSPropertyParserConsumer+URL.cpp
 css/parser/CSSPropertyParserConsumer+UnevaluatedCalc.cpp
 css/parser/CSSPropertyParserHelpers.cpp
 css/parser/CSSPropertyParserWorkerSafe.cpp
@@ -1337,6 +1347,7 @@ editing/VisibleUnits.cpp
 editing/WebContentReader.cpp
 editing/WebCorePasteboardFileReader.cpp
 editing/WrapContentsInDummySpanCommand.cpp
+editing/WritingToolsCompositionCommand.cpp
 editing/markup.cpp
 fileapi/AsyncFileStream.cpp
 fileapi/Blob.cpp
@@ -1529,7 +1540,8 @@ html/ValidatedFormListedElement.cpp
 html/ValidationMessage.cpp
 html/WeekInputType.cpp
 html/canvas/ANGLEInstancedArrays.cpp
-html/canvas/CanvasFilterTargetSwitcher.cpp
+html/canvas/CanvasLayerContextSwitcher.cpp
+html/canvas/CanvasFilterContextSwitcher.cpp
 html/canvas/CanvasGradient.cpp
 html/canvas/CanvasPath.cpp
 html/canvas/CanvasPattern.cpp
@@ -1984,18 +1996,19 @@ page/LocalFrame.cpp
 page/LocalFrameView.cpp
 page/LocalFrameViewLayoutContext.cpp
 page/Location.cpp
-page/LoggedInStatus.cpp
+page/LoginStatus.cpp
 page/MemoryRelease.cpp
 page/MouseEventWithHitTestResults.cpp
 page/NavigateEvent.cpp
 page/Navigation.cpp
+page/NavigationActivation.cpp
 page/NavigationCurrentEntryChangeEvent.cpp
 page/NavigationDestination.cpp
 page/NavigationHistoryEntry.cpp
 page/NavigationTransition.cpp
 page/Navigator.cpp
 page/NavigatorBase.cpp
-page/NavigatorIsLoggedIn.cpp
+page/NavigatorLoginStatus.cpp
 page/OpportunisticTaskScheduler.cpp
 page/OriginAccessEntry.cpp
 page/OriginAccessPatterns.cpp
@@ -2198,6 +2211,7 @@ platform/SleepDisabler.cpp
 platform/SleepDisablerClient.cpp
 platform/SystemSoundManager.cpp
 platform/StaticPasteboard.cpp
+platform/StyleAppearance.cpp
 platform/Theme.cpp
 platform/ThemeTypes.cpp
 platform/ThermalMitigationNotifier.cpp
@@ -2340,6 +2354,7 @@ platform/graphics/GraphicsContext.cpp
 platform/graphics/GraphicsContextGL.cpp
 platform/graphics/GraphicsContextGLImageExtractor.cpp
 platform/graphics/GraphicsContextState.cpp
+platform/graphics/GraphicsContextSwitcher.cpp
 platform/graphics/GraphicsLayer.cpp
 platform/graphics/GraphicsLayerContentsDisplayDelegate.cpp
 platform/graphics/GraphicsLayerTransform.cpp
@@ -2352,7 +2367,7 @@ platform/graphics/ImageAdapter.cpp
 platform/graphics/ImageBuffer.cpp
 platform/graphics/ImageBufferAllocator.cpp
 platform/graphics/ImageBufferBackend.cpp
-platform/graphics/ImageBufferPipe.cpp
+platform/graphics/ImageBufferContextSwitcher.cpp
 platform/graphics/ImageDecoder.cpp
 platform/graphics/ImageFrame.cpp
 platform/graphics/ImageFrameAnimator.cpp
@@ -2364,6 +2379,7 @@ platform/graphics/ImageResolution.cpp
 platform/graphics/IntPoint.cpp
 platform/graphics/IntRect.cpp
 platform/graphics/IntSize.cpp
+platform/graphics/TransparencyLayerContextSwitcher.cpp
 platform/graphics/LayoutPoint.cpp
 platform/graphics/LayoutRect.cpp
 platform/graphics/LayoutSize.cpp
@@ -2455,12 +2471,9 @@ platform/graphics/filters/Filter.cpp
 platform/graphics/filters/FilterEffect.cpp
 platform/graphics/filters/FilterFunction.cpp
 platform/graphics/filters/FilterImage.cpp
-platform/graphics/filters/FilterImageTargetSwitcher.cpp
 platform/graphics/filters/FilterOperation.cpp
 platform/graphics/filters/FilterOperations.cpp
 platform/graphics/filters/FilterResults.cpp
-platform/graphics/filters/FilterStyleTargetSwitcher.cpp
-platform/graphics/filters/FilterTargetSwitcher.cpp
 platform/graphics/filters/PointLightSource.cpp
 platform/graphics/filters/SourceAlpha.cpp
 platform/graphics/filters/SourceGraphic.cpp
@@ -2872,6 +2885,8 @@ rendering/svg/RenderSVGPath.cpp
 rendering/svg/RenderSVGRect.cpp
 rendering/svg/RenderSVGResourceClipper.cpp
 rendering/svg/RenderSVGResourceContainer.cpp
+rendering/svg/RenderSVGResourceFilter.cpp
+rendering/svg/RenderSVGResourceFilterPrimitive.cpp
 rendering/svg/RenderSVGResourceGradient.cpp
 rendering/svg/RenderSVGResourceLinearGradient.cpp
 rendering/svg/RenderSVGResourceMarker.cpp
@@ -2928,6 +2943,7 @@ storage/StorageEventDispatcher.cpp
 storage/StorageMap.cpp
 storage/StorageNamespaceProvider.cpp
 storage/StorageUtilities.cpp
+style/AnchorPositionEvaluator.cpp
 style/AttributeChangeInvalidation.cpp
 style/ChildChangeInvalidation.cpp
 style/ClassChangeInvalidation.cpp
@@ -2950,7 +2966,6 @@ style/RuleFeature.cpp
 style/RuleSet.cpp
 style/RuleSetBuilder.cpp
 style/StyleAdjuster.cpp
-style/StyleAppearance.cpp
 style/StyleBuilder.cpp
 style/StyleBuilderState.cpp
 style/StyleChange.cpp
@@ -3988,6 +4003,7 @@ JSMutationRecord.cpp
 JSNamedNodeMap.cpp
 JSNavigateEvent.cpp
 JSNavigation.cpp
+JSNavigationActivation.cpp
 JSNavigationCurrentEntryChangeEvent.cpp
 JSNavigationDestination.cpp
 JSNavigationHistoryEntry.cpp

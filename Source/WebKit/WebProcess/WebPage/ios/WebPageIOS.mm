@@ -165,6 +165,7 @@
 #import <wtf/SetForScope.h>
 #import <wtf/cocoa/Entitlements.h>
 #import <wtf/cocoa/SpanCocoa.h>
+#import <wtf/text/MakeString.h>
 #import <wtf/text/StringToIntegerConversion.h>
 #import <wtf/text/TextBreakIterator.h>
 #import <wtf/text/TextStream.h>
@@ -676,8 +677,7 @@ void WebPage::registerRemoteFrameAccessibilityTokens(pid_t, std::span<const uint
 
 void WebPage::registerUIProcessAccessibilityTokens(std::span<const uint8_t> elementToken, std::span<const uint8_t>)
 {
-    NSData *elementTokenData = [NSData dataWithBytes:elementToken.data() length:elementToken.size()];
-    [m_mockAccessibilityElement setRemoteTokenData:elementTokenData];
+    [m_mockAccessibilityElement setRemoteTokenData:toNSData(elementToken).get()];
 }
 
 void WebPage::getStringSelectionForPasteboard(CompletionHandler<void(String&&)>&& completionHandler)
@@ -2767,6 +2767,9 @@ bool WebPage::applyAutocorrectionInternal(const String& correction, const String
     if (!frame->selection().isCaretOrRange())
         return false;
 
+    if (correction == originalText)
+        return false;
+
     std::optional<SimpleRange> range;
     String textForRange;
     auto originalTextWithFoldedQuoteMarks = foldQuoteMarks(originalText);
@@ -2854,7 +2857,7 @@ WebAutocorrectionContext WebPage::autocorrectionContext()
     if (auto compositionRange = frame->editor().compositionRange()) {
         auto markedTextBefore = plainTextForContext(makeSimpleRange(compositionRange->start, startPosition));
         auto markedTextAfter = plainTextForContext(makeSimpleRange(endPosition, compositionRange->end));
-        markedText = markedTextBefore + selectedText + markedTextAfter;
+        markedText = makeString(markedTextBefore, selectedText, markedTextAfter);
         if (!markedText.isEmpty()) {
             selectedRangeInMarkedText.location = markedTextBefore.length();
             selectedRangeInMarkedText.length = selectedText.length();
@@ -4112,7 +4115,8 @@ void WebPage::dynamicViewportSizeUpdate(const DynamicViewportSizeUpdate& target)
     // FIXME: Move settings from Frame to Frame and remove this check.
     auto& settings = frameView.frame().settings();
     LayoutRect documentRect = IntRect(frameView.scrollOrigin(), frameView.contentsSize());
-    auto layoutViewportSize = LocalFrameView::expandedLayoutViewportSize(frameView.baseLayoutViewportSize(), LayoutSize(documentRect.size()), settings.layoutViewportHeightExpansionFactor());
+    double heightExpansionFactor = m_disallowLayoutViewportHeightExpansionReasons.isEmpty() ? settings.layoutViewportHeightExpansionFactor() : 0;
+    auto layoutViewportSize = LocalFrameView::expandedLayoutViewportSize(frameView.baseLayoutViewportSize(), LayoutSize(documentRect.size()), heightExpansionFactor);
     LayoutRect layoutViewportRect = LocalFrameView::computeUpdatedLayoutViewportRect(frameView.layoutViewportRect(), documentRect, LayoutSize(newUnobscuredContentRect.size()), LayoutRect(newUnobscuredContentRect), layoutViewportSize, frameView.minStableLayoutViewportOrigin(), frameView.maxStableLayoutViewportOrigin(), LayoutViewportConstraint::ConstrainedToDocumentRect);
     frameView.setLayoutViewportOverrideRect(layoutViewportRect);
     frameView.layoutOrVisualViewportChanged();
@@ -4676,6 +4680,51 @@ void WebPage::updateVisibleContentRects(const VisibleContentRectUpdateInfo& visi
         }
         scrollingCoordinator->reconcileScrollingState(frameView, scrollPosition, visibleContentRectUpdateInfo.layoutViewportRect(), ScrollType::User, viewportStability, layerAction);
     }
+}
+
+void WebPage::updateLayoutViewportHeightExpansionTimerFired()
+{
+    RefPtr mainFrame = m_mainFrame->coreLocalFrame();
+    if (!mainFrame)
+        return;
+
+    RefPtr view = mainFrame->view();
+    if (!view)
+        return;
+
+    FloatRect viewportRect = view->viewportConstrainedObjectsRect();
+
+    bool hitTestedToLargeViewportConstrainedElement = [&] {
+        if (!view->hasViewportConstrainedObjects())
+            return false;
+
+        Vector<Ref<Element>> largeViewportConstrainedElements;
+        for (auto& renderer : *view->viewportConstrainedObjects()) {
+            RefPtr element = renderer.element();
+            if (!element)
+                continue;
+
+            auto bounds = renderer.absoluteBoundingBoxRect();
+            if (intersection(viewportRect, bounds).area() > 0.9 * viewportRect.area())
+                largeViewportConstrainedElements.append(element.releaseNonNull());
+        }
+
+        if (largeViewportConstrainedElements.isEmpty())
+            return false;
+
+        RefPtr hitTestedNode = mainFrame->eventHandler().hitTestResultAtPoint(LayoutPoint { viewportRect.center() }, HitTestRequest::Type::ReadOnly).innerNode();
+        if (!hitTestedNode)
+            return false;
+
+        return largeViewportConstrainedElements.containsIf([hitTestedNode](auto& element) {
+            return element->contains(*hitTestedNode);
+        });
+    }();
+
+    if (hitTestedToLargeViewportConstrainedElement)
+        addReasonsToDisallowLayoutViewportHeightExpansion(DisallowLayoutViewportHeightExpansionReason::LargeContainer);
+    else
+        removeReasonsToDisallowLayoutViewportHeightExpansion(DisallowLayoutViewportHeightExpansionReason::LargeContainer);
 }
 
 void WebPage::willStartUserTriggeredZooming()

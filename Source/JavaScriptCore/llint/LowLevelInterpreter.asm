@@ -1530,7 +1530,7 @@ macro prologue(osrSlowPath, traceSlowPath)
     subp cfr, t0, t0
 
 .stackHeightOK:
-    if X86_64 or ARM64
+    if X86_64 or X86_64_WIN or ARM64
         # We need to start zeroing from sp as it has been adjusted after saving callee saves.
         move sp, t2
         move t0, sp
@@ -2550,6 +2550,67 @@ op(llint_virtual_tail_call_trampoline, macro ()
     virtualThunkFor(ExecutableBase::m_jitCodeForCallWithArityCheck, FunctionExecutable::m_codeBlockForCall, _llint_internal_function_call_trampoline, .slowCase)
 .slowCase:
     linkFor(_llint_virtual_call)
+end)
+
+# 64bit:t0 32bit(t0,t1) is callee
+# t2 is CallLinkInfo*
+op(llint_polymorphic_normal_call_trampoline, macro ()
+    if not JSVALUE64
+        bineq t1, CellTag, .slowCase
+    end
+    loadp CallLinkInfo::m_stub[t2], t5
+    addp (constexpr (PolymorphicCallStubRoutine::offsetOfTrailingData())), t5
+
+.loop:
+    loadp CallSlot::m_calleeOrExecutable[t5], t3
+    bpeq t3, t0, .found
+    btpz t3, .slowCase
+    addp (constexpr (sizeof(CallSlot))), t5
+    jmp .loop
+
+.found:
+    loadp CallSlot::m_target[t5], t1
+    loadp CallSlot::m_codeBlock[t5], t5
+    storep t5, CodeBlock - PrologueStackPointerDelta[sp]
+    jmp t1, JSEntryPtrTag
+
+.slowCase:
+    linkFor(_llint_polymorphic_call)
+end)
+
+# 64bit:t0 32bit(t0,t1) is callee
+# t2 is CallLinkInfo*
+op(llint_polymorphic_closure_call_trampoline, macro ()
+    if JSVALUE64
+        btqnz t0, NotCellMask, .slowCase
+    else
+        bineq t1, CellTag, .slowCase
+    end
+
+    bbneq JSCell::m_type[t0], JSFunctionType, .slowCase
+    loadp JSFunction::m_executableOrRareData[t0], t6
+    btpz t6, (constexpr JSFunction::rareDataTag), .isExecutable
+    loadp (FunctionRareData::m_executable - (constexpr JSFunction::rareDataTag))[t6], t6
+.isExecutable:
+
+    loadp CallLinkInfo::m_stub[t2], t5
+    addp (constexpr (PolymorphicCallStubRoutine::offsetOfTrailingData())), t5
+
+.loop:
+    loadp CallSlot::m_calleeOrExecutable[t5], t3
+    bpeq t3, t6, .found
+    btpz t3, .slowCase
+    addp (constexpr (sizeof(CallSlot))), t5
+    jmp .loop
+
+.found:
+    loadp CallSlot::m_target[t5], t1
+    loadp CallSlot::m_codeBlock[t5], t5
+    storep t5, CodeBlock - PrologueStackPointerDelta[sp]
+    jmp t1, JSEntryPtrTag
+
+.slowCase:
+    linkFor(_llint_polymorphic_call)
 end)
 
 if JIT

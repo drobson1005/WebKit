@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003-2019 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2024 Apple Inc. All rights reserved.
  *  Copyright (C) 2007 Cameron Zwarich (cwzwarich@uwaterloo.ca)
  *  Copyright (C) 2007 Maks Orlovich
  *  Copyright (C) 2007 Eric Seidel <eric@webkit.org>
@@ -29,6 +29,7 @@
 #include "ImplementationVisibility.h"
 #include "JITCode.h"
 #include "Label.h"
+#include "ModuleScopeData.h"
 #include "ParserArena.h"
 #include "ParserModes.h"
 #include "ParserTokens.h"
@@ -49,7 +50,6 @@ namespace JSC {
     class FunctionMetadataNode;
     class FunctionParameters;
     class ModuleAnalyzer;
-    class ModuleScopeData;
     class PropertyListNode;
     class ReadModifyResolveNode;
     class RegisterID;
@@ -226,15 +226,11 @@ namespace JSC {
 
         ResultType resultDescriptor() const { return m_resultType; }
 
-        bool isOnlyChildOfStatement() const { return m_isOnlyChildOfStatement; }
-        void setIsOnlyChildOfStatement() { m_isOnlyChildOfStatement = true; }
-
         bool isOptionalChainBase() const { return m_isOptionalChainBase; }
         void setIsOptionalChainBase() { m_isOptionalChainBase = true; }
 
     private:
         ResultType m_resultType;
-        bool m_isOnlyChildOfStatement { false };
         bool m_isOptionalChainBase { false };
     };
 

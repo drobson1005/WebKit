@@ -325,17 +325,6 @@ RenderBlock::~RenderBlock()
     // Do not add any more code here. Add it to willBeDestroyed() instead.
 }
 
-// Note that this is not called for RenderBlockFlows.
-void RenderBlock::willBeDestroyed()
-{
-    if (!renderTreeBeingDestroyed()) {
-        if (parent())
-            parent()->dirtyLinesFromChangedChild(*this);
-    }
-
-    RenderBox::willBeDestroyed();
-}
-
 void RenderBlock::removePositionedObjectsIfNeeded(const RenderStyle& oldStyle, const RenderStyle& newStyle)
 {
     bool hadTransform = oldStyle.hasTransformRelatedProperty();
@@ -822,6 +811,8 @@ bool RenderBlock::canPerformSimplifiedLayout() const
 {
     if (selfNeedsLayout() || normalChildNeedsLayout() || outOfFlowChildNeedsStaticPositionLayout())
         return false;
+    if (auto wasSkippedDuringLastLayout = wasSkippedDuringLastLayoutDueToContentVisibility(); wasSkippedDuringLastLayout && *wasSkippedDuringLastLayout)
+        return false;
     return posChildNeedsLayout() || needsSimplifiedNormalFlowLayout();
 }
 
@@ -1153,22 +1144,36 @@ bool RenderBlock::paintChild(RenderBox& child, PaintInfo& paintInfo, const Layou
 
 void RenderBlock::paintCaret(PaintInfo& paintInfo, const LayoutPoint& paintOffset, CaretType type)
 {
-    // Paint the caret if the FrameSelection says so or if caret browsing is enabled
-    RenderBlock* caretPainter;
-    bool isContentEditable;
-    if (type == CursorCaret) {
-        caretPainter = frame().selection().caretRendererWithoutUpdatingLayout();
-        isContentEditable = frame().selection().selection().hasEditableStyle();
-    } else {
-        caretPainter = page().dragCaretController().caretRenderer();
-        isContentEditable = page().dragCaretController().isContentEditable();
-    }
+    auto shouldPaintCaret = [&](RenderBlock* caretPainter, bool isContentEditable) {
+        if (caretPainter != this)
+            return false;
 
-    if (caretPainter == this && (isContentEditable || settings().caretBrowsingEnabled())) {
-        if (type == CursorCaret)
+        return isContentEditable || settings().caretBrowsingEnabled();
+    };
+
+    switch (type) {
+    case CaretType::CursorCaret: {
+        auto caretPainter = frame().selection().caretRendererWithoutUpdatingLayout();
+        if (!caretPainter)
+            return;
+
+        bool isContentEditable = frame().selection().selection().hasEditableStyle();
+
+        if (shouldPaintCaret(caretPainter, isContentEditable))
             frame().selection().paintCaret(paintInfo.context(), paintOffset);
-        else
+        break;
+    }
+    case CaretType::DragCaret: {
+        auto caretPainter = page().dragCaretController().caretRenderer();
+        if (!caretPainter)
+            return;
+
+        bool isContentEditable = page().dragCaretController().isContentEditable();
+        if (shouldPaintCaret(caretPainter, isContentEditable))
             page().dragCaretController().paintDragCaret(&frame(), paintInfo.context(), paintOffset);
+
+        break;
+    }
     }
 }
 
@@ -1957,9 +1962,10 @@ bool RenderBlock::isPointInOverflowControl(HitTestResult& result, const LayoutPo
 
 Node* RenderBlock::nodeForHitTest() const
 {
+    switch (style().pseudoElementType()) {
     // If we're a ::backdrop pseudo-element, we should hit-test to the element that generated it.
     // This matches the behavior that other browsers have.
-    if (style().pseudoElementType() == PseudoId::Backdrop) {
+    case PseudoId::Backdrop:
         for (auto& element : document().topLayerElements()) {
             if (!element->renderer())
                 continue;
@@ -1968,6 +1974,16 @@ Node* RenderBlock::nodeForHitTest() const
                 return element.ptr();
         }
         ASSERT_NOT_REACHED();
+        break;
+
+    // The view transition pseudo-elements should hit-test to their originating element (the document element).
+    case PseudoId::ViewTransition:
+    case PseudoId::ViewTransitionGroup:
+    case PseudoId::ViewTransitionImagePair:
+        return document().documentElement();
+
+    default:
+        break;
     }
 
     // If we are in the margins of block elements that are part of a
@@ -2477,7 +2493,7 @@ LayoutUnit RenderBlock::minLineHeightForReplacedRenderer(bool isFirstLine, Layou
 std::optional<LayoutUnit> RenderBlock::firstLineBaseline() const
 {
     if (shouldApplyLayoutContainment())
-        return std::nullopt;
+        return { };
 
     if (isWritingModeRoot() && !isFlexItem())
         return std::optional<LayoutUnit>();
@@ -2492,7 +2508,7 @@ std::optional<LayoutUnit> RenderBlock::firstLineBaseline() const
 std::optional<LayoutUnit> RenderBlock::lastLineBaseline() const
 {
     if (shouldApplyLayoutContainment())
-        return std::nullopt;
+        return { };
 
     if (isWritingModeRoot())
         return std::optional<LayoutUnit>();

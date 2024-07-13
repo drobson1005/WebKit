@@ -79,7 +79,7 @@ private:
     WebCore::IntSize visibleSize() const override;
     WebCore::IntSize contentsSize() const override;
     WebCore::IntRect scrollableAreaBoundingBox(bool* = nullptr) const override;
-    bool shouldPlaceVerticalScrollbarOnLeft() const override { return false; }
+    bool shouldPlaceVerticalScrollbarOnLeft() const override;
     bool forceUpdateScrollbarsOnMainThreadForPerformanceTesting() const override { return false; }
     bool isScrollableOrRubberbandable() override { return true; }
     bool hasScrollableOrRubberbandableAncestor() override { return true; }
@@ -140,6 +140,7 @@ private:
     GDIObject<HBITMAP> m_bmp;
     HWND m_popup { nullptr };
     WebCore::IntRect m_windowRect;
+    WebCore::IntSize m_clientSize;
 
     float m_itemHeight { 0 };
     int m_scrollOffset { 0 };

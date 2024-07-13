@@ -2019,7 +2019,8 @@
       {
         "args": [
           "--log=debug",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--show-test-stdout",
           "--trial-time=10"
         ],
@@ -2034,7 +2035,8 @@
             "device_os_type": "userdebug",
             "device_type": "flame",
             "os": "Android",
-            "pool": "chromium.tests.gpu"
+            "pool": "chromium.tests.gpu",
+            "temp_band": "<30"
           },
           "hard_timeout": 7200,
           "io_timeout": 300,
@@ -2048,7 +2050,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-gl=native",
           "--trace-tests",
           "--trial-time=10"
@@ -2064,7 +2067,8 @@
             "device_os_type": "userdebug",
             "device_type": "flame",
             "os": "Android",
-            "pool": "chromium.tests.gpu"
+            "pool": "chromium.tests.gpu",
+            "temp_band": "<30"
           },
           "hard_timeout": 7200,
           "io_timeout": 300,
@@ -2078,7 +2082,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-angle=vulkan",
           "--trace-tests",
           "--trial-time=10"
@@ -2094,7 +2099,8 @@
             "device_os_type": "userdebug",
             "device_type": "flame",
             "os": "Android",
-            "pool": "chromium.tests.gpu"
+            "pool": "chromium.tests.gpu",
+            "temp_band": "<30"
           },
           "hard_timeout": 7200,
           "io_timeout": 300,
@@ -2707,9 +2713,11 @@
       {
         "args": [
           "--log=debug",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--show-test-stdout",
-          "--trial-time=10"
+          "--trial-time=10",
+          "--custom-throttling-temp=38"
         ],
         "merge": {
           "script": "//scripts/process_angle_perf_results.py"
@@ -2722,7 +2730,8 @@
             "device_os_type": "userdebug",
             "device_type": "oriole",
             "os": "Android",
-            "pool": "chromium.tests.gpu"
+            "pool": "chromium.tests.gpu",
+            "temp_band": "<30"
           },
           "hard_timeout": 7200,
           "io_timeout": 300,
@@ -2736,10 +2745,12 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-gl=native",
           "--trace-tests",
-          "--trial-time=10"
+          "--trial-time=10",
+          "--custom-throttling-temp=38"
         ],
         "merge": {
           "script": "//scripts/process_angle_perf_results.py"
@@ -2752,7 +2763,8 @@
             "device_os_type": "userdebug",
             "device_type": "oriole",
             "os": "Android",
-            "pool": "chromium.tests.gpu"
+            "pool": "chromium.tests.gpu",
+            "temp_band": "<30"
           },
           "hard_timeout": 7200,
           "io_timeout": 300,
@@ -2766,10 +2778,12 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-angle=vulkan",
           "--trace-tests",
-          "--trial-time=10"
+          "--trial-time=10",
+          "--custom-throttling-temp=38"
         ],
         "merge": {
           "script": "//scripts/process_angle_perf_results.py"
@@ -2782,7 +2796,8 @@
             "device_os_type": "userdebug",
             "device_type": "oriole",
             "os": "Android",
-            "pool": "chromium.tests.gpu"
+            "pool": "chromium.tests.gpu",
+            "temp_band": "<30"
           },
           "hard_timeout": 7200,
           "io_timeout": 300,
@@ -3362,7 +3377,8 @@
       {
         "args": [
           "--log=debug",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--show-test-stdout"
         ],
         "merge": {
@@ -3388,7 +3404,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-gl=native",
           "--trace-tests"
         ],
@@ -3415,7 +3432,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-angle=vulkan",
           "--trace-tests"
         ],
@@ -4235,7 +4253,8 @@
       {
         "args": [
           "--log=debug",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--show-test-stdout"
         ],
         "merge": {
@@ -4261,7 +4280,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-gl=native",
           "--trace-tests"
         ],
@@ -4288,7 +4308,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-angle=vulkan",
           "--trace-tests"
         ],
@@ -6354,7 +6375,8 @@
       {
         "args": [
           "--log=debug",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--show-test-stdout"
         ],
         "merge": {
@@ -6381,7 +6403,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-gl=native",
           "--trace-tests"
         ],
@@ -6409,7 +6432,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-angle=vulkan",
           "--trace-tests"
         ],
@@ -7399,7 +7423,8 @@
       {
         "args": [
           "--log=debug",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--show-test-stdout"
         ],
         "merge": {
@@ -7426,7 +7451,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-gl=native",
           "--trace-tests"
         ],
@@ -7454,7 +7480,8 @@
         "args": [
           "--log=debug",
           "--show-test-stdout",
-          "--samples-per-test=6",
+          "--samples-per-test=3",
+          "--trials-per-sample=3",
           "--use-angle=vulkan",
           "--trace-tests"
         ],

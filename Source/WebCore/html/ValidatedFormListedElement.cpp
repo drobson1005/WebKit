@@ -51,6 +51,7 @@
 #include <wtf/Ref.h>
 #include <wtf/SetForScope.h>
 #include <wtf/Vector.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
@@ -275,7 +276,7 @@ void ValidatedFormListedElement::updateValidity()
             }
         }
 
-        if (auto* cache = element.document().existingAXObjectCache())
+        if (CheckedPtr cache = element.document().existingAXObjectCache())
             cache->onValidityChange(element);
     }
 

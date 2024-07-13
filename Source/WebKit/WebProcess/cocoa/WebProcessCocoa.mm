@@ -128,6 +128,7 @@
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/spi/cocoa/OSLogSPI.h>
 #import <wtf/spi/darwin/SandboxSPI.h>
+#import <wtf/text/MakeString.h>
 
 #if ENABLE(REMOTE_INSPECTOR)
 #import <JavaScriptCore/RemoteInspector.h>
@@ -214,8 +215,7 @@ void WebProcess::bindAccessibilityFrameWithData(WebCore::FrameIdentifier frameID
         m_accessibilityRemoteFrameTokenCache = adoptNS([[NSMutableDictionary alloc] init]);
 
     auto frameInt = frameID.object().toUInt64();
-    NSData *nsData = [NSData dataWithBytes:data.data() length:data.size()];
-    [m_accessibilityRemoteFrameTokenCache setObject:nsData forKey:@(frameInt)];
+    [m_accessibilityRemoteFrameTokenCache setObject:toNSData(data).get() forKey:@(frameInt)];
 }
 
 id WebProcess::accessibilityFocusedUIElement()
@@ -610,7 +610,7 @@ void WebProcess::platformSetWebsiteDataStoreParameters(WebProcessDataStoreParame
 #endif
 
     if (!parameters.javaScriptConfigurationDirectory.isEmpty()) {
-        String javaScriptConfigFile = parameters.javaScriptConfigurationDirectory + "/JSC.config"_s;
+        auto javaScriptConfigFile = makeString(parameters.javaScriptConfigurationDirectory, "/JSC.config"_s);
         JSC::processConfigFile(javaScriptConfigFile.latin1().data(), "com.apple.WebKit.WebContent", m_uiProcessBundleIdentifier.latin1().data());
     }
 }

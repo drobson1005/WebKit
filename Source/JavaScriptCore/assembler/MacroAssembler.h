@@ -103,7 +103,7 @@ enum class SavedFPWidth {
 };
 
 class Context;
-typedef void (*Function)(Context&);
+typedef void SYSV_ABI (*Function)(Context&);
 
 } // namespace Probe
 
@@ -1037,6 +1037,11 @@ public:
     void lshiftPtr(RegisterID src, TrustedImm32 imm, RegisterID dest)
     {
         lshift64(src, imm, dest);
+    }
+
+    void lshiftPtr(TrustedImm32 imm, RegisterID shiftAmount, RegisterID dest)
+    {
+        lshift64(imm, shiftAmount, dest);
     }
 
     void rshiftPtr(Imm32 imm, RegisterID srcDest)
@@ -2322,6 +2327,11 @@ public:
     void lshift32(RegisterID src, Imm32 amount, RegisterID dest)
     {
         lshift32(src, trustedImm32ForShift(amount), dest);
+    }
+
+    void lshift32(Imm32 amount, RegisterID shiftAmount, RegisterID dest)
+    {
+        lshift32(trustedImm32ForShift(amount), shiftAmount, dest);
     }
     
     void rshift32(Imm32 imm, RegisterID dest)

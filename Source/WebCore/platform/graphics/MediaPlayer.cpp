@@ -33,6 +33,7 @@
 #include "DeprecatedGlobalSettings.h"
 #include "FourCC.h"
 #include "GraphicsContext.h"
+#include "InbandTextTrackPrivate.h"
 #include "IntRect.h"
 #include "LegacyCDMSession.h"
 #include "Logging.h"
@@ -54,7 +55,7 @@
 #include <wtf/NativePromise.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/CString.h>
-#include "InbandTextTrackPrivate.h"
+#include <wtf/text/MakeString.h>
 
 #if ENABLE(MEDIA_SOURCE)
 #include "MediaSourcePrivateClient.h"
@@ -473,6 +474,8 @@ MediaPlayer::MediaPlayer(MediaPlayerClient& client, MediaPlayerEnums::MediaEngin
 MediaPlayer::~MediaPlayer()
 {
     ASSERT(!m_initializingMediaEngine);
+    if (m_private)
+        m_private->mediaPlayerWillBeDestroyed();
 }
 
 void MediaPlayer::invalidate()
@@ -925,6 +928,13 @@ FloatSize MediaPlayer::videoLayerSize() const
 {
     return client().mediaPlayerVideoLayerSize();
 }
+
+#if PLATFORM(IOS_FAMILY)
+bool MediaPlayer::canShowWhileLocked() const
+{
+    return client().canShowWhileLocked();
+}
+#endif
 
 void MediaPlayer::videoLayerSizeDidChange(const FloatSize& size)
 {
@@ -1979,6 +1989,13 @@ bool MediaPlayer::isInFullscreenOrPictureInPicture() const
     return m_isInFullscreenOrPictureInPicture;
 }
 
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+bool MediaPlayer::supportsLinearMediaPlayer() const
+{
+    return m_private->supportsLinearMediaPlayer();
+}
+#endif
+
 #if !RELEASE_LOG_DISABLED
 const Logger& MediaPlayer::mediaPlayerLogger()
 {
@@ -2098,6 +2115,6 @@ String SeekTarget::toString() const
         WTF::LogArgument<MediaTime>::toString(positiveThreshold), ']');
 }
 
-}
+} // namespace WebCore
 
-#endif
+#endif // ENABLE(VIDEO)

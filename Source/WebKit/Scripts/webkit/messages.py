@@ -189,7 +189,7 @@ def types_that_must_be_moved():
     ]
 
 
-def function_parameter_type(type, kind):
+def function_parameter_type(type, kind, for_reply=False):
     # Don't use references for built-in types.
     builtin_types = frozenset([
         'bool',
@@ -210,11 +210,11 @@ def function_parameter_type(type, kind):
     if type in builtin_types:
         return type
 
-    if type in types_that_must_be_moved():
-        return '%s&&' % type
-
     if kind.startswith('enum:'):
         return type
+
+    if type in types_that_must_be_moved() or for_reply:
+        return '%s&&' % type
 
     return 'const %s&' % type
 
@@ -257,6 +257,7 @@ def message_to_struct_declaration(receiver, message):
         else:
             result.append('    static constexpr auto callbackThread = WTF::CompletionHandlerCallThread::ConstructionThread;\n')
         result.append('    using ReplyArguments = std::tuple<%s>;\n' % ', '.join([parameter.type for parameter in message.reply_parameters]))
+        result.append('    using Reply = CompletionHandler<void(%s)>;\n' % ', '.join([function_parameter_type(x.type, x.kind, True) for x in message.reply_parameters]))
         if not message.has_attribute(SYNCHRONOUS_ATTRIBUTE):
             if len(message.reply_parameters) == 0:
                 result.append('    using Promise = WTF::NativePromise<void, IPC::Error>;\n')
@@ -364,6 +365,7 @@ def serialized_identifiers():
         'WebKit::DownloadID',
         'WebKit::DrawingAreaIdentifier',
         'WebKit::GeolocationIdentifier',
+        'WebKit::GPUProcessConnectionIdentifier',
         'WebKit::GraphicsContextGLIdentifier',
         'WebKit::IPCConnectionTesterIdentifier',
         'WebKit::IPCStreamTesterIdentifier',
@@ -812,6 +814,11 @@ def headers_for_type(type):
         'WebCore::AttributedStringTextListID': ['<WebCore/AttributedString.h>'],
         'WebCore::AttributedStringTextTableID': ['<WebCore/AttributedString.h>'],
         'WebCore::AttributedStringTextTableBlockID': ['<WebCore/AttributedString.h>'],
+        'WebCore::AudioSessionCategory': ['<WebCore/AudioSession.h>'],
+        'WebCore::AudioSessionMode': ['<WebCore/AudioSession.h>'],
+        'WebCore::AudioSessionRoutingArbitrationClient::DefaultRouteChanged': ['<WebCore/AudioSession.h>'],
+        'WebCore::AudioSessionRoutingArbitrationError': ['<WebCore/AudioSession.h>'],
+        'WebCore::AudioSessionSoundStageSize': ['<WebCore/AudioSession.h>'],
         'WebCore::AutocorrectionResponse': ['<WebCore/AlternativeTextClient.h>'],
         'WebCore::AutoplayEventFlags': ['<WebCore/AutoplayEvent.h>'],
         'WebCore::BackForwardItemIdentifierID': ['"GeneratedSerializers.h"'],
@@ -821,8 +828,10 @@ def headers_for_type(type):
         'WebCore::CaptionUserPreferencesDisplayMode': ['<WebCore/CaptionUserPreferences.h>'],
         'WebCore::CaptureSourceError': ['<WebCore/RealtimeMediaSource.h>'],
         'WebCore::CaretAnimatorType': ['<WebCore/CaretAnimator.h>'],
+        'WebCore::CDMInstanceSessionLoadFailure': ['<WebCore/CDMInstanceSession.h>'],
         'WebCore::COEPDisposition': ['<WebCore/CrossOriginEmbedderPolicy.h>'],
         'WebCore::ColorSchemePreference': ['<WebCore/DocumentLoader.h>'],
+        'WebCore::CompositeMode': ['<WebCore/GraphicsTypes.h>'],
         'WebCore::CompositeOperator': ['<WebCore/GraphicsTypes.h>'],
         'WebCore::Cookie': ['<WebCore/Cookie.h>'],
         'WebCore::COOPDisposition': ['<WebCore/CrossOriginOpenerPolicy.h>'],
@@ -853,6 +862,7 @@ def headers_for_type(type):
         'WebCore::FontPlatformDataAttributes': ['<WebCore/FontPlatformData.h>'],
         'WebCore::FontCustomPlatformSerializedData': ['<WebCore/FontPlatformData.h>'],
         'WebCore::FontSmoothingMode': ['<WebCore/GraphicsTypes.h>'],
+        'WebCore::FragmentedSharedBuffer': ['<WebCore/SharedBuffer.h>'],
         'WebCore::FrameIdentifierID': ['"GeneratedSerializers.h"'],
         'WebCore::FrameLoadType': ['<WebCore/FrameLoaderTypes.h>'],
         'WebCore::GenericCueData': ['<WebCore/InbandGenericCue.h>'],
@@ -868,11 +878,12 @@ def headers_for_type(type):
         'WebCore::HighlightVisibility': ['<WebCore/HighlightVisibility.h>'],
         'WebCore::ImageBufferParameters': ['<WebCore/ImageBuffer.h>'],
         'WebCore::ImageDecoderFrameInfo': ['<WebCore/ImageDecoder.h>'],
+        'WebCore::InbandTextTrackPrivateMode': ['<WebCore/InbandTextTrackPrivate.h>'],
         'WebCore::IncludeSecureCookies': ['<WebCore/CookieJar.h>'],
         'WebCore::IndexedDB::ObjectStoreOverwriteMode': ['<WebCore/IndexedDB.h>'],
         'WebCore::InputMode': ['<WebCore/InputMode.h>'],
         'WebCore::InspectorClientDeveloperPreference': ['<WebCore/InspectorClient.h>'],
-        'WebCore::InspectorOverlay::Highlight': ['<WebCore/InspectorOverlay.h>'],
+        'WebCore::InspectorOverlayHighlight': ['<WebCore/InspectorOverlay.h>'],
         'WebCore::ISOWebVTTCue': ['<WebCore/ISOVTTCue.h>'],
         'WebCore::KeyframeValueList': ['<WebCore/GraphicsLayer.h>'],
         'WebCore::KeypressCommand': ['<WebCore/KeyboardEvent.h>'],
@@ -885,6 +896,7 @@ def headers_for_type(type):
         'WebCore::PlatformMediaSessionRemoteControlCommandType': ['<WebCore/PlatformMediaSession.h>'],
         'WebCore::PlaybackSessionModelExternalPlaybackTargetType': ['<WebCore/PlaybackSessionModel.h>'],
         'WebCore::LockBackForwardList': ['<WebCore/FrameLoaderTypes.h>'],
+        'WebCore::MediaPlaybackTargetContextMockState': ['<WebCore/MediaPlaybackTargetContext.h>'],
         'WebCore::MediaPlayerBufferingPolicy': ['<WebCore/MediaPlayerEnums.h>'],
         'WebCore::MediaPlayerMediaEngineIdentifier': ['<WebCore/MediaPlayerEnums.h>'],
         'WebCore::MediaPlayerPitchCorrectionAlgorithm': ['<WebCore/MediaPlayerEnums.h>'],
@@ -898,6 +910,7 @@ def headers_for_type(type):
         'WebCore::MediaProducerMutedState': ['<WebCore/MediaProducer.h>'],
         'WebCore::MediaPromise::Result': ['<WebCore/MediaPromiseTypes.h>'],
         'WebCore::MediaSettingsRange': ['<WebCore/MediaSettingsRange.h>'],
+        'WebCore::MediaSourcePrivateAddStatus': ['<WebCore/MediaSourcePrivate.h>'],
         'WebCore::MediaSourcePrivateEndOfStreamStatus': ['<WebCore/MediaSourcePrivate.h>'],
         'WebCore::MessagePortChannelProvider::HasActivity': ['<WebCore/MessagePortChannelProvider.h>'],
         'WebCore::ModalContainerControlType': ['<WebCore/ModalContainerTypes.h>'],
@@ -986,6 +999,17 @@ def headers_for_type(type):
         'WebCore::TextManipulationTokenIdentifier': ['<WebCore/TextManipulationToken.h>'],
         'WebCore::ThirdPartyCookieBlockingMode': ['<WebCore/NetworkStorageSession.h>'],
         'WebCore::TrackID': ['<WebCore/TrackBase.h>'],
+        'WebCore::WritingTools::Context': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::ContextID': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::Action': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::TextSuggestion': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::Behavior': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::TextSuggestion::ID': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::TextSuggestionState': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::Session': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::Session::Type': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::Session::CompositionType': ['<WebCore/WritingToolsTypes.h>'],
+        'WebCore::WritingTools::Session::ID': ['<WebCore/WritingToolsTypes.h>'],
         'WebCore::UsedLegacyTLS': ['<WebCore/ResourceResponseBase.h>'],
         'WebCore::VideoFrameRotation': ['<WebCore/VideoFrame.h>'],
         'WebCore::VideoPlaybackQualityMetrics': ['<WebCore/VideoPlaybackQualityMetrics.h>'],
@@ -1056,7 +1080,6 @@ def headers_for_type(type):
         'WebKit::ContentWorldIdentifier': ['"ContentWorldShared.h"'],
         'WebKit::DocumentEditingContextRequest': ['"DocumentEditingContext.h"'],
         'WebKit::DrawingAreaIdentifier': ['"DrawingAreaInfo.h"'],
-        'WebKit::EditorStateIdentifier': ['"IdentifierTypes.h"'],
         'WebKit::FindDecorationStyle': ['"WebFindOptions.h"'],
         'WebKit::FindOptions': ['"WebFindOptions.h"'],
         'WebKit::GestureRecognizerState': ['"GestureTypes.h"'],
@@ -1081,16 +1104,14 @@ def headers_for_type(type):
         'WebKit::SelectionTouch': ['"GestureTypes.h"'],
         'WebKit::TapIdentifier': ['"IdentifierTypes.h"'],
         'WebKit::TextCheckerRequestID': ['"IdentifierTypes.h"'],
-        'WebKit::TextIndicatorStyle': ['"TextIndicatorStyle.h"'],
-        'WebKit::TextIndicatorStyleData': ['"TextIndicatorStyle.h"'],
+        'WebKit::TextAnimationType': ['"TextAnimationType.h"'],
+        'WebKit::TextAnimationData': ['"TextAnimationType.h"'],
         'WebKit::WebEventType': ['"WebEvent.h"'],
         'WebKit::WebExtensionContextInstallReason': ['"WebExtensionContext.h"'],
         'WebKit::WebExtensionCookieFilterParameters': ['"WebExtensionCookieParameters.h"'],
         'WebKit::WebExtensionError': ['"WebExtensionError.h"'],
         'WebKit::WebExtensionTabImageFormat': ['"WebExtensionTab.h"'],
         'WebKit::WebExtensionWindowTypeFilter': ['"WebExtensionWindow.h"'],
-        'WebKit::WebTextReplacementDataState': ['"WebTextReplacementData.h"'],
-        'WebKit::WebUnifiedTextReplacementSessionDataReplacementType': ['"WebUnifiedTextReplacementSessionData.h"'],
         'WebKit::WebGPU::BindGroupDescriptor': ['"WebGPUBindGroupDescriptor.h"'],
         'WebKit::WebGPU::BindGroupEntry': ['"WebGPUBindGroupEntry.h"'],
         'WebKit::WebGPU::BindGroupLayoutDescriptor': ['"WebGPUBindGroupLayoutDescriptor.h"'],
@@ -1466,12 +1487,6 @@ def generate_message_names_header(receivers):
         result.append('    return Detail::messageDescriptions[static_cast<size_t>(messageName)].%s;\n' % fname)
         result.append('}\n')
         result.append('\n')
-    result.append('inline ASCIILiteral descriptionLiteral(MessageName messageName)\n')
-    result.append('{\n')
-    result.append('    messageName = std::min(messageName, MessageName::Last);\n')
-    result.append('    return ASCIILiteral::fromLiteralUnsafe(Detail::messageDescriptions[static_cast<size_t>(messageName)].description);\n')
-    result.append('}\n')
-    result.append('\n')
     result.append('constexpr bool messageIsSync(MessageName name)\n')
     result.append('{\n')
     if seen_synchronous:

@@ -67,6 +67,7 @@
 #include "TypedElementDescendantIteratorInlines.h"
 #include "VisibilityAdjustment.h"
 #include <wtf/Scope.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
@@ -132,15 +133,15 @@ static inline bool elementAndAncestorsAreOnlyRenderedChildren(const Element& ele
         return false;
 
     for (auto& ancestor : ancestorsOfType<RenderElement>(*renderer)) {
-        unsigned numberOfRenderedChildren = 0;
-        for (auto& child : childrenOfType<RenderElement>(ancestor)) {
-            if (RefPtr childElement = child.element(); childElement && !childElement->visibilityAdjustment().contains(VisibilityAdjustment::Subtree))
-                numberOfRenderedChildren++;
-        }
-        if (numberOfRenderedChildren >= 2)
-            return false;
-    }
+        unsigned numberOfVisibleChildren = 0;
+        for (auto& child : childrenOfType<RenderObject>(ancestor)) {
+            if (child.style().usedVisibility() == Visibility::Hidden)
+                continue;
 
+            if (++numberOfVisibleChildren >= 2)
+                return false;
+        }
+    }
     return true;
 }
 
@@ -1785,7 +1786,7 @@ RefPtr<Image> ElementTargetingController::snapshotIgnoringVisibilityAdjustment(E
     if (snapshotRect.isEmpty())
         return { };
 
-    auto buffer = snapshotFrameRect(*mainFrame, snapshotRect, { { }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() });
+    auto buffer = snapshotFrameRect(*mainFrame, snapshotRect, { { }, ImageBufferPixelFormat::BGRA8, DestinationColorSpace::SRGB() });
     return BitmapImage::create(ImageBuffer::sinkIntoNativeImage(WTFMove(buffer)));
 }
 

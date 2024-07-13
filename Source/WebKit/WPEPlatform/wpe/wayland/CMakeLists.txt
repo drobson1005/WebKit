@@ -8,6 +8,7 @@ set(WPEPlatformWayland_SOURCES
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEInputMethodContextWaylandV1.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEInputMethodContextWaylandV3.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEMonitorWayland.cpp
+    ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEToplevelWayland.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEViewWayland.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEWaylandCursor.cpp
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEWaylandCursorTheme.cpp
@@ -22,6 +23,8 @@ set(WPEPlatformWayland_SOURCES
 set(WPEPlatformWayland_INSTALLED_HEADERS
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/wpe-wayland.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEDisplayWayland.h
+    ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEMonitorWayland.h
+    ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEToplevelWayland.h
     ${WEBKIT_DIR}/WPEPlatform/wpe/wayland/WPEViewWayland.h
 )
 
@@ -40,6 +43,14 @@ set(WPEPlatformWayland_LIBRARIES
     ${WAYLAND_LIBRARIES}
     ${WPEPlatform_LIBRARIES}
 )
+
+check_function_exists(shm_open SHM_OPEN_EXISTS)
+if (NOT SHM_OPEN_EXISTS)
+    check_function_exists(shm_open SHM_OPEN_REQUIRES_LIBRT)
+    if (SHM_OPEN_REQUIRES_LIBRT)
+        list(APPEND WPEPlatformWayland_LIBRARIES rt)
+    endif ()
+endif ()
 
 set(WPEPlatformWayland_SOURCES_FOR_INTROSPECTION
     ${WPEPlatformWayland_INSTALLED_HEADERS}

@@ -704,6 +704,13 @@
    },
    {
       "emails" : [
+         "a_fryer@apple.com"
+      ],
+      "github" : "Andrew-Fryer",
+      "name" : "Andrew Fryer"
+   },
+   {
+      "emails" : [
          "anlo@rim.com",
          "anlo@blackberry.com",
          "andrewlo@gmail.com"
@@ -797,6 +804,15 @@
       "nicks" : [
          "wingo"
       ]
+   },
+   {
+      "emails" : [
+         "aviduya@apple.com",
+         "anferneev@icloud.com"
+      ],
+      "github" : "aviduya",
+      "name" : "Anfernee Viduya",
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -2058,6 +2074,7 @@
    {
       "emails" : [
          "david_choi5@apple.com",
+         "davidchoi1027@gmail.com",
          "djchoi@andrew.cmu.edu"
       ],
       "expertise" : "WebCore",
@@ -2065,7 +2082,8 @@
       "name" : "David Choi",
       "nicks" : [
          "RWDavid"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -5127,6 +5145,13 @@
    },
    {
       "emails" : [
+         "lily_spiniolas@apple.com"
+      ],
+      "github" : "lilyspiniolas",
+      "name" : "Lily Spiniolas"
+   },
+   {
+      "emails" : [
          "lindseywild@github.com"
       ],
       "github" : "lindseywild",
@@ -6099,7 +6124,8 @@
       "name" : "Nitin Mahendru",
       "nicks" : [
          "Nitin"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -6440,6 +6466,14 @@
       "nicks" : [
          "pol"
       ]
+   },
+   {
+      "emails" : [
+         "pbahrami@apple.com",
+         "pnikkhah@ucdavis.edu"
+      ],
+      "github" : "pooneh-nb",
+      "name" : "Pouneh Bahrami"
    },
    {
       "emails" : [
@@ -8204,6 +8238,17 @@
       "name" : "Zack Rusin",
       "nicks" : [
          "zackr"
+      ]
+   },
+   {
+      "emails" : [
+         "z_ridouh@apple.com",
+         "zakr@apple.com"
+      ],
+      "github" : "zakariaridouh",
+      "name" : "Zak Ridouh",
+      "nicks" : [
+         "zakr"
       ]
    },
    {

@@ -96,6 +96,7 @@
 #include <wtf/RefCountedLeakCounter.h>
 #include <wtf/SHA1.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/TextStream.h>
 
@@ -1529,7 +1530,7 @@ void Node::removedFromAncestor(RemovalType removalType, ContainerNode& oldParent
     if (isInShadowTree() && !treeScope().rootNode().isShadowRoot())
         clearEventTargetFlag(EventTargetFlag::IsInShadowTree);
     if (removalType.disconnectedFromDocument) {
-        if (auto* cache = oldParentOfRemovedTree.document().existingAXObjectCache())
+        if (CheckedPtr cache = oldParentOfRemovedTree.document().existingAXObjectCache())
             cache->remove(*this);
     }
 }
@@ -2364,7 +2365,7 @@ void Node::moveNodeToNewDocumentSlowCase(Document& oldDocument, Document& newDoc
         oldDocument.parentlessNodeMovedToNewDocument(*this);
 
     if (AXObjectCache::accessibilityEnabled()) {
-        if (auto* cache = oldDocument.existingAXObjectCache())
+        if (CheckedPtr cache = oldDocument.existingAXObjectCache())
             cache->remove(*this);
     }
 

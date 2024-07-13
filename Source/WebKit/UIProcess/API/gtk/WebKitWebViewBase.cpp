@@ -191,12 +191,19 @@ struct MotionEvent {
             yRoot = rootPoint.y();
         }
 
-        MotionEvent(FloatPoint(x, y), FloatPoint(xRoot, yRoot), state);
+        position = FloatPoint(x, y);
+        globalPosition = FloatPoint(xRoot, yRoot);
+        setState(state);
     }
 
     MotionEvent(FloatPoint&& position, FloatPoint&& globalPosition, GdkModifierType state)
         : position(WTFMove(position))
         , globalPosition(WTFMove(globalPosition))
+    {
+        setState(state);
+    }
+
+    void setState(GdkModifierType state)
     {
         if (state & GDK_CONTROL_MASK)
             modifiers.add(WebEventModifier::ControlKey);
@@ -244,9 +251,8 @@ typedef HashMap<uint32_t, GRefPtr<GdkEvent>> TouchEventsMap;
 
 struct _WebKitWebViewBasePrivate {
     _WebKitWebViewBasePrivate()
-        : updateActivityStateTimer(RunLoop::main(), this, &_WebKitWebViewBasePrivate::updateActivityStateTimerFired)
+        : pageScaleFactor(1.0)
 #if GTK_CHECK_VERSION(3, 24, 0)
-        , pageScaleFactor(1.0)
         , releaseEmojiChooserTimer(RunLoop::main(), this, &_WebKitWebViewBasePrivate::releaseEmojiChooserTimerFired)
 #endif
         , nextPresentationUpdateTimer(RunLoop::main(), this, &_WebKitWebViewBasePrivate::nextPresentationUpdateTimerFired)
@@ -255,14 +261,6 @@ struct _WebKitWebViewBasePrivate {
         releaseEmojiChooserTimer.setPriority(RunLoopSourcePriority::ReleaseUnusedResourcesTimer);
 #endif
         nextPresentationUpdateTimer.setPriority(GDK_PRIORITY_REDRAW - 10);
-    }
-
-    void updateActivityStateTimerFired()
-    {
-        if (!pageProxy)
-            return;
-        pageProxy->activityStateDidChange(activityStateFlagsToUpdate);
-        activityStateFlagsToUpdate = { };
     }
 
 #if GTK_CHECK_VERSION(3, 24, 0)
@@ -335,11 +333,7 @@ struct _WebKitWebViewBasePrivate {
 
     ToplevelWindow* toplevelOnScreenWindow { nullptr };
 
-    // View State.
     OptionSet<ActivityState> activityState;
-    OptionSet<ActivityState> activityStateFlagsToUpdate;
-    RunLoop::Timer updateActivityStateTimer;
-
     PlatformDisplayID displayID;
     double pageScaleFactor; // Adjusts all CSS units to match fontDPI
 
@@ -462,16 +456,6 @@ static void webkitWebViewBaseUpdateDisplayID(WebKitWebViewBase* webViewBase, Gdk
         webViewBase->priv->pageProxy->windowScreenDidChange(displayID);
 }
 
-static void webkitWebViewBaseScheduleUpdateActivityState(WebKitWebViewBase* webViewBase, OptionSet<ActivityState> flagsToUpdate)
-{
-    WebKitWebViewBasePrivate* priv = webViewBase->priv;
-    priv->activityStateFlagsToUpdate.add(flagsToUpdate);
-    if (priv->updateActivityStateTimer.isActive())
-        return;
-
-    priv->updateActivityStateTimer.startOneShot(0_s);
-}
-
 void webkitWebViewBaseToplevelWindowIsActiveChanged(WebKitWebViewBase* webViewBase, bool isActive)
 {
     WebKitWebViewBasePrivate* priv = webViewBase->priv;
@@ -492,7 +476,7 @@ void webkitWebViewBaseToplevelWindowIsActiveChanged(WebKitWebViewBase* webViewBa
             priv->inputMethodFilter.notifyFocusedOut();
 #endif
     }
-    webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::WindowIsActive);
+    priv->pageProxy->activityStateDidChange(ActivityState::WindowIsActive);
 }
 
 void webkitWebViewBaseToplevelWindowStateChanged(WebKitWebViewBase* webViewBase, uint32_t changedMask, uint32_t state)
@@ -545,7 +529,7 @@ void webkitWebViewBaseToplevelWindowStateChanged(WebKitWebViewBase* webViewBase,
             return;
         priv->activityState.remove(ActivityState::IsVisible);
     }
-    webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::IsVisible);
+    priv->pageProxy->activityStateDidChange(ActivityState::IsVisible);
 }
 
 void webkitWebViewBaseToplevelWindowMonitorChanged(WebKitWebViewBase* webViewBase, GdkMonitor* monitor)
@@ -554,12 +538,12 @@ void webkitWebViewBaseToplevelWindowMonitorChanged(WebKitWebViewBase* webViewBas
     if (priv->toplevelOnScreenWindow->isInMonitor()) {
         if (!(priv->activityState & ActivityState::IsVisible) && gtk_widget_get_mapped(GTK_WIDGET(webViewBase)) && !priv->toplevelOnScreenWindow->isMinimized()) {
             priv->activityState.add(ActivityState::IsVisible);
-            webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::IsVisible);
+            priv->pageProxy->activityStateDidChange(ActivityState::IsVisible);
         }
     } else {
         if (priv->activityState & ActivityState::IsVisible) {
             priv->activityState.remove(ActivityState::IsVisible);
-            webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::IsVisible);
+            priv->pageProxy->activityStateDidChange(ActivityState::IsVisible);
         }
     }
     webkitWebViewBaseUpdateDisplayID(webViewBase, monitor);
@@ -614,7 +598,7 @@ static void webkitWebViewBaseSetToplevelOnScreenWindow(WebKitWebViewBase* webVie
     }
 
     if (flagsToUpdate)
-        webkitWebViewBaseScheduleUpdateActivityState(webViewBase, flagsToUpdate);
+        priv->pageProxy->activityStateDidChange(flagsToUpdate);
 }
 
 static void webkitWebViewBaseRealize(GtkWidget* widget)
@@ -1106,7 +1090,7 @@ static void webkitWebViewBaseMap(GtkWidget* widget)
         return;
 
     priv->activityState.add(ActivityState::IsVisible);
-    webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::IsVisible);
+    priv->pageProxy->activityStateDidChange(ActivityState::IsVisible);
 }
 
 static void webkitWebViewBaseUnmap(GtkWidget* widget)
@@ -1119,7 +1103,7 @@ static void webkitWebViewBaseUnmap(GtkWidget* widget)
         return;
 
     priv->activityState.remove(ActivityState::IsVisible);
-    webkitWebViewBaseScheduleUpdateActivityState(webViewBase, ActivityState::IsVisible);
+    priv->pageProxy->activityStateDidChange(ActivityState::IsVisible);
 }
 
 static bool shouldForwardWheelEvent(WebKitWebViewBase* webViewBase, GdkEvent* event)
@@ -2834,7 +2818,7 @@ void webkitWebViewBaseSetFocus(WebKitWebViewBase* webViewBase, bool focused)
     } else
         priv->activityState.remove(ActivityState::IsFocused);
 
-    webkitWebViewBaseScheduleUpdateActivityState(webViewBase, flagsToUpdate);
+    priv->pageProxy->activityStateDidChange(flagsToUpdate);
 }
 
 void webkitWebViewBaseSetEditable(WebKitWebViewBase* webViewBase, bool editable)
@@ -3051,7 +3035,7 @@ RefPtr<WebKit::ViewSnapshot> webkitWebViewBaseTakeViewSnapshot(WebKitWebViewBase
         return nullptr;
 
     graphene_rect_t viewport = { { 0, 0 }, { static_cast<float>(size.width()), static_cast<float>(size.height()) } };
-    GdkTexture* texture = gsk_renderer_render_texture(renderer, renderNode.get(), &viewport);
+    GRefPtr<GdkTexture> texture = adoptGRef(gsk_renderer_render_texture(renderer, renderNode.get(), &viewport));
 
     return ViewSnapshot::create(WTFMove(texture));
 #endif

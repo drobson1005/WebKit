@@ -236,6 +236,7 @@ set(WPE_WEB_PROCESS_EXTENSION_API_INSTALLED_HEADERS
 )
 
 set(WPE_WEB_PROCESS_EXTENSION_API_HEADER_TEMPLATES
+    ${WEBKIT_DIR}/WebProcess/InjectedBundle/API/glib/WebKitConsoleMessage.h.in
     ${WEBKIT_DIR}/WebProcess/InjectedBundle/API/glib/WebKitFrame.h.in
     ${WEBKIT_DIR}/WebProcess/InjectedBundle/API/glib/WebKitScriptWorld.h.in
     ${WEBKIT_DIR}/WebProcess/InjectedBundle/API/glib/WebKitWebEditor.h.in
@@ -563,8 +564,9 @@ if (ENABLE_WPE_QT_API)
         #        SHARED here works on Linux and probably some other systems, but
         #        not on MacOS or Windows.
         add_library(qtwpe SHARED
-            UIProcess/API/wpe/qt6/WPEViewQtQuick.cpp
             UIProcess/API/wpe/qt6/WPEDisplayQtQuick.cpp
+            UIProcess/API/wpe/qt6/WPEToplevelQtQuick.cpp
+            UIProcess/API/wpe/qt6/WPEViewQtQuick.cpp
             UIProcess/API/wpe/qt6/WPEQmlExtensionPlugin.cpp
             UIProcess/API/wpe/qt6/WPEQtView.cpp
             UIProcess/API/wpe/qt6/WPEQtViewLoadRequest.cpp
@@ -575,6 +577,7 @@ if (ENABLE_WPE_QT_API)
         )
         target_compile_definitions(qtwpe PUBLIC
             QT_NO_KEYWORDS=1
+            QT_WPE_LIBRARY
         )
         target_link_libraries(qtwpe
             PUBLIC

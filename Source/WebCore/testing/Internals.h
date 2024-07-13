@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
- * Copyright (C) 2013-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +37,7 @@
 #include "ExceptionOr.h"
 #include "HEVCUtilities.h"
 #include "IDLTypes.h"
+#include "NowPlayingInfo.h"
 #include "OrientationNotifier.h"
 #include "PageConsoleClient.h"
 #include "RealtimeMediaSource.h"
@@ -443,8 +444,8 @@ public:
     bool hasAutocorrectedMarker(int from, int length);
     bool hasDictationAlternativesMarker(int from, int length);
     bool hasCorrectionIndicatorMarker(int from, int length);
-#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
-    bool hasUnifiedTextReplacementMarker(int from, int length);
+#if ENABLE(WRITING_TOOLS)
+    bool hasWritingToolsTextSuggestionMarker(int from, int length);
 #endif
     void setContinuousSpellCheckingEnabled(bool);
     void setAutomaticQuoteSubstitutionEnabled(bool);
@@ -746,7 +747,6 @@ public:
     uint64_t sframeCounter(const RTCRtpSFrameTransform&);
     uint64_t sframeKeyId(const RTCRtpSFrameTransform&);
     void setEnableWebRTCEncryption(bool);
-    void setUseDTLS10(bool);
 #endif
 
     String getImageSourceURL(Element&);
@@ -832,6 +832,8 @@ public:
     void endAudioSessionInterruption();
     void clearAudioSessionInterruptionFlag();
     void suspendAllMediaBuffering();
+    void suspendAllMediaPlayback();
+    void resumeAllMediaPlayback();
 #endif
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
@@ -984,6 +986,9 @@ public:
     bool isMediaStreamSourceEnded(MediaStreamTrack&) const;
     bool isMockRealtimeMediaSourceCenterEnabled();
     bool shouldAudioTrackPlay(const AudioTrack&);
+#endif // ENABLE(MEDIA_STREAM)
+#if ENABLE(WEB_RTC)
+    String rtcNetworkInterfaceName() const;
 #endif
 
     bool isHardwareVP9DecoderExpected();
@@ -1116,6 +1121,10 @@ public:
 
     bool usingAppleInternalSDK() const;
     bool usingGStreamer() const;
+
+    using NowPlayingInfoArtwork = WebCore::NowPlayingInfoArtwork;
+    using NowPlayingMetadata = WebCore::NowPlayingMetadata;
+    std::optional<NowPlayingMetadata> nowPlayingMetadata() const;
 
     struct NowPlayingState {
         String title;
@@ -1350,8 +1359,6 @@ public:
     int readPreferenceInteger(const String& domain, const String& key);
     String encodedPreferenceValue(const String& domain, const String& key);
 
-    String getUTIFromTag(const String& tagClass, const String& tag, const String& conformingToUTI);
-
     bool supportsPictureInPicture();
 
     String focusRingColor();
@@ -1468,6 +1475,7 @@ public:
 
     Vector<PDFAnnotationRect> pdfAnnotationRectsForTesting(Element& pluginElement) const;
     void setPDFDisplayModeForTesting(Element&, const String&) const;
+    bool sendEditingCommandToPDFForTesting(Element&, const String& commandName, const String& argument) const;
     void registerPDFTest(Ref<VoidCallback>&&, Element&);
 
     const String& defaultSpatialTrackingLabel() const;

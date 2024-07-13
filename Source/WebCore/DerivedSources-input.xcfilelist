@@ -1622,6 +1622,7 @@ $(PROJECT_DIR)/html/canvas/CanvasFilters.idl
 $(PROJECT_DIR)/html/canvas/CanvasGradient.idl
 $(PROJECT_DIR)/html/canvas/CanvasImageData.idl
 $(PROJECT_DIR)/html/canvas/CanvasImageSmoothing.idl
+$(PROJECT_DIR)/html/canvas/CanvasLayers.idl
 $(PROJECT_DIR)/html/canvas/CanvasLineCap.idl
 $(PROJECT_DIR)/html/canvas/CanvasLineJoin.idl
 $(PROJECT_DIR)/html/canvas/CanvasPath.idl
@@ -1778,13 +1779,14 @@ $(PROJECT_DIR)/page/IntersectionObserverEntry.idl
 $(PROJECT_DIR)/page/Location.idl
 $(PROJECT_DIR)/page/NavigateEvent.idl
 $(PROJECT_DIR)/page/Navigation.idl
+$(PROJECT_DIR)/page/NavigationActivation.idl
 $(PROJECT_DIR)/page/NavigationCurrentEntryChangeEvent.idl
 $(PROJECT_DIR)/page/NavigationDestination.idl
 $(PROJECT_DIR)/page/NavigationHistoryEntry.idl
 $(PROJECT_DIR)/page/NavigationInterceptHandler.idl
 $(PROJECT_DIR)/page/NavigationNavigationType.idl
 $(PROJECT_DIR)/page/NavigationTransition.idl
-$(PROJECT_DIR)/page/Navigator+IsLoggedIn.idl
+$(PROJECT_DIR)/page/Navigator+LoginStatus.idl
 $(PROJECT_DIR)/page/Navigator+UserActivation.idl
 $(PROJECT_DIR)/page/Navigator.idl
 $(PROJECT_DIR)/page/NavigatorCookies.idl

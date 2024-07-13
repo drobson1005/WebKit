@@ -1095,9 +1095,6 @@ void RenderElement::willBeRemovedFromTree()
     if (firstChild() || hasLayer())
         removeLayers();
 
-    if (isOutOfFlowPositioned() && parent()->childrenInline())
-        checkedParent()->dirtyLinesFromChangedChild(*this);
-
     RenderObject::willBeRemovedFromTree();
 }
 
@@ -2525,8 +2522,8 @@ bool RenderElement::hasEligibleContainmentForSizeQuery() const
 void RenderElement::clearNeedsLayoutForSkippedContent()
 {
     for (CheckedRef descendant : descendantsOfTypePostOrder<RenderObject>(*this))
-        descendant->clearNeedsLayout(EverHadSkippedContentLayout::No);
-    clearNeedsLayout(EverHadSkippedContentLayout::No);
+        descendant->clearNeedsLayout(HadSkippedLayout::Yes);
+    clearNeedsLayout(HadSkippedLayout::Yes);
 }
 
 void RenderElement::layoutIfNeeded()

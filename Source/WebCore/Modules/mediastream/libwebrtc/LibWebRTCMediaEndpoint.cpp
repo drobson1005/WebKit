@@ -81,8 +81,7 @@ LibWebRTCMediaEndpoint::LibWebRTCMediaEndpoint(LibWebRTCPeerConnectionBackend& p
     ASSERT(isMainThread());
     ASSERT(client.factory());
 
-    if (DeprecatedGlobalSettings::webRTCH264SimulcastEnabled())
-        webrtc::field_trial::InitFieldTrialsFromString("WebRTC-H264Simulcast/Enabled/");
+    webrtc::field_trial::InitFieldTrialsFromString("WebRTC-Video-H26xPacketBuffer/Enabled/");
 }
 
 void LibWebRTCMediaEndpoint::restartIce()
@@ -284,7 +283,7 @@ void LibWebRTCMediaEndpoint::gatherDecoderImplementationName(Function<void(Strin
             for (const auto& rtcStats : *rtcReport) {
                 if (rtcStats.type() == webrtc::RTCInboundRtpStreamStats::kType) {
                     auto& inboundRTPStats = static_cast<const webrtc::RTCInboundRtpStreamStats&>(rtcStats);
-                    if (inboundRTPStats.decoder_implementation.is_defined()) {
+                    if (inboundRTPStats.decoder_implementation) {
                         callback(fromStdString(*inboundRTPStats.decoder_implementation));
                         return;
                     }

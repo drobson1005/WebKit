@@ -257,6 +257,8 @@ void WebFullScreenManager::enterFullScreenForElement(WebCore::Element* element, 
 
             auto imageResourceHandle = sharedMemoryBuffer->createHandle(SharedMemory::Protection::ReadOnly);
 
+            m_willUseQuickLookForFullscreen = true;
+
             return {
                 FullScreenMediaDetails::Type::Image,
                 imageSize,
@@ -267,6 +269,9 @@ void WebFullScreenManager::enterFullScreenForElement(WebCore::Element* element, 
 
         mediaDetails = getImageMediaDetails();
     }
+
+    if (m_willUseQuickLookForFullscreen)
+        m_page->freezeLayerTree(WebPage::LayerTreeFreezeReason::OutOfProcessFullscreen);
 #endif
 
     m_initialFrame = screenRectOfContents(m_element.get());
@@ -274,13 +279,15 @@ void WebFullScreenManager::enterFullScreenForElement(WebCore::Element* element, 
 #if ENABLE(VIDEO)
     updateMainVideoElement();
 
-#if PLATFORM(VISION)
+#if ENABLE(VIDEO_USES_ELEMENT_FULLSCREEN)
     if (m_mainVideoElement) {
         bool fullscreenElementIsVideoElement = is<HTMLVideoElement>(element);
 
         auto mainVideoElementSize = [&]() -> FloatSize {
+#if PLATFORM(VISION)
             if (!fullscreenElementIsVideoElement && element->document().quirks().shouldDisableFullscreenVideoAspectRatioAdaptiveSizing())
                 return { };
+#endif
             return FloatSize(m_mainVideoElement->videoWidth(), m_mainVideoElement->videoHeight());
         }();
 
@@ -291,6 +298,7 @@ void WebFullScreenManager::enterFullScreenForElement(WebCore::Element* element, 
     }
 #endif
 
+    m_page->prepareToEnterElementFullScreen();
     m_page->injectedBundleFullScreenClient().enterFullScreenForElement(m_page.ptr(), element, m_element->document().quirks().blocksReturnToFullscreenFromPictureInPictureQuirk(), mode, WTFMove(mediaDetails));
 
     if (mode == WebCore::HTMLMediaElementEnums::VideoFullscreenModeInWindow) {
@@ -308,6 +316,7 @@ void WebFullScreenManager::exitFullScreenForElement(WebCore::Element* element)
     else
         ALWAYS_LOG(LOGIDENTIFIER, "null");
 
+    m_page->prepareToExitElementFullScreen();
     m_page->injectedBundleFullScreenClient().exitFullScreenForElement(m_page.ptr(), element, m_inWindowFullScreenMode);
 
     if (m_inWindowFullScreenMode) {
@@ -441,6 +450,11 @@ static Vector<Ref<Element>> collectFullscreenElementsFromElement(Element* elemen
 
 void WebFullScreenManager::didExitFullScreen()
 {
+#if PLATFORM(VISION) && ENABLE(QUICKLOOK_FULLSCREEN)
+    if (std::exchange(m_willUseQuickLookForFullscreen, false))
+        m_page->unfreezeLayerTree(WebPage::LayerTreeFreezeReason::OutOfProcessFullscreen);
+#endif
+
     m_page->isInFullscreenChanged(WebPage::IsInFullscreenMode::No);
 
     if (!m_element)
@@ -513,7 +527,7 @@ void WebFullScreenManager::close()
         return;
     m_closing = true;
     ALWAYS_LOG(LOGIDENTIFIER);
-    m_page->injectedBundleFullScreenClient().closeFullScreen(m_page.ptr());
+    m_page->closeFullScreen();
     invalidate();
     m_closing = false;
 }

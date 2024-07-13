@@ -157,7 +157,10 @@ _PATH_RULES_SPECIFIER = [
     ([
         # The WPEQtViewLoadRequest class uses Qt naming conventions (d_ptr).
         os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt5', 'WPEQtViewLoadRequest.h'),
-        os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEQtViewLoadRequest.h')],
+        os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEQtViewLoadRequest.h'),
+
+        # The WPEQtView class uses Qt naming conventions (d_ptr).
+        os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEQtView.h')],
      ["-readability/naming/underscores"]),
 
     ([
@@ -169,14 +172,16 @@ _PATH_RULES_SPECIFIER = [
      ["-readability/parameter_name", "-readability/naming/acronym"]),
 
     ([
-        # The WPEViewQtQuick / WPEDisplayQtQuick follow GLib API conventions.
+        # The WPE QtQuick files follow GLib API conventions.
         os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEViewQtQuick.h'),
+        os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEToplevelQtQuick.h'),
         os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEDisplayQtQuick.h')],
      ["-build/header_guard", "-readability/naming/underscores", "-readability/parameter_name", "-whitespace/declaration", "-whitespace/parens"]),
 
     ([
-        # The WPEViewQtQuick / WPEDisplayQtQuick follow GLib API conventions.
+        # The WPE QtQuick files follow GLib API conventions.
         os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEViewQtQuick.cpp'),
+        os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEToplevelQtQuick.cpp'),
         os.path.join('Source', 'WebKit', 'UIProcess', 'API', 'wpe', 'qt6', 'WPEDisplayQtQuick.cpp')],
      ["-build/include_order", "-whitespace/parens"]),
 
@@ -315,6 +320,7 @@ _PATH_RULES_SPECIFIER = [
     ([os.path.join('webkitpy', 'thirdparty'),
       os.path.join('Source', 'bmalloc', 'bmalloc', 'valgrind.h'),
       os.path.join('Source', 'ThirdParty', 'ANGLE'),
+      os.path.join('Source', 'ThirdParty', 'libsysprof-capture'),
       os.path.join('Source', 'ThirdParty', 'libwebrtc'),
       os.path.join('Source', 'ThirdParty', 'openvr'),
       os.path.join('Source', 'ThirdParty', 'skia'),
@@ -518,6 +524,9 @@ _SKIPPED_FILES_WITHOUT_WARNING = [
     os.path.join('Source', 'WebCore', 'icu'),
     os.path.join('Source', 'WebKitLegacy', 'mac', 'icu'),
     os.path.join('Source', 'WTF', 'icu'),
+
+    # libsysprof-capture.
+    os.path.join('Source', 'ThirdParty', 'libsysprof-capture'),
 
     # Skia.
     os.path.join('Source', 'ThirdParty', 'skia'),

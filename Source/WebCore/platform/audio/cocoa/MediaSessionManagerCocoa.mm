@@ -475,6 +475,13 @@ WeakPtr<PlatformMediaSession> MediaSessionManagerCocoa::nowPlayingEligibleSessio
     }, PlatformMediaSession::PlaybackControlsPurpose::NowPlaying);
 }
 
+void MediaSessionManagerCocoa::updateActiveNowPlayingSession(CheckedPtr<PlatformMediaSession> activeNowPlayingSession)
+{
+    forEachSession([&](auto& session) {
+        session.setActiveNowPlayingSession(&session == activeNowPlayingSession.get());
+    });
+}
+
 void MediaSessionManagerCocoa::updateNowPlayingInfo()
 {
     if (!isMediaRemoteFrameworkAvailable())
@@ -483,11 +490,11 @@ void MediaSessionManagerCocoa::updateNowPlayingInfo()
     BEGIN_BLOCK_OBJC_EXCEPTIONS
 
     std::optional<NowPlayingInfo> nowPlayingInfo;
-    if (auto session = nowPlayingEligibleSession())
+    CheckedPtr session = nowPlayingEligibleSession().get();
+    if (session)
         nowPlayingInfo = session->nowPlayingInfo();
 
     if (!nowPlayingInfo) {
-
         if (m_registeredAsNowPlayingApplication) {
             ALWAYS_LOG(LOGIDENTIFIER, "clearing now playing info");
             m_nowPlayingManager->clearNowPlayingInfo();
@@ -499,7 +506,9 @@ void MediaSessionManagerCocoa::updateNowPlayingInfo()
         m_lastUpdatedNowPlayingDuration = NAN;
         m_lastUpdatedNowPlayingElapsedTime = NAN;
         m_lastUpdatedNowPlayingInfoUniqueIdentifier = { };
+        m_nowPlayingInfo = std::nullopt;
 
+        updateActiveNowPlayingSession(nullptr);
         return;
     }
 
@@ -519,6 +528,8 @@ void MediaSessionManagerCocoa::updateNowPlayingInfo()
         m_registeredAsNowPlayingApplication = true;
         providePresentingApplicationPIDIfNecessary();
     }
+
+    updateActiveNowPlayingSession(session);
 
     if (!m_nowPlayingInfo || nowPlayingInfo->metadata != m_nowPlayingInfo->metadata)
         nowPlayingMetadataChanged(nowPlayingInfo->metadata);

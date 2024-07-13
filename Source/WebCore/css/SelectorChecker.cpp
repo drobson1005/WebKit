@@ -424,7 +424,7 @@ SelectorChecker::MatchResult SelectorChecker::matchRecursively(CheckingContext& 
 
             if (result.match == Match::SelectorMatches || result.match == Match::SelectorFailsAllSiblings || result.match == Match::SelectorFailsCompletely)
                 return MatchResult::updateWithMatchType(result, matchType);
-        };
+        }
         return MatchResult::fails(Match::SelectorFailsAllSiblings);
     }
     case CSSSelector::Relation::Subselector:
@@ -1161,6 +1161,9 @@ bool SelectorChecker::checkOne(CheckingContext& checkingContext, const LocalCont
 
         case CSSSelector::PseudoClass::UserValid:
             return matchesUserValidPseudoClass(element);
+
+        case CSSSelector::PseudoClass::ActiveViewTransition:
+            return matchesActiveViewTransitionPseudoClass(element);
         }
         return false;
     }

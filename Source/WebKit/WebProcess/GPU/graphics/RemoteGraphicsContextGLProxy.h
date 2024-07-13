@@ -88,7 +88,8 @@ public:
 #endif
 
     void simulateEventForTesting(WebCore::GraphicsContextGLSimulatedEventForTesting) final;
-    void readPixels(WebCore::IntRect, GCGLenum format, GCGLenum type, std::span<uint8_t> data, GCGLint alignment, GCGLint rowLength) final;
+    void getBufferSubData(GCGLenum target, GCGLintptr offset, std::span<uint8_t> data) final;
+    void readPixels(WebCore::IntRect, GCGLenum format, GCGLenum type, std::span<uint8_t> data, GCGLint alignment, GCGLint rowLength, GCGLboolean packReverseRowOrder) final;
     void multiDrawArraysANGLE(GCGLenum mode, GCGLSpanTuple<const GCGLint, const GCGLsizei> firstsAndCounts) final;
     void multiDrawArraysInstancedANGLE(GCGLenum mode, GCGLSpanTuple<const GCGLint, const GCGLsizei, const GCGLsizei> firstsCountsAndInstanceCounts) final;
     void multiDrawElementsANGLE(GCGLenum mode, GCGLSpanTuple<const GCGLsizei, const GCGLsizei> countsAndOffsets, GCGLenum type) final;
@@ -248,7 +249,6 @@ public:
     GCGLboolean isVertexArray(PlatformGLObject arg0) final;
     void bindVertexArray(PlatformGLObject arg0) final;
     void copyBufferSubData(GCGLenum readTarget, GCGLenum writeTarget, GCGLintptr readOffset, GCGLintptr writeOffset, GCGLsizeiptr) final;
-    void getBufferSubData(GCGLenum target, GCGLintptr offset, std::span<uint8_t> data) final;
     void blitFramebuffer(GCGLint srcX0, GCGLint srcY0, GCGLint srcX1, GCGLint srcY1, GCGLint dstX0, GCGLint dstY0, GCGLint dstX1, GCGLint dstY1, GCGLbitfield mask, GCGLenum filter) final;
     void framebufferTextureLayer(GCGLenum target, GCGLenum attachment, PlatformGLObject texture, GCGLint level, GCGLint layer) final;
     void invalidateFramebuffer(GCGLenum target, std::span<const GCGLenum> attachments) final;
@@ -359,7 +359,6 @@ public:
     void renderbufferStorageMultisampleANGLE(GCGLenum target, GCGLsizei samples, GCGLenum internalformat, GCGLsizei width, GCGLsizei height) final;
     void getInternalformativ(GCGLenum target, GCGLenum internalformat, GCGLenum pname, std::span<GCGLint> params) final;
     void setDrawingBufferColorSpace(const WebCore::DestinationColorSpace&) final;
-    RefPtr<WebCore::PixelBuffer> drawingBufferToPixelBuffer(WebCore::GraphicsContextGLFlipY) final;
 
 #if ENABLE(WEBXR)
     GCGLExternalImage createExternalImage(WebCore::GraphicsContextGL::ExternalImageSource&&, GCGLenum internalFormat, GCGLint layer) IPC_MESSAGE_ATTRIBUTE(EnabledIf='webXREnabled()') final;
@@ -374,6 +373,8 @@ public:
     bool addFoveation(WebCore::IntSize physicalSizeLeft, WebCore::IntSize physicalSizeRight, WebCore::IntSize screenSize, std::span<const GCGLfloat> horizontalSamplesLeft, std::span<const GCGLfloat> verticalSamples, std::span<const GCGLfloat> horizontalSamplesRight) IPC_MESSAGE_ATTRIBUTE(EnabledIf='webXREnabled()') final;
     void enableFoveation(GCGLuint) IPC_MESSAGE_ATTRIBUTE(EnabledIf='webXREnabled()') final;
     void disableFoveation() IPC_MESSAGE_ATTRIBUTE(EnabledIf='webXREnabled()') final;
+    void framebufferDiscard(GCGLenum target, std::span<const GCGLenum> attachments) IPC_MESSAGE_ATTRIBUTE(EnabledIf='webXREnabled()') final;
+    void framebufferResolveRenderbuffer(GCGLenum target, GCGLenum attachment, GCGLenum renderbuffertarget, PlatformGLObject arg3) IPC_MESSAGE_ATTRIBUTE(EnabledIf='webXREnabled()') final;
 #endif
     // End of list used by generate-gpup-webgl script.
 
@@ -405,8 +406,6 @@ private:
     void wasCreated(IPC::Semaphore&&, IPC::Semaphore&&, std::optional<RemoteGraphicsContextGLInitializationState>&&);
     void wasLost();
     void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, String&&);
-
-    void readPixelsSharedMemory(WebCore::IntRect, GCGLenum format, GCGLenum type, std::span<uint8_t> data);
 
     void initialize(const RemoteGraphicsContextGLInitializationState&);
     void waitUntilInitialized();

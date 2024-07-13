@@ -155,10 +155,6 @@ void AudioSessionIOS::setPresentingProcesses(Vector<audit_token_t>&& auditTokens
     ALWAYS_LOG(LOGIDENTIFIER);
 
     AVAudioSession *session = [PAL::getAVAudioSessionClass() sharedInstance];
-    if (![session respondsToSelector:@selector(setAuditTokensForProcessAssertion:error:)])
-        return;
-
-    ALWAYS_LOG(LOGIDENTIFIER);
     auto nsAuditTokens = adoptNS([[NSMutableArray alloc] init]);
     for (auto& token : auditTokens) {
         auto nsToken = adoptNS([[NSData alloc] initWithBytes:token.val length:sizeof(token.val)]);
@@ -385,6 +381,8 @@ void AudioSessionIOS::updateSpatialExperience()
         case AudioSession::SoundStageSize::Large:
             return AVAudioSessionSoundStageSizeLarge;
         };
+        ASSERT_NOT_REACHED();
+        return AVAudioSessionSoundStageSizeAutomatic;
     }();
     NSError *error = nil;
     AVAudioSession *session = [PAL::getAVAudioSessionClass() sharedInstance];

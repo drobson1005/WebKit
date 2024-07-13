@@ -34,6 +34,7 @@
 #include <WebCore/PlaybackSessionModel.h>
 #include <WebCore/TimeRanges.h>
 #include <WebCore/VideoReceiverEndpoint.h>
+#include <wtf/CheckedPtr.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
@@ -47,13 +48,24 @@ class WebPageProxy;
 class PlaybackSessionManagerProxy;
 class VideoReceiverEndpointMessage;
 
-class PlaybackSessionModelContext final: public RefCounted<PlaybackSessionModelContext>, public WebCore::PlaybackSessionModel  {
+class PlaybackSessionModelContext final
+    : public RefCounted<PlaybackSessionModelContext>
+    , public WebCore::PlaybackSessionModel
+    , public CanMakeCheckedPtr<PlaybackSessionModelContext> {
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(PlaybackSessionModelContext);
 public:
     static Ref<PlaybackSessionModelContext> create(PlaybackSessionManagerProxy& manager, PlaybackSessionContextIdentifier contextId)
     {
         return adoptRef(*new PlaybackSessionModelContext(manager, contextId));
     }
     virtual ~PlaybackSessionModelContext();
+
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    uint32_t ptrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::ptrCountWithoutThreadCheck(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
 
     // PlaybackSessionModel
     void addClient(WebCore::PlaybackSessionModelClient&) final;
@@ -77,9 +89,14 @@ public:
     void pictureInPictureSupportedChanged(bool);
     void pictureInPictureActiveChanged(bool);
     void isInWindowFullscreenActiveChanged(bool);
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+    void supportsLinearMediaPlayerChanged(bool);
+#endif
 
     bool wirelessVideoPlaybackDisabled() const final { return m_wirelessVideoPlaybackDisabled; }
     const WebCore::VideoReceiverEndpoint& videoReceiverEndpoint() { return m_videoReceiverEndpoint; }
+
+    void invalidate();
 
 private:
     friend class PlaybackSessionManagerProxy;
@@ -143,6 +160,9 @@ private:
     bool isPictureInPictureSupported() const final { return m_pictureInPictureSupported; }
     bool isPictureInPictureActive() const final { return m_pictureInPictureActive; }
     bool isInWindowFullscreenActive() const final { return m_isInWindowFullscreenActive; }
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+    bool supportsLinearMediaPlayer() const final { return m_supportsLinearMediaPlayer; }
+#endif
 
     WebCore::AudioSessionSoundStageSize soundStageSize() const final { return m_soundStageSize; }
     void setSoundStageSize(WebCore::AudioSessionSoundStageSize) final;
@@ -187,6 +207,9 @@ private:
     bool m_isInWindowFullscreenActive { false };
     WebCore::VideoReceiverEndpoint m_videoReceiverEndpoint;
     WebCore::AudioSessionSoundStageSize m_soundStageSize { 0 };
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+    bool m_supportsLinearMediaPlayer { false };
+#endif
 
 #if !RELEASE_LOG_DISABLED
     const void* m_logIdentifier { nullptr };
@@ -207,6 +230,7 @@ public:
 
     void invalidate();
 
+    bool hasControlsManagerInterface() const { return !!m_controlsManagerContextId; }
     WebCore::PlatformPlaybackSessionInterface* controlsManagerInterface();
     void requestControlledElementID();
 
@@ -253,6 +277,9 @@ private:
     void volumeChanged(PlaybackSessionContextIdentifier, double volume);
     void pictureInPictureSupportedChanged(PlaybackSessionContextIdentifier, bool pictureInPictureSupported);
     void isInWindowFullscreenActiveChanged(PlaybackSessionContextIdentifier, bool isInWindow);
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+    void supportsLinearMediaPlayerChanged(PlaybackSessionContextIdentifier, bool);
+#endif
 
     // Messages to PlaybackSessionManager
     void play(PlaybackSessionContextIdentifier);
@@ -287,6 +314,7 @@ private:
     void setSoundStageSize(PlaybackSessionContextIdentifier, WebCore::AudioSessionSoundStageSize);
 
     void uncacheVideoReceiverEndpoint(PlaybackSessionContextIdentifier);
+    void updateVideoControlsManager(PlaybackSessionContextIdentifier);
 
 #if !RELEASE_LOG_DISABLED
     void setLogIdentifier(PlaybackSessionContextIdentifier, uint64_t);

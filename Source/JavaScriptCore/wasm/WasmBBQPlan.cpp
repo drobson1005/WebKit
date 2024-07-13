@@ -42,6 +42,7 @@
 #include <wtf/DataLog.h>
 #include <wtf/Locker.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/MakeString.h>
 
 namespace JSC { namespace Wasm {
 
@@ -147,7 +148,7 @@ void BBQPlan::work(CompilationEffort effort)
     LinkBuffer linkBuffer(*context.wasmEntrypointJIT, callee.ptr(), LinkBuffer::Profile::WasmBBQ, JITCompilationCanFail);
     if (UNLIKELY(linkBuffer.didFailToAllocate())) {
         Locker locker { m_lock };
-        Base::fail(makeString("Out of executable memory while tiering up function at index "_s, m_functionIndex));
+        Base::fail(makeString("Out of executable memory while tiering up function at index "_s, m_functionIndex), Plan::Error::OutOfMemory);
         return;
     }
 
@@ -200,7 +201,7 @@ void BBQPlan::work(CompilationEffort effort)
         m_calleeGroup->callsiteCollection().updateCallsitesToCallUs(locker, *m_calleeGroup, CodeLocationLabel<WasmEntryPtrTag>(entrypoint), m_functionIndex, functionIndexSpace);
 
         {
-            if (Options::useWasmIPInt()) {
+            if (Options::useWebAssemblyIPInt()) {
                 IPIntCallee& ipintCallee = m_calleeGroup->m_ipintCallees->at(m_functionIndex).get();
                 Locker locker { ipintCallee.tierUpCounter().m_lock };
                 ipintCallee.setReplacement(callee.copyRef(), mode());
@@ -303,7 +304,7 @@ std::unique_ptr<InternalFunction> BBQPlan::compileFunction(uint32_t functionInde
 {
     const auto& function = m_moduleInformation->functions[functionIndex];
     TypeIndex typeIndex = m_moduleInformation->internalFunctionTypeIndices[functionIndex];
-    const TypeDefinition& signature = TypeInformation::get(typeIndex);
+    const TypeDefinition& signature = TypeInformation::get(typeIndex).expand();
     unsigned functionIndexSpace = m_moduleInformation->importFunctionCount() + functionIndex;
     ASSERT_UNUSED(functionIndexSpace, m_moduleInformation->typeIndexFromFunctionIndexSpace(functionIndexSpace) == typeIndex);
     Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileResult;
@@ -332,7 +333,7 @@ void BBQPlan::didCompleteCompilation()
     for (uint32_t functionIndex = 0; functionIndex < m_moduleInformation->functions.size(); functionIndex++) {
         CompilationContext& context = m_compilationContexts[functionIndex];
         TypeIndex typeIndex = m_moduleInformation->internalFunctionTypeIndices[functionIndex];
-        const TypeDefinition& signature = TypeInformation::get(typeIndex);
+        const TypeDefinition& signature = TypeInformation::get(typeIndex).expand();
         const uint32_t functionIndexSpace = functionIndex + m_moduleInformation->importFunctionCount();
         ASSERT(functionIndexSpace < m_moduleInformation->functionIndexSpaceSize());
         {

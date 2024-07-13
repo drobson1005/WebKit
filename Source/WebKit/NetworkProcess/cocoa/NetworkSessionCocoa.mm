@@ -41,6 +41,7 @@
 #import "NetworkSessionCreationParameters.h"
 #import "PrivateRelayed.h"
 #import "WKURLSessionTaskDelegate.h"
+#import "WebErrors.h"
 #import "WebPageNetworkParameters.h"
 #import "WebSocketTask.h"
 #import <Foundation/NSURLSession.h>
@@ -72,6 +73,7 @@
 #import <wtf/cocoa/TypeCastsCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/darwin/WeakLinking.h>
+#import <wtf/text/MakeString.h>
 #import <wtf/text/WTFString.h>
 
 #if USE(APPLE_INTERNAL_SDK)
@@ -747,7 +749,7 @@ void NetworkSessionCocoa::setClientAuditToken(const WebCore::AuthenticationChall
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler
 {
-    auto* sessionCocoa = [self sessionFromTask: task];
+    auto* sessionCocoa = [self sessionFromTask:task];
     if (!sessionCocoa || [task state] == NSURLSessionTaskStateCanceling) {
         completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
         return;
@@ -1087,16 +1089,19 @@ ALLOW_DEPRECATED_DECLARATIONS_END
         auto privateRelayed = PrivateRelayed::No;
 #endif
         auto tlsVersion = (tls_protocol_version_t)metrics.negotiatedTLSProtocolVersion.unsignedShortValue;
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         if (tlsVersion == tls_protocol_version_TLSv10 || tlsVersion == tls_protocol_version_TLSv11)
             negotiatedLegacyTLS = NegotiatedLegacyTLS::Yes;
-ALLOW_DEPRECATED_DECLARATIONS_END
-        
+        ALLOW_DEPRECATED_DECLARATIONS_END
+
         // Avoid MIME type sniffing if the response comes back as 304 Not Modified.
-        int statusCode = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
+        auto isNSHTTPURLResponseClass = [response isKindOfClass:NSHTTPURLResponse.class];
+        int statusCode = isNSHTTPURLResponseClass ? [(NSHTTPURLResponse *)response statusCode] : 0;
+        NSString *xContentTypeOptions = isNSHTTPURLResponseClass ? [(NSHTTPURLResponse *)response valueForHTTPHeaderField:@"X-Content-Type-Options"] : nil;
+        bool isNoSniff = xContentTypeOptions && [xContentTypeOptions caseInsensitiveCompare:@"nosniff"] == NSOrderedSame;
         if (statusCode != httpStatus304NotModified) {
             bool isMainResourceLoad = networkDataTask->firstRequest().requester() == WebCore::ResourceRequestRequester::Main;
-            WebCore::adjustMIMETypeIfNecessary(response._CFURLResponse, isMainResourceLoad);
+            WebCore::adjustMIMETypeIfNecessary(response._CFURLResponse, isMainResourceLoad ? WebCore::IsMainResourceLoad::Yes : WebCore::IsMainResourceLoad::No, isNoSniff ? WebCore::IsNoSniffSet::Yes : WebCore::IsNoSniffSet::No);
         }
 
         WebCore::ResourceResponse resourceResponse(response);
@@ -2004,15 +2009,69 @@ private:
     const DataTaskIdentifier m_identifier;
 };
 
-void NetworkSessionCocoa::loadImageForDecoding(WebCore::ResourceRequest&& request, WebPageProxyIdentifier pageID, CompletionHandler<void(std::variant<WebCore::ResourceError, Ref<WebCore::SharedBuffer>>&&)>&& completionHandler)
+void NetworkSessionCocoa::loadImageForDecoding(WebCore::ResourceRequest&& request, WebPageProxyIdentifier pageID, size_t maximumBytesFromNetwork, CompletionHandler<void(std::variant<WebCore::ResourceError, Ref<WebCore::FragmentedSharedBuffer>>&&)>&& completionHandler)
 {
-    auto session = sessionWrapperForTask(pageID, request, WebCore::StoredCredentialsPolicy::Use, std::nullopt).session;
-    RetainPtr task = [session dataTaskWithRequest:request.nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody) completionHandler:makeBlockPtr([completionHandler = WTFMove(completionHandler)] (NSData *data, NSURLResponse *response, NSError *error) mutable {
-        if (error)
-            return completionHandler(error);
-        completionHandler(WebCore::SharedBuffer::create(data));
-    }).get()];
-    [task resume];
+    class Client : public NetworkDataTaskClient {
+    public:
+        Client(NetworkSession& networkSession, Ref<NetworkProcess>&& networkProcess, WebPageProxyIdentifier pageID, const NetworkLoadParameters& loadParameters, size_t maximumBytesFromNetwork, CompletionHandler<void(std::variant<WebCore::ResourceError, Ref<WebCore::FragmentedSharedBuffer>>&&)>&& completionHandler)
+            : m_networkProcess(WTFMove(networkProcess))
+            , m_url(loadParameters.request.url())
+            , m_sessionID(networkSession.sessionID())
+            , m_pageID(pageID)
+            , m_maximumBytesFromNetwork(maximumBytesFromNetwork)
+            , m_dataTask(NetworkDataTask::create(networkSession, *this, loadParameters))
+            , m_completionHandler(WTFMove(completionHandler))
+        {
+            m_dataTask->resume();
+        }
+    private:
+        void willPerformHTTPRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&& request, RedirectCompletionHandler&& completionHandler) final { completionHandler(WTFMove(request)); }
+        void didReceiveChallenge(WebCore::AuthenticationChallenge&& challenge, NegotiatedLegacyTLS negotiatedLegacyTLS, ChallengeCompletionHandler&& completionHandler) final
+        {
+            m_networkProcess->authenticationManager().didReceiveAuthenticationChallenge(m_sessionID, m_pageID, nullptr, challenge, negotiatedLegacyTLS, WTFMove(completionHandler));
+        }
+        void didReceiveResponse(WebCore::ResourceResponse&&, NegotiatedLegacyTLS, PrivateRelayed, ResponseCompletionHandler&& completionHandler) final
+        {
+            completionHandler(WebCore::PolicyAction::Use);
+        }
+        void didReceiveData(const WebCore::SharedBuffer& buffer) final
+        {
+            m_buffer.append(buffer);
+            if (m_buffer.size() > m_maximumBytesFromNetwork)
+                didCompleteWithError(WebCore::ResourceError([NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorDataLengthExceedsMaximum userInfo:nil]), WebCore::NetworkLoadMetrics { });
+        }
+        void didCompleteWithError(const WebCore::ResourceError& error, const WebCore::NetworkLoadMetrics&) final
+        {
+            if (error.isNull())
+                m_completionHandler(m_buffer.take());
+            else
+                m_completionHandler(error);
+            delete this;
+        }
+        void didSendData(uint64_t, uint64_t) final { }
+        void wasBlocked() final { completeWithBlockedError(); }
+        void cannotShowURL() final { completeWithBlockedError(); }
+        void wasBlockedByRestrictions() final { completeWithBlockedError(); }
+        void wasBlockedByDisabledFTP() final { completeWithBlockedError(); }
+        void completeWithBlockedError()
+        {
+            didCompleteWithError(blockedError({ m_url }), WebCore::NetworkLoadMetrics { });
+        }
+
+        const Ref<NetworkProcess> m_networkProcess;
+        const URL m_url;
+        const PAL::SessionID m_sessionID;
+        const WebPageProxyIdentifier m_pageID;
+        const size_t m_maximumBytesFromNetwork;
+        const Ref<NetworkDataTask> m_dataTask;
+        CompletionHandler<void(std::variant<WebCore::ResourceError, Ref<WebCore::FragmentedSharedBuffer>>&&)> m_completionHandler;
+        WebCore::SharedBufferBuilder m_buffer;
+    };
+
+    NetworkLoadParameters loadParameters;
+    loadParameters.request = WTFMove(request);
+    // Client manages its own lifetime, deleting itself when its purpose has been fulfilled.
+    new Client(*this, networkProcess(), pageID, loadParameters, maximumBytesFromNetwork, WTFMove(completionHandler));
 }
 
 void NetworkSessionCocoa::dataTaskWithRequest(WebPageProxyIdentifier pageID, WebCore::ResourceRequest&& request, const std::optional<WebCore::SecurityOriginData>& topOrigin, CompletionHandler<void(DataTaskIdentifier)>&& completionHandler)

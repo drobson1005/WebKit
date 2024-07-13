@@ -621,9 +621,12 @@ class Contributors(object):
                 cls.last_update = now
 
         if not contributors_json:
+            errors.append('Loading data from disk...\n')
             contributors_json, error = cls.load_from_disk()
             if error:
                 errors.append(error)
+            if contributors_json:
+                errors = []
 
         for value in contributors_json:
             name = value.get('name')
@@ -2511,7 +2514,7 @@ class CheckStatusOfPR(buildstep.BuildStep, GitHubMixin, AddToLogMixin):
     name = 'check-status-of-pr'
     flunkOnFailure = False
     haltOnFailure = False
-    EMBEDDED_CHECKS = ['ios', 'ios-sim', 'ios-wk2', 'ios-wk2-wpt', 'api-ios', 'tv', 'tv-sim', 'watch', 'watch-sim']
+    EMBEDDED_CHECKS = ['ios', 'ios-sim', 'ios-wk2', 'ios-wk2-wpt', 'api-ios', 'vision', 'vision-sim', 'vision-wk2', 'tv', 'tv-sim', 'watch', 'watch-sim']
     MACOS_CHECKS = ['mac', 'mac-AS-debug', 'api-mac', 'mac-wk1', 'mac-wk2', 'mac-AS-debug-wk2', 'mac-wk2-stress', 'jsc', 'jsc-arm64']
     LINUX_CHECKS = ['gtk', 'gtk-wk2', 'api-gtk', 'wpe', 'wpe-cairo', 'wpe-wk2', 'api-wpe', 'jsc-armv7', 'jsc-armv7-tests']
     WINDOWS_CHECKS = ['wincairo']
@@ -2820,6 +2823,8 @@ class Trigger(trigger.Trigger):
 
         properties_to_pass = {prop: properties.Property(prop) for prop in property_names}
         properties_to_pass['retry_count'] = properties.Property('retry_count', default=0)
+        properties_to_pass['os_version_builder'] = properties.Property('os_version', default='')
+        properties_to_pass['xcode_version_builder'] = properties.Property('xcode_version', default='')
         if self.include_revision:
             properties_to_pass['ews_revision'] = properties.Property('got_revision')
         return properties_to_pass
@@ -3125,11 +3130,11 @@ class InstallWinDependencies(shell.ShellCommandNewStyle):
 
 def customBuildFlag(platform, fullPlatform):
     # FIXME: Make a common 'supported platforms' list.
-    if platform not in ('gtk', 'wincairo', 'ios', 'jsc-only', 'wpe', 'playstation', 'tvos', 'watchos'):
+    if platform not in ('gtk', 'wincairo', 'ios', 'visionos', 'jsc-only', 'wpe', 'playstation', 'tvos', 'watchos'):
         return []
     if 'simulator' in fullPlatform:
         platform = platform + '-simulator'
-    elif platform in ['ios', 'tvos', 'watchos']:
+    elif platform in ['ios', 'visionos', 'tvos', 'watchos']:
         platform = platform + '-device'
     return ['--' + platform]
 
@@ -3181,7 +3186,7 @@ class CompileWebKit(shell.Compile, AddToLogMixin, ShellMixin):
     build_command = ['perl', 'Tools/Scripts/build-webkit']
     filter_command = ['perl', 'Tools/Scripts/filter-build-webkit', '-logfile', 'build-log.txt']
     VALID_ADDITIONAL_ARGUMENTS_LIST = []  # If additionalArguments is added to config.json for CompileWebKit step, it should be added here as well.
-    APPLE_PLATFORMS = ('mac', 'ios', 'tvos', 'watchos')
+    APPLE_PLATFORMS = ('mac', 'ios', 'visionos', 'tvos', 'watchos')
 
     def __init__(self, skipUpload=False, **kwargs):
         self.skipUpload = skipUpload
@@ -3582,7 +3587,7 @@ class RunJavaScriptCoreTests(shell.Test, AddToLogMixin, ShellMixin):
     NUM_FAILURES_TO_DISPLAY_IN_STATUS = 5
 
     def __init__(self, **kwargs):
-        super().__init__(logEnviron=False, sigtermTime=10, timeout=2 * 60 * 60, **kwargs)
+        super().__init__(logEnviron=False, sigtermTime=10, timeout=3 * 60 * 60, **kwargs)
         self.binaryFailures = []
         self.stressTestFailures = []
         self.flaky = {}
@@ -5398,7 +5403,7 @@ class RunAPITests(shell.TestNewStyle, AddToLogMixin, ShellMixin):
     MSG_FOR_EXCESSIVE_LOGS_API_TEST = f'Stopped due to excessive logging, limit: {THRESHOLD_FOR_EXCESSIVE_LOGS_API_TESTS}'
 
     def __init__(self, **kwargs):
-        super().__init__(logEnviron=False, timeout=2 * 60 * 60, **kwargs)
+        super().__init__(logEnviron=False, timeout=3 * 60 * 60, **kwargs)
         self.failing_tests_filtered = []
         self.preexisting_failures_in_results_db = []
         self.steps_to_add = []
@@ -5573,7 +5578,7 @@ class ReRunAPITests(RunAPITests):
     suffix = 'second_run'
 
     def doOnFailure(self):
-        self.steps_to_add = [RevertAppliedChanges(), CleanWorkingDirectory(), ValidateChange(verifyBugClosed=False, addURLs=False)]
+        self.steps_to_add += [RevertAppliedChanges(), CleanWorkingDirectory(), ValidateChange(verifyBugClosed=False, addURLs=False)]
         platform = self.getProperty('platform')
         if platform == 'wpe':
             self.steps_to_add.append(InstallWpeDependencies())
@@ -5834,19 +5839,23 @@ class PrintConfiguration(steps.ShellSequence):
         self.log_observer = logobserver.BufferLogObserver(wantStderr=True)
         self.addLogObserver('stdio', self.log_observer)
 
+    @defer.inlineCallbacks
     def run(self):
         command_list = list(self.command_list_generic)
         platform = self.getProperty('platform', '*')
         if platform != 'jsc-only':
             platform = platform.split('-')[0]
-        if platform in ('mac', 'ios', 'tvos', 'watchos', '*'):
+        if platform in ('mac', 'ios', 'visionos', 'tvos', 'watchos', '*'):
             command_list.extend(self.command_list_apple)
         elif platform in ('gtk', 'wpe', 'jsc-only'):
             command_list.extend(self.command_list_linux)
 
         for command in command_list:
             self.commands.append(util.ShellArg(command=command, logname='stdio'))
-        return super().run()
+        rc = yield super().run()
+        logs = self.log_observer.getStdout() + self.log_observer.getStderr()
+        self.parseAndValidate(logs)
+        defer.returnValue(rc)
 
     def convert_build_to_os_name(self, build):
         if not build:
@@ -5864,21 +5873,43 @@ class PrintConfiguration(steps.ShellSequence):
                 return value
         return 'Unknown'
 
-    def getResultSummary(self):
-        if self.results != SUCCESS:
-            return {'step': 'Failed to print configuration'}
-        logText = self.log_observer.getStdout() + self.log_observer.getStderr()
-        configuration = 'Printed configuration'
+    def parseAndValidate(self, logText):
+        os_version, xcode_version = '', ''
         match = re.search('ProductVersion:[ \t]*(.+?)\n', logText)
         if match:
             os_version = match.group(1).strip()
             os_name = self.convert_build_to_os_name(os_version)
-            configuration = 'OS: {} ({})'.format(os_name, os_version)
 
         xcode_re = sdk_re = 'Xcode[ \t]+?([0-9.]+?)\n'
         match = re.search(xcode_re, logText)
         if match:
             xcode_version = match.group(1).strip()
+
+        self.setProperty('os_version', os_version)
+        self.setProperty('xcode_version', xcode_version)
+        os_version_builder = self.getProperty('os_version_builder', '')
+        xcode_version_builder = self.getProperty('xcode_version_builder', '')
+
+        if ((os_version and os_version_builder and os_version != os_version_builder) or
+                (xcode_version and xcode_version_builder and xcode_version != xcode_version_builder)):
+            message = f'Error: OS/SDK version mismatch, please inform an admin.'
+            detailed_message = message + f' Builder: OS={os_version_builder}, Xcode={xcode_version_builder}; Tester: OS={os_version}, Xcode={xcode_version}'
+            print(f'\n{detailed_message}')
+            self.build.stopBuild(reason=detailed_message, results=FAILURE)
+            self.build.buildFinished([message], FAILURE)
+
+    def getResultSummary(self):
+        if self.results not in [SUCCESS, WARNINGS, EXCEPTION]:
+            return {'step': 'Failed to print configuration'}
+
+        configuration = 'Printed configuration'
+        os_version = self.getProperty('os_version', '')
+        if os_version:
+            os_name = self.convert_build_to_os_name(os_version)
+            configuration = 'OS: {} ({})'.format(os_name, os_version)
+
+        xcode_version = self.getProperty('xcode_version', '')
+        if xcode_version:
             configuration += ', Xcode: {}'.format(xcode_version)
         return {'step': configuration}
 
@@ -6567,18 +6598,21 @@ class ValidateCommitMessage(steps.ShellSequence, ShellMixin, AddToLogMixin):
         self.contributors, errors = yield Contributors.load(use_network=True)
         for error in errors:
             self._addToLog('stdio', error)
+        self._addToLog('stdio', '\n')
 
         reviewers, log_text = self.extract_reviewers(self.log_observer.getStdout())
         log_text = log_text.rstrip()
         author = self.getProperty('author', '')
 
+        self.summary = ''
         if any(os.path.basename(file).startswith('ChangeLog') for file in self._files()):
             self.summary = 'ChangeLog modified, WebKit only allows commit messages'
             rc = FAILURE
         elif log_text:
-            self.summary = log_text
+            self.summary = log_text.split('\n')[0]  # Display the first error if there are multiple
             rc = FAILURE
-        elif rc == SUCCESS:
+
+        if rc == SUCCESS:
             if reviewers and not self.contributors:
                 self.summary = "Failed to load contributors.json, can't validate reviewers"
             elif reviewers and any([not self.is_reviewer(reviewer) for reviewer in reviewers]):
@@ -6592,7 +6626,7 @@ class ValidateCommitMessage(steps.ShellSequence, ShellMixin, AddToLogMixin):
                 rc = FAILURE
             else:
                 self.summary = 'Validated commit message'
-        else:
+        elif not self.summary:
             self.summary = 'Error parsing commit message'
             rc = FAILURE
 

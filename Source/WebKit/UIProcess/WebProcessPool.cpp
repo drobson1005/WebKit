@@ -111,8 +111,8 @@
 #include <wtf/Scope.h>
 #include <wtf/URLParser.h>
 #include <wtf/WallTime.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
-#include <wtf/text/StringConcatenateNumbers.h>
 
 #if ENABLE(SERVICE_CONTROLS)
 #include "ServicesController.h"
@@ -2130,15 +2130,23 @@ std::tuple<Ref<WebProcessProxy>, SuspendedPageProxy*, ASCIILiteral> WebProcessPo
     }
 
     // For non-HTTP(s) URLs, we only swap when navigating to a new scheme, unless processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol is set.
-    if (!m_configuration->processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol() && !sourceURL.protocolIsInHTTPFamily() && sourceURL.protocol() == targetURL.protocol())
+    if (!m_configuration->processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol() && !sourceURL.protocolIsInHTTPFamily() && sourceURL.protocol() == targetURL.protocol() && !siteIsolationEnabled)
         return { WTFMove(sourceProcess), nullptr, "Navigation within the same non-HTTP(s) protocol"_s };
 
     if (!sourceURL.isValid()
         || !targetURL.isValid()
         || sourceURL.isEmpty()
-        || (siteIsolationEnabled ? targetSite.matches(sourceURL) : targetSite.domain().matches(sourceURL))
-        || (sourceURL.protocolIsAbout() && (!sourceProcess->hasCommittedAnyMeaningfulProvisionalLoads() || sourceProcess->registrableDomain().matches(targetURL))))
+        || (siteIsolationEnabled ? targetSite.matches(sourceURL) : targetSite.domain().matches(sourceURL)))
         return { WTFMove(sourceProcess), nullptr, "Navigation is same-site"_s };
+
+    if (sourceURL.protocolIsAbout()) {
+        if (sourceProcess->registrableDomain().matches(targetURL))
+            return { WTFMove(sourceProcess), nullptr, "Navigation is treated as same-site"_s };
+        // With site isolation enabled, this condition is not enough to indicate the web process can be reused;
+        // we may also need to consider whether the process is used or in use by other sites.
+        if (!siteIsolationEnabled && !sourceProcess->hasCommittedAnyMeaningfulProvisionalLoads())
+            return { WTFMove(sourceProcess), nullptr, "Navigation is treated as same-site"_s };
+    }
 
     auto reason = "Navigation is cross-site"_s;
     

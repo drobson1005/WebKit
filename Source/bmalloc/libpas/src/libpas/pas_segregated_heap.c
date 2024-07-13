@@ -1643,7 +1643,7 @@ pas_segregated_heap_ensure_size_directory_for_size(
             if (parent_heap && parent_heap->heap_ref)
                 parent_heap->heap_ref->allocator_index = 0;
         }
-        
+
         /* We'll create a new size class that aligns properly. The indices that we cleared will
            reconfigure to use our new size class. */
         result = NULL;
@@ -1811,7 +1811,7 @@ pas_segregated_heap_ensure_size_directory_for_size(
                    so just reuse that. */
                 object_size = (size_t)best_bytes_dirtied_per_object;
             }
-        
+
             if (verbose)
                 pas_log("Did compute ideal object size; object_size = %zu\n", object_size);
 
@@ -1838,7 +1838,7 @@ pas_segregated_heap_ensure_size_directory_for_size(
                at offset=112 with no gaps, so as to not create internal fragmentation. Had we executed the code
                below, we would have given the 256-size directory alignment=256, and so we would be forced to
                allocate at offset=256, creating a gap of 144 bytes. Yuck!
-               
+
                On the other hand, not executing this code creates this weird situation where if we had once upon
                a time allocated 256 bytes with no particular alignment, and later memaligned 256 bytes with
                256-byte alignment, then we would create a second directory, and the old directory's memory will

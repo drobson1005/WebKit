@@ -30,6 +30,7 @@
 
 #include "AccessCase.h"
 #include "AssemblyHelpersSpoolers.h"
+#include "BaselineJITCode.h"
 #include "JITOperations.h"
 #include "JSArrayBufferView.h"
 #include "JSCJSValueInlines.h"
@@ -518,7 +519,7 @@ AssemblyHelpers::JumpList AssemblyHelpers::loadMegamorphicProperty(VM& vm, GPRRe
         mul32(TrustedImm32(sizeof(MegamorphicCache::LoadEntry)), scratch3GPR, scratch3GPR);
     auto& cache = vm.ensureMegamorphicCache();
     move(TrustedImmPtr(&cache), scratch2GPR);
-    ASSERT(!MegamorphicCache::offsetOfLoadCachePrimaryEntries());
+    static_assert(!MegamorphicCache::offsetOfLoadCachePrimaryEntries());
     addPtr(scratch2GPR, scratch3GPR);
 
     load16(Address(scratch2GPR, MegamorphicCache::offsetOfEpoch()), scratch2GPR);
@@ -769,8 +770,10 @@ void AssemblyHelpers::emitNonNullDecodeZeroExtendedStructureID(RegisterID source
     if constexpr (structureHeapAddressSize >= 4 * GB) {
         ASSERT(structureHeapAddressSize == 4 * GB);
         move(source, dest);
-    } else
-        and32(TrustedImm32(StructureID::structureIDMask), source, dest);
+    } else {
+        static_assert(static_cast<uint32_t>(StructureID::structureIDMask) == StructureID::structureIDMask);
+        and32(TrustedImm32(static_cast<uint32_t>(StructureID::structureIDMask)), source, dest);
+    }
     or64(TrustedImm64(startOfStructureHeap()), dest);
 #else // not CPU(ADDRESS64)
     move(source, dest);
@@ -813,14 +816,14 @@ void AssemblyHelpers::emitLoadPrototype(VM& vm, GPRReg objectGPR, JSValueRegs re
 
 void AssemblyHelpers::makeSpaceOnStackForCCall()
 {
-    unsigned stackOffset = WTF::roundUpToMultipleOf(stackAlignmentBytes(), maxFrameExtentForSlowPathCall);
+    unsigned stackOffset = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(maxFrameExtentForSlowPathCall);
     if (stackOffset)
         subPtr(TrustedImm32(stackOffset), stackPointerRegister);
 }
 
 void AssemblyHelpers::reclaimSpaceOnStackForCCall()
 {
-    unsigned stackOffset = WTF::roundUpToMultipleOf(stackAlignmentBytes(), maxFrameExtentForSlowPathCall);
+    unsigned stackOffset = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(maxFrameExtentForSlowPathCall);
     if (stackOffset)
         addPtr(TrustedImm32(stackOffset), stackPointerRegister);
 }
@@ -1354,7 +1357,7 @@ void AssemblyHelpers::emitConvertValueToBoolean(VM& vm, JSValueRegs value, GPRRe
     done.link(this);
 }
 
-AssemblyHelpers::JumpList AssemblyHelpers::branchIfValue(VM& vm, JSValueRegs value, GPRReg scratch, GPRReg scratchIfShouldCheckMasqueradesAsUndefined, FPRReg valueAsFPR, FPRReg tempFPR, bool shouldCheckMasqueradesAsUndefined, std::variant<JSGlobalObject*, GPRReg> globalObject, bool invert)
+AssemblyHelpers::JumpList AssemblyHelpers::branchIfValue(VM& vm, JSValueRegs value, GPRReg scratch, GPRReg scratchIfShouldCheckMasqueradesAsUndefined, FPRReg valueAsFPR, FPRReg tempFPR, bool shouldCheckMasqueradesAsUndefined, std::variant<JSGlobalObject*, GPRReg, LazyGlobalObjectLoadTag> globalObject, bool invert)
 {
     // Implements the following control flow structure:
     // if (value is cell) {
@@ -1388,8 +1391,10 @@ AssemblyHelpers::JumpList AssemblyHelpers::branchIfValue(VM& vm, JSValueRegs val
         emitLoadStructure(vm, value.payloadGPR(), scratch);
         if (std::holds_alternative<JSGlobalObject*>(globalObject))
             move(TrustedImmPtr(std::get<JSGlobalObject*>(globalObject)), scratchIfShouldCheckMasqueradesAsUndefined);
-        else
+        else if (std::holds_alternative<GPRReg>(globalObject))
             move(std::get<GPRReg>(globalObject), scratchIfShouldCheckMasqueradesAsUndefined);
+        else
+            loadPtr(Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfGlobalObject()), scratchIfShouldCheckMasqueradesAsUndefined);
         isNotMasqueradesAsUndefined.append(branchPtr(NotEqual, Address(scratch, Structure::globalObjectOffset()), scratchIfShouldCheckMasqueradesAsUndefined));
 
         // We act like we are "undefined" here.

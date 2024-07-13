@@ -31,6 +31,7 @@
 #include "InjectedBundlePageContextMenuClient.h"
 #include "MessageSenderInlines.h"
 #include "WebContextMenuItem.h"
+#include "WebKitConsoleMessagePrivate.h"
 #include "WebKitContextMenuPrivate.h"
 #include "WebKitFramePrivate.h"
 #include "WebKitPrivate.h"
@@ -58,9 +59,9 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/glib/WTFGType.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/MakeString.h>
 
 #if !ENABLE(2022_GLIB_API)
-#include "WebKitConsoleMessagePrivate.h"
 #include "WebKitDOMDocumentPrivate.h"
 #include "WebKitDOMElementPrivate.h"
 #include "WebKitDOMNodePrivate.h"
@@ -79,8 +80,8 @@ enum {
     DOCUMENT_LOADED,
     SEND_REQUEST,
     CONTEXT_MENU,
-#if !ENABLE(2022_GLIB_API)
     CONSOLE_MESSAGE_SENT,
+#if !ENABLE(2022_GLIB_API)
     FORM_CONTROLS_ASSOCIATED,
 #endif
     FORM_CONTROLS_ASSOCIATED_FOR_FRAME,
@@ -284,13 +285,11 @@ private:
     WebKitWebPage* m_webPage;
 };
 
-#if !ENABLE(2022_GLIB_API)
 static void webkitWebPageDidSendConsoleMessage(WebKitWebPage* webPage, MessageSource source, MessageLevel level, const String& message, unsigned lineNumber, const String& sourceID)
 {
     WebKitConsoleMessage consoleMessage(source, level, message, lineNumber, sourceID);
     g_signal_emit(webPage, signals[CONSOLE_MESSAGE_SENT], 0, &consoleMessage);
 }
-#endif
 
 class PageResourceLoadClient final : public API::InjectedBundle::ResourceLoadClient {
 public:
@@ -315,7 +314,6 @@ private:
         webkitURIRequestGetResourceRequest(request.get(), resourceRequest);
     }
 
-#if !ENABLE(2022_GLIB_API)
     void didReceiveResponseForResource(WebPage& page, WebFrame&, WebCore::ResourceLoaderIdentifier identifier, const ResourceResponse& response) override
     {
         // Post on the console as well to be consistent with the inspector.
@@ -334,12 +332,10 @@ private:
             webkitWebPageDidSendConsoleMessage(m_webPage, MessageSource::Network, MessageLevel::Error, errorMessage, 0, error.failingURL().string());
         }
     }
-#endif
 
     WebKitWebPage* m_webPage;
 };
 
-#if !ENABLE(2022_GLIB_API)
 class PageUIClient final : public API::InjectedBundle::PageUIClient {
 public:
     explicit PageUIClient(WebKitWebPage* webPage)
@@ -355,7 +351,6 @@ private:
 
     WebKitWebPage* m_webPage;
 };
-#endif
 
 #if ENABLE(CONTEXT_MENUS)
 class PageContextMenuClient final : public API::InjectedBundle::PageContextMenuClient {
@@ -610,8 +605,6 @@ static void webkit_web_page_class_init(WebKitWebPageClass* klass)
 #endif // ENABLE(CONTEXT_MENUS)
         WEBKIT_TYPE_WEB_HIT_TEST_RESULT);
 
-#if !ENABLE(2022_GLIB_API)
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     /**
      * WebKitWebPage::console-message-sent:
      * @web_page: the #WebKitWebPage on which the signal is emitted
@@ -623,8 +616,6 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
      * The @console_message contains information of the message.
      *
      * Since: 2.12
-     *
-     * Deprecated: 2.40
      */
     signals[CONSOLE_MESSAGE_SENT] = g_signal_new(
         "console-message-sent",
@@ -634,8 +625,6 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         g_cclosure_marshal_VOID__BOXED,
         G_TYPE_NONE, 1,
         WEBKIT_TYPE_CONSOLE_MESSAGE | G_SIGNAL_TYPE_STATIC_SCOPE);
-ALLOW_DEPRECATED_DECLARATIONS_END
-#endif
 
 #if !ENABLE(2022_GLIB_API)
 ALLOW_DEPRECATED_DECLARATIONS_BEGIN
@@ -807,9 +796,7 @@ WebKitWebPage* webkitWebPageCreate(WebPage* webPage)
     webPage->setInjectedBundleContextMenuClient(makeUnique<PageContextMenuClient>(page));
 #endif // ENABLE(CONTEXT_MENUS)
     webPage->setInjectedBundleFormClient(makeUnique<PageFormClient>(page));
-#if !ENABLE(2022_GLIB_API)
     webPage->setInjectedBundleUIClient(makeUnique<PageUIClient>(page));
-#endif
 
     return page;
 }

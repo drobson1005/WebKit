@@ -44,7 +44,6 @@ class GetterSetter;
 class CCallHelpers;
 class CodeBlock;
 class PolymorphicAccess;
-class ProxyObjectAccessCase;
 class StructureStubInfo;
 class InlineCacheHandler;
 
@@ -127,10 +126,7 @@ public:
 
     // When this fails (returns GaveUp), this will leave the old stub intact but you should not try
     // to call this method again for that PolymorphicAccess instance.
-    AccessGenerationResult addCases(const GCSafeConcurrentJSLocker&, VM&, CodeBlock*, StructureStubInfo&, ListType&&);
-
-    AccessGenerationResult addCase(
-        const GCSafeConcurrentJSLocker&, VM&, CodeBlock*, StructureStubInfo&, Ref<AccessCase>);
+    AccessGenerationResult addCases(const GCSafeConcurrentJSLocker&, VM&, CodeBlock*, StructureStubInfo&, RefPtr<AccessCase>&& previousCase, Ref<AccessCase>);
 
     bool isEmpty() const { return m_list.isEmpty(); }
     unsigned size() const { return m_list.size(); }
@@ -154,7 +150,6 @@ private:
     friend class InlineCacheCompiler;
 
     ListType m_list;
-    RefPtr<PolymorphicAccessJITStubRoutine> m_stubRoutine;
 };
 
 class InlineCacheHandler final : public RefCounted<InlineCacheHandler>, public TrailingArray<InlineCacheHandler, DataOnlyCallLinkInfo> {
@@ -163,12 +158,8 @@ class InlineCacheHandler final : public RefCounted<InlineCacheHandler>, public T
 public:
     using Base = TrailingArray<InlineCacheHandler, DataOnlyCallLinkInfo>;
 
-    static constexpr ptrdiff_t offsetOfCallTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_callTarget); }
-    static constexpr ptrdiff_t offsetOfJumpTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_jumpTarget); }
-    static constexpr ptrdiff_t offsetOfNext() { return OBJECT_OFFSETOF(InlineCacheHandler, m_next); }
-
-    static Ref<InlineCacheHandler> create(CodeBlock*, StructureStubInfo&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<StructureStubInfoClearingWatchpoint>&&, unsigned callLinkInfoCount);
-    static Ref<InlineCacheHandler> createPreCompiled(CodeBlock*, StructureStubInfo&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<StructureStubInfoClearingWatchpoint>&&, AccessCase&);
+    static Ref<InlineCacheHandler> create(Ref<InlineCacheHandler>&&, CodeBlock*, StructureStubInfo&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<StructureStubInfoClearingWatchpoint>&&, unsigned callLinkInfoCount);
+    static Ref<InlineCacheHandler> createPreCompiled(Ref<InlineCacheHandler>&&, CodeBlock*, StructureStubInfo&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<StructureStubInfoClearingWatchpoint>&&, AccessCase&);
 
     CodePtr<JITStubRoutinePtrTag> callTarget() const { return m_callTarget; }
     CodePtr<JITStubRoutinePtrTag> jumpTarget() const { return m_jumpTarget; }
@@ -195,6 +186,23 @@ public:
     void addOwner(CodeBlock*);
     void removeOwner(CodeBlock*);
 
+    PolymorphicAccessJITStubRoutine* stubRoutine() { return m_stubRoutine.get(); }
+
+    InlineCacheHandler* next() const { return m_next.get(); }
+    void setNext(RefPtr<InlineCacheHandler>&& next)
+    {
+        m_next = WTFMove(next);
+    }
+
+    AccessCase* accessCase() const { return m_accessCase.get(); }
+    void setAccessCase(RefPtr<AccessCase>&& accessCase)
+    {
+        m_accessCase = WTFMove(accessCase);
+    }
+
+    static constexpr ptrdiff_t offsetOfCallTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_callTarget); }
+    static constexpr ptrdiff_t offsetOfJumpTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_jumpTarget); }
+    static constexpr ptrdiff_t offsetOfNext() { return OBJECT_OFFSETOF(InlineCacheHandler, m_next); }
     static constexpr ptrdiff_t offsetOfUid() { return OBJECT_OFFSETOF(InlineCacheHandler, m_uid); }
     static constexpr ptrdiff_t offsetOfStructureID() { return OBJECT_OFFSETOF(InlineCacheHandler, m_structureID); }
     static constexpr ptrdiff_t offsetOfOffset() { return OBJECT_OFFSETOF(InlineCacheHandler, m_offset); }
@@ -204,14 +212,22 @@ public:
     static constexpr ptrdiff_t offsetOfHolder() { return OBJECT_OFFSETOF(InlineCacheHandler, u.s1.m_holder); }
     static constexpr ptrdiff_t offsetOfGlobalObject() { return OBJECT_OFFSETOF(InlineCacheHandler, u.s1.m_globalObject); }
     static constexpr ptrdiff_t offsetOfCustomAccessor() { return OBJECT_OFFSETOF(InlineCacheHandler, u.s1.m_customAccessor); }
+    static constexpr ptrdiff_t offsetOfModuleNamespaceObject() { return OBJECT_OFFSETOF(InlineCacheHandler, u.s3.m_moduleNamespaceObject); }
+    static constexpr ptrdiff_t offsetOfModuleVariableSlot() { return OBJECT_OFFSETOF(InlineCacheHandler, u.s3.m_moduleVariableSlot); }
     static constexpr ptrdiff_t offsetOfCallLinkInfos() { return Base::offsetOfData(); }
+
+    StructureID structureID() const { return m_structureID; }
+    PropertyOffset offset() const { return m_offset; }
+    size_t newSize() const { return u.s2.m_newSize; }
+    size_t oldSize() const { return u.s2.m_oldSize; }
+    StructureID newStructureID() const { return u.s2.m_newStructureID; }
 
 private:
     InlineCacheHandler()
         : Base(0)
     { }
 
-    InlineCacheHandler(Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<StructureStubInfoClearingWatchpoint>&&, unsigned callLinkInfoCount);
+    InlineCacheHandler(Ref<InlineCacheHandler>&&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<StructureStubInfoClearingWatchpoint>&&, unsigned callLinkInfoCount);
 
     static Ref<InlineCacheHandler> createSlowPath(VM&, AccessType);
 
@@ -231,8 +247,13 @@ private:
             JSGlobalObject* m_globalObject;
             void* m_customAccessor;
         } s1;
+        struct {
+            JSObject* m_moduleNamespaceObject;
+            WriteBarrierBase<Unknown>* m_moduleVariableSlot;
+        } s3;
     } u;
     RefPtr<PolymorphicAccessJITStubRoutine> m_stubRoutine;
+    RefPtr<AccessCase> m_accessCase;
     std::unique_ptr<StructureStubInfoClearingWatchpoint> m_watchpoint;
     RefPtr<InlineCacheHandler> m_next;
 };
@@ -252,6 +273,8 @@ inline bool canUseMegamorphicPutById(VM& vm, UniquedStringImpl* uid)
     return !parseIndex(*uid) && uid != vm.propertyNames->underscoreProto;
 }
 
+bool canBeViaGlobalProxy(AccessCase::AccessType);
+
 inline AccessGenerationResult::AccessGenerationResult(Kind kind, Ref<InlineCacheHandler>&& handler)
     : m_kind(kind)
     , m_handler(WTFMove(handler))
@@ -264,7 +287,7 @@ public:
     InlineCacheCompiler(JITType jitType, VM& vm, JSGlobalObject* globalObject, ECMAMode ecmaMode, StructureStubInfo& stubInfo)
         : m_vm(vm)
         , m_globalObject(globalObject)
-        , m_stubInfo(&stubInfo)
+        , m_stubInfo(stubInfo)
         , m_ecmaMode(ecmaMode)
         , m_jitType(jitType)
     {
@@ -344,12 +367,16 @@ public:
     VM& vm() { return m_vm; }
 
     AccessGenerationResult compile(const GCSafeConcurrentJSLocker&, PolymorphicAccess&, CodeBlock*);
+    AccessGenerationResult compileHandler(const GCSafeConcurrentJSLocker&, PolymorphicAccess&, CodeBlock*, Ref<AccessCase>&&);
 
     static MacroAssemblerCodeRef<JITThunkPtrTag> generateSlowPathCode(VM&, AccessType);
     static Ref<InlineCacheHandler> generateSlowPathHandler(VM&, AccessType);
 
     static void emitDataICPrologue(CCallHelpers&);
     static void emitDataICEpilogue(CCallHelpers&);
+    static CCallHelpers::Jump emitDataICCheckStructure(CCallHelpers&, GPRReg baseGPR, GPRReg scratchGPR);
+    static CCallHelpers::JumpList emitDataICCheckUid(CCallHelpers&, bool isSymbol, JSValueRegs, GPRReg scratchGPR);
+    static void emitDataICJumpNextHandler(CCallHelpers&);
 
     bool useHandlerIC() const;
 
@@ -359,17 +386,20 @@ private:
 
     AccessGenerationResult compileOneAccessCaseHandler(PolymorphicAccess&, CodeBlock*, AccessCase&, Vector<WatchpointSet*, 8>&&);
 
-    void emitDOMJITGetter(GetterSetterAccessCase&, const DOMJIT::GetterSetter*, GPRReg baseForGetGPR);
+    void emitDOMJITGetter(JSGlobalObject*, const DOMJIT::GetterSetter*, GPRReg baseForGetGPR);
     void emitModuleNamespaceLoad(ModuleNamespaceAccessCase&, MacroAssembler::JumpList& fallThrough);
-    void emitProxyObjectAccess(unsigned index, ProxyObjectAccessCase&, MacroAssembler::JumpList& fallThrough);
+    void emitProxyObjectAccess(unsigned index, AccessCase&, MacroAssembler::JumpList& fallThrough);
     void emitIntrinsicGetter(IntrinsicGetterAccessCase&);
 
     void generateWithConditionChecks(unsigned index, AccessCase&);
     void generateAccessCase(unsigned index, AccessCase&);
 
+    MacroAssemblerCodeRef<JITStubRoutinePtrTag> compileGetByDOMJITHandler(CodeBlock*, const DOMJIT::GetterSetter*, std::optional<bool> isSymbol);
+    RefPtr<AccessCase> tryFoldToMegamorphic(CodeBlock*, std::span<const Ref<AccessCase>>);
+
     VM& m_vm;
     JSGlobalObject* const m_globalObject;
-    StructureStubInfo* m_stubInfo { nullptr };
+    StructureStubInfo& m_stubInfo;
     const ECMAMode m_ecmaMode { ECMAMode::sloppy() };
     JITType m_jitType;
     CCallHelpers* m_jit { nullptr };
@@ -392,21 +422,72 @@ private:
     Vector<std::unique_ptr<OptimizingCallLinkInfo>, 16> m_callLinkInfos;
 };
 
-MacroAssemblerCodeRef<JITThunkPtrTag> getByIdLoadOwnPropertyHandlerCodeGenerator(VM&);
-MacroAssemblerCodeRef<JITThunkPtrTag> getByIdLoadPrototypePropertyHandlerCodeGenerator(VM&);
-MacroAssemblerCodeRef<JITThunkPtrTag> getByIdMissHandlerCodeGenerator(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByIdLoadOwnPropertyHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByIdLoadPrototypePropertyHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByIdMissHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> getByIdCustomAccessorHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> getByIdCustomValueHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> getByIdGetterHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> getByIdProxyObjectLoadHandler(VM&);
-MacroAssemblerCodeRef<JITThunkPtrTag> putByIdReplaceHandlerCodeGenerator(VM&);
-MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionNonAllocatingHandlerCodeGenerator(VM&);
-MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionNewlyAllocatingHandlerCodeGenerator(VM&);
-MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionReallocatingHandlerCodeGenerator(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByIdModuleNamespaceLoadHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByIdReplaceHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionNonAllocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionNewlyAllocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionReallocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionReallocatingOutOfLineHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> putByIdCustomAccessorHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> putByIdCustomValueHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> putByIdStrictSetterHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> putByIdSloppySetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> inByIdHitHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> inByIdMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByIdDeleteHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByIdDeleteNonConfigurableHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByIdDeleteMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> instanceOfHitHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> instanceOfMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithStringLoadOwnPropertyHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithStringLoadPrototypePropertyHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithStringMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithStringCustomAccessorHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithStringCustomValueHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithStringGetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithSymbolLoadOwnPropertyHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithSymbolLoadPrototypePropertyHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithSymbolMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithSymbolCustomAccessorHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithSymbolCustomValueHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithSymbolGetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringReplaceHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringTransitionNonAllocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringTransitionNewlyAllocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringTransitionReallocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringTransitionReallocatingOutOfLineHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringCustomAccessorHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringCustomValueHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringStrictSetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithStringSloppySetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolReplaceHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolTransitionNonAllocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolTransitionNewlyAllocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolTransitionReallocatingHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolTransitionReallocatingOutOfLineHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolCustomAccessorHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolCustomValueHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolStrictSetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> putByValWithSymbolSloppySetterHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> inByValWithStringHitHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> inByValWithStringMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> inByValWithSymbolHitHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> inByValWithSymbolMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithStringDeleteHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithStringDeleteNonConfigurableHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithStringDeleteMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithSymbolDeleteHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithSymbolDeleteNonConfigurableHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithSymbolDeleteMissHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> checkPrivateBrandHandler(VM&);
+MacroAssemblerCodeRef<JITThunkPtrTag> setPrivateBrandHandler(VM&);
 
 } // namespace JSC
 

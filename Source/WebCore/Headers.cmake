@@ -817,7 +817,9 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     contentextensions/URLFilterParser.h
 
     crypto/SerializedCryptoKeyWrap.h
+    crypto/WrappedCryptoKey.h
 
+    css/CSSAnchorValue.h
     css/CSSConditionRule.h
     css/CSSCounterStyle.h
     css/CSSCounterStyleDescriptors.h
@@ -1163,6 +1165,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     history/CachedPage.h
     history/HistoryItem.h
 
+    html/Allowlist.h
     html/AttachmentAssociatedElement.h
     html/Autocapitalize.h
     html/AutocapitalizeTypes.h
@@ -1275,6 +1278,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     html/MediaElementSession.h
     html/MediaError.h
     html/OffscreenCanvas.h
+    html/OwnerPermissionsPolicyData.h
     html/PDFDocument.h
     html/PermissionsPolicy.h
     html/PluginDocument.h
@@ -1548,7 +1552,8 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/MediaProducer.h
     page/MemoryRelease.h
     page/ModalContainerTypes.h
-    page/NavigatorIsLoggedIn.h
+    page/NavigationNavigationType.h
+    page/NavigatorLoginStatus.h
     page/OriginAccessPatterns.h
     page/Page.h
     page/PageColorSampler.h
@@ -1661,6 +1666,8 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
 
     page/text-extraction/TextExtraction.h
     page/text-extraction/TextExtractionTypes.h
+
+    page/writing-tools/WritingToolsTypes.h
 
     platform/AbortableTaskQueue.h
     platform/AudioSampleFormat.h
@@ -1795,6 +1802,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/SleepDisabler.h
     platform/SleepDisablerClient.h
     platform/SleepDisablerIdentifier.h
+    platform/StyleAppearance.h
     platform/SuddenTermination.h
     platform/Supplementable.h
     platform/SystemSoundDelegate.h
@@ -1899,6 +1907,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/ColorUtilities.h
     platform/graphics/ComplexTextController.h
     platform/graphics/ContentTypeUtilities.h
+    platform/graphics/Damage.h
     platform/graphics/DashArray.h
     platform/graphics/DecodingOptions.h
     platform/graphics/DecomposedGlyphs.h
@@ -1975,7 +1984,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/ImageBufferAllocator.h
     platform/graphics/ImageBufferBackend.h
     platform/graphics/ImageBufferBackendParameters.h
-    platform/graphics/ImageBufferPipe.h
+    platform/graphics/ImageBufferPixelFormat.h
     platform/graphics/ImageBufferPlatformBackend.h
     platform/graphics/ImageDecoder.h
     platform/graphics/ImageDecoderIdentifier.h
@@ -2355,6 +2364,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     rendering/HitTestRequest.h
     rendering/HitTestResult.h
     rendering/HitTestSource.h
+    rendering/LayoutRepainter.h
     rendering/LayerAncestorClippingStack.h
     rendering/LayerFragment.h
     rendering/LegacyInlineBox.h
@@ -2492,9 +2502,9 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     storage/StorageType.h
     storage/StorageUtilities.h
 
+    style/AnchorPositionEvaluator.h
     style/PseudoElementIdentifier.h
     style/ScopedName.h
-    style/StyleAppearance.h
     style/StyleChange.h
     style/StyleScope.h
     style/StyleScopeOrdinal.h

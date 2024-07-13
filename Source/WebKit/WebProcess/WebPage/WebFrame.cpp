@@ -99,6 +99,7 @@
 #include <WebCore/SubresourceLoader.h>
 #include <WebCore/TextIterator.h>
 #include <WebCore/TextResourceDecoder.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
 #if PLATFORM(COCOA)
@@ -299,11 +300,6 @@ FrameTreeNodeData WebFrame::frameTreeData() const
     }
 
     return data;
-}
-
-void WebFrame::getFrameInfo(CompletionHandler<void(FrameInfoData&&)>&& completionHandler)
-{
-    completionHandler(info());
 }
 
 WebCore::FrameIdentifier WebFrame::frameID() const
@@ -1182,7 +1178,7 @@ RetainPtr<CFDataRef> WebFrame::webArchiveData(FrameFilterFunction callback, void
 
 RefPtr<WebImage> WebFrame::createSelectionSnapshot() const
 {
-    auto snapshot = snapshotSelection(*coreLocalFrame(), { { WebCore::SnapshotFlags::ForceBlackText, WebCore::SnapshotFlags::Shareable }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() });
+    auto snapshot = snapshotSelection(*coreLocalFrame(), { { WebCore::SnapshotFlags::ForceBlackText, WebCore::SnapshotFlags::Shareable }, ImageBufferPixelFormat::BGRA8, DestinationColorSpace::SRGB() });
     if (!snapshot)
         return nullptr;
 

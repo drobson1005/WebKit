@@ -47,13 +47,9 @@ messages -> WebPage LegacyReceiver {
     ViewWillEndLiveResize()
 
     ExecuteEditCommandWithCallback(String name, String argument) -> ()
-    KeyEvent(WebCore::FrameIdentifier frameID, WebKit::WebKeyboardEvent event) -> (std::optional<WebKit::WebEventType> eventType, bool handled)
-    MouseEvent(WebCore::FrameIdentifier frameID, WebKit::WebMouseEvent event, std::optional<Vector<WebKit::SandboxExtensionHandle>> sandboxExtensions) -> (std::optional<WebKit::WebEventType> eventType, bool handled, struct std::optional<WebCore::RemoteUserInputEventData> remoteUserInputEventData)
+    KeyEvent(WebCore::FrameIdentifier frameID, WebKit::WebKeyboardEvent event)
+    MouseEvent(WebCore::FrameIdentifier frameID, WebKit::WebMouseEvent event, std::optional<Vector<WebKit::SandboxExtensionHandle>> sandboxExtensions)
     SetLastKnownMousePosition(WebCore::FrameIdentifier frameID, WebCore::IntPoint eventPoint, WebCore::IntPoint globalPoint);
-
-#if ENABLE(NOTIFICATIONS)
-    ClearNotificationPermissionState()
-#endif
 
 #if PLATFORM(IOS_FAMILY)
     SetSceneIdentifier(String sceneIdentifier)
@@ -380,9 +376,9 @@ GenerateSyntheticEditingCommand(enum:uint8_t WebKit::SyntheticEditingCommandType
     RemoveTextPlaceholder(struct WebCore::ElementContext placeholder) -> ()
 #endif
     
-#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
-    CreateTextIndicatorForID(WTF::UUID uuid) -> (std::optional<WebCore::TextIndicatorData> textIndicator)
-    UpdateTextIndicatorStyleVisibilityForID(WTF::UUID uuid, bool visible) -> ()
+#if ENABLE(WRITING_TOOLS_UI)
+    createTextIndicatorForTextAnimationID(WTF::UUID uuid) -> (std::optional<WebCore::TextIndicatorData> textIndicator)
+    updateUnderlyingTextVisibilityForTextAnimationID(WTF::UUID uuid, bool visible) -> ()
 #endif
 
     # Popup menu.
@@ -451,8 +447,6 @@ GenerateSyntheticEditingCommand(enum:uint8_t WebKit::SyntheticEditingCommandType
 
     SwipeAnimationDidStart()
     SwipeAnimationDidEnd()
-
-    IsLayerTreeFrozen() -> (bool isFrozen)
 
     # Printing.
     BeginPrinting(WebCore::FrameIdentifier frameID, struct WebKit::PrintInfo printInfo)
@@ -622,7 +616,6 @@ GenerateSyntheticEditingCommand(enum:uint8_t WebKit::SyntheticEditingCommandType
     DidLosePointerLock()
 #endif
 
-    ClearWheelEventTestMonitor()
     SetShouldScaleViewToFitDocument(bool shouldScaleViewToFitDocument)
 
     SetUserInterfaceLayoutDirection(uint32_t direction)
@@ -656,8 +649,6 @@ GenerateSyntheticEditingCommand(enum:uint8_t WebKit::SyntheticEditingCommandType
 #endif
 
     GetTextFragmentMatch() -> (String match)
-
-    SetDefersLoading(bool defersLoading)
 
 #if ENABLE(PDF_PLUGIN) && PLATFORM(MAC)
     ZoomPDFIn(WebKit::PDFPluginIdentifier identifier)
@@ -779,24 +770,26 @@ GenerateSyntheticEditingCommand(enum:uint8_t WebKit::SyntheticEditingCommandType
     SetMediaEnvironment(String mediaEnvironment)
 #endif
 
-#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
-    WillBeginTextReplacementSession(std::optional<WebKit::WebUnifiedTextReplacementSessionData> session) -> (Vector<WebKit::WebUnifiedTextReplacementContextData> contexts)
+#if ENABLE(WRITING_TOOLS)
+    WillBeginWritingToolsSession(std::optional<WebCore::WritingTools::Session> session) -> (Vector<WebCore::WritingTools::Context> contexts)
 
-    DidBeginTextReplacementSession(struct WebKit::WebUnifiedTextReplacementSessionData session, Vector<WebKit::WebUnifiedTextReplacementContextData> contexts)
+    DidBeginWritingToolsSession(struct WebCore::WritingTools::Session session, Vector<WebCore::WritingTools::Context> contexts)
 
-    TextReplacementSessionDidReceiveReplacements(struct WebKit::WebUnifiedTextReplacementSessionData session, Vector<WebKit::WebTextReplacementData> replacements, struct WebKit::WebUnifiedTextReplacementContextData context, bool finished)
+    ProofreadingSessionDidReceiveSuggestions(struct WebCore::WritingTools::Session session, Vector<WebCore::WritingTools::TextSuggestion> suggestions, struct WebCore::WritingTools::Context context, bool finished)
 
-    TextReplacementSessionDidUpdateStateForReplacement(struct WebKit::WebUnifiedTextReplacementSessionData session, enum:uint8_t WebKit::WebTextReplacementDataState state, struct WebKit::WebTextReplacementData replacement, struct WebKit::WebUnifiedTextReplacementContextData context)
+    ProofreadingSessionDidUpdateStateForSuggestion(struct WebCore::WritingTools::Session session, enum:uint8_t WebCore::WritingTools::TextSuggestionState state, struct WebCore::WritingTools::TextSuggestion suggestion, struct WebCore::WritingTools::Context context)
 
-    DidEndTextReplacementSession(struct WebKit::WebUnifiedTextReplacementSessionData session, bool accepted)
+    DidEndWritingToolsSession(struct WebCore::WritingTools::Session session, bool accepted)
 
-    TextReplacementSessionDidReceiveTextWithReplacementRange(struct WebKit::WebUnifiedTextReplacementSessionData session, struct WebCore::AttributedString attributedText, struct WebCore::CharacterRange range, struct WebKit::WebUnifiedTextReplacementContextData context, bool finished);
+    CompositionSessionDidReceiveTextWithReplacementRange(struct WebCore::WritingTools::Session session, struct WebCore::AttributedString attributedText, struct WebCore::CharacterRange range, struct WebCore::WritingTools::Context context, bool finished);
 
-    TextReplacementSessionDidReceiveEditAction(struct WebKit::WebUnifiedTextReplacementSessionData session, enum:uint8_t WebKit::WebTextReplacementData::EditAction action);
+    WritingToolsSessionDidReceiveAction(struct WebCore::WritingTools::Session session, enum:uint8_t WebCore::WritingTools::Action action);
+#endif
+
+#if ENABLE(WRITING_TOOLS_UI)
+    enableSourceTextAnimationAfterElementWithID(String elementID, WTF::UUID uuid);
     
-    EnableTextIndicatorStyleAfterElementWithID(String elementID, WTF::UUID uuid);
-    
-    EnableTextIndicatorStyleForElementWithID(String elementID, WTF::UUID uuid);
+    EnableTextAnimationTypeForElementWithID(String elementID, WTF::UUID uuid);
 #endif
 
     TakeSnapshotForTargetedElement(WebCore::ElementIdentifier elementID, WebCore::ScriptExecutionContextIdentifier documentID) -> (std::optional<WebCore::ShareableBitmapHandle> image)
@@ -815,7 +808,13 @@ GenerateSyntheticEditingCommand(enum:uint8_t WebKit::SyntheticEditingCommandType
     StartObservingNowPlayingMetadata()
     StopObservingNowPlayingMetadata()
 
-    LoadAndDecodeImage(WebCore::ResourceRequest request, std::optional<WebCore::FloatSize> sizeConstraint) -> (std::variant<WebCore::ResourceError, Ref<WebCore::ShareableBitmap>> result)
+    LoadAndDecodeImage(WebCore::ResourceRequest request, std::optional<WebCore::FloatSize> sizeConstraint, size_t maximumBytesFromNetwork) -> (std::variant<WebCore::ResourceError, Ref<WebCore::ShareableBitmap>> result)
 
     FrameNameWasChangedInAnotherProcess(WebCore::FrameIdentifier frameID, String frameName)
+
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    StartPlayingPredominantVideo() -> (bool success)
+#endif
+
+    CloseCurrentTypingCommand()
 }

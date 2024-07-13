@@ -614,6 +614,12 @@ void WebProcess::initializeWebProcess(WebProcessCreationParameters&& parameters,
         RetainPtr<CFDataRef> auditData = adoptCF(CFDataCreate(nullptr, (const UInt8*)&*auditToken, sizeof(*auditToken)));
         Inspector::RemoteInspector::singleton().setParentProcessInformation(WebCore::presentingApplicationPID(), auditData);
     }
+    // We need to connect to webinspectord before the first page load for the XPC connection to be successfully opened.
+    // This is because we block launchd before the first page load, and launchd is required to establish the connection.
+    // This is only done if Web Inspector is enabled, which is determined by the size of the Web Inspector extension vector.
+    // See WebProcessProxy::shouldEnableRemoteInspector().
+    if (parameters.enableRemoteWebInspectorExtensionHandles.size())
+        Inspector::RemoteInspector::singleton().connectToWebInspector();
 #endif
 
 #if ENABLE(GAMEPAD)
@@ -1191,7 +1197,7 @@ static NetworkProcessConnectionInfo getNetworkProcessConnection(IPC::Connection&
 {
     NetworkProcessConnectionInfo connectionInfo;
     auto requestConnection = [&]() -> bool {
-        auto sendResult = connection.sendSync(Messages::WebProcessProxy::GetNetworkProcessConnection(), 0);
+        auto sendResult = connection.sendSync(Messages::WebProcessProxy::GetNetworkProcessConnection(), 0, IPC::Timeout::infinity(), IPC::SendSyncOption::MaintainOrderingWithAsyncMessages);
         if (!sendResult.succeeded()) {
             RELEASE_LOG_ERROR(Process, "getNetworkProcessConnection: Failed to send message or receive invalid message: error %" PUBLIC_LOG_STRING, IPC::errorAsString(sendResult.error()).characters());
             failedToGetNetworkProcessConnection();
@@ -1353,13 +1359,14 @@ GPUProcessConnection& WebProcess::ensureGPUProcessConnection()
         auto connectionIdentifiers = IPC::Connection::createConnectionIdentifierPair();
         if (!connectionIdentifiers)
             CRASH();
-        protectedParentProcessConnection()->send(Messages::WebProcessProxy::CreateGPUProcessConnection(WTFMove(connectionIdentifiers->client)), 0, IPC::SendOption::DispatchMessageEvenWhenWaitingForSyncReply);
+
         Ref gpuConnection = IPC::Connection::createServerConnection(WTFMove(connectionIdentifiers->server));
 #if ENABLE(IPC_TESTING_API)
         if (gpuConnection->ignoreInvalidMessageForTesting())
             gpuConnection->setIgnoreInvalidMessageForTesting();
 #endif
         m_gpuProcessConnection = GPUProcessConnection::create(WTFMove(gpuConnection));
+        protectedParentProcessConnection()->send(Messages::WebProcessProxy::CreateGPUProcessConnection(m_gpuProcessConnection->identifier(),  WTFMove(connectionIdentifiers->client)), 0, IPC::SendOption::DispatchMessageEvenWhenWaitingForSyncReply);
         for (auto& page : m_pageMap.values()) {
             // If page is null, then it is currently being constructed.
             if (page)
@@ -1388,7 +1395,7 @@ void WebProcess::gpuProcessConnectionClosed()
 void WebProcess::gpuProcessConnectionDidBecomeUnresponsive()
 {
     ASSERT(m_gpuProcessConnection);
-    parentProcessConnection()->send(Messages::WebProcessProxy::GPUProcessConnectionDidBecomeUnresponsive(), 0);
+    parentProcessConnection()->send(Messages::WebProcessProxy::GPUProcessConnectionDidBecomeUnresponsive(m_gpuProcessConnection->identifier()), 0);
 }
 
 #if PLATFORM(COCOA) && USE(LIBWEBRTC)
@@ -1639,10 +1646,10 @@ void WebProcess::prepareToSuspend(bool isSuspensionImminent, MonotonicTime estim
 
 #if PLATFORM(COCOA)
     destroyRenderingResources();
+    accessibilityRelayProcessSuspended(true);
 #endif
 
 #if PLATFORM(IOS_FAMILY)
-    accessibilityRelayProcessSuspended(true);
     updateFreezerStatus();
 #endif
 
@@ -1715,7 +1722,7 @@ void WebProcess::processDidResume()
     cancelMarkAllLayersVolatile();
     unfreezeAllLayerTrees();
 
-#if PLATFORM(IOS_FAMILY)
+#if PLATFORM(COCOA)
     accessibilityRelayProcessSuspended(false);
 #endif
 

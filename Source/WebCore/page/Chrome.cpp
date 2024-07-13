@@ -352,12 +352,10 @@ void Chrome::setStatusbarText(LocalFrame& frame, const String& status)
 
 void Chrome::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier> modifiers)
 {
-    RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
-    if (!localMainFrame)
-        return;
-
-    if (result.innerNode() && result.innerNode()->document().isDNSPrefetchEnabled())
-        localMainFrame->checkedLoader()->client().prefetchDNS(result.absoluteLinkURL().host().toString());
+    if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame())) {
+        if (result.innerNode() && result.innerNode()->document().isDNSPrefetchEnabled())
+            localMainFrame->checkedLoader()->client().prefetchDNS(result.absoluteLinkURL().host().toString());
+    }
 
     String toolTip;
     TextDirection toolTipDirection;
@@ -551,7 +549,7 @@ void Chrome::setCursorHiddenUntilMouseMoves(bool hiddenUntilMouseMoves)
     m_client->setCursorHiddenUntilMouseMoves(hiddenUntilMouseMoves);
 }
 
-RefPtr<ImageBuffer> Chrome::createImageBuffer(const FloatSize& size, RenderingPurpose purpose, float resolutionScale, const DestinationColorSpace& colorSpace, PixelFormat pixelFormat, OptionSet<ImageBufferOptions> options) const
+RefPtr<ImageBuffer> Chrome::createImageBuffer(const FloatSize& size, RenderingPurpose purpose, float resolutionScale, const DestinationColorSpace& colorSpace, ImageBufferPixelFormat pixelFormat, OptionSet<ImageBufferOptions> options) const
 {
     return m_client->createImageBuffer(size, purpose, resolutionScale, colorSpace, pixelFormat, options);
 }

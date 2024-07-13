@@ -1082,12 +1082,12 @@ int GStreamerMediaEndpoint::pickAvailablePayloadType()
             continue;
 
         gst_caps_foreach(codecPreferences.get(), reinterpret_cast<GstCapsForeachFunc>(+[](GstCapsFeatures*, GstStructure* structure, gpointer data) -> gboolean {
-            int payloadType;
-            if (!gst_structure_get_int(structure, "payload", &payloadType))
+            auto payloadType = gstStructureGet<int>(structure, "payload"_s);
+            if (!payloadType)
                 return TRUE;
 
             auto* holder = reinterpret_cast<PayloadTypeHolder*>(data);
-            holder->payloadType = std::max(holder->payloadType, payloadType);
+            holder->payloadType = std::max(holder->payloadType, *payloadType);
             return TRUE;
         }), holder);
     }
@@ -1653,9 +1653,8 @@ void GStreamerMediaEndpoint::processStats(const GValue* value)
 
     // Just check a single timestamp, inbound RTP for instance.
     if (!m_statsFirstDeliveredTimestamp && statsType == GST_WEBRTC_STATS_INBOUND_RTP) {
-        double timestamp;
-        if (gst_structure_get_double(structure, "timestamp", &timestamp)) {
-            auto ts = Seconds::fromMilliseconds(timestamp);
+        if (auto timestamp = gstStructureGet<double>(structure, "timestamp"_s)) {
+            auto ts = Seconds::fromMilliseconds(*timestamp);
             m_statsFirstDeliveredTimestamp = ts;
 
             if (!isStopped() && m_statsLogTimer.repeatInterval() != statsLogInterval(ts)) {

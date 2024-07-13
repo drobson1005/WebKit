@@ -40,11 +40,7 @@
 
 namespace JSC { namespace Wasm {
 
-#if OS(WINDOWS)
-constexpr unsigned numberOfLLIntCalleeSaveRegisters = 3;
-#else
 constexpr unsigned numberOfLLIntCalleeSaveRegisters = 2;
-#endif
 constexpr unsigned numberOfIPIntCalleeSaveRegisters = 3;
 constexpr unsigned numberOfLLIntInternalRegisters = 2;
 
@@ -324,7 +320,7 @@ public:
         fpArgumentCount = 0;
 
         uint32_t stackResults = numberOfStackResults(signature) * sizeof(Register);
-        uint32_t stackCountAligned = WTF::roundUpToMultipleOf(stackAlignmentBytes(), std::max(stackArgs, stackResults));
+        uint32_t stackCountAligned = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(std::max(stackArgs, stackResults));
         size_t resultStackOffset = headerSize + stackCountAligned - stackResults;
         Vector<ArgumentLocation, 1> results(signature.returnCount());
         for (size_t i = 0; i < signature.returnCount(); ++i) {
@@ -603,7 +599,7 @@ public:
         fpArgumentCount = 0;
 
         uint32_t stackResults = numberOfStackResults(signature) * sizeof(Register);
-        uint32_t stackCountAligned = WTF::roundUpToMultipleOf(stackAlignmentBytes(), std::max(stackArgs, stackResults));
+        uint32_t stackCountAligned = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(std::max(stackArgs, stackResults));
         size_t resultStackOffset = headerSize + stackCountAligned - stackResults;
         Vector<ArgumentLocation, 1> results(signature.returnCount());
         for (size_t i = 0; i < signature.returnCount(); ++i) {

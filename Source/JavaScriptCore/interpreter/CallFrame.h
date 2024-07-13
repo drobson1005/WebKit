@@ -368,6 +368,24 @@ using JSInstruction = BaseInstruction<JSOpcodeTraits>;
 JS_EXPORT_PRIVATE bool isFromJSCode(void* returnAddress);
 
 #if USE(BUILTIN_FRAME_ADDRESS)
+#if OS(WINDOWS)
+// On Windows, __builtin_frame_address(1) doesn't work, it returns __builtin_frame_address(0)
+// We can't use __builtin_frame_address(0) either, as on Windows it points at the space after
+// function's local variables on the stack instead of before like other platforms.
+// Instead we use _AddressOfReturnAddress(), and clobber rbp so it should be the first parameter
+// saved by the currrent function.
+#define DECLARE_CALL_FRAME(vm) \
+    ({ \
+        asm volatile( \
+            "" \
+            : /* no outputs */ \
+            : /* no inputs */ \
+            : "rbp" /* clobber rbp */ \
+        ); \
+        ASSERT(JSC::isFromJSCode(removeCodePtrTag<void*>(__builtin_return_address(0)))); \
+        bitwise_cast<JSC::CallFrame*>(*((uintptr_t**) _AddressOfReturnAddress() - 1)); \
+    })
+#else // !OS(WINDOWS)
 // FIXME (see rdar://72897291): Work around a Clang bug where __builtin_return_address()
 // sometimes gives us a signed pointer, and sometimes does not.
 #define DECLARE_CALL_FRAME(vm) \
@@ -375,6 +393,7 @@ JS_EXPORT_PRIVATE bool isFromJSCode(void* returnAddress);
         ASSERT(JSC::isFromJSCode(removeCodePtrTag<void*>(__builtin_return_address(0)))); \
         bitwise_cast<JSC::CallFrame*>(__builtin_frame_address(1)); \
     })
+#endif // !OS(WINDOWS)
 #else
 #define DECLARE_CALL_FRAME(vm) ((vm).topCallFrame)
 #endif

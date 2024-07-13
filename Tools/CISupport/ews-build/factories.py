@@ -228,6 +228,21 @@ class iOSTestsFactory(TestFactory):
     willTriggerCrashLogSubmission = True
 
 
+class visionOSBuildFactory(BuildFactory):
+    branches = [r'main']
+
+
+class visionOSEmbeddedBuildFactory(BuildFactory):
+    skipUpload = True
+    branches = [r'main']
+
+
+class visionOSTestsFactory(TestFactory):
+    LayoutTestClass = RunWebKitTests
+    findModifiedLayoutTests = True
+    willTriggerCrashLogSubmission = True
+
+
 class macOSBuildFactory(BuildFactory):
     pass
 

@@ -48,6 +48,7 @@
 #include <WebCore/WindowMessageBroadcaster.h>
 #include <WebKit/WKPage.h>
 #include <wtf/FileSystem.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebKit {
 
@@ -184,6 +185,11 @@ LRESULT CALLBACK WebInspectorUIProxy::wndProc(HWND hwnd, UINT msg, WPARAM wParam
     case WM_CLOSE:
         inspector->close();
         return 0;
+    case WM_DPICHANGED: {
+        RECT& rect = *reinterpret_cast<RECT*>(lParam);
+        SetWindowPos(hwnd, nullptr, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        return 0;
+    }
     default:
         break;
     }

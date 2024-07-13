@@ -50,7 +50,7 @@
 #import "WKProcessPoolPrivate.h"
 #import "WKSafeBrowsingWarning.h"
 #import "WKScrollView.h"
-#import "WKTextIndicatorStyleType.h"
+#import "WKTextAnimationType.h"
 #import "WKUIDelegatePrivate.h"
 #import "WKWebViewConfigurationInternal.h"
 #import "WKWebViewContentProvider.h"
@@ -63,16 +63,14 @@
 #import "WebPageProxy.h"
 #import "WebPreferences.h"
 #import "WebProcessPool.h"
-#import "WebTextReplacementData.h"
-#import "WebUnifiedTextReplacementContextData.h"
 #import "_WKActivatedElementInfoInternal.h"
 #import <WebCore/ColorCocoa.h>
 #import <WebCore/GraphicsContextCG.h>
 #import <WebCore/IOSurfacePool.h>
+#import <WebCore/LocalCurrentTraitCollection.h>
 #import <WebCore/MIMETypeRegistry.h>
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/UserInterfaceLayoutDirection.h>
-#import <pal/ios/ManagedConfigurationSoftLink.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <pal/spi/ios/GraphicsServicesSPI.h>
 #import <wtf/BlockPtr.h>
@@ -86,6 +84,7 @@
 #import <wtf/cocoa/Entitlements.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
+#import <wtf/text/MakeString.h>
 
 #if ENABLE(LOCKDOWN_MODE_API)
 #import "_WKSystemPreferencesInternal.h"
@@ -100,6 +99,8 @@
 #if USE(APPLE_INTERNAL_SDK)
 #import <WebKitAdditions/WKWebViewIOSAdditionsBefore.mm>
 #endif
+
+#import <pal/ios/ManagedConfigurationSoftLink.h>
 
 #define FORWARD_ACTION_TO_WKCONTENTVIEW(_action) \
 - (void)_action:(id)sender \
@@ -140,10 +141,6 @@ static WebCore::IntDegrees deviceOrientationForUIInterfaceOrientation(UIInterfac
 @interface UIWindow (UIWindowInternal)
 - (BOOL)_isHostedInAnotherProcess;
 @end
-
-#if USE(APPLE_INTERNAL_SDK)
-#import <WebKitAdditions/WKWebViewPrivateAdditions.mm>
-#endif
 
 @implementation WKWebView (WKViewInternalIOS)
 
@@ -651,7 +648,7 @@ static WebCore::Color scrollViewBackgroundColor(WKWebView *webView, AllowPageBac
         return WebCore::Color::transparentBlack;
 
     WebCore::Color color;
-    [webView.traitCollection performAsCurrentTraitCollection:[&]() {
+    [WebCore::traitCollectionWithAdjustedIdiomForSystemColors(webView.traitCollection) performAsCurrentTraitCollection:[&] {
         color = baseScrollViewBackgroundColor(webView, allowPageBackgroundColorOverride);
 
         if (!color.isValid() && webView->_contentView)

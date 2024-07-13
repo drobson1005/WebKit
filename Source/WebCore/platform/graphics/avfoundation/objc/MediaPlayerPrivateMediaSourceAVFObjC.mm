@@ -358,12 +358,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::playInternal(std::optional<MonotonicT
     if (!shouldBePlaying())
         return;
 
-    if (hostTime) {
-        auto cmHostTime = PAL::CMClockMakeHostTimeFromSystemUnits(hostTime->toMachAbsoluteTime());
-        ALWAYS_LOG(LOGIDENTIFIER, "setting rate to ", m_rate, " at host time ", PAL::CMTimeGetSeconds(cmHostTime));
-        [m_synchronizer setRate:m_rate time:PAL::kCMTimeInvalid atHostTime:cmHostTime];
-    } else
-        [m_synchronizer setRate:m_rate];
+    setSynchronizerRate(m_rate, WTFMove(hostTime));
 }
 
 void MediaPlayerPrivateMediaSourceAVFObjC::pause()
@@ -377,12 +372,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::pauseInternal(std::optional<Monotonic
     ALWAYS_LOG(LOGIDENTIFIER);
     m_isPlaying = false;
 
-    if (hostTime) {
-        auto cmHostTime = PAL::CMClockMakeHostTimeFromSystemUnits(hostTime->toMachAbsoluteTime());
-        ALWAYS_LOG(LOGIDENTIFIER, "setting rate to 0 at host time ", PAL::CMTimeGetSeconds(cmHostTime));
-        [m_synchronizer setRate:0 time:PAL::kCMTimeInvalid atHostTime:cmHostTime];
-    } else
-        [m_synchronizer setRate:0];
+    setSynchronizerRate(0, WTFMove(hostTime));
 }
 
 bool MediaPlayerPrivateMediaSourceAVFObjC::paused() const
@@ -599,7 +589,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::maybeCompleteSeek()
     }
     m_seekState = SeekCompleted;
     if (shouldBePlaying())
-        [m_synchronizer setRate:m_rate];
+        setSynchronizerRate(m_rate);
     if (auto player = m_player.get()) {
         player->seeked(m_lastSeekTime);
         player->timeChanged();
@@ -623,7 +613,7 @@ void MediaPlayerPrivateMediaSourceAVFObjC::setRateDouble(double rate)
     }
 
     if (shouldBePlaying())
-        [m_synchronizer setRate:m_rate];
+        setSynchronizerRate(m_rate);
 }
 
 double MediaPlayerPrivateMediaSourceAVFObjC::rate() const
@@ -779,6 +769,16 @@ bool MediaPlayerPrivateMediaSourceAVFObjC::updateLastImage()
     return true;
 }
 
+void MediaPlayerPrivateMediaSourceAVFObjC::maybePurgeLastImage()
+{
+    // If we are in the middle of a rVFC operation, do not purge anything:
+    if (m_isGatheringVideoFrameMetadata)
+        return;
+
+    m_lastImage = nullptr;
+    m_lastPixelBuffer = nullptr;
+}
+
 void MediaPlayerPrivateMediaSourceAVFObjC::paint(GraphicsContext& context, const FloatRect& rect)
 {
     paintCurrentFrameInContext(context, rect);
@@ -875,8 +875,8 @@ void MediaPlayerPrivateMediaSourceAVFObjC::acceleratedRenderingStateChanged()
 void MediaPlayerPrivateMediaSourceAVFObjC::updateDisplayLayerAndDecompressionSession()
 {
     if (shouldEnsureLayerOrVideoRenderer()) {
-        destroyDecompressionSession();
-        ensureLayerOrVideoRenderer();
+        auto needsRenderingModeChanged = destroyDecompressionSession();
+        ensureLayerOrVideoRenderer(needsRenderingModeChanged);
         return;
     }
 
@@ -1044,10 +1044,10 @@ void MediaPlayerPrivateMediaSourceAVFObjC::ensureDecompressionSession()
         player->renderingModeChanged();
 }
 
-void MediaPlayerPrivateMediaSourceAVFObjC::destroyDecompressionSession()
+MediaPlayerEnums::NeedsRenderingModeChanged MediaPlayerPrivateMediaSourceAVFObjC::destroyDecompressionSession()
 {
     if (!m_decompressionSession)
-        return;
+        return MediaPlayerEnums::NeedsRenderingModeChanged::No;
 
     ALWAYS_LOG(LOGIDENTIFIER);
 
@@ -1057,9 +1057,10 @@ void MediaPlayerPrivateMediaSourceAVFObjC::destroyDecompressionSession()
     m_decompressionSession->invalidate();
     m_decompressionSession = nullptr;
     setHasAvailableVideoFrame(false);
+    return MediaPlayerEnums::NeedsRenderingModeChanged::Yes;
 }
 
-void MediaPlayerPrivateMediaSourceAVFObjC::ensureLayerOrVideoRenderer()
+void MediaPlayerPrivateMediaSourceAVFObjC::ensureLayerOrVideoRenderer(MediaPlayerEnums::NeedsRenderingModeChanged needsRenderingModeChanged)
 {
     switch (acceleratedVideoMode()) {
     case AcceleratedVideoMode::Layer:
@@ -1089,25 +1090,36 @@ void MediaPlayerPrivateMediaSourceAVFObjC::ensureLayerOrVideoRenderer()
 
     ALWAYS_LOG(LOGIDENTIFIER, acceleratedVideoMode(), ", renderer=", !!renderer);
 
-    bool needsRenderingModeChanged;
     switch (acceleratedVideoMode()) {
     case AcceleratedVideoMode::Layer:
+#if ENABLE(LINEAR_MEDIA_PLAYER)
+        if (!m_usingLinearMediaPlayer)
+            needsRenderingModeChanged = MediaPlayerEnums::NeedsRenderingModeChanged::Yes;
+#else
+        needsRenderingModeChanged = MediaPlayerEnums::NeedsRenderingModeChanged::Yes;
+#endif
+        FALLTHROUGH;
     case AcceleratedVideoMode::VideoRenderer:
-        needsRenderingModeChanged = true;
         if (mediaSourcePrivate)
             mediaSourcePrivate->setVideoRenderer(renderer.get());
         break;
     case AcceleratedVideoMode::StagedLayer:
+        needsRenderingModeChanged = MediaPlayerEnums::NeedsRenderingModeChanged::Yes;
+        FALLTHROUGH;
     case AcceleratedVideoMode::StagedVideoRenderer:
-        needsRenderingModeChanged = false;
         if (mediaSourcePrivate)
             mediaSourcePrivate->stageVideoRenderer(renderer.get());
         break;
     }
 
-    RefPtr player = m_player.get();
-    if (player && needsRenderingModeChanged)
-        player->renderingModeChanged();
+    switch (needsRenderingModeChanged) {
+    case MediaPlayerEnums::NeedsRenderingModeChanged::Yes:
+        if (RefPtr player = m_player.get())
+            player->renderingModeChanged();
+        break;
+    case MediaPlayerEnums::NeedsRenderingModeChanged::No:
+        break;
+    }
 }
 
 void MediaPlayerPrivateMediaSourceAVFObjC::destroyLayerOrVideoRenderer()
@@ -1170,6 +1182,25 @@ bool MediaPlayerPrivateMediaSourceAVFObjC::shouldBePlaying() const
     return m_isPlaying && !seeking() && (m_flushingActiveSourceBuffersDueToVisibilityChange || allRenderersHaveAvailableSamples()) && m_readyState >= MediaPlayer::ReadyState::HaveFutureData;
 }
 
+void MediaPlayerPrivateMediaSourceAVFObjC::setSynchronizerRate(double rate, std::optional<MonotonicTime>&& hostTime)
+{
+    if (hostTime) {
+        auto cmHostTime = PAL::CMClockMakeHostTimeFromSystemUnits(hostTime->toMachAbsoluteTime());
+        ALWAYS_LOG(LOGIDENTIFIER, "setting rate to ", m_rate, " at host time ", PAL::CMTimeGetSeconds(cmHostTime));
+        [m_synchronizer setRate:rate time:PAL::kCMTimeInvalid atHostTime:cmHostTime];
+    } else
+        [m_synchronizer setRate:rate];
+
+    // If we are pausing the synchronizer, update the last image to ensure we have something
+    // to display if and when the decoders are purged while in the background. And vice-versa,
+    // purge our retained images and pixel buffers when playing the synchronizer, to release that
+    // retained memory.
+    if (!rate)
+        updateLastPixelBuffer();
+    else
+        maybePurgeLastImage();
+}
+
 void MediaPlayerPrivateMediaSourceAVFObjC::setHasAvailableVideoFrame(bool flag)
 {
     if (m_hasAvailableVideoFrame == flag)
@@ -1181,6 +1212,8 @@ void MediaPlayerPrivateMediaSourceAVFObjC::setHasAvailableVideoFrame(bool flag)
 
     if (!m_hasAvailableVideoFrame)
         return;
+
+    setNeedsPlaceholderImage(false);
 
     auto player = m_player.get();
     if (player)
@@ -1236,9 +1269,9 @@ void MediaPlayerPrivateMediaSourceAVFObjC::updateAllRenderersHaveAvailableSample
     m_allRenderersHaveAvailableSamples = allRenderersHaveAvailableSamples;
 
     if (shouldBePlaying() && [m_synchronizer rate] != m_rate)
-        [m_synchronizer setRate:m_rate];
+        setSynchronizerRate(m_rate);
     else if (!shouldBePlaying() && [m_synchronizer rate])
-        [m_synchronizer setRate:0];
+        setSynchronizerRate(0);
 }
 
 void MediaPlayerPrivateMediaSourceAVFObjC::durationChanged()
@@ -1402,6 +1435,19 @@ void MediaPlayerPrivateMediaSourceAVFObjC::needsVideoLayerChanged()
     updateDisplayLayerAndDecompressionSession();
 }
 
+void MediaPlayerPrivateMediaSourceAVFObjC::setNeedsPlaceholderImage(bool needsPlaceholder)
+{
+    if (m_needsPlaceholderImage == needsPlaceholder)
+        return;
+
+    m_needsPlaceholderImage = needsPlaceholder;
+
+    if (m_needsPlaceholderImage)
+        [m_sampleBufferDisplayLayer setContents:(id)m_lastPixelBuffer.get()];
+    else
+        [m_sampleBufferDisplayLayer setContents:nil];
+}
+
 void MediaPlayerPrivateMediaSourceAVFObjC::setReadyState(MediaPlayer::ReadyState readyState)
 {
     if (m_readyState == readyState)
@@ -1413,9 +1459,9 @@ void MediaPlayerPrivateMediaSourceAVFObjC::setReadyState(MediaPlayer::ReadyState
     m_readyState = readyState;
 
     if (shouldBePlaying())
-        [m_synchronizer setRate:m_rate];
+        setSynchronizerRate(m_rate);
     else
-        [m_synchronizer setRate:0];
+        setSynchronizerRate(0);
 
     if (m_readyState >= MediaPlayer::ReadyState::HaveCurrentData && hasVideo() && !m_hasAvailableVideoFrame) {
         m_readyStateIsWaitingForAvailableFrame = true;

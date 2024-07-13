@@ -25,9 +25,12 @@
 #include "DocumentInlines.h"
 #include "FEGaussianBlur.h"
 #include "NodeName.h"
+#include "SVGDocumentExtensions.h"
+#include "SVGFilter.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
 #include <wtf/IsoMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 

@@ -161,6 +161,7 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/Scope.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
@@ -2008,19 +2009,7 @@ ExceptionOr<bool> Element::toggleAttribute(const AtomString& qualifiedName, std:
     unsigned index = elementData() ? elementData()->findAttributeIndexByName(caseAdjustedQualifiedName, false) : ElementData::attributeNotFound;
     if (index == ElementData::attributeNotFound) {
         if (!force || *force) {
-            auto name = QualifiedName { nullAtom(), caseAdjustedQualifiedName, nullAtom() };
-            if (!document().scriptExecutionContext()->settingsValues().trustedTypesEnabled)
-                setAttributeInternal(index, name, emptyAtom(), InSynchronizationOfLazyAttribute::No);
-            else {
-                auto attributeTypeAndSink = trustedTypeForAttribute(nodeName(), name.localName().convertToASCIILowercase(), this->namespaceURI(), name.namespaceURI());
-                auto attributeValue = trustedTypesCompliantAttributeValue(attributeTypeAndSink.attributeType, emptyAtom(), this, attributeTypeAndSink.sink);
-
-                if (attributeValue.hasException())
-                    return attributeValue.releaseException();
-
-                index = validateAttributeIndex(index, name);
-                setAttributeInternal(index, name, AtomString(attributeValue.releaseReturnValue()), InSynchronizationOfLazyAttribute::No);
-            }
+            setAttributeInternal(index, QualifiedName { nullAtom(), caseAdjustedQualifiedName, nullAtom() }, emptyAtom(), InSynchronizationOfLazyAttribute::No);
             return true;
         }
         return false;
@@ -2560,6 +2549,17 @@ void Element::invalidateForResumingQueryContainerResolution()
     markAncestorsForInvalidatedStyle();
 }
 
+void Element::invalidateAncestorsForAnchor()
+{
+    markAncestorsForInvalidatedStyle();
+}
+
+void Element::invalidateForResumingAnchorPositionedElementResolution()
+{
+    invalidateStyleInternal();
+    markAncestorsForInvalidatedStyle();
+}
+
 bool Element::needsUpdateQueryContainerDependentStyle() const
 {
     return hasElementStateFlag(ElementStateFlag::NeedsUpdateQueryContainerDependentStyle);
@@ -2857,7 +2857,7 @@ void Element::removedFromAncestor(RemovalType removalType, ContainerNode& oldPar
 {
     ContainerNode::removedFromAncestor(removalType, oldParentOfRemovedTree);
 
-    if (RefPtr page = document().page()) {
+    if (RefPtrAllowingPartiallyDestroyed<Page> page = document().page()) {
 #if ENABLE(POINTER_LOCK)
         page->pointerLockController().elementWasRemoved(*this);
 #endif
@@ -4972,6 +4972,9 @@ bool Element::isWritingSuggestionsEnabled() const
     // is intentionally off, the site author probably wants writingsuggestions off too.
     auto autocompleteValue = attributeWithoutSynchronization(HTMLNames::autocompleteAttr);
     if (equalLettersIgnoringASCIICase(autocompleteValue, "off"_s))
+        return false;
+
+    if (protectedDocument()->quirks().shouldDisableWritingSuggestionsByDefault())
         return false;
 
     // Otherwise, return `true`.

@@ -5,7 +5,13 @@ struct S {
     @align(16) y: i32,
 }
 
-struct T{ x:array<i32,4294063007u> }
+struct T { x:array<i32,4294063007u> }
+
+struct U {
+    w: array< array<f32,1-2*4u>, 15095094>,
+    ram_shadow: u32,
+    o: u32,
+}
 
 fn testStructConstructor() -> i32
 {
@@ -15,10 +21,16 @@ fn testStructConstructor() -> i32
     return 0;
 }
 
+fn testPrimitiveStruct()
+{
+    var x = frexp(vec4<f16>());
+}
+
 @compute @workgroup_size(1)
 fn main()
 {
     _ = testStructConstructor();
+    testPrimitiveStruct();
 }
 
 struct S1 {

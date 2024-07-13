@@ -105,7 +105,6 @@ private:
 
     VideoFrameRotation videoFrameRotation() const final { return m_videoFrameRotation; }
     void setFrameRateAndZoomWithPreset(double, double, std::optional<VideoPreset>&&) final;
-    bool prefersPreset(const VideoPreset&) final;
     void generatePresets() final;
     bool canResizeVideoFrames() const final { return true; }
 
@@ -119,7 +118,7 @@ private:
     void orientationChanged(IntDegrees orientation) final;
 
     bool setFrameRateConstraint(double minFrameRate, double maxFrameRate);
-    bool areSettingsMatching(AVFrameRateRange*) const;
+    bool areSettingsMatching() const;
 
     IntSize sizeForPreset(NSString*);
 
@@ -176,9 +175,8 @@ private:
     Lock m_photoLock;
     std::optional<VideoPreset> m_currentPreset;
     std::optional<VideoPreset> m_appliedPreset;
-    RetainPtr<AVFrameRateRange> m_appliedFrameRateRange;
 
-    double m_currentFrameRate;
+    double m_currentFrameRate { 0 };
     double m_currentZoom { 1 };
     double m_zoomScaleFactor { 1 };
     uint64_t m_beginConfigurationCount { 0 };

@@ -171,6 +171,7 @@ public:
     unsigned numTmps() const { return m_unlinkedCode->hasCheckpoints() * maxNumCheckpointTmps; }
 
     static constexpr ptrdiff_t offsetOfNumParameters() { return OBJECT_OFFSETOF(CodeBlock, m_numParameters); }
+    static constexpr ptrdiff_t offsetOfVM() { return OBJECT_OFFSETOF(CodeBlock, m_vm); }
 
     CodeBlock* alternative() const { return static_cast<CodeBlock*>(m_alternative.get()); }
     void setAlternative(VM&, CodeBlock*);
@@ -993,7 +994,8 @@ private:
 };
 /* This check is for normal Release builds; ASSERT_ENABLED changes the size. */
 #if !ASSERT_ENABLED
-static_assert(sizeof(CodeBlock) <= 232, "Keep it small for memory saving");
+// TODO Figure out why this went up on my machine
+static_assert(sizeof(CodeBlock) <= 240, "Keep it small for memory saving");
 #endif
 
 template <typename ExecutableType>

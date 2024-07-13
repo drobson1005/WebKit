@@ -151,18 +151,15 @@ GPUCanvasContextCocoa::GPUCanvasContextCocoa(CanvasBase& canvas, GPU& gpu)
 {
 }
 
-void GPUCanvasContextCocoa::reshape(int width, int height, int oldWidth, int oldHeight)
+void GPUCanvasContextCocoa::reshape()
 {
-    UNUSED_PARAM(oldWidth);
-    UNUSED_PARAM(oldHeight);
-
     if (auto* texture = m_currentTexture.get()) {
         texture->destroy();
         m_currentTexture = nullptr;
     }
-
-    m_width = static_cast<GPUIntegerCoordinate>(width);
-    m_height = static_cast<GPUIntegerCoordinate>(height);
+    auto newSize = canvasBase().size();
+    m_width = static_cast<GPUIntegerCoordinate>(newSize.width());
+    m_height = static_cast<GPUIntegerCoordinate>(newSize.height());
 
     auto configuration = WTFMove(m_configuration);
     m_configuration.reset();
@@ -317,9 +314,9 @@ ExceptionOr<RefPtr<GPUTexture>> GPUCanvasContextCocoa::getCurrentTexture()
     return protectedCurrentTexture;
 }
 
-PixelFormat GPUCanvasContextCocoa::pixelFormat() const
+ImageBufferPixelFormat GPUCanvasContextCocoa::pixelFormat() const
 {
-    return m_configuration ? PixelFormat::BGRA8 : PixelFormat::BGRX8;
+    return m_configuration ? ImageBufferPixelFormat::BGRA8 : ImageBufferPixelFormat::BGRX8;
 }
 
 DestinationColorSpace GPUCanvasContextCocoa::colorSpace() const

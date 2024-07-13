@@ -29,6 +29,7 @@
 #if ENABLE(GPU_PROCESS) && ENABLE(WEBGL)
 
 #include "GPUConnectionToWebProcess.h"
+#include "Logging.h"
 #include "RemoteGraphicsContextGLInitializationState.h"
 #include "RemoteGraphicsContextGLMessages.h"
 #include "RemoteGraphicsContextGLProxyMessages.h"
@@ -276,7 +277,53 @@ void RemoteGraphicsContextGL::simulateEventForTesting(WebCore::GraphicsContextGL
     m_context->simulateEventForTesting(event);
 }
 
-void RemoteGraphicsContextGL::readPixelsInline(WebCore::IntRect rect, uint32_t format, uint32_t type, CompletionHandler<void(std::optional<WebCore::IntSize>, std::span<const uint8_t>)>&& completionHandler)
+void RemoteGraphicsContextGL::getBufferSubDataInline(uint32_t target, uint64_t offset, size_t dataSize, CompletionHandler<void(std::span<const uint8_t>)>&& completionHandler)
+{
+    assertIsCurrent(workQueue());
+    static constexpr size_t getBufferSubDataInlineSizeLimit = 64 * KB; // NOTE: when changing, change the value in RemoteGraphicsContextGLProxy too.
+
+    if (!dataSize || dataSize > getBufferSubDataInlineSizeLimit) {
+        m_context->addError(GCGLErrorCode::InvalidOperation);
+        completionHandler({ });
+        return;
+    }
+
+    MallocPtr<uint8_t> bufferStore;
+    std::span<uint8_t> bufferData;
+    bufferStore = MallocPtr<uint8_t>::tryMalloc(dataSize);
+    if (bufferStore) {
+        bufferData = { bufferStore.get(), dataSize };
+        if (!m_context->getBufferSubDataWithStatus(target, offset, bufferData))
+            bufferData = { };
+    } else
+        m_context->addError(GCGLErrorCode::OutOfMemory);
+
+    completionHandler(bufferData);
+}
+
+void RemoteGraphicsContextGL::getBufferSubDataSharedMemory(uint32_t target, uint64_t offset, size_t dataSize, WebCore::SharedMemory::Handle handle, CompletionHandler<void(bool)>&& completionHandler)
+{
+    assertIsCurrent(workQueue());
+    bool validBufferData = false;
+
+    static constexpr size_t readPixelsSharedMemorySizeLimit = 100 * MB; // NOTE: when changing, change the value in RemoteGraphicsContextGLProxy too.
+
+    if (dataSize > readPixelsSharedMemorySizeLimit) {
+        completionHandler({ });
+        return;
+    }
+
+    handle.setOwnershipOfMemory(m_sharedResourceCache->resourceOwner(), WebKit::MemoryLedger::Default);
+    auto buffer = SharedMemory::map(WTFMove(handle), SharedMemory::Protection::ReadWrite);
+    if (buffer && dataSize <= buffer->size())
+        validBufferData = m_context->getBufferSubDataWithStatus(target, offset, buffer->mutableSpan().subspan(0, dataSize));
+    else
+        m_context->addError(GCGLErrorCode::InvalidOperation);
+
+    completionHandler(validBufferData);
+}
+
+void RemoteGraphicsContextGL::readPixelsInline(WebCore::IntRect rect, uint32_t format, uint32_t type, bool packReverseRowOrder, CompletionHandler<void(std::optional<WebCore::IntSize>, std::span<const uint8_t>)>&& completionHandler)
 {
     assertIsCurrent(workQueue());
     static constexpr size_t readPixelsInlineSizeLimit = 64 * KB; // NOTE: when changing, change the value in RemoteGraphicsContextGLProxy too.
@@ -295,7 +342,7 @@ void RemoteGraphicsContextGL::readPixelsInline(WebCore::IntRect rect, uint32_t f
     }
     std::optional<WebCore::IntSize> readArea;
     if (pixels.size() == replyImageBytes)
-        readArea = m_context->readPixelsWithStatus(rect, format, type, pixels);
+        readArea = m_context->readPixelsWithStatus(rect, format, type, packReverseRowOrder, pixels);
     else
         m_context->addError(GCGLErrorCode::OutOfMemory);
     if (!readArea) {
@@ -306,14 +353,14 @@ void RemoteGraphicsContextGL::readPixelsInline(WebCore::IntRect rect, uint32_t f
 }
 
 
-void RemoteGraphicsContextGL::readPixelsSharedMemory(WebCore::IntRect rect, uint32_t format, uint32_t type, SharedMemory::Handle handle, CompletionHandler<void(std::optional<WebCore::IntSize>)>&& completionHandler)
+void RemoteGraphicsContextGL::readPixelsSharedMemory(WebCore::IntRect rect, uint32_t format, uint32_t type, bool packReverseRowOrder, SharedMemory::Handle handle, CompletionHandler<void(std::optional<WebCore::IntSize>)>&& completionHandler)
 {
     assertIsCurrent(workQueue());
     std::optional<WebCore::IntSize> readArea;
 
     handle.setOwnershipOfMemory(m_sharedResourceCache->resourceOwner(), WebKit::MemoryLedger::Default);
     if (auto buffer = SharedMemory::map(WTFMove(handle), SharedMemory::Protection::ReadWrite))
-        readArea = m_context->readPixelsWithStatus(rect, format, type, buffer->mutableSpan());
+        readArea = m_context->readPixelsWithStatus(rect, format, type, packReverseRowOrder, buffer->mutableSpan());
     else
         m_context->addError(GCGLErrorCode::InvalidOperation);
 

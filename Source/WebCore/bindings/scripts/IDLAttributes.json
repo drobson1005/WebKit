@@ -269,7 +269,7 @@
         "IsImmutablePrototypeExoticObjectOnPrototype": {
             "contextsAllowed": ["interface"]
         },
-        "IsWeakCallback": {
+        "IsStrongCallback": {
             "contextsAllowed": ["callback-function", "interface"]
         },
         "JSBuiltin": {
@@ -489,10 +489,6 @@
         },
         "SkipVTableValidation": {
             "contextsAllowed": ["interface"]
-        },
-        "StringContext": {
-            "contextsAllowed": ["type"],
-            "values": ["TrustedHTML", "TrustedScript", "TrustedScriptURL"]
         },
         "SuppressToJSObject": {
             "contextsAllowed": ["interface"]

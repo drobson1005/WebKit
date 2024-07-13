@@ -582,7 +582,6 @@ public:
 
     WEBCORE_EXPORT Ref<HTMLCollection> images();
     WEBCORE_EXPORT Ref<HTMLCollection> embeds();
-    WEBCORE_EXPORT Ref<HTMLCollection> plugins(); // an alias for embeds() required for the JS DOM bindings.
     WEBCORE_EXPORT Ref<HTMLCollection> applets();
     WEBCORE_EXPORT Ref<HTMLCollection> links();
     WEBCORE_EXPORT Ref<HTMLCollection> forms();
@@ -807,6 +806,8 @@ public:
     void cancelParsing();
 
     ExceptionOr<void> write(Document* entryDocument, SegmentedString&&);
+    ExceptionOr<void> write(Document* entryDocument, FixedVector<std::variant<RefPtr<TrustedHTML>, String>>&&);
+    ExceptionOr<void> writeln(Document* entryDocument, FixedVector<std::variant<RefPtr<TrustedHTML>, String>>&&);
     WEBCORE_EXPORT ExceptionOr<void> write(Document* entryDocument, FixedVector<String>&&);
     WEBCORE_EXPORT ExceptionOr<void> writeln(Document* entryDocument, FixedVector<String>&&);
 
@@ -1540,6 +1541,8 @@ public:
     bool inRenderTreeUpdate() const { return m_inRenderTreeUpdate; }
     bool isResolvingContainerQueries() const { return m_isResolvingContainerQueries; }
     bool isResolvingContainerQueriesForSelfOrAncestor() const;
+    bool isInStyleInterleavedLayout() const { return m_isResolvingContainerQueries || m_isResolvingAnchorPositionedElements; };
+    bool isInStyleInterleavedLayoutForSelfOrAncestor() const;
     bool isResolvingTreeStyle() const { return m_isResolvingTreeStyle; }
     void setIsResolvingTreeStyle(bool);
 
@@ -1798,7 +1801,7 @@ public:
     WEBCORE_EXPORT void navigateFromServiceWorker(const URL&, CompletionHandler<void(ScheduleLocationChangeResult)>&&);
 
 #if ENABLE(VIDEO)
-    void forEachMediaElement(const Function<void(HTMLMediaElement&)>&);
+    WEBCORE_EXPORT void forEachMediaElement(const Function<void(HTMLMediaElement&)>&);
 #endif
 
 #if ENABLE(IOS_TOUCH_EVENTS)
@@ -1936,6 +1939,8 @@ public:
 
     PermissionsPolicy permissionsPolicy() const;
 
+    unsigned unloadCounter() const { return m_unloadCounter; }
+
 protected:
     enum class ConstructionFlag : uint8_t {
         Synthesized = 1 << 0,
@@ -1951,7 +1956,7 @@ private:
     friend class DocumentParserYieldToken;
     friend class Node;
     friend class ThrowOnDynamicMarkupInsertionCountIncrementer;
-    friend class IgnoreOpensDuringUnloadCountIncrementer;
+    friend class UnloadCountIncrementer;
     friend class IgnoreDestructiveWriteCountIncrementer;
 
     void updateTitleElement(Element& changingTitleElement);
@@ -1960,6 +1965,8 @@ private:
     void frameDestroyed() final;
 
     void commonTeardown();
+
+    ExceptionOr<void> write(Document* entryDocument, FixedVector<std::variant<RefPtr<TrustedHTML>, String>>&&, ASCIILiteral lineFeed);
 
     WEBCORE_EXPORT Quirks& ensureQuirks();
     WEBCORE_EXPORT CachedResourceLoader& ensureCachedResourceLoader();
@@ -2447,8 +2454,8 @@ private:
     // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#throw-on-dynamic-markup-insertion-counter
     unsigned m_throwOnDynamicMarkupInsertionCount { 0 };
 
-    // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#ignore-opens-during-unload-counter
-    unsigned m_ignoreOpensDuringUnloadCount { 0 };
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#unload-counter
+    unsigned m_unloadCounter { 0 };
 
     // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#ignore-destructive-writes-counter
     unsigned m_ignoreDestructiveWriteCount { 0 };
@@ -2523,6 +2530,7 @@ private:
     bool m_inRenderTreeUpdate { false };
     bool m_isResolvingTreeStyle { false };
     bool m_isResolvingContainerQueries { false };
+    bool m_isResolvingAnchorPositionedElements { false };
 
     bool m_gotoAnchorNeededAfterStylesheetsLoad { false };
     TriState m_isDNSPrefetchEnabled { TriState::Indeterminate };

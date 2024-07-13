@@ -40,7 +40,6 @@
 #include <wtf/SetForScope.h>
 #include <wtf/SortedArrayMap.h>
 #include <wtf/text/StringBuilder.h>
-#include <wtf/text/StringConcatenateNumbers.h>
 
 namespace WGSL {
 
@@ -76,6 +75,7 @@ public:
     void visit(AST::Function&) override;
     void visit(AST::Structure&) override;
     void visit(AST::Variable&) override;
+    void visit(AST::ConstAssert&) override;
 
     void visit(const Type*, AST::Expression&);
     void visit(const Type*, AST::CallExpression&);
@@ -741,6 +741,11 @@ void FunctionDefinitionWriter::visit(AST::Variable& variable)
     serializeVariable(variable);
 }
 
+void FunctionDefinitionWriter::visit(AST::ConstAssert&)
+{
+    // const_assert should not generate any code
+}
+
 void FunctionDefinitionWriter::visitGlobal(AST::Variable& variable)
 {
     if (variable.flavor() != AST::VariableFlavor::Override)
@@ -1044,7 +1049,7 @@ void FunctionDefinitionWriter::visit(const Type* type)
         },
         [&](const Struct& structure) {
             m_stringBuilder.append(structure.structure.name());
-            if (shouldPackType() && type->isConstructible() && structure.structure.role() == AST::StructureRole::UserDefinedResource)
+            if (shouldPackType() && structure.structure.role() == AST::StructureRole::UserDefinedResource)
                 m_stringBuilder.append("::PackedType"_s);
         },
         [&](const PrimitiveStruct& structure) {
@@ -2270,7 +2275,22 @@ void FunctionDefinitionWriter::visit(AST::CallStatement& statement)
 
 void FunctionDefinitionWriter::visit(AST::CompoundAssignmentStatement& statement)
 {
-    visit(statement.leftExpression());
+    bool serialized = false;
+    auto* leftExpression = &statement.leftExpression();
+    if (auto* identity = dynamicDowncast<AST::IdentityExpression>(*leftExpression))
+        leftExpression = &identity->expression();
+    if (auto* call = dynamicDowncast<AST::CallExpression>(*leftExpression)) {
+        auto& target = call->target();
+        if (auto* identifier = dynamicDowncast<AST::IdentifierExpression>(target)) {
+            if (identifier->identifier() == "__unpack"_s) {
+                serialized = true;
+                visit(call->arguments()[0]);
+            }
+        }
+    }
+    if (!serialized)
+        visit(statement.leftExpression());
+
     m_stringBuilder.append(" = "_s);
     serializeBinaryExpression(statement.leftExpression(), statement.operation(), statement.rightExpression());
 }
@@ -2415,6 +2435,8 @@ void FunctionDefinitionWriter::visit(AST::LoopStatement& statement)
 {
     m_stringBuilder.append("while (true) {\n"_s);
     {
+        if (statement.containsSwitch())
+            m_stringBuilder.append("bool __continuing = false;\n"_s, m_indent);
         auto& continuing = statement.continuing();
         SetForScope continuingScope(m_continuing, continuing.has_value() ? &*continuing : nullptr);
 
@@ -2483,6 +2505,21 @@ void FunctionDefinitionWriter::visit(AST::SwitchStatement& statement)
         visitClause(clause);
     visitClause(statement.defaultClause(), true);
     m_stringBuilder.append('\n', m_indent, '}');
+    if (statement.isInsideLoop()) {
+        m_stringBuilder.append('\n', m_indent, "if (__continuing) {"_s);
+        {
+            auto scope = IndentationScope(m_indent);
+            visit(*m_continuing);
+        }
+        m_stringBuilder.append('\n', m_indent, '}');
+    } else if (statement.isNestedInsideLoop()) {
+        m_stringBuilder.append('\n', m_indent, "if (__continuing) {"_s);
+        {
+            auto scope = IndentationScope(m_indent);
+            m_stringBuilder.append('\n', m_indent, "break;"_s);
+        }
+        m_stringBuilder.append('\n', m_indent, '}');
+    }
 }
 
 void FunctionDefinitionWriter::visit(AST::BreakStatement&)
@@ -2490,8 +2527,13 @@ void FunctionDefinitionWriter::visit(AST::BreakStatement&)
     m_stringBuilder.append("break"_s);
 }
 
-void FunctionDefinitionWriter::visit(AST::ContinueStatement&)
+void FunctionDefinitionWriter::visit(AST::ContinueStatement& statement)
 {
+    if (statement.isFromSwitchToContinuing()) {
+        m_stringBuilder.append("__continuing = true;\n"_s);
+        m_stringBuilder.append(m_indent, "break"_s);
+        return;
+    }
     if (m_continuing) {
         visit(*m_continuing);
         m_stringBuilder.append(m_indent);

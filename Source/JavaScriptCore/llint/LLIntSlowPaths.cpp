@@ -441,7 +441,7 @@ static UGPRPair entryOSR(CodeBlock* codeBlock, const char*, EntryKind)
 #endif // ENABLE(JIT)
 
 #if LLINT_TRACING
-extern "C" void logWasmPrologue(uint64_t i, uint64_t* fp, uint64_t* sp)
+extern "C" void SYSV_ABI logWasmPrologue(uint64_t i, uint64_t* fp, uint64_t* sp)
 {
     if (!Options::traceLLIntExecution())
         return;
@@ -617,6 +617,25 @@ extern "C" UGPRPair SYSV_ABI llint_virtual_call(CallFrame* calleeFrame, CallLink
     JSCell* calleeAsFunctionCellIgnored;
     calleeFrame->setCodeBlock(nullptr);
     void* callTarget = virtualForWithFunction(vm, owner, calleeFrame, callLinkInfo, calleeAsFunctionCellIgnored);
+    ensureStillAliveHere(owner);
+    if (UNLIKELY(scope.exception()))
+        return encodeResult(callTarget, bitwise_cast<void*>(&vm));
+    return encodeResult(callTarget, nullptr);
+}
+
+extern "C" UGPRPair SYSV_ABI llint_polymorphic_call(CallFrame* calleeFrame, CallLinkInfo* callLinkInfo)
+{
+    JSCell* owner = callLinkInfo->ownerForSlowPath(calleeFrame);
+    VM& vm = owner->vm();
+    NativeCallFrameTracer tracer(vm, calleeFrame);
+    sanitizeStackForVM(vm);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    JSCell* calleeAsFunctionCell;
+    calleeFrame->setCodeBlock(nullptr);
+    void* callTarget = virtualForWithFunction(vm, owner, calleeFrame, callLinkInfo, calleeAsFunctionCell);
+    if (UNLIKELY(scope.exception()))
+        return encodeResult(callTarget, bitwise_cast<void*>(&vm));
+    linkPolymorphicCall(vm, owner, calleeFrame, *callLinkInfo, CallVariant(calleeAsFunctionCell));
     ensureStillAliveHere(owner);
     if (UNLIKELY(scope.exception()))
         return encodeResult(callTarget, bitwise_cast<void*>(&vm));
@@ -2684,7 +2703,7 @@ extern "C" UGPRPair SYSV_ABI llint_stack_check_at_vm_entry(VM* vm, Register* new
 }
 #endif
 
-extern "C" void llint_write_barrier_slow(CallFrame* callFrame, JSCell* cell)
+extern "C" void SYSV_ABI llint_write_barrier_slow(CallFrame* callFrame, JSCell* cell)
 {
     VM& vm = callFrame->codeBlock()->vm();
     vm.writeBarrier(cell);

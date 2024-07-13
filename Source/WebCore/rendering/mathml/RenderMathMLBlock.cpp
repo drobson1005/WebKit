@@ -240,7 +240,7 @@ void RenderMathMLBlock::layoutBlock(bool relayoutChildren, LayoutUnit)
     if (!relayoutChildren && simplifiedLayout())
         return;
 
-    LayoutRepainter repainter(*this, checkForRepaintDuringLayout());
+    LayoutRepainter repainter(*this);
 
     if (recomputeLogicalWidth())
         relayoutChildren = true;
@@ -277,6 +277,12 @@ void RenderMathMLBlock::layoutInvalidMarkup(bool relayoutChildren)
     layoutPositionedObjects(relayoutChildren);
     updateScrollInfoAfterLayout();
     clearNeedsLayout();
+}
+
+void RenderMathMLBlock::computeAndSetBlockDirectionMarginsOfChildren()
+{
+    for (auto* child = firstChildBox(); child; child = child->nextSiblingBox())
+        child->computeAndSetBlockDirectionMargins(*this);
 }
 
 void RenderMathMLBlock::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)

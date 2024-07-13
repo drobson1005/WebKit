@@ -26,9 +26,6 @@
 #include "config.h"
 #include "PolymorphicCallStubRoutine.h"
 
-#if ENABLE(JIT)
-
-#include "AccessCase.h"
 #include "CachedCall.h"
 #include "CallLinkInfo.h"
 #include "CodeBlock.h"
@@ -71,13 +68,11 @@ void PolymorphicCallCase::dump(PrintStream& out) const
     out.print("<variant = ", m_variant, ", codeBlock = ", pointerDump(m_codeBlock), ">");
 }
 
-PolymorphicCallStubRoutine::PolymorphicCallStubRoutine(unsigned headerSize, unsigned trailingSize, const MacroAssemblerCodeRef<JITStubRoutinePtrTag>& code, VM& vm, JSCell* owner, CallFrame* callerFrame, CallLinkInfo& callLinkInfo, const Vector<CallSlot, 16>& callSlots, UniqueArray<uint32_t>&& fastCounts, bool notUsingCounting, bool isClosureCall)
+PolymorphicCallStubRoutine::PolymorphicCallStubRoutine(unsigned headerSize, unsigned trailingSize, const MacroAssemblerCodeRef<JITStubRoutinePtrTag>& code, VM& vm, JSCell* owner, CallFrame* callerFrame, CallLinkInfo& callLinkInfo, const Vector<CallSlot, 16>& callSlots, bool notUsingCounting, bool isClosureCall)
     : GCAwareJITStubRoutine(Type::PolymorphicCallStubRoutineType, code, owner)
     , ButterflyArray<PolymorphicCallStubRoutine, PolymorphicCallNode, CallSlot>(headerSize, trailingSize)
-    , m_fastCounts(WTFMove(fastCounts))
     , m_callLinkInfo(&callLinkInfo)
     , m_notUsingCounting(notUsingCounting)
-    , m_isDataIC(m_callLinkInfo->isDataIC())
     , m_isClosureCall(isClosureCall)
 {
     for (unsigned index = 0; index < callSlots.size(); ++index) {
@@ -96,16 +91,12 @@ PolymorphicCallStubRoutine::PolymorphicCallStubRoutine(unsigned headerSize, unsi
     }
 
     WTF::storeStoreFence();
-    bool isCodeImmutable = m_isDataIC;
+    bool isCodeImmutable = true;
     makeGCAware(vm, isCodeImmutable);
 }
 
 bool PolymorphicCallStubRoutine::upgradeIfPossible(VM&, CodeBlock* oldCodeBlock, CodeBlock* newCodeBlock, uint8_t index)
 {
-    // Not DataIC.
-    if (!m_isDataIC)
-        return false;
-
     // It is possible that we can just upgrade the CallSlot and continue using this PolymorphicCallStubRoutine instead of unlinking CallLinkInfo.
     auto& callNode = leadingSpan()[index];
     auto& slot = trailingSpan()[index];
@@ -151,11 +142,7 @@ CallEdgeList PolymorphicCallStubRoutine::edges() const
     CallEdgeList result;
     unsigned index = 0;
     forEachDependentCell([&](JSCell* cell) {
-        unsigned count = 0;
-        if (m_fastCounts)
-            count = m_fastCounts[index];
-        else
-            count = trailingSpan()[index].m_count;
+        unsigned count = trailingSpan()[index].m_count;
         result.append(CallEdge(CallVariant(cell), count));
         ++index;
     });
@@ -186,21 +173,12 @@ bool PolymorphicCallStubRoutine::visitWeakImpl(VM& vm)
     return isStillLive;
 }
 
-template<typename Visitor>
-ALWAYS_INLINE void PolymorphicCallStubRoutine::markRequiredObjectsInternalImpl(Visitor& visitor)
+void PolymorphicCallStubRoutine::markRequiredObjectsImpl(AbstractSlotVisitor&)
 {
-    forEachDependentCell([&](JSCell* cell) {
-        visitor.appendUnbarriered(cell);
-    });
 }
 
-void PolymorphicCallStubRoutine::markRequiredObjectsImpl(AbstractSlotVisitor& visitor)
+void PolymorphicCallStubRoutine::markRequiredObjectsImpl(SlotVisitor&)
 {
-    markRequiredObjectsInternalImpl(visitor);
-}
-void PolymorphicCallStubRoutine::markRequiredObjectsImpl(SlotVisitor& visitor)
-{
-    markRequiredObjectsInternalImpl(visitor);
 }
 
 void PolymorphicCallStubRoutine::destroy(PolymorphicCallStubRoutine* derived)
@@ -209,5 +187,3 @@ void PolymorphicCallStubRoutine::destroy(PolymorphicCallStubRoutine* derived)
 }
 
 } // namespace JSC
-
-#endif // ENABLE(JIT)

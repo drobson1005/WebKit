@@ -33,6 +33,7 @@
 #include <wtf/SetForScope.h>
 #include <wtf/StringPrintStream.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 #define updateErrorMessage(shouldPrintToken, ...) do {\
     propagateError(); \
@@ -984,11 +985,11 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseVariableDecl
                 headLocation = location;
             } else {
                 if (!tail) {
-                    head = tail = context.createCommaExpr(headLocation, head);
                     recordPauseLocation(context.breakpointLocation(head));
+                    head = tail = context.createCommaExpr(headLocation, head);
                 }
-                tail = context.appendToCommaExpr(location, head, tail, node);
-                recordPauseLocation(context.breakpointLocation(tail));
+                recordPauseLocation(context.breakpointLocation(node));
+                tail = context.appendToCommaExpr(location, tail, node);
             }
         }
     } while (match(COMMA));
@@ -1711,7 +1712,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseReturnStateme
 
     if (autoSemiColon())
         return context.createReturnStatement(location, 0, start, end);
-    TreeExpression expr = parseExpression(context, IsOnlyChildOfStatement::Yes);
+    TreeExpression expr = parseExpression(context);
     failIfFalse(expr, "Cannot parse the return expression");
     end = lastTokenEndPosition();
     if (match(SEMICOLON))
@@ -1731,7 +1732,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseThrowStatemen
     failIfTrue(match(SEMICOLON), "Expected expression after 'throw'");
     semanticFailIfTrue(autoSemiColon(), "Cannot have a newline after 'throw'");
     
-    TreeExpression expr = parseExpression(context, IsOnlyChildOfStatement::Yes);
+    TreeExpression expr = parseExpression(context);
     failIfFalse(expr, "Cannot parse expression for throw statement");
     JSTextPosition end = lastTokenEndPosition();
     failIfFalse(autoSemiColon(), "Expected a ';' after a throw statement");
@@ -3477,7 +3478,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseExpressionSta
 
     JSTextPosition start = tokenStartPosition();
     JSTokenLocation location(tokenLocation());
-    TreeExpression expression = parseExpression(context, IsOnlyChildOfStatement::Yes);
+    TreeExpression expression = parseExpression(context);
     failIfFalse(expression, "Cannot parse expression statement");
     if (!autoSemiColon())
         failDueToUnexpectedToken();
@@ -4088,7 +4089,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseExportDeclara
 }
 
 template <typename LexerType>
-template <class TreeBuilder> TreeExpression Parser<LexerType>::parseExpression(TreeBuilder& context, IsOnlyChildOfStatement isStatement)
+template <class TreeBuilder> TreeExpression Parser<LexerType>::parseExpression(TreeBuilder& context)
 {
     failIfStackOverflow();
     JSTokenLocation headLocation(tokenLocation());
@@ -4097,28 +4098,25 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseExpression(T
     context.setEndOffset(node, m_lastTokenEndPosition.offset);
     if (!match(COMMA))
         return node;
+    recordPauseLocation(context.breakpointLocation(node));
     next();
     m_parserState.nonTrivialExpressionCount++;
     m_parserState.nonLHSCount++;
     JSTokenLocation tailLocation(tokenLocation());
     TreeExpression right = parseAssignmentExpression(context);
     failIfFalse(right, "Cannot parse expression in a comma expression");
+    recordPauseLocation(context.breakpointLocation(right));
     context.setEndOffset(right, m_lastTokenEndPosition.offset);
     typename TreeBuilder::Comma head = context.createCommaExpr(headLocation, node);
-    if (isStatement == IsOnlyChildOfStatement::Yes)
-        recordPauseLocation(context.breakpointLocation(head));
-    typename TreeBuilder::Comma tail = context.appendToCommaExpr(tailLocation, head, head, right);
-    if (isStatement == IsOnlyChildOfStatement::Yes)
-        recordPauseLocation(context.breakpointLocation(tail));
+    typename TreeBuilder::Comma tail = context.appendToCommaExpr(tailLocation, head, right);
     while (match(COMMA)) {
         next(TreeBuilder::DontBuildStrings);
         tailLocation = tokenLocation();
         right = parseAssignmentExpression(context);
         failIfFalse(right, "Cannot parse expression in a comma expression");
         context.setEndOffset(right, m_lastTokenEndPosition.offset);
-        tail = context.appendToCommaExpr(tailLocation, head, tail, right);
-        if (isStatement == IsOnlyChildOfStatement::Yes)
-            recordPauseLocation(context.breakpointLocation(tail));
+        recordPauseLocation(context.breakpointLocation(right));
+        tail = context.appendToCommaExpr(tailLocation, tail, right);
     }
     context.setEndOffset(head, m_lastTokenEndPosition.offset);
     return head;
@@ -4328,6 +4326,9 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseYieldExpress
     // http://ecma-international.org/ecma-262/6.0/#sec-generator-function-definitions-static-semantics-early-errors
     failIfTrue(m_parserState.functionParsePhase == FunctionParsePhase::Parameters, "Cannot use yield expression within parameters");
 
+    // https://github.com/tc39/ecma262/issues/3333
+    failIfTrue(m_parserState.isParsingClassFieldInitializer, "Cannot use yield expression inside class field initializer expression");
+
     JSTokenLocation location(tokenLocation());
     JSTextPosition divotStart = tokenStartPosition();
     ASSERT(match(YIELD));
@@ -4354,6 +4355,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseAwaitExpress
     ASSERT(currentScope()->isAsyncFunction() || isModuleParseMode(sourceParseMode()));
     ASSERT(isAsyncFunctionParseMode(sourceParseMode()) || isModuleParseMode(sourceParseMode()));
     ASSERT(m_parserState.functionParsePhase != FunctionParsePhase::Parameters);
+    ASSERT(!m_parserState.isParsingClassFieldInitializer);
     JSTokenLocation location(tokenLocation());
     JSTextPosition divotStart = tokenStartPosition();
     next();
@@ -5088,7 +5090,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parsePrimaryExpre
         semanticFailIfTrue(currentScope()->isStaticBlock(), "The 'await' keyword is disallowed in the IdentifierReference position within static block");
         if (m_parserState.functionParsePhase == FunctionParsePhase::Parameters)
             semanticFailIfFalse(m_parserState.allowAwait, "Cannot use 'await' within a parameter default expression");
-        else if (currentFunctionScope()->isAsyncFunctionBoundary() || isModuleParseMode(sourceParseMode()))
+        else if (!m_parserState.isParsingClassFieldInitializer && (currentFunctionScope()->isAsyncFunctionBoundary() || isModuleParseMode(sourceParseMode())))
             return parseAwaitExpression(context);
 
         goto identifierExpression;
@@ -5585,7 +5587,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseUnaryExpress
     bool hasPrefixUpdateOp = false;
     unsigned lastOperator = 0;
 
-    if (UNLIKELY(match(AWAIT) && (currentFunctionScope()->isAsyncFunctionBoundary() || isModuleParseMode(sourceParseMode())))) {
+    if (UNLIKELY(match(AWAIT) && !m_parserState.isParsingClassFieldInitializer && (currentFunctionScope()->isAsyncFunctionBoundary() || isModuleParseMode(sourceParseMode())))) {
         semanticFailIfTrue(currentScope()->isStaticBlock(), "Cannot use 'await' within static block");
         return parseAwaitExpression(context);
     }

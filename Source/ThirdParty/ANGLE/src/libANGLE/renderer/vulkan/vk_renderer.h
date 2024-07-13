@@ -518,9 +518,22 @@ class Renderer : angle::NonCopyable
     // Log cache stats for all caches
     void logCacheStats() const;
 
-    VkPipelineStageFlags getSupportedVulkanPipelineStageMask() const
+    VkPipelineStageFlags getSupportedBufferWritePipelineStageMask() const
     {
-        return mSupportedVulkanPipelineStageMask;
+        return mSupportedBufferWritePipelineStageMask;
+    }
+
+    VkPipelineStageFlags getPipelineStageMask(EventStage eventStage) const
+    {
+        return mEventStageAndPipelineStageFlagsMap[eventStage];
+    }
+    VkPipelineStageFlags getEventPipelineStageMask(const RefCountedEvent &refCountedEvent) const
+    {
+        return mEventStageAndPipelineStageFlagsMap[refCountedEvent.getEventStage()];
+    }
+    const ImageMemoryBarrierData &getImageMemoryBarrierData(ImageLayout layout) const
+    {
+        return mImageLayoutAndMemoryBarrierDataMap[layout];
     }
 
     VkShaderStageFlags getSupportedVulkanShaderStageMask() const
@@ -752,6 +765,12 @@ class Renderer : angle::NonCopyable
 
     std::thread::id getCommandProcessorThreadId() const { return mCommandProcessor.getThreadId(); }
 
+    vk::RefCountedDescriptorSetLayout *getDescriptorLayoutForEmptyDesc()
+    {
+        ASSERT(mPlaceHolderDescriptorSetLayout && mPlaceHolderDescriptorSetLayout->get().valid());
+        return mPlaceHolderDescriptorSetLayout;
+    }
+
   private:
     angle::Result setupDevice(vk::Context *context,
                               const angle::FeatureOverrides &featureOverrides,
@@ -896,8 +915,6 @@ class Renderer : angle::NonCopyable
     VkDeviceDeviceMemoryReportCreateInfoEXT mMemoryReportCallback;
     VkPhysicalDeviceShaderFloat16Int8FeaturesKHR mShaderFloat16Int8Features;
     VkPhysicalDeviceDepthStencilResolvePropertiesKHR mDepthStencilResolveProperties;
-    VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesGOOGLEX
-        mMultisampledRenderToSingleSampledFeaturesGOOGLEX;
     VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT
         mMultisampledRenderToSingleSampledFeatures;
     VkPhysicalDeviceImage2DViewOf3DFeaturesEXT mImage2dViewOf3dFeatures;
@@ -910,6 +927,7 @@ class Renderer : angle::NonCopyable
     VkPhysicalDeviceHostQueryResetFeaturesEXT mHostQueryResetFeatures;
     VkPhysicalDeviceDepthClampZeroOneFeaturesEXT mDepthClampZeroOneFeatures;
     VkPhysicalDeviceDepthClipControlFeaturesEXT mDepthClipControlFeatures;
+    VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT mBlendOperationAdvancedFeatures;
     VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT mPrimitivesGeneratedQueryFeatures;
     VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT mPrimitiveTopologyListRestartFeatures;
     VkPhysicalDeviceSamplerYcbcrConversionFeatures mSamplerYcbcrConversionFeatures;
@@ -918,6 +936,8 @@ class Renderer : angle::NonCopyable
     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT mGraphicsPipelineLibraryFeatures;
     VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT mGraphicsPipelineLibraryProperties;
     VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT mVertexInputDynamicStateFeatures;
+    VkPhysicalDeviceDynamicRenderingFeaturesKHR mDynamicRenderingFeatures;
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR mDynamicRenderingLocalReadFeatures;
     VkPhysicalDeviceFragmentShadingRateFeaturesKHR mFragmentShadingRateFeatures;
     VkPhysicalDeviceFragmentShadingRatePropertiesKHR mFragmentShadingRateProperties;
     VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT mFragmentShaderInterlockFeatures;
@@ -926,6 +946,7 @@ class Renderer : angle::NonCopyable
     VkPhysicalDevicePipelineProtectedAccessFeaturesEXT mPipelineProtectedAccessFeatures;
     VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT
         mRasterizationOrderAttachmentAccessFeatures;
+    VkPhysicalDeviceMaintenance5FeaturesKHR mMaintenance5Features;
     VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT mSwapchainMaintenance1Features;
     VkPhysicalDeviceLegacyDitheringFeaturesEXT mDitheringFeatures;
     VkPhysicalDeviceDrmPropertiesEXT mDrmProperties;
@@ -1069,8 +1090,11 @@ class Renderer : angle::NonCopyable
     // Note that this mask can have bits set that don't correspond to valid stages, so it's
     // strictly only useful for masking out unsupported stages in an otherwise valid set of
     // stages.
-    VkPipelineStageFlags mSupportedVulkanPipelineStageMask;
+    VkPipelineStageFlags mSupportedBufferWritePipelineStageMask;
     VkShaderStageFlags mSupportedVulkanShaderStageMask;
+    // The 1:1 mapping between EventStage and VkPipelineStageFlags
+    angle::PackedEnumMap<EventStage, VkPipelineStageFlags> mEventStageAndPipelineStageFlagsMap;
+    angle::PackedEnumMap<ImageLayout, ImageMemoryBarrierData> mImageLayoutAndMemoryBarrierDataMap;
 
     // Use thread pool to compress cache data.
     std::shared_ptr<angle::WaitableEvent> mCompressEvent;
@@ -1089,6 +1113,9 @@ class Renderer : angle::NonCopyable
     std::ostringstream mPipelineCacheGraph;
     bool mDumpPipelineCacheGraph;
     std::string mPipelineCacheGraphDumpPath;
+
+    // A placeholder descriptor set layout handle for layouts with no bindings.
+    vk::RefCountedDescriptorSetLayout *mPlaceHolderDescriptorSetLayout;
 };
 
 ANGLE_INLINE Serial Renderer::generateQueueSerial(SerialIndex index)

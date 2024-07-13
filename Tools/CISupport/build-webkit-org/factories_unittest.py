@@ -349,6 +349,19 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'extract-test-results',
             'set-permissions',
         ],
+        'Apple-Sonoma-Smart-Pointer-Static-Analyzer-Build': [
+            'configure-build',
+            'configuration',
+            'clean-and-update-working-directory',
+            'checkout-specific-revision',
+            'show-identifier',
+            'kill-old-processes',
+            'delete-WebKitBuild-directory',
+            'delete-stale-build-files',
+            'prune-coresymbolicationd-cache-if-too-large',
+            'print-clang-version',
+            'scan-build-smart-pointer'
+        ],
         'Apple-Ventura-Release-Build': [
             'configure-build',
             'configuration',
@@ -1105,6 +1118,7 @@ class TestExpectedBuildSteps(unittest.TestCase):
             'kill-old-processes',
             'delete-WebKitBuild-directory',
             'delete-stale-build-files',
+            'jhbuild',
             'compile-webkit'
         ],
         'GTK-Linux-64-bit-Release-Debian-Stable-Build': [

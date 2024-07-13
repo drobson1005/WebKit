@@ -75,6 +75,7 @@
 #include <wtf/FastMalloc.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 #if !ENABLE(WEBASSEMBLY)
 #error ENABLE(WEBASSEMBLY_OMGJIT) is enabled, but ENABLE(WEBASSEMBLY) is not.
@@ -791,7 +792,7 @@ private:
     void emitArraySetUnchecked(uint32_t, Value*, Value*, Value*);
     void emitStructSet(Value*, uint32_t, const StructType&, Value*);
     ExpressionType WARN_UNUSED_RETURN pushArrayNew(uint32_t typeIndex, Value* initValue, ExpressionType size);
-    using arraySegmentOperation = EncodedJSValue (&)(JSC::Wasm::Instance*, uint32_t, uint32_t, uint32_t, uint32_t);
+    using arraySegmentOperation = EncodedJSValue SYSV_ABI (&)(JSC::Wasm::Instance*, uint32_t, uint32_t, uint32_t, uint32_t);
     ExpressionType WARN_UNUSED_RETURN pushArrayNewFromSegment(arraySegmentOperation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType);
     void emitRefTestOrCast(CastKind, ExpressionType, bool, int32_t, bool, ExpressionType&);
     template <typename Generator>
@@ -1015,8 +1016,8 @@ void OMGIRGenerator::computeStackCheckSize(bool& needsOverflowCheck, int32_t& ch
 {
     const Checked<int32_t> wasmFrameSize = m_proc.frameSize();
     const Checked<int32_t> wasmTailCallFrameSize = -m_tailCallStackOffsetFromFP;
-    const unsigned minimumParentCheckSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), 1024);
-    const unsigned extraFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), std::max<uint32_t>(
+    const unsigned minimumParentCheckSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(1024);
+    const unsigned extraFrameSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(std::max<uint32_t>(
         // This allows us to elide stack checks for functions that are terminal nodes in the call
         // tree, (e.g they don't make any calls) and have a small enough frame size. This works by
         // having any such terminal node have its parent caller include some extra size in its
@@ -1665,7 +1666,7 @@ auto OMGIRGenerator::emitIndirectCall(Value* calleeInstance, Value* calleeCode, 
     const auto& callingConvention = wasmCallingConvention();
     CallInformation wasmCalleeInfo = callingConvention.callInformationFor(signature, CallRole::Caller);
     CallInformation wasmCalleeInfoAsCallee = callingConvention.callInformationFor(signature, CallRole::Callee);
-    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), wasmCalleeInfo.headerAndArgumentStackSizeInBytes);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(wasmCalleeInfo.headerAndArgumentStackSizeInBytes);
 
     m_proc.requestCallArgAreaSizeInBytes(calleeStackSize);
 
@@ -3244,8 +3245,11 @@ auto OMGIRGenerator::addArrayFill(uint32_t typeIndex, ExpressionType arrayref, E
 
     Value* resultValue;
     if (!elementType.unpacked().isV128()) {
+        Value* valueGPR = get(value);
+        if (value->type().isFloat())
+            valueGPR = m_currentBlock->appendNew<Value>(m_proc, BitwiseCast, origin(), valueGPR);
         resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::I32), operationWasmArrayFill,
-            instanceValue(), get(arrayref), get(offset), get(value), get(size));
+            instanceValue(), get(arrayref), get(offset), valueGPR, get(size));
     } else {
         Value* lane0 = m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), B3::VectorExtractLane, B3::Int64, SIMDLane::i64x2, SIMDSignMode::None, uint8_t { 0 }, get(value));
         Value* lane1 = m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), B3::VectorExtractLane, B3::Int64, SIMDLane::i64x2, SIMDSignMode::None, uint8_t { 1 }, get(value));
@@ -4046,7 +4050,7 @@ void OMGIRGenerator::emitLoopTierUpCheck(uint32_t loopIndex, const Stack& enclos
     for (auto& local : m_locals)
         stackmap.append(get(local));
 
-    if (Options::useWasmIPInt()) {
+    if (Options::useWebAssemblyIPInt()) {
         // Do rethrow slots first because IPInt has them in a shadow stack.
         for (unsigned controlIndex = 0; controlIndex < m_parser->controlStack().size(); ++controlIndex) {
             auto& data = m_parser->controlStack()[controlIndex].controlData;
@@ -4330,10 +4334,12 @@ PatchpointExceptionHandle OMGIRGenerator::preparePatchpointForExceptions(BasicBl
 auto OMGIRGenerator::addCatchToUnreachable(unsigned exceptionIndex, const TypeDefinition& signature, ControlType& data, ResultList& results) -> PartialResult
 {
     Value* payload = emitCatchImpl(CatchKind::Catch, data, exceptionIndex);
+    unsigned offset = 0;
     for (unsigned i = 0; i < signature.as<FunctionSignature>()->argumentCount(); ++i) {
         Type type = signature.as<FunctionSignature>()->argumentType(i);
-        Value* value = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, toB3Type(type), origin(), payload, i * sizeof(uint64_t));
+        Value* value = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, toB3Type(type), origin(), payload, offset * sizeof(uint64_t));
         results.append(push(value));
+        offset += type.kind == TypeKind::V128 ? 2 : 1;
     }
     TRACE_CF("CATCH");
     return { };
@@ -4433,14 +4439,12 @@ auto OMGIRGenerator::addThrow(unsigned exceptionIndex, Vector<ExpressionType>& a
     PatchpointValue* patch = m_proc.add<PatchpointValue>(B3::Void, origin(), cloningForbidden(Patchpoint));
     patch->effects.terminal = true;
     patch->append(instanceValue(), ValueRep::reg(GPRInfo::argumentGPR0));
-    for (unsigned i = 0; i < args.size(); ++i) {
-        // Note: SIMD values can appear here, but should never be read at runtime because this will throw an un-catchable TypeError instead.
-        // Nonetheless, they may clobber important things if they aren't treated as doubles.
-        auto arg = get(args[i]);
-        if (args[i]->type().isVector())
-            arg = constant(Double, 0);
-        patch->append(arg, ValueRep::stackArgument(i * sizeof(EncodedJSValue)));
+    unsigned offset = 0;
+    for (auto arg : args) {
+        patch->append(get(arg), ValueRep::stackArgument(offset * sizeof(EncodedJSValue)));
+        offset += arg->type().isVector() ? 2 : 1;
     }
+    m_maxNumJSCallArguments = std::max(m_maxNumJSCallArguments, offset);
     patch->clobber(RegisterSetBuilder::registersToSaveForJSCall(m_proc.usesSIMD() ? RegisterSetBuilder::allRegisters() : RegisterSetBuilder::allScalarRegisters()));
     PatchpointExceptionHandle handle = preparePatchpointForExceptions(m_currentBlock, patch);
     patch->setGenerator([this, exceptionIndex, handle] (CCallHelpers& jit, const B3::StackmapGenerationParams& params) {
@@ -4699,8 +4703,8 @@ auto OMGIRGenerator::createCallPatchpoint(BasicBlock* block, Value* jsCalleeAnch
 auto OMGIRGenerator::createTailCallPatchpoint(BasicBlock* block, CallInformation wasmCallerInfoAsCallee, CallInformation wasmCalleeInfoAsCallee, const Vector<ExpressionType>& tmpArgSourceLocations, Vector<B3::ConstrainedValue> patchArgs) -> CallPatchpointData
 {
     // First slot here is the last argument to the caller, a.k.a the first stack slot that belongs to the caller.
-    const Checked<int32_t> offsetOfFirstSlotFromFP = WTF::roundUpToMultipleOf(stackAlignmentBytes(), wasmCallerInfoAsCallee.headerAndArgumentStackSizeInBytes);
-    const Checked<int32_t> offsetOfNewFPFromFirstSlot = checkedProduct<int32_t>(-1, WTF::roundUpToMultipleOf(stackAlignmentBytes(), wasmCalleeInfoAsCallee.headerAndArgumentStackSizeInBytes));
+    const Checked<int32_t> offsetOfFirstSlotFromFP = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(wasmCallerInfoAsCallee.headerAndArgumentStackSizeInBytes);
+    const Checked<int32_t> offsetOfNewFPFromFirstSlot = checkedProduct<int32_t>(-1, WTF::roundUpToMultipleOf<stackAlignmentBytes()>(wasmCalleeInfoAsCallee.headerAndArgumentStackSizeInBytes));
     const Checked<int32_t> newFPOffsetFromFP = checkedSum<int32_t>(offsetOfFirstSlotFromFP + offsetOfNewFPFromFirstSlot);
     m_tailCallStackOffsetFromFP = std::min(m_tailCallStackOffsetFromFP, newFPOffsetFromFP);
     //    Layout of stack right before tail call F -> G
@@ -4798,8 +4802,8 @@ auto OMGIRGenerator::createTailCallPatchpoint(BasicBlock* block, CallInformation
 bool OMGIRGenerator::canInline() const
 {
     ASSERT(!m_inlinedBytes || !m_inlineParent);
-    return m_inlineDepth < Options::maximumWasmDepthForInlining()
-        && m_inlineRoot->m_inlinedBytes.value() < Options::maximumWasmCallerSizeForInlining()
+    return m_inlineDepth < Options::maximumWebAssemblyDepthForInlining()
+        && m_inlineRoot->m_inlinedBytes.value() < Options::maximumWebAssemblyCallerSizeForInlining()
         && (m_inlineDepth <= 1 || StackCheck().isSafeToRecurse());
 }
 
@@ -4882,7 +4886,7 @@ auto OMGIRGenerator::addCall(uint32_t functionIndex, const TypeDefinition& signa
     Checked<int32_t> tailCallStackOffsetFromFP;
     CallInformation wasmCalleeInfo = callingConvention.callInformationFor(signature, CallRole::Caller);
     CallInformation wasmCalleeInfoAsCallee = callingConvention.callInformationFor(signature, CallRole::Callee);
-    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), wasmCalleeInfo.headerAndArgumentStackSizeInBytes);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(wasmCalleeInfo.headerAndArgumentStackSizeInBytes);
     const TypeIndex callerTypeIndex = m_info.internalFunctionTypeIndices[m_functionIndex];
     const TypeDefinition& callerTypeDefinition = TypeInformation::get(callerTypeIndex);
     CallInformation wasmCallerInfoAsCallee = callingConvention.callInformationFor(callerTypeDefinition, CallRole::Callee);
@@ -4896,7 +4900,7 @@ auto OMGIRGenerator::addCall(uint32_t functionIndex, const TypeDefinition& signa
         const TypeIndex callerTypeIndex = m_info.internalFunctionTypeIndices[m_functionIndex];
         const TypeDefinition& callerTypeDefinition = TypeInformation::get(callerTypeIndex);
         CallInformation wasmCallerInfo = callingConvention.callInformationFor(callerTypeDefinition, CallRole::Callee);
-        Checked<int32_t> callerStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), wasmCallerInfo.headerAndArgumentStackSizeInBytes);
+        Checked<int32_t> callerStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(wasmCallerInfo.headerAndArgumentStackSizeInBytes);
         tailCallStackOffsetFromFP = callerStackSize - calleeStackSize;
 
         m_tailCallStackOffsetFromFP = std::min(m_tailCallStackOffsetFromFP, tailCallStackOffsetFromFP);
@@ -5014,7 +5018,7 @@ auto OMGIRGenerator::addCall(uint32_t functionIndex, const TypeDefinition& signa
 
     if (callType == CallType::Call
         && functionIndex - m_numImportFunctions != m_functionIndex
-        && m_info.functionWasmSizeImportSpace(functionIndex) < Options::maximumWasmCalleeSizeForInlining()
+        && m_info.functionWasmSizeImportSpace(functionIndex) < Options::maximumWebAssemblyCalleeSizeForInlining()
         && isAnyOMG(m_compilationMode)
         && canInline()
         && !m_info.callCanClobberInstance(functionIndex)) {
@@ -5267,7 +5271,7 @@ static bool shouldDumpIRFor(uint32_t functionIndex)
     static LazyNeverDestroyed<FunctionAllowlist> dumpAllowlist;
     static std::once_flag initializeAllowlistFlag;
     std::call_once(initializeAllowlistFlag, [] {
-        const char* functionAllowlistFile = Options::wasmOMGFunctionsToDump();
+        const char* functionAllowlistFile = Options::webAssemblyOMGFunctionsToDump();
         dumpAllowlist.construct(functionAllowlistFile);
     });
     return dumpAllowlist->shouldDumpWasmFunction(functionIndex);
@@ -5308,9 +5312,7 @@ Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileOMG(Compilati
     // optLevel=1.
     procedure.setNeedsUsedRegisters(false);
     
-    procedure.setOptLevel(isAnyBBQ(compilationMode)
-        ? Options::webAssemblyBBQB3OptimizationLevel()
-        : Options::webAssemblyOMGOptimizationLevel());
+    procedure.setOptLevel(Options::webAssemblyOMGOptimizationLevel());
 
     procedure.code().setForceIRCRegisterAllocation();
 

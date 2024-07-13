@@ -78,9 +78,6 @@ AuxiliaryProcessProxy::AuxiliaryProcessProxy(ShouldTakeUIBackgroundAssertion sho
     : m_responsivenessTimer(*this, adjustedTimeoutForThermalState(responsivenessTimeout))
     , m_alwaysRunsAtBackgroundPriority(alwaysRunsAtBackgroundPriority == AlwaysRunsAtBackgroundPriority::Yes)
     , m_throttler(*this, shouldTakeUIBackgroundAssertion == ShouldTakeUIBackgroundAssertion::Yes)
-#if USE(RUNNINGBOARD)
-    , m_timedActivityForIPC(3_s)
-#endif
 {
 }
 
@@ -186,7 +183,7 @@ void AuxiliaryProcessProxy::terminate()
 {
     RELEASE_LOG(Process, "AuxiliaryProcessProxy::terminate: PID=%d", processID());
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !USE(EXTENSIONKIT_PROCESS_TERMINATION)
     if (RefPtr connection = m_connection) {
         if (connection->kill())
             return;
@@ -262,7 +259,7 @@ bool AuxiliaryProcessProxy::sendMessage(UniqueRef<IPC::Encoder>&& encoder, Optio
 
     if (asyncReplyHandler && canSendMessage() && shouldStartProcessThrottlerActivity == ShouldStartProcessThrottlerActivity::Yes) {
         auto completionHandler = WTFMove(asyncReplyHandler->completionHandler);
-        asyncReplyHandler->completionHandler = [activity = throttler().quietBackgroundActivity(descriptionLiteral(encoder->messageName())), completionHandler = WTFMove(completionHandler)](IPC::Decoder* decoder) mutable {
+        asyncReplyHandler->completionHandler = [activity = throttler().quietBackgroundActivity(description(encoder->messageName())), completionHandler = WTFMove(completionHandler)](IPC::Decoder* decoder) mutable {
             completionHandler(decoder);
         };
     }
@@ -387,9 +384,12 @@ void AuxiliaryProcessProxy::outgoingMessageQueueIsGrowingLarge()
 void AuxiliaryProcessProxy::wakeUpTemporarilyForIPC()
 {
     // If we keep trying to send IPC to a suspended process, the outgoing message queue may grow large and result
-    // in increased memory usage. To avoid this, we wake up the process for a bit so we can drain the messages.
-    if (!ProcessThrottler::isValidBackgroundActivity(m_timedActivityForIPC.activity()))
-        m_timedActivityForIPC = throttler().backgroundActivity("IPC sending due to large outgoing queue"_s);
+    // in increased memory usage. To avoid this, we allow the process to stay alive for 1 second after draining
+    // its message queue.
+    auto completionHandler = [activity = throttler().backgroundActivity("IPC sending due to large outgoing queue"_s)]() mutable {
+        WebCore::Timer::schedule(1_s, [activity = WTFMove(activity)]() { });
+    };
+    sendWithAsyncReply(Messages::AuxiliaryProcess::MainThreadPing(), WTFMove(completionHandler), 0, { }, ShouldStartProcessThrottlerActivity::No);
 }
 #endif
 
@@ -577,6 +577,11 @@ void AuxiliaryProcessProxy::platformStartConnectionTerminationWatchdog()
 }
 
 #endif
+
+void AuxiliaryProcessProxy::requestRemoteProcessTermination()
+{
+    terminate();
+}
 
 #if PLATFORM(MAC) && USE(RUNNINGBOARD)
 void AuxiliaryProcessProxy::setRunningBoardThrottlingEnabled()

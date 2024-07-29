@@ -32,6 +32,7 @@
 #include "WebPushMessage.h"
 #include <WebCore/ExceptionData.h>
 #include <WebCore/NotificationResources.h>
+#include <WebCore/PushPermissionState.h>
 #include <WebCore/PushSubscriptionData.h>
 #include <WebCore/PushSubscriptionIdentifier.h>
 #include <WebCore/SecurityOriginData.h>
@@ -111,13 +112,15 @@ private:
     void removePushSubscriptionsForOrigin(WebCore::SecurityOriginData&&, CompletionHandler<void(unsigned)>&&);
     void setPublicTokenForTesting(const String& publicToken, CompletionHandler<void()>&&);
     void updateConnectionConfiguration(WebPushDaemonConnectionConfiguration&&);
-    void getPushPermissionState(URL&& scopeURL, CompletionHandler<void(const Expected<uint8_t, WebCore::ExceptionData>&)>&&);
+    void getPushPermissionState(URL&& scopeURL, CompletionHandler<void(WebCore::PushPermissionState)>&&);
     void setHostAppAuditTokenData(const Vector<uint8_t>&);
     void getPushTopicsForTesting(CompletionHandler<void(Vector<String>, Vector<String>)>&&);
     void didShowNotificationForTesting(URL&& scopeURL, CompletionHandler<void()>&&);
 
     void showNotification(const WebCore::NotificationData&, RefPtr<WebCore::NotificationResources>, CompletionHandler<void()>&&);
     void getNotifications(const URL& registrationURL, const String& tag, CompletionHandler<void(Expected<Vector<WebCore::NotificationData>, WebCore::ExceptionData>&&)>&&);
+    void cancelNotification(const WTF::UUID& notificationID);
+    void enableMockUserNotificationCenterForTesting(CompletionHandler<void()>&&);
 
     String bundleIdentifierFromAuditToken(audit_token_t);
     bool hostHasEntitlement(ASCIILiteral);
@@ -132,6 +135,7 @@ private:
     std::optional<String> m_hostAppCodeSigningIdentifier;
     std::optional<bool> m_hostAppHasPushEntitlement;
 
+    String m_bundleIdentifierOverride;
     String m_pushPartitionString;
     Markable<WTF::UUID> m_dataStoreIdentifier;
 

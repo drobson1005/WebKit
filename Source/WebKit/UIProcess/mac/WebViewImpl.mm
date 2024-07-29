@@ -4606,7 +4606,7 @@ void WebViewImpl::removeTextPlaceholder(NSTextPlaceholder *placeholder, bool wil
 }
 
 #if ENABLE(WRITING_TOOLS_UI)
-void WebViewImpl::addTextAnimationForAnimationID(WTF::UUID uuid, const WebKit::TextAnimationData& data)
+void WebViewImpl::addTextAnimationForAnimationID(WTF::UUID uuid, const WebCore::TextAnimationData& data)
 {
     if (!m_page->preferences().textAnimationsEnabled())
         return;
@@ -5649,8 +5649,10 @@ void WebViewImpl::mouseEntered(NSEvent *event)
     if (m_ignoresMouseMoveEvents)
         return;
 
-    if (event.trackingArea == m_flagsChangedEventMonitorTrackingArea.get())
+    if (event.trackingArea == m_flagsChangedEventMonitorTrackingArea.get()) {
         createFlagsChangedEventMonitor();
+        return;
+    }
 
     nativeMouseEventHandler(event);
 }
@@ -5660,8 +5662,10 @@ void WebViewImpl::mouseExited(NSEvent *event)
     if (m_ignoresMouseMoveEvents)
         return;
 
-    if (event.trackingArea == m_flagsChangedEventMonitorTrackingArea.get())
+    if (event.trackingArea == m_flagsChangedEventMonitorTrackingArea.get()) {
         removeFlagsChangedEventMonitor();
+        return;
+    }
 
     nativeMouseEventHandler(event);
 }

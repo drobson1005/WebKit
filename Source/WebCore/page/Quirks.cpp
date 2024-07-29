@@ -45,6 +45,7 @@
 #include "JSEventListener.h"
 #include "LayoutUnit.h"
 #include "LocalDOMWindow.h"
+#include "MouseEvent.h"
 #include "NamedNodeMap.h"
 #include "NetworkStorageSession.h"
 #include "OrganizationStorageAccessPromptQuirk.h"
@@ -1809,6 +1810,10 @@ bool Quirks::needsIPadMiniUserAgent(const URL& url)
 
     // FIXME: Remove this quirk when <rdar://122481999> is complete
     if (host == "spotify.com"_s || host.endsWith(".spotify.com"_s) || host.endsWith(".spotifycdn.com"_s))
+        return true;
+
+    // FIXME: Remove this quirk if seatguru decides to adjust their site. See https://webkit.org/b/276947
+    if (host == "seatguru.com"_s || host.endsWith(".seatguru.com"_s))
         return true;
 
     return false;

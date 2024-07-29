@@ -134,6 +134,7 @@
 #import <WebCore/Scrollbar.h>
 #import <WebCore/ShareData.h>
 #import <WebCore/TextAlternativeWithRange.h>
+#import <WebCore/TextAnimationTypes.h>
 #import <WebCore/TextIndicator.h>
 #import <WebCore/TextIndicatorWindow.h>
 #import <WebCore/TextRecognitionResult.h>
@@ -1337,9 +1338,7 @@ static WKDragSessionContext *ensureLocalDragSessionContext(id <UIDragSession> se
     [self _createAndConfigureHighlightLongPressGestureRecognizer];
     [self _createAndConfigureLongPressGestureRecognizer];
 
-#if HAVE(LINK_PREVIEW)
     [self _updateLongPressAndHighlightLongPressGestures];
-#endif
 
 #if ENABLE(DRAG_SUPPORT)
     [self setUpDragAndDropInteractions];
@@ -1667,6 +1666,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 - (void)_updateLongPressAndHighlightLongPressGestures
 {
+#if HAVE(LINK_PREVIEW)
     // We only disable the highlight long press gesture in the case where UIContextMenu is available and we
     // also allow link previews, since the context menu interaction's gestures need to take precedence over
     // highlight long press gestures.
@@ -1675,6 +1675,10 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     // We only enable the long press gesture in the case where the app is linked on iOS 12 or earlier (and
     // therefore prefers the legacy action sheet over context menus), and link previews are also enabled.
     [_longPressGestureRecognizer setEnabled:!self._shouldUseContextMenus && self.webView.allowsLinkPreview];
+#else
+    [_highlightLongPressGestureRecognizer setEnabled:NO];
+    [_longPressGestureRecognizer setEnabled:NO];
+#endif
 }
 
 - (UIView *)unscaledView
@@ -2653,6 +2657,9 @@ static inline WebCore::FloatSize tapHighlightBorderRadius(WebCore::FloatSize bor
     case WebKit::InputType::Month:
     case WebKit::InputType::DateTimeLocal:
     case WebKit::InputType::Time:
+#if ENABLE(INPUT_TYPE_WEEK_PICKER)
+    case WebKit::InputType::Week:
+#endif
         return NO;
     case WebKit::InputType::Select: {
         if (self._shouldUseContextMenusForFormControls)
@@ -3882,6 +3889,9 @@ static void cancelPotentialTapIfNecessary(WKContentView* contentView)
     case WebKit::InputType::DateTimeLocal:
     case WebKit::InputType::Month:
     case WebKit::InputType::Time:
+#if ENABLE(INPUT_TYPE_WEEK_PICKER)
+    case WebKit::InputType::Week:
+#endif
         return NO;
     case WebKit::InputType::Select: {
         if (self._shouldUseContextMenusForFormControls)
@@ -3898,7 +3908,9 @@ static void cancelPotentialTapIfNecessary(WKContentView* contentView)
     case WebKit::InputType::NumberPad:
     case WebKit::InputType::ContentEditable:
     case WebKit::InputType::TextArea:
+#if !ENABLE(INPUT_TYPE_WEEK_PICKER)
     case WebKit::InputType::Week:
+#endif
         return PAL::currentUserInterfaceIdiomIsSmallScreen();
     }
 }
@@ -7771,6 +7783,9 @@ static bool mayContainSelectableText(WebKit::InputType type)
     case WebKit::InputType::Month:
     case WebKit::InputType::Select:
     case WebKit::InputType::Time:
+#if ENABLE(INPUT_TYPE_WEEK_PICKER)
+    case WebKit::InputType::Week:
+#endif
         return false;
     // The following types look and behave like a text field.
     case WebKit::InputType::ContentEditable:
@@ -7783,7 +7798,9 @@ static bool mayContainSelectableText(WebKit::InputType type)
     case WebKit::InputType::Text:
     case WebKit::InputType::TextArea:
     case WebKit::InputType::URL:
+#if !ENABLE(INPUT_TYPE_WEEK_PICKER)
     case WebKit::InputType::Week:
+#endif
         return true;
     }
 }
@@ -7823,6 +7840,9 @@ static RetainPtr<NSObject <WKFormPeripheral>> createInputPeripheralWithView(WebK
     case WebKit::InputType::DateTimeLocal:
     case WebKit::InputType::Month:
     case WebKit::InputType::Time:
+#if ENABLE(INPUT_TYPE_WEEK_PICKER)
+    case WebKit::InputType::Week:
+#endif
         return adoptNS([[WKDateTimeInputControl alloc] initWithView:view]);
     default:
         return nil;
@@ -10939,6 +10959,9 @@ static RetainPtr<UITargetedPreview> createFallbackTargetedPreview(UIView *rootVi
         case WebKit::InputType::Month:
         case WebKit::InputType::DateTimeLocal:
         case WebKit::InputType::Time:
+#if ENABLE(INPUT_TYPE_WEEK_PICKER)
+        case WebKit::InputType::Week:
+#endif
             return UIColor.clearColor;
         default:
             return nil;
@@ -13276,7 +13299,7 @@ inline static NSString *extendSelectionCommand(UITextLayoutDirection direction)
 - (void)callCompletionHandlerForAnimationID:(NSUUID *)uuid
 {
     auto animationUUID = WTF::UUID::fromNSUUID(uuid);
-    _page->callCompletionHandlerForAnimationID(*animationUUID);
+    _page->callCompletionHandlerForAnimationID(*animationUUID, WebCore::TextAnimationRunMode::RunAnimation);
 }
 
 #endif

@@ -386,14 +386,6 @@ public:
         m_assembler.lsl(dest, src, imm.m_value & 0x1f);
     }
 
-    void lshift32(TrustedImm32 imm, RegisterID shiftAmount, RegisterID dest)
-    {
-        // Clamp the shift to the range 0..31
-        m_assembler.ARM_and(dest, shiftAmount, ARMThumbImmediate::makeEncodedImm(0x1f));
-        move(imm, getCachedDataTempRegisterIDAndInvalidate());
-        m_assembler.lsl(dest, dataTempRegister, dest);
-    }
-
     void lshift32(RegisterID shiftAmount, RegisterID dest)
     {
         lshift32(dest, shiftAmount, dest);
@@ -2924,9 +2916,13 @@ public:
 
     void compareFloat(DoubleCondition cond, FPRegisterID left, FPRegisterID right, RegisterID dest)
     {
-        // Not handled, but should not be used right now
-        ASSERT(cond != DoubleNotEqualAndOrdered);
-        ASSERT(cond != DoubleEqualOrUnordered);
+        if ((cond == DoubleNotEqualAndOrdered) || (cond == DoubleEqualOrUnordered)) {
+            move(TrustedImm32(1), dest);
+            Jump trueCase = branchFloat(cond, left, right);
+            move(TrustedImm32(0), dest);
+            trueCase.link(this);
+            return;
+        }
         m_assembler.vcmp(asSingle(left), asSingle(right));
         m_assembler.vmrs();
         m_assembler.it(armV7Condition(cond), false);
@@ -2940,6 +2936,22 @@ public:
         UNUSED_PARAM(left);
         UNUSED_PARAM(dest);
         UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void compareDouble(DoubleCondition cond, FPRegisterID left, FPRegisterID right, RegisterID dest)
+    {
+        if ((cond == DoubleNotEqualAndOrdered) || (cond == DoubleEqualOrUnordered)) {
+            move(TrustedImm32(1), dest);
+            Jump trueCase = branchDouble(cond, left, right);
+            move(TrustedImm32(0), dest);
+            trueCase.link(this);
+            return;
+        }
+        m_assembler.vcmp(left, right);
+        m_assembler.vmrs();
+        m_assembler.it(armV7Condition(cond), false);
+        m_assembler.mov(dest, ARMThumbImmediate::makeUInt16(1));
+        m_assembler.mov(dest, ARMThumbImmediate::makeUInt16(0));
     }
 
     void test32(ResultCondition cond, RegisterID op1, RegisterID op2, RegisterID dest)

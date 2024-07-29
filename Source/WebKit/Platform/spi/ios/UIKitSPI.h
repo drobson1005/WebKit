@@ -29,7 +29,6 @@
 
 #import <CoreSVG/CGSVGDocument.h>
 #import <UIKit/NSTextAlternatives.h>
-#import <UIKit/UIActivityViewController_Private.h>
 #import <UIKit/UIAlertController_Private.h>
 #import <UIKit/UIApplication+iOSMac_Private.h>
 #import <UIKit/UIApplication_Private.h>
@@ -140,6 +139,7 @@
 #endif
 
 #if PLATFORM(VISION)
+#import <UIKit/UIActivityViewController_Private.h>
 #import <UIKit/UIView+SpatialComputing.h>
 #endif
 
@@ -148,6 +148,7 @@
 @interface UIWebClip : NSObject
 + (UIWebClip *)webClipWithIdentifier:(NSString *)identifier;
 @property (nonatomic, copy) NSString *title;
+@property (nonatomic, retain) NSURL *pageURL;
 @end
 
 #if ENABLE(DRAG_SUPPORT)
@@ -590,9 +591,11 @@ extern NSString * const UIPresentationControllerDismissalTransitionDidEndComplet
 - (UIWindow *)window;
 @end
 
+#if PLATFORM(VISION)
 @interface UIActivityViewController ()
 @property (nonatomic) BOOL allowsCustomPresentationStyle;
 @end
+#endif // PLATFORM(VISION)
 
 @interface UIView ()
 + (BOOL)_isInAnimationBlock;

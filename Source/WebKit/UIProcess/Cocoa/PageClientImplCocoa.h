@@ -100,7 +100,7 @@ public:
 #endif
 
 #if ENABLE(WRITING_TOOLS_UI)
-    void addTextAnimationForAnimationID(const WTF::UUID&, const WebKit::TextAnimationData&) final;
+    void addTextAnimationForAnimationID(const WTF::UUID&, const WebCore::TextAnimationData&) final;
     void removeTextAnimationForAnimationID(const WTF::UUID&) final;
 #endif
 
@@ -129,6 +129,9 @@ public:
 
 #if ENABLE(GAMEPAD)
     void setGamepadsRecentlyAccessed(GamepadsRecentlyAccessed) final;
+#if PLATFORM(VISION)
+    void gamepadsConnectedStateChanged() final;
+#endif
 #endif
 
     void hasActiveNowPlayingSessionChanged(bool) final;

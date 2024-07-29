@@ -1436,7 +1436,6 @@ fast/borders/border-painting-correctness-dotted.html [ ImageOnlyFailure ]
 [ x86_64 ] css3/blending/background-blend-mode-body-image.html [ ImageOnlyFailure ]
 [ Ventura+ ] fast/images/animated-heics-draw.html [ Pass Timeout ]
 [ Ventura+ ]  http/tests/resourceLoadStatistics/capped-lifetime-for-cookie-set-in-js.html [ Failure ]
-fast/repaint/fixed-move-after-keyboard-scroll.html [ Pass Failure Timeout ]
 [ Ventura+ x86_64 ] imported/w3c/web-platform-tests/html/cross-origin-embedder-policy/block-local-documents-inheriting-none.https.html [ Pass Failure ]
 [ Ventura+ x86_64 ] imported/w3c/web-platform-tests/html/browsers/history/the-history-interface/history_go_no_argument.html [ Pass Failure ]
 [ x86_64 ] scrollbars/scrolling-by-page-on-keyboard-spacebar.html [ Pass Failure ]
@@ -1797,8 +1796,6 @@ webkit.org/b/275873 storage/indexeddb/database-transaction-cycle.html [ Pass Fai
 # Some of these tests have expectations set elsewhere (marked with inline comment). Please uncomment those when this issue is resolved.
 [ Sequoia+ ] http/tests/resourceLoadStatistics/do-not-remove-blocking-in-redirect.html [ Failure ]
 [ Sequoia+ ] http/tests/resourceLoadStatistics/set-all-cookies-to-same-site-strict.html [ Failure Timeout ] # expectation exists above
-[ Sequoia+ ] http/tests/cache/disk-cache/disk-cache-vary-cookie-private.html [ Failure ]
-[ Sequoia+ ] http/tests/cache/disk-cache/disk-cache-vary-cookie.html [ Failure ]
 [ Sequoia+ ] http/tests/cookies/same-site/fetch-after-navigating-iframe-in-cross-origin-page.html [ Failure ]
 [ Sequoia+ ] http/tests/cookies/same-site/fetch-in-cross-origin-service-worker.html [ Failure Timeout ]
 [ Sequoia+ ] http/tests/privateClickMeasurement/send-attribution-conversion-request.html [ Failure Timeout ]
@@ -1876,3 +1873,5 @@ webkit.org/b/275873 storage/indexeddb/database-transaction-cycle.html [ Pass Fai
 [ Sequoia+ Release ] imported/w3c/web-platform-tests/html/browsers/browsing-the-web/unloading-documents/beforeunload-on-history-back.html [ Pass Failure ]
 
 webkit.org/b/276389 media/video-transformed.html [ Pass Failure ] 
+
+webkit.org/b/277024 media/now-playing-status-for-video-conference-web-page.html [ Pass Failure ]

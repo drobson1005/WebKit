@@ -172,6 +172,7 @@ class ImageBitmapRenderingContext;
 class IntPoint;
 class IntersectionObserver;
 class JSNode;
+class JSViewTransitionUpdateCallback;
 class LayoutPoint;
 class LayoutRect;
 class LazyLoadImageObserver;
@@ -277,6 +278,8 @@ struct IntersectionObserverData;
 struct OwnerPermissionsPolicyData;
 struct QuerySelectorAllResults;
 struct SecurityPolicyViolationEventInit;
+struct StartViewTransitionOptions;
+struct ViewTransitionParams;
 
 #if ENABLE(TOUCH_EVENTS)
 struct EventTrackingRegions;
@@ -321,6 +324,10 @@ enum class VisibilityState : bool;
 
 #if ENABLE(TOUCH_EVENTS)
 enum class EventTrackingRegionsEventType : uint8_t;
+#endif
+
+#if ENABLE(MEDIA_SESSION)
+enum class MediaSessionAction : uint8_t;
 #endif
 
 using MediaProducerMediaStateFlags = OptionSet<MediaProducerMediaState>;
@@ -368,11 +375,6 @@ enum class LayoutOptions : uint8_t {
     ContentVisibilityForceLayout = 1 << 2,
     UpdateCompositingLayers = 1 << 3,
     DoNotLayoutAncestorDocuments = 1 << 4,
-    // Doesn't call RenderLayer::recursiveUpdateLayerPositionsAfterLayout if
-    // possible. The caller should use a LocalFrameView::AutoPreventLayerAccess
-    // for the scope that layout is expected to be flushed to stop any access to
-    // the stale RenderLayers.
-    CanDeferUpdateLayerPositions = 1 << 5
 };
 
 enum class HttpEquivPolicy : uint8_t {
@@ -399,6 +401,8 @@ using RenderingContext = std::variant<
     RefPtr<ImageBitmapRenderingContext>,
     RefPtr<CanvasRenderingContext2D>
 >;
+
+using StartViewTransitionCallbackOptions = std::optional<std::variant<RefPtr<JSViewTransitionUpdateCallback>, StartViewTransitionOptions>>;
 
 class DocumentParserYieldToken {
     WTF_MAKE_FAST_ALLOCATED;
@@ -949,6 +953,8 @@ public:
     void clearAutofocusCandidates();
     void flushAutofocusCandidates();
 
+    void reveal();
+
     void hoveredElementDidDetach(Element&);
     void elementInActiveChainDidDetach(Element&);
 
@@ -1038,16 +1044,15 @@ public:
         DOMNodeRemovedFromDocument = 1 << 3,
         DOMNodeInsertedIntoDocument = 1 << 4,
         DOMCharacterDataModified = 1 << 5,
-        OverflowChanged = 1 << 6,
-        Scroll = 1 << 7,
-        ForceWillBegin = 1 << 8,
-        ForceChanged = 1 << 9,
-        ForceDown = 1 << 10,
-        ForceUp = 1 << 11,
-        FocusIn = 1 << 12,
-        FocusOut = 1 << 13,
-        CSSTransition = 1 << 14,
-        CSSAnimation = 1 << 15,
+        Scroll = 1 << 6,
+        ForceWillBegin = 1 << 7,
+        ForceChanged = 1 << 8,
+        ForceDown = 1 << 8,
+        ForceUp = 1 << 10,
+        FocusIn = 1 << 11,
+        FocusOut = 1 << 12,
+        CSSTransition = 1 << 13,
+        CSSAnimation = 1 << 14,
     };
 
     bool hasListenerType(ListenerType listenerType) const { return m_listenerTypes.contains(listenerType); }
@@ -1375,12 +1380,15 @@ public:
 
     void queueTaskToDispatchEvent(TaskSource, Ref<Event>&&);
     void queueTaskToDispatchEventOnWindow(TaskSource, Ref<Event>&&);
-    void enqueueOverflowEvent(Ref<Event>&&);
     void dispatchPageshowEvent(PageshowEventPersistence);
     void dispatchPagehideEvent(PageshowEventPersistence);
+    void dispatchPageswapEvent(bool canTriggerCrossDocumentViewTransition);
+    void transferViewTransitionParams(Document&);
     WEBCORE_EXPORT void enqueueSecurityPolicyViolationEvent(SecurityPolicyViolationEventInit&&);
     void enqueueHashchangeEvent(const String& oldURL, const String& newURL);
     void dispatchPopstateEvent(RefPtr<SerializedScriptValue>&& stateObject);
+
+    bool resolveViewTransitionRule();
 
     WEBCORE_EXPORT void addMediaCanStartListener(MediaCanStartListener&);
     WEBCORE_EXPORT void removeMediaCanStartListener(MediaCanStartListener&);
@@ -1636,6 +1644,13 @@ public:
     void noteUserInteractionWithMediaElement();
     inline bool isCapturing() const;
     WEBCORE_EXPORT void updateIsPlayingMedia();
+
+#if ENABLE(MEDIA_STREAM) && ENABLE(MEDIA_SESSION)
+    void processCaptureStateDidChange(Function<bool(const Page&)>&&, Function<bool(const RealtimeMediaSource&)>&&, MediaSessionAction);
+    void cameraCaptureStateDidChange();
+    void microphoneCaptureStateDidChange();
+    void screenshareCaptureStateDidChange();
+#endif
     void pageMutedStateDidChange();
     void visibilityAdjustmentStateDidChange();
 
@@ -1688,7 +1703,7 @@ public:
     void unobserveForContainIntrinsicSize(Element&);
     void resetObservationSizeForContainIntrinsicSize(Element&);
 
-    RefPtr<ViewTransition> startViewTransition(RefPtr<ViewTransitionUpdateCallback>&& = nullptr);
+    RefPtr<ViewTransition> startViewTransition(StartViewTransitionCallbackOptions&&);
     ViewTransition* activeViewTransition() const;
     bool activeViewTransitionCapturedDocumentElement() const;
     void setActiveViewTransition(RefPtr<ViewTransition>&&);
@@ -2367,6 +2382,8 @@ private:
 
     String m_cachedDOMCookies;
 
+    std::unique_ptr<ViewTransitionParams> m_inboundViewTransitionParams;
+
     Markable<WallTime> m_overrideLastModified;
 
     WeakHashSet<Element, WeakPtrImplWithEventTargetData> m_associatedFormControls;
@@ -2622,6 +2639,8 @@ private:
 
     bool m_scheduledDeferredAXObjectCacheUpdate { false };
     bool m_wasRemovedLastRefCalled { false };
+
+    bool m_hasBeenRevealed { false };
 
     static bool hasEverCreatedAnAXObjectCache;
 

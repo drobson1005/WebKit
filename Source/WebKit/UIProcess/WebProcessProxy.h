@@ -123,6 +123,7 @@ class WebPageGroup;
 class WebPageProxy;
 class WebPermissionControllerProxy;
 class WebPreferences;
+class WebProcessActivityState;
 class WebProcessPool;
 class WebUserContentControllerProxy;
 class WebsiteDataStore;
@@ -189,8 +190,8 @@ public:
     WebProcessPool& processPool() const;
     Ref<WebProcessPool> protectedProcessPool() const;
 
-    const std::optional<SharedPreferencesForWebProcess>& sharedPreferencesForWebProcess() const { return m_sharedPreferencesForWebProcess; }
-    std::optional<SharedPreferencesForWebProcess> updateSharedPreferencesForWebProcess(const WebPreferences&);
+    const SharedPreferencesForWebProcess& sharedPreferencesForWebProcess() const { return m_sharedPreferencesForWebProcess; }
+    std::optional<SharedPreferencesForWebProcess> updateSharedPreferencesForWebProcess(const WebPreferencesStore&);
     void didSyncSharedPreferencesForWebProcessWithNetworkProcess(uint64_t syncedPreferencesVersion);
 #if ENABLE(GPU_PROCESS)
     void didSyncSharedPreferencesForWebProcessWithGPUProcess(uint64_t syncedPreferencesVersion);
@@ -278,7 +279,8 @@ public:
     void updateTextCheckerState();
 
     void willAcquireUniversalFileReadSandboxExtension() { m_mayHaveUniversalFileReadSandboxExtension = true; }
-    void assumeReadAccessToBaseURL(WebPageProxy&, const String&);
+    void assumeReadAccessToBaseURL(WebPageProxy&, const String&, CompletionHandler<void()>&&, bool directoryOnly = false);
+    void assumeReadAccessToBaseURLs(WebPageProxy&, const Vector<String>&, CompletionHandler<void()>&&);
     bool hasAssumedReadAccessToURL(const URL&) const;
 
     bool checkURLReceivedFromWebProcess(const String&, CheckBackForwardList = CheckBackForwardList::Yes);
@@ -347,11 +349,6 @@ public:
 #if PLATFORM(COCOA)
     Vector<String> mediaMIMETypes() const;
     void cacheMediaMIMETypes(const Vector<String>&);
-#endif
-
-#if PLATFORM(MAC)
-    void requestHighPerformanceGPU();
-    void releaseHighPerformanceGPU();
 #endif
 
 #if HAVE(DISPLAY_LINK)
@@ -520,6 +517,8 @@ public:
 #if ENABLE(WEBXR)
     const WebCore::ProcessIdentity& processIdentity();
 #endif
+
+    WebProcessActivityState& activityState() { return m_activityState; }
 
 private:
     Type type() const final { return Type::WebContent; }
@@ -784,7 +783,7 @@ private:
     bool m_platformSuspendDidReleaseNearSuspendedAssertion { false };
 #endif
     mutable String m_environmentIdentifier;
-    mutable std::optional<SharedPreferencesForWebProcess> m_sharedPreferencesForWebProcess;
+    mutable SharedPreferencesForWebProcess m_sharedPreferencesForWebProcess;
     uint64_t m_sharedPreferencesVersionInNetworkProcess { 0 };
 #if ENABLE(GPU_PROCESS)
     uint64_t m_sharedPreferencesVersionInGPUProcess { 0 };
@@ -801,6 +800,8 @@ private:
     Seconds m_totalBackgroundTime;
     Seconds m_totalSuspendedTime;
     WebCore::ProcessIdentity m_processIdentity;
+
+    UniqueRef<WebProcessActivityState> m_activityState;
 };
 
 WTF::TextStream& operator<<(WTF::TextStream&, const WebProcessProxy&);

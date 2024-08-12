@@ -94,6 +94,7 @@
 #import <UIKit/_UINavigationInteractiveTransition.h>
 #import <UIKit/_UINavigationParallaxTransition.h>
 #import <UIKit/_UISheetPresentationController.h>
+#import <UIKitServices/UISApplicationState.h>
 
 #if HAVE(LINK_PREVIEW)
 #import <UIKit/UIPreviewAction_Private.h>
@@ -1024,6 +1025,11 @@ extern NSNotificationName const _UIWindowSceneDidEndLiveResizeNotification;
 extern void _UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor(UIUserInterfaceIdiom, CGFloat scaleFactor);
 #endif
 
+@interface UISApplicationState : NSObject
+- (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier;
+@property (nonatomic, copy) id badgeValue;
+@end
+
 #endif // USE(APPLE_INTERNAL_SDK)
 
 #if ENABLE(OVERLAY_REGIONS_IN_EVENT_REGION)
@@ -1223,14 +1229,6 @@ typedef NS_ENUM(NSUInteger, _UIScrollDeviceCategory) {
 @end
 
 @class UITextInputArrowKeyHistory;
-
-#if HAVE(UI_FOCUS_ITEM_DEFERRAL_MODE)
-// FIXME: <rdar://131799614> Remove staging code.
-
-typedef NS_ENUM(NSInteger, UIFocusItemDeferralMode);
-
-#define UIFocusItemDeferralModeNever 2
-#endif
 
 WTF_EXTERN_C_BEGIN
 

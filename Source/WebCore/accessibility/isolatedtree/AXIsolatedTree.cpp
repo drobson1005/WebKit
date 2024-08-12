@@ -369,6 +369,7 @@ void AXIsolatedTree::queueRemovalsLocked(Vector<AXID>&& subtreeRemovals)
     ASSERT(m_changeLogLock.isLocked());
 
     m_pendingSubtreeRemovals.appendVector(WTFMove(subtreeRemovals));
+    m_pendingProtectedFromDeletionIDs.formUnion(std::exchange(m_protectedFromDeletionIDs, { }));
 }
 
 void AXIsolatedTree::queueRemovalsAndUnresolvedChanges(Vector<AXID>&& subtreeRemovals)
@@ -393,7 +394,10 @@ Vector<AXIsolatedTree::NodeChange> AXIsolatedTree::resolveAppends()
     double counter = 0;
     Vector<NodeChange> resolvedAppends;
     resolvedAppends.reserveInitialCapacity(m_unresolvedPendingAppends.size());
-    for (const auto& unresolvedAppend : m_unresolvedPendingAppends) {
+    // The process of resolving appends can add more IDs to m_unresolvedPendingAppends as we iterate over it, so
+    // iterate over an exchanged map instead. Any late-appended IDs will get picked up in the next cycle.
+    auto unresolvedPendingAppends = std::exchange(m_unresolvedPendingAppends, { });
+    for (const auto& unresolvedAppend : unresolvedPendingAppends) {
         if (m_replacingTree) {
             ++counter;
             if (MonotonicTime::now() - lastFeedbackTime > CreationFeedbackInterval) {
@@ -408,7 +412,6 @@ Vector<AXIsolatedTree::NodeChange> AXIsolatedTree::resolveAppends()
         }
     }
     resolvedAppends.shrinkToFit();
-    m_unresolvedPendingAppends.clear();
 
     if (m_replacingTree)
         m_replacingTree->reportLoadingProgress(1);
@@ -433,7 +436,6 @@ void AXIsolatedTree::queueAppendsAndRemovals(Vector<NodeChange>&& appends, Vecto
     }
 
     queueRemovalsLocked(WTFMove(subtreeRemovals));
-    m_pendingProtectedFromDeletionIDs.formUnion(std::exchange(m_protectedFromDeletionIDs, { }));
 }
 
 void AXIsolatedTree::collectNodeChangesForSubtree(AXCoreObject& axObject)

@@ -187,10 +187,10 @@ private:
     PartialResult WARN_UNUSED_RETURN parseNestedBlocksEagerly(bool&);
     void switchToBlock(ControlType&&, Stack&&);
 
-#define WASM_TRY_POP_EXPRESSION_STACK_INTO(result, what) do {                               \
+#define WASM_TRY_POP_EXPRESSION_STACK_INTO(result, what) do { \
         WASM_PARSER_FAIL_IF(m_expressionStack.isEmpty(), "can't pop empty stack in "_s, what); \
-        result = m_expressionStack.takeLast();                                              \
-        m_context.didPopValueFromStack(result, WTF::makeString("WasmFunctionParser.h:"_s, (__LINE__)));                                                   \
+        result = m_expressionStack.takeLast(); \
+        m_context.didPopValueFromStack(result, "WasmFunctionParser.h " STRINGIZE(__LINE__) ""_s); \
     } while (0)
 
     using UnaryOperationHandler = PartialResult (Context::*)(ExpressionType, ExpressionType&);
@@ -2753,6 +2753,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_PARSER_FAIL_IF(!Options::useWasmTypedFunctionReferences(), "function references are not enabled"_s);
         TypedExpression ref;
         WASM_TRY_POP_EXPRESSION_STACK_INTO(ref, "ref.as_non_null"_s);
+        WASM_VALIDATOR_FAIL_IF(!isRefType(ref.type()), "ref.as_non_null ref to type ", ref.type(), " expected a reference type");
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addRefAsNonNull(ref, result));
@@ -2856,10 +2857,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_TRY_POP_EXPRESSION_STACK_INTO(value, "tee_local"_s);
         WASM_VALIDATOR_FAIL_IF(index >= m_locals.size(), "attempt to tee unknown local "_s, index, "_s, the number of locals is "_s, m_locals.size());
         WASM_VALIDATOR_FAIL_IF(!isSubtype(value.type(), m_locals[index]), "set_local to type "_s, value.type(), " expected "_s, m_locals[index]);
-        WASM_TRY_ADD_TO_CONTEXT(setLocal(index, value));
-
         ExpressionType result;
-        WASM_TRY_ADD_TO_CONTEXT(getLocal(index, result));
+        WASM_TRY_ADD_TO_CONTEXT(teeLocal(index, value, result));
         m_expressionStack.constructAndAppend(m_locals[index], result);
         return { };
     }

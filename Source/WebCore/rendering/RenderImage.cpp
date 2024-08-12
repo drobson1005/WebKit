@@ -57,7 +57,7 @@
 #include "RenderChildIterator.h"
 #include "RenderElementInlines.h"
 #include "RenderFragmentedFlow.h"
-#include "RenderImageResource.h"
+#include "RenderImageResourceStyleImage.h"
 #include "RenderLayoutState.h"
 #include "RenderStyleSetters.h"
 #include "RenderTheme.h"
@@ -151,7 +151,7 @@ using namespace HTMLNames;
 
 RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, OptionSet<ReplacedFlag> flags, StyleImage* styleImage, const float imageDevicePixelRatio)
     : RenderReplaced(type, element, WTFMove(style), IntSize(), flags | ReplacedFlag::IsImage)
-    , m_imageResource(makeUnique<RenderImageResource>(styleImage))
+    , m_imageResource(styleImage ? makeUnique<RenderImageResourceStyleImage>(*styleImage) : makeUnique<RenderImageResource>())
     , m_hasImageOverlay([&] {
         auto* htmlElement = dynamicDowncast<HTMLElement>(element);
         return htmlElement && ImageOverlay::hasOverlay(*htmlElement);
@@ -172,7 +172,7 @@ RenderImage::RenderImage(Type type, Element& element, RenderStyle&& style, Style
 
 RenderImage::RenderImage(Type type, Document& document, RenderStyle&& style, StyleImage* styleImage)
     : RenderReplaced(type, document, WTFMove(style), IntSize(), ReplacedFlag::IsImage)
-    , m_imageResource(makeUnique<RenderImageResource>(styleImage))
+    , m_imageResource(styleImage ? makeUnique<RenderImageResourceStyleImage>(*styleImage) : makeUnique<RenderImageResource>())
 {
 }
 
@@ -783,10 +783,10 @@ bool RenderImage::foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect,
         return false;
     FillBox backgroundClip = style().backgroundClip();
     // Background paints under borders.
-    if (backgroundClip == FillBox::Border && style().hasBorder() && !borderObscuresBackground())
+    if (backgroundClip == FillBox::BorderBox && style().hasBorder() && !borderObscuresBackground())
         return false;
     // Background shows in padding area.
-    if ((backgroundClip == FillBox::Border || backgroundClip == FillBox::Padding) && style().hasPadding())
+    if ((backgroundClip == FillBox::BorderBox || backgroundClip == FillBox::PaddingBox) && style().hasPadding())
         return false;
     // Object-fit may leave parts of the content box empty.
     ObjectFit objectFit = style().objectFit();

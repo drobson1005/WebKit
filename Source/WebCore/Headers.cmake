@@ -393,7 +393,12 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     Modules/highlight/HighlightRegistry.h
     Modules/highlight/HighlightVisibility.h
 
+    Modules/identity/CredentialRequestCoordinator.h
+    Modules/identity/CredentialRequestCoordinatorClient.h
     Modules/identity/DigitalCredentialRequestOptions.h
+    Modules/identity/IdentityCredentialsContainer.h
+    Modules/identity/IdentityRequestProvider.h
+    Modules/identity/OpenID4VPRequest.h
 
     Modules/indexeddb/IDBActiveDOMObject.h
     Modules/indexeddb/IDBDatabaseIdentifier.h
@@ -901,6 +906,8 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     css/parser/CSSPropertyParserConsumer+UnevaluatedCalc.h
     css/parser/CSSSelectorParser.h
     css/parser/CSSSelectorParserContext.h
+    css/parser/CSSTokenizer.h
+    css/parser/CSSTokenizerInputStream.h
     css/parser/MutableCSSSelector.h
 
     css/query/ContainerQuery.h
@@ -1025,7 +1032,6 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/NodeList.h
     dom/NodeRenderStyle.h
     dom/NodeTraversal.h
-    dom/OverflowEvent.h
     dom/ParserContentPolicy.h
     dom/PointerEvent.h
     dom/PointerEventTypeNames.h
@@ -1057,6 +1063,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/SimulatedClickOptions.h
     dom/SlotAssignmentMode.h
     dom/SpaceSplitString.h
+    dom/StartViewTransitionOptions.h
     dom/StaticRange.h
     dom/StyledElement.h
     dom/TaskSource.h
@@ -1084,6 +1091,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/UserTypingGestureIndicator.h
     dom/ValidityStateFlags.h
     dom/ViewTransition.h
+    dom/ViewTransitionTypeSet.h
     dom/VisibilityAdjustment.h
     dom/ViewTransitionUpdateCallback.h
     dom/ViewportArguments.h
@@ -2300,6 +2308,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/network/HTTPHeaderNames.in
     platform/network/HTTPHeaderValues.h
     platform/network/HTTPParsers.h
+    platform/network/HTTPSByDefaultMode.h
     platform/network/HTTPStatusCodes.h
     platform/network/NetworkLoadInformation.h
     platform/network/NetworkLoadMetrics.h

@@ -722,6 +722,8 @@ enum RenderingMode {
 
     boolean testProcessIncomingSyncMessagesWhenWaitingForSyncReply();
 
+    undefined setResourceCachingDisabledByWebInspector(boolean disabled);
+
     // Flags for layerTreeAsText.
     const unsigned short LAYER_TREE_INCLUDES_VISIBLE_RECTS = 1;
     const unsigned short LAYER_TREE_INCLUDES_TILE_CACHES = 2;
@@ -829,8 +831,6 @@ enum RenderingMode {
 
     undefined setHeaderHeight(unrestricted float height);
     undefined setFooterHeight(unrestricted float height);
-
-    undefined setTopContentInset(unrestricted float contentInset);
 
     [Conditional=FULLSCREEN_API] undefined webkitWillEnterFullScreenForElement(Element element);
     [Conditional=FULLSCREEN_API] undefined webkitDidEnterFullScreenForElement(Element element);
@@ -1045,6 +1045,7 @@ enum RenderingMode {
     undefined disableCORSForURL(DOMString url);
 
     File? createFile(DOMString url);
+    Promise<File> asyncCreateFile(DOMString url);
     DOMString createTemporaryFile(DOMString name, DOMString contents);
 
     undefined queueMicroTask(long testNumber);

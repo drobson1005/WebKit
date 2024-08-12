@@ -318,7 +318,7 @@ RetainPtr<xpc_connection_t> createAndConfigureConnectionToService(const char* se
 
     if (!configuration)
         configuration = defaultWebPushDaemonConfiguration();
-    sender.sendWithoutUsingIPCConnection(Messages::PushClientConnection::UpdateConnectionConfiguration(configuration.value()));
+    sender.sendWithoutUsingIPCConnection(Messages::PushClientConnection::InitializeConnection(configuration.value()));
 
     return WTFMove(connection);
 }
@@ -341,7 +341,7 @@ TEST(WebPushD, BasicCommunication)
 
     // Send a basic message and make sure its reply handler ran.
     auto sender = WebPushXPCConnectionMessageSender { connection.get() };
-    sender.sendWithoutUsingIPCConnection(Messages::PushClientConnection::UpdateConnectionConfiguration(defaultWebPushDaemonConfiguration()));
+    sender.sendWithoutUsingIPCConnection(Messages::PushClientConnection::InitializeConnection(defaultWebPushDaemonConfiguration()));
     sender.sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::GetPushTopicsForTesting(), ^(Vector<String>, Vector<String>) {
         done = true;
     });
@@ -466,6 +466,55 @@ async function unsubscribe()
     }
 }
 
+async function getNotificationPermissionFromServiceWorker()
+{
+    const channel = new MessageChannel();
+    const promise = new Promise((resolve) => {
+        channel.port1.onmessage = (event) => resolve(event.data);
+    });
+    globalRegistration.active.postMessage({ message: "notificationPermission", port: channel.port2 }, [channel.port2]);
+    return await promise;
+}
+
+async function getPushPermissionState()
+{
+    try {
+        return await globalRegistration.pushManager.permissionState();
+    } catch (error) {
+        return "Error: " + error;
+    }
+}
+
+async function getPushPermissionStateFromServiceWorker()
+{
+    const channel = new MessageChannel();
+    const promise = new Promise((resolve) => {
+        channel.port1.onmessage = (event) => resolve(event.data);
+    });
+    globalRegistration.active.postMessage({ message: "getPushPermissionState", port: channel.port2 }, [channel.port2]);
+    return await promise;
+}
+
+async function queryPermission(name)
+{
+    try {
+        let status = await navigator.permissions.query({ name });
+        return status.state;
+    } catch (error) {
+        return "Error: " + error;
+    }
+}
+
+async function queryPermissionFromServiceWorker(name)
+{
+    const channel = new MessageChannel();
+    const promise = new Promise((resolve) => {
+        channel.port1.onmessage = (event) => resolve(event.data);
+    });
+    globalRegistration.active.postMessage({ message: "queryPermission", arguments: [name], port: channel.port2 }, [channel.port2]);
+    return await promise;
+}
+
 async function getPushSubscription()
 {
     try {
@@ -519,11 +568,24 @@ function notificationToString(n)
 }
 
 self.addEventListener("message", (event) => {
-    let { message, port } = event.data;
+    let { message, arguments, port } = event.data;
     var closeAllNotifications = message === "closeAllNotifications";
     if (message === "setup") {
         globalPort = port;
         port.postMessage("Ready");
+    } else if (message === "notificationPermission") {
+        port.postMessage(Notification.permission);
+    } else if (message === "getPushPermissionState") {
+        registration.pushManager.permissionState().then(port.postMessage.bind(port), (error) => {
+            port.postMessage("getPushPermissionState failed: " + error);
+        });
+    } else if (message === "queryPermission") {
+        let [name] = arguments;
+        navigator.permissions.query({ name }).then((status) => {
+            port.postMessage(status.state);
+        }, (error) => {
+            port.postMessage("queryPermission failed: " + error);
+        });
     } else if (message === "disableShowNotifications") {
         showNotifications = false;
         port.postMessage(true);
@@ -587,6 +649,7 @@ self.addEventListener("push", async (event) => {
     try {
         if (showNotifications) {
             await self.registration.showNotification("notification");
+            navigator.setAppBadge(42);
         }
         if (!event.data) {
             globalPort.postMessage("Received: null data");
@@ -653,7 +716,6 @@ public:
             (NSString *)kCFStreamPropertyHTTPSProxyPort: @(m_server->port())
         }];
         dataStoreConfiguration.get().webPushMachServiceName = @"org.webkit.webpushtestdaemon.service";
-        dataStoreConfiguration.get().webPushDaemonUsesMockBundlesForTesting = YES;
 
 #if ENABLE(DECLARATIVE_WEB_PUSH)
         dataStoreConfiguration.get().isDeclarativeWebPushEnabled = YES;
@@ -702,6 +764,8 @@ public:
 
         m_webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration.get()]);
 
+        [m_webView _setDontResetTransientActivationAfterRunJavaScript:YES];
+
         [m_webView setUIDelegate:m_delegate.get()];
 
         auto navigationDelegate = adoptNS([TestNavigationDelegate new]);
@@ -721,6 +785,13 @@ public:
 
     RetainPtr<WKWebsiteDataStore> dataStore() { return m_dataStore; }
 
+    id requestNotificationPermission()
+    {
+        NSError *error = nil;
+        id obj = [m_webView objectByCallingAsyncFunction:@"return await Notification.requestPermission()" withArguments:@{ } error:&error];
+        return error ?: obj;
+    }
+
     id subscribe(String key = validServerKey)
     {
         NSError *error = nil;
@@ -733,6 +804,46 @@ public:
     {
         NSError *error = nil;
         id obj = [m_webView objectByCallingAsyncFunction:@"return await unsubscribe()" withArguments:@{ } error:&error];
+        return error ?: obj;
+    }
+
+    id getNotificationPermission()
+    {
+        return [m_webView stringByEvaluatingJavaScript:@"Notification.permission"];
+    }
+
+    id getNotificationPermissionFromServiceWorker()
+    {
+        NSError *error = nil;
+        id obj = [m_webView objectByCallingAsyncFunction:@"return await getNotificationPermissionFromServiceWorker()" withArguments:@{ } error:&error];
+        return error ?: obj;
+    }
+
+    id getPushPermissionState()
+    {
+        NSError *error = nil;
+        id obj = [m_webView objectByCallingAsyncFunction:@"return await getPushPermissionState()" withArguments:@{ } error:&error];
+        return error ?: obj;
+    }
+
+    id getPushPermissionStateFromServiceWorker()
+    {
+        NSError *error = nil;
+        id obj = [m_webView objectByCallingAsyncFunction:@"return await getPushPermissionStateFromServiceWorker()" withArguments:@{ } error:&error];
+        return error ?: obj;
+    }
+
+    id queryPermission(NSString *name)
+    {
+        NSError *error = nil;
+        id obj = [m_webView objectByCallingAsyncFunction:@"return await queryPermission(name)" withArguments:@{ @"name": name } error:&error];
+        return error ?: obj;
+    }
+
+    id queryPermissionFromServiceWorker(NSString *name)
+    {
+        NSError *error = nil;
+        id obj = [m_webView objectByCallingAsyncFunction:@"return await queryPermissionFromServiceWorker(name)" withArguments:@{ @"name": name } error:&error];
         return error ?: obj;
     }
 
@@ -785,6 +896,19 @@ public:
         NSError *error = nil;
         id obj = [m_webView objectByCallingAsyncFunction:@"return await getNotifications()" withArguments:@{ } error:&error];
         return error ?: obj;
+    }
+
+    NSNumber *getAppBadge()
+    {
+        __block bool done = false;
+        __block NSNumber *result = nil;
+        [m_webView.get().configuration.websiteDataStore _getAppBadgeForTesting:^(NSNumber *badge) {
+            result = badge;
+            done = true;
+        }];
+
+        TestWebKitAPI::Util::run(&done);
+        return result;
     }
 
     void closeAllNotifications()
@@ -871,42 +995,17 @@ public:
         TestWebKitAPI::Util::run(&done);
     }
 
-    // FIXME: remove this once we add fetchPushMessage to WKWebsiteDataStore.
-    void didShowNotificationForTesting()
+    RetainPtr<NSDictionary> fetchPushMessage()
     {
-        auto configuration = defaultWebPushDaemonConfiguration();
-        configuration.pushPartitionString = m_pushPartition;
-        configuration.dataStoreIdentifier = m_dataStoreIdentifier;
+        __block bool gotMessage = false;
+        __block RetainPtr<NSDictionary> message;
+        [m_dataStore _getPendingPushMessage:^(NSDictionary *rawMessage) {
+            message = rawMessage;
+            gotMessage = true;
+        }];
+        TestWebKitAPI::Util::run(&gotMessage);
 
-        auto utilityConnection = createAndConfigureConnectionToService("org.webkit.webpushtestdaemon.service", WTFMove(configuration));
-        auto sender = WebPushXPCConnectionMessageSender { utilityConnection.get() };
-
-        bool done = false;
-        sender.sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::DidShowNotificationForTesting(m_url.get()), [&]() {
-            done = true;
-        });
-        TestWebKitAPI::Util::run(&done);
-    }
-
-    // FIXME: switch to WKWebsiteDataStore method once we add that.
-    std::optional<WebKit::WebPushMessage> fetchPushMessage()
-    {
-        auto configuration = defaultWebPushDaemonConfiguration();
-        configuration.pushPartitionString = m_pushPartition;
-        configuration.dataStoreIdentifier = m_dataStoreIdentifier;
-
-        auto utilityConnection = createAndConfigureConnectionToService("org.webkit.webpushtestdaemon.service", WTFMove(configuration));
-        auto sender = WebPushXPCConnectionMessageSender { utilityConnection.get() };
-
-        std::optional<WebKit::WebPushMessage> result;
-        bool done = false;
-        sender.sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::GetPendingPushMessage(), [&](std::optional<WebKit::WebPushMessage> message) {
-            result = WTFMove(message);
-            done = true;
-        });
-        TestWebKitAPI::Util::run(&done);
-
-        return result;
+        return message;
     }
 
     RetainPtr<NSArray<NSDictionary *>> fetchPushMessages()
@@ -1437,59 +1536,6 @@ TEST_F(WebPushDTest, IgnoresSubscriptionOnPermissionDenied)
     ASSERT_TRUE(v->hasPushSubscription());
 }
 
-TEST_F(WebPushDTest, ImplicitSilentPushTimerCancelledOnShowingNotification)
-{
-    for (auto& v : webViews())
-        v->subscribe();
-    ASSERT_EQ(subscribedTopicsCount(), webViews().size());
-
-    for (auto& v : webViews()) {
-        ASSERT_TRUE(v->hasPushSubscription());
-
-        for (unsigned i = 0; i < WebKit::WebPushD::maxSilentPushCount; i++) {
-            v->injectPushMessage(@{ });
-            auto message = v->fetchPushMessage();
-            ASSERT_TRUE(message.has_value());
-            v->didShowNotificationForTesting();
-        }
-
-        [NSThread sleepForTimeInterval:(WebKit::WebPushD::silentPushTimeoutForTesting.seconds() + 0.5)];
-        ASSERT_TRUE(v->hasPushSubscription());
-    }
-}
-
-TEST_F(WebPushDTest, ImplicitSilentPushTimerCausesUnsubscribe)
-{
-    for (auto& v : webViews()) {
-        v->subscribe();
-        v->disableShowNotifications();
-    }
-    ASSERT_EQ(subscribedTopicsCount(), webViews().size());
-
-    int i = 1;
-    for (auto& v : webViews()) {
-        ASSERT_TRUE(v->hasPushSubscription());
-
-        for (unsigned i = 0; i < WebKit::WebPushD::maxSilentPushCount; i++) {
-            v->injectPushMessage(@{ });
-            auto message = v->fetchPushMessage();
-            ASSERT_TRUE(message.has_value());
-        }
-
-        bool unsubscribed = false;
-        TestWebKitAPI::Util::waitForConditionWithLogging([&] {
-            unsubscribed = !v->hasPushSubscription();
-            [NSThread sleepForTimeInterval:0.25];
-            return unsubscribed;
-        }, 5, @"Timed out waiting for push subscription to be unsubscribed.");
-        ASSERT_TRUE(unsubscribed);
-
-        // Unsubscribing from this data store should not affect subscriptions in other data stores.
-        ASSERT_EQ(subscribedTopicsCount(), webViews().size() - i);
-        i++;
-    }
-}
-
 TEST_F(WebPushDTest, TooManySilentPushesCausesUnsubscribe)
 {
     for (auto& v : webViews()) {
@@ -1592,11 +1638,8 @@ TEST_F(WebPushDBuiltInTest, ShowAndGetNotifications)
     message.disposition = WebKit::WebPushD::PushMessageDisposition::Legacy;
     message.payload = @"hello";
 
-    __block bool done = false;
-    sender.sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::EnableMockUserNotificationCenterForTesting(), ^() {
-        done = true;
-    });
-    TestWebKitAPI::Util::run(&done);
+    // No badge had been set, so confirm its `nil`
+    EXPECT_FALSE(view->getAppBadge());
 
     done = false;
     sender.sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::InjectPushMessageForTesting(message), ^(const String& error) {
@@ -1625,7 +1668,117 @@ TEST_F(WebPushDBuiltInTest, ShowAndGetNotifications)
 
     result = view->getNotifications();
     EXPECT_TRUE([result isEqualToString:@""]);
+
+    // The push message handler should set the app badge to 42
+    EXPECT_TRUE([view->getAppBadge() isEqual:@42]);
 }
+
+TEST_F(WebPushDBuiltInTest, TestPermissionsAfterNotificatonRequestPermission)
+{
+    auto& view = webViews().last();
+
+    EXPECT_TRUE([view->getNotificationPermission() isEqual:@"default"]);
+    EXPECT_TRUE([view->getNotificationPermissionFromServiceWorker() isEqualToString:@"default"]);
+    EXPECT_TRUE([view->getPushPermissionState() isEqual:@"prompt"]);
+    EXPECT_TRUE([view->getPushPermissionStateFromServiceWorker() isEqualToString:@"prompt"]);
+    EXPECT_TRUE([view->queryPermission(@"push") isEqual:@"prompt"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"push") isEqual:@"prompt"]);
+    EXPECT_TRUE([view->queryPermission(@"notifications") isEqual:@"prompt"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"notifications") isEqual:@"prompt"]);
+
+    EXPECT_TRUE([view->requestNotificationPermission() isEqual:@"granted"]);
+
+    EXPECT_TRUE([view->getNotificationPermission() isEqual:@"granted"]);
+    EXPECT_TRUE([view->getNotificationPermissionFromServiceWorker() isEqualToString:@"granted"]);
+    EXPECT_TRUE([view->getPushPermissionState() isEqual:@"granted"]);
+    EXPECT_TRUE([view->getPushPermissionStateFromServiceWorker() isEqualToString:@"granted"]);
+    EXPECT_TRUE([view->queryPermission(@"push") isEqual:@"granted"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"push") isEqual:@"granted"]);
+    EXPECT_TRUE([view->queryPermission(@"notifications") isEqual:@"granted"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"notifications") isEqual:@"granted"]);
+}
+
+TEST_F(WebPushDBuiltInTest, TestPermissionsAfterSubscribe)
+{
+    auto& view = webViews().last();
+
+    EXPECT_FALSE(view->hasPushSubscription());
+    EXPECT_TRUE([view->getNotificationPermission() isEqual:@"default"]);
+    EXPECT_TRUE([view->getNotificationPermissionFromServiceWorker() isEqualToString:@"default"]);
+    EXPECT_TRUE([view->getPushPermissionState() isEqual:@"prompt"]);
+    EXPECT_TRUE([view->getPushPermissionStateFromServiceWorker() isEqualToString:@"prompt"]);
+    EXPECT_TRUE([view->queryPermission(@"push") isEqual:@"prompt"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"push") isEqual:@"prompt"]);
+    EXPECT_TRUE([view->queryPermission(@"notifications") isEqual:@"prompt"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"notifications") isEqual:@"prompt"]);
+
+    view->subscribe();
+
+    EXPECT_TRUE(view->hasPushSubscription());
+    EXPECT_TRUE([view->getNotificationPermission() isEqual:@"granted"]);
+    EXPECT_TRUE([view->getNotificationPermissionFromServiceWorker() isEqualToString:@"granted"]);
+    EXPECT_TRUE([view->getPushPermissionState() isEqual:@"granted"]);
+    EXPECT_TRUE([view->getPushPermissionStateFromServiceWorker() isEqualToString:@"granted"]);
+    EXPECT_TRUE([view->queryPermission(@"push") isEqual:@"granted"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"push") isEqual:@"granted"]);
+    EXPECT_TRUE([view->queryPermission(@"notifications") isEqual:@"granted"]);
+    EXPECT_TRUE([view->queryPermissionFromServiceWorker(@"notifications") isEqual:@"granted"]);
+}
+
+TEST_F(WebPushDBuiltInTest, ImplicitSilentPushTimerCancelledOnShowingNotification)
+{
+    for (auto& v : webViews())
+        v->subscribe();
+    ASSERT_EQ(subscribedTopicsCount(), webViews().size());
+
+    for (auto& v : webViews()) {
+        ASSERT_TRUE(v->hasPushSubscription());
+
+        for (unsigned i = 0; i < WebKit::WebPushD::maxSilentPushCount; i++) {
+            v->injectPushMessage(@{ });
+            auto message = v->fetchPushMessage();
+            ASSERT_TRUE(v->expectDecryptedMessage(@"null data", message.get()));
+        }
+
+        [NSThread sleepForTimeInterval:(WebKit::WebPushD::silentPushTimeoutForTesting.seconds() + 0.5)];
+        ASSERT_TRUE(v->hasPushSubscription());
+    }
+}
+
+TEST_F(WebPushDBuiltInTest, ImplicitSilentPushTimerCausesUnsubscribe)
+{
+    for (auto& v : webViews()) {
+        v->subscribe();
+        v->disableShowNotifications();
+    }
+    ASSERT_EQ(subscribedTopicsCount(), webViews().size());
+
+    int i = 1;
+    for (auto& v : webViews()) {
+        ASSERT_TRUE(v->hasPushSubscription());
+
+        for (unsigned i = 0; i < WebKit::WebPushD::maxSilentPushCount; i++) {
+            v->injectPushMessage(@{ });
+            auto message = v->fetchPushMessage();
+
+            // _processPushMessage should return false since we disabled showing notifications above.
+            ASSERT_FALSE(v->expectDecryptedMessage(@"null data", message.get()));
+        }
+
+        bool unsubscribed = false;
+        TestWebKitAPI::Util::waitForConditionWithLogging([&] {
+            unsubscribed = !v->hasPushSubscription();
+            [NSThread sleepForTimeInterval:0.25];
+            return unsubscribed;
+        }, 5, @"Timed out waiting for push subscription to be unsubscribed.");
+        ASSERT_TRUE(unsubscribed);
+
+        // Unsubscribing from this data store should not affect subscriptions in other data stores.
+        ASSERT_EQ(subscribedTopicsCount(), webViews().size() - i);
+        i++;
+    }
+}
+
 #endif // HAVE(FULL_FEATURED_USER_NOTIFICATIONS)
 
 
@@ -2126,7 +2279,6 @@ TEST(WebPushD, DeclarativeParsing)
 
     auto dataStoreConfiguration = adoptNS([_WKWebsiteDataStoreConfiguration new]);
     dataStoreConfiguration.get().webPushMachServiceName = @"org.webkit.webpushtestdaemon.service";
-    dataStoreConfiguration.get().webPushDaemonUsesMockBundlesForTesting = YES;
     auto dataStore = adoptNS([[WKWebsiteDataStore alloc] _initWithConfiguration:dataStoreConfiguration.get()]);
     clearWebsiteDataStore(dataStore.get());
 
@@ -2181,7 +2333,6 @@ TEST(WebPushD, DeclarativeWebPushHandling)
 
     auto dataStoreConfiguration = adoptNS([_WKWebsiteDataStoreConfiguration new]);
     dataStoreConfiguration.get().webPushMachServiceName = @"org.webkit.webpushtestdaemon.service";
-    dataStoreConfiguration.get().webPushDaemonUsesMockBundlesForTesting = YES;
     dataStoreConfiguration.get().isDeclarativeWebPushEnabled = YES;
     auto dataStore = adoptNS([[WKWebsiteDataStore alloc] _initWithConfiguration:dataStoreConfiguration.get()]);
     clearWebsiteDataStore(dataStore.get());

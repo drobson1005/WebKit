@@ -102,6 +102,7 @@ public:
 #if ENABLE(WRITING_TOOLS_UI)
     void addTextAnimationForAnimationID(const WTF::UUID&, const WebCore::TextAnimationData&) final;
     void removeTextAnimationForAnimationID(const WTF::UUID&) final;
+    void didEndPartialIntelligenceTextPonderingAnimation() final;
 #endif
 
     void microphoneCaptureWillChange() final;
@@ -137,6 +138,8 @@ public:
     void hasActiveNowPlayingSessionChanged(bool) final;
 
     void videoControlsManagerDidChange() override;
+
+    CocoaWindow *platformWindow() const final;
 
 protected:
     RetainPtr<WKWebView> webView() const { return m_webView.get(); }

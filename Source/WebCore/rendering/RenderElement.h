@@ -135,10 +135,7 @@ public:
     void removeLayers();
     void moveLayers(RenderLayer& newParent);
 
-    virtual void dirtyLinesFromChangedChild(RenderObject&) { }
-
-    bool ancestorLineBoxDirty() const { return m_ancestorLineBoxDirty; }
-    void setAncestorLineBoxDirty(bool f = true);
+    virtual void dirtyLineFromChangedChild() { }
 
     void setChildNeedsLayout(MarkingBehavior = MarkContainingBlockChain);
     void setOutOfFlowChildNeedsStaticPositionLayout();
@@ -306,7 +303,7 @@ public:
     using LayoutIdentifier = unsigned;
     void setLayoutIdentifier(LayoutIdentifier layoutIdentifier) { m_layoutIdentifier = layoutIdentifier; }
     LayoutIdentifier layoutIdentifier() const { return m_layoutIdentifier; }
-    bool didVisitSinceLayout(LayoutIdentifier) const;
+    bool didVisitDuringLastLayout() const;
 
 protected:
     RenderElement(Type, Element&, RenderStyle&&, OptionSet<TypeFlag>, TypeSpecificFlags);
@@ -401,7 +398,6 @@ private:
     const RenderStyle* textSegmentPseudoStyle(PseudoId) const;
 
     SingleThreadPackedWeakPtr<RenderObject> m_firstChild;
-    unsigned m_ancestorLineBoxDirty : 1;
     unsigned m_hasInitializedStyle : 1;
 
     unsigned m_hasPausedImageAnimations : 1;
@@ -431,13 +427,6 @@ private:
 inline int adjustForAbsoluteZoom(int, const RenderElement&);
 inline LayoutUnit adjustLayoutUnitForAbsoluteZoom(LayoutUnit, const RenderElement&);
 inline LayoutSize adjustLayoutSizeForAbsoluteZoom(LayoutSize, const RenderElement&);
-
-inline void RenderElement::setAncestorLineBoxDirty(bool f)
-{
-    m_ancestorLineBoxDirty = f;
-    if (m_ancestorLineBoxDirty)
-        setNeedsLayout();
-}
 
 inline void RenderElement::setChildNeedsLayout(MarkingBehavior markParents)
 {

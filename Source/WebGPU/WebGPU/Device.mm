@@ -326,7 +326,6 @@ auto Device::currentErrorScope(WGPUErrorFilter type) -> ErrorScope*
 void Device::generateAValidationError(String&& message)
 {
     // https://gpuweb.github.io/gpuweb/#abstract-opdef-generate-a-validation-error
-
     auto* scope = currentErrorScope(WGPUErrorFilter_Validation);
 
     if (scope) {
@@ -496,8 +495,10 @@ id<MTLBuffer> Device::dispatchCallBuffer()
     if (!m_device)
         return nil;
 
-    if (!m_dispatchCallBuffer)
+    if (!m_dispatchCallBuffer) {
         m_dispatchCallBuffer = [m_device newBufferWithLength:sizeof(MTLDispatchThreadgroupsIndirectArguments) options:MTLResourceStorageModePrivate];
+        setOwnerWithIdentity(m_dispatchCallBuffer);
+    }
     return m_dispatchCallBuffer;
 }
 

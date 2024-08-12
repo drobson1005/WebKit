@@ -63,6 +63,7 @@
 #include "RenderFragmentedFlow.h"
 #include "RenderGrid.h"
 #include "RenderImage.h"
+#include "RenderImageResourceStyleImage.h"
 #include "RenderInline.h"
 #include "RenderIterator.h"
 #include "RenderLayer.h"
@@ -121,7 +122,6 @@ static_assert(sizeof(RenderElement) == sizeof(SameSizeAsRenderElement), "RenderE
 inline RenderElement::RenderElement(Type type, ContainerNode& elementOrDocument, RenderStyle&& style, OptionSet<TypeFlag> flags, TypeSpecificFlags typeSpecificFlags)
     : RenderObject(type, elementOrDocument, flags, typeSpecificFlags)
     , m_firstChild(nullptr)
-    , m_ancestorLineBoxDirty(false)
     , m_hasInitializedStyle(false)
     , m_hasPausedImageAnimations(false)
     , m_hasCounterNodeMap(false)
@@ -1097,9 +1097,9 @@ void RenderElement::willBeRemovedFromTree()
     RenderObject::willBeRemovedFromTree();
 }
 
-bool RenderElement::didVisitSinceLayout(LayoutIdentifier identifier) const
+bool RenderElement::didVisitDuringLastLayout() const
 {
-    return layoutIdentifier() >= identifier;
+    return layoutIdentifier() == view().frameView().layoutContext().layoutIdentifier();
 }
 
 inline void RenderElement::clearSubtreeLayoutRootIfNeeded() const

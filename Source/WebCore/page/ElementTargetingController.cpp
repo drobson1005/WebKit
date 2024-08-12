@@ -117,6 +117,41 @@ static float maximumAreaRatioForTrackingAdjustmentAreas(float viewportArea)
     return linearlyInterpolatedViewportRatio(viewportArea, 0.25, 0.3);
 }
 
+class ClearVisibilityAdjustmentForScope {
+    WTF_MAKE_NONCOPYABLE(ClearVisibilityAdjustmentForScope);
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    ClearVisibilityAdjustmentForScope(Element& element)
+        : m_element(element)
+        , m_adjustmentToRestore(element.visibilityAdjustment())
+    {
+        if (m_adjustmentToRestore.isEmpty())
+            return;
+
+        element.setVisibilityAdjustment({ });
+        element.invalidateStyleAndRenderersForSubtree();
+    }
+
+    ClearVisibilityAdjustmentForScope(ClearVisibilityAdjustmentForScope&& other)
+        : m_element(WTFMove(other.m_element))
+        , m_adjustmentToRestore(std::exchange(other.m_adjustmentToRestore, { }))
+    {
+    }
+
+    ~ClearVisibilityAdjustmentForScope()
+    {
+        if (m_adjustmentToRestore.isEmpty())
+            return;
+
+        m_element->setVisibilityAdjustment(m_adjustmentToRestore);
+        m_element->invalidateStyleAndRenderersForSubtree();
+    }
+
+private:
+    Ref<Element> m_element;
+    OptionSet<VisibilityAdjustment> m_adjustmentToRestore;
+};
+
 using ElementSelectorCache = HashMap<Ref<Element>, std::optional<String>>;
 
 ElementTargetingController::ElementTargetingController(Page& page)
@@ -654,21 +689,35 @@ static HashSet<URL> collectMediaAndLinkURLs(const Element& element)
 }
 
 enum class IsNearbyTarget : bool { No, Yes };
-static TargetedElementInfo targetedElementInfo(Element& element, IsNearbyTarget isNearbyTarget, ElementSelectorCache& cache)
+static std::optional<TargetedElementInfo> targetedElementInfo(Element& element, IsNearbyTarget isNearbyTarget, ElementSelectorCache& cache)
 {
-    CheckedPtr renderer = element.renderer();
+    element.document().updateLayoutIgnorePendingStylesheets();
+
+    FloatRect boundsInClientCoordinates;
+    RectEdges<bool> offsetEdges;
+    PositionType positionType = PositionType::Static;
+    {
+        WeakPtr renderer = element.renderer();
+        if (!renderer)
+            return { };
+
+        offsetEdges = computeOffsetEdges(renderer->style());
+        positionType = renderer->style().position();
+        boundsInClientCoordinates = computeClientRect(*renderer);
+    }
+
     auto [renderedText, screenReaderText, hasLargeReplacedDescendant] = TextExtraction::extractRenderedText(element);
-    return {
+    return { {
         .elementIdentifier = element.identifier(),
         .documentIdentifier = element.document().identifier(),
-        .offsetEdges = computeOffsetEdges(renderer->style()),
+        .offsetEdges = offsetEdges,
         .renderedText = WTFMove(renderedText),
         .searchableText = searchableTextForTarget(element),
         .screenReaderText = WTFMove(screenReaderText),
         .selectors = selectorsForTarget(element, cache),
         .boundsInRootView = element.boundingBoxInRootViewCoordinates(),
-        .boundsInClientCoordinates = computeClientRect(*renderer),
-        .positionType = renderer->style().position(),
+        .boundsInClientCoordinates = WTFMove(boundsInClientCoordinates),
+        .positionType = positionType,
         .childFrameIdentifiers = collectChildFrameIdentifiers(element),
         .mediaAndLinkURLs = collectMediaAndLinkURLs(element),
         .isNearbyTarget = isNearbyTarget == IsNearbyTarget::Yes,
@@ -677,7 +726,7 @@ static TargetedElementInfo targetedElementInfo(Element& element, IsNearbyTarget 
         .isInVisibilityAdjustmentSubtree = element.isInVisibilityAdjustmentSubtree(),
         .hasLargeReplacedDescendant = hasLargeReplacedDescendant,
         .hasAudibleMedia = hasAudibleMedia(element)
-    };
+    } };
 }
 
 static const HTMLElement* findOnlyMainElement(const HTMLBodyElement& bodyElement)
@@ -770,8 +819,22 @@ static inline std::optional<IntRect> inflatedClientRectForAdjustmentRegionTracki
     return { inflatedClientRect };
 }
 
+static bool shouldIgnoreExistingVisibilityAdjustments(const TargetedElementRequest& request)
+{
+    return std::holds_alternative<String>(request.data);
+}
+
 Vector<TargetedElementInfo> ElementTargetingController::findTargets(TargetedElementRequest&& request)
 {
+    Vector<ClearVisibilityAdjustmentForScope> clearVisibilityAdjustmentScopes;
+    if (shouldIgnoreExistingVisibilityAdjustments(request) && m_adjustedElements.computeSize()) {
+        for (auto& element : m_adjustedElements)
+            clearVisibilityAdjustmentScopes.append({ element });
+
+        if (RefPtr document = mainDocument())
+            document->updateLayoutIgnorePendingStylesheets();
+    }
+
     auto [nodes, innerElement] = switchOn(request.data, [this](const String& searchText) {
         return findNodes(searchText);
     }, [this, &request](const FloatPoint& point) {
@@ -1078,8 +1141,10 @@ Vector<TargetedElementInfo> ElementTargetingController::extractTargets(Vector<Re
     Vector<TargetedElementInfo> results;
     results.reserveInitialCapacity(targets.size());
     for (auto iterator = targets.rbegin(); iterator != targets.rend(); ++iterator) {
-        results.append(targetedElementInfo(*iterator, IsNearbyTarget::No, cache));
-        addOutOfFlowTargetClientRectIfNeeded(*iterator);
+        if (auto info = targetedElementInfo(*iterator, IsNearbyTarget::No, cache)) {
+            results.append(WTFMove(*info));
+            addOutOfFlowTargetClientRectIfNeeded(*iterator);
+        }
     }
 
     if (additionalRegionForNearbyElements.isEmpty())
@@ -1135,8 +1200,10 @@ Vector<TargetedElementInfo> ElementTargetingController::extractTargets(Vector<Re
     }();
 
     for (auto& element : nearbyTargets) {
-        results.append(targetedElementInfo(element, IsNearbyTarget::Yes, cache));
-        addOutOfFlowTargetClientRectIfNeeded(element);
+        if (auto info = targetedElementInfo(element, IsNearbyTarget::Yes, cache)) {
+            results.append(WTFMove(*info));
+            addOutOfFlowTargetClientRectIfNeeded(element);
+        }
     }
 
     return results;
@@ -1770,35 +1837,6 @@ void ElementTargetingController::selectorBasedVisibilityAdjustmentTimerFired()
 {
     applyVisibilityAdjustmentFromSelectors();
 }
-
-class ClearVisibilityAdjustmentForScope {
-    WTF_MAKE_NONCOPYABLE(ClearVisibilityAdjustmentForScope);
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    ClearVisibilityAdjustmentForScope(Element& element)
-        : m_element(element)
-        , m_adjustmentToRestore(element.visibilityAdjustment())
-    {
-        if (m_adjustmentToRestore.isEmpty())
-            return;
-
-        element.setVisibilityAdjustment({ });
-        element.invalidateStyleAndRenderersForSubtree();
-    }
-
-    ~ClearVisibilityAdjustmentForScope()
-    {
-        if (m_adjustmentToRestore.isEmpty())
-            return;
-
-        m_element->setVisibilityAdjustment(m_adjustmentToRestore);
-        m_element->invalidateStyleAndRenderersForSubtree();
-    }
-
-private:
-    Ref<Element> m_element;
-    OptionSet<VisibilityAdjustment> m_adjustmentToRestore;
-};
 
 RefPtr<Image> ElementTargetingController::snapshotIgnoringVisibilityAdjustment(ElementIdentifier elementID, ScriptExecutionContextIdentifier documentID)
 {

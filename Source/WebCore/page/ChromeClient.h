@@ -396,6 +396,8 @@ public:
     virtual RefPtr<ShapeDetection::FaceDetector> createFaceDetector(const ShapeDetection::FaceDetectorOptions&) const { return nullptr; }
     virtual RefPtr<ShapeDetection::TextDetector> createTextDetector() const { return nullptr; }
 
+    virtual void registerBlobPathForTesting(const String&, CompletionHandler<void()>&&) { }
+
     // Pass nullptr as the GraphicsLayer to detatch the root layer.
     virtual void attachRootGraphicsLayer(LocalFrame&, GraphicsLayer*) = 0;
     virtual void attachViewOverlayGraphicsLayer(GraphicsLayer*) = 0;
@@ -684,9 +686,9 @@ public:
 
     virtual void addInitialTextAnimation(const WritingTools::SessionID&) { }
 
-    virtual void addSourceTextAnimation(const WritingTools::SessionID&, const CharacterRange&, const String, WTF::CompletionHandler<void(TextAnimationRunMode)>&&) { }
+    virtual void addSourceTextAnimation(const WritingTools::SessionID&, const CharacterRange&, const String&, CompletionHandler<void(TextAnimationRunMode)>&&) { }
 
-    virtual void addDestinationTextAnimation(const WritingTools::SessionID&, const CharacterRange&, const String) { }
+    virtual void addDestinationTextAnimation(const WritingTools::SessionID&, const std::optional<CharacterRange>&, const String&) { }
 
     virtual void clearAnimationsForSessionID(const WritingTools::SessionID&) { };
 #endif

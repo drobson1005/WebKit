@@ -32,6 +32,7 @@
 #import "PushClientConnectionMessages.h"
 #import "WebPushDaemonConnectionConfiguration.h"
 #import "WebPushDaemonConstants.h"
+#import <WebCore/SecurityOriginData.h>
 #import <mach/mach_init.h>
 #import <mach/task.h>
 #import <pal/spi/cocoa/ServersSPI.h>
@@ -112,7 +113,14 @@ void Connection::getPushPermissionState(const String& scope, CompletionHandler<v
 {
     printf("Getting push permission state\n");
 
-    sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::GetPushPermissionState(URL(scope)), WTFMove(completionHandler));
+    sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::GetPushPermissionState(WebCore::SecurityOriginData::fromURL(URL { scope })), WTFMove(completionHandler));
+}
+
+void Connection::requestPushPermission(const String& scope, CompletionHandler<void(bool)>&& completionHandler)
+{
+    printf("Request push permission state for %s\n", scope.utf8().data());
+
+    sendWithAsyncReplyWithoutUsingIPCConnection(Messages::PushClientConnection::RequestPushPermission(WebCore::SecurityOriginData::fromURL(URL { scope })), WTFMove(completionHandler));
 }
 
 void Connection::sendAuditToken()
@@ -126,7 +134,6 @@ void Connection::sendAuditToken()
     }
 
     WebKit::WebPushD::WebPushDaemonConnectionConfiguration configuration;
-    configuration.useMockBundlesForTesting = true;
     configuration.bundleIdentifierOverride = m_bundleIdentifier;
     configuration.pushPartitionString = m_pushPartition;
 
@@ -135,7 +142,7 @@ void Connection::sendAuditToken()
     memcpy(tokenVector.data(), &token, sizeof(token));
     configuration.hostAppAuditTokenData = WTFMove(tokenVector);
 
-    sendWithoutUsingIPCConnection(Messages::PushClientConnection::UpdateConnectionConfiguration(WTFMove(configuration)));
+    sendWithoutUsingIPCConnection(Messages::PushClientConnection::InitializeConnection(WTFMove(configuration)));
 }
 
 static OSObjectPtr<xpc_object_t> messageDictionaryFromEncoder(UniqueRef<IPC::Encoder>&& encoder)

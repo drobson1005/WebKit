@@ -1063,6 +1063,20 @@ static Vector<WebKit::WebsiteDataRecord> toWebsiteDataRecords(NSArray *dataRecor
     return _websiteDataStore->hasServiceWorkerBackgroundActivityForTesting();
 }
 
+- (void)_getPendingPushMessage:(void(^)(NSDictionary *))completionHandler
+{
+    RELEASE_LOG(Push, "Getting pending push message");
+
+    _websiteDataStore->networkProcess().getPendingPushMessage(_websiteDataStore->sessionID(), [completionHandler = makeBlockPtr(completionHandler)] (const auto& message) {
+        RetainPtr<NSDictionary> result;
+        if (message)
+            result = message->toDictionary();
+        RELEASE_LOG(Push, "Giving application %d pending push messages", result ? 1 : 0);
+        completionHandler(result.get());
+    });
+}
+
+
 -(void)_getPendingPushMessages:(void(^)(NSArray<NSDictionary *> *))completionHandler
 {
     RELEASE_LOG(Push, "Getting pending push messages");
@@ -1268,6 +1282,16 @@ static Vector<WebKit::WebsiteDataRecord> toWebsiteDataRecords(NSArray *dataRecor
 - (void)_setRestrictedOpenerTypeForTesting:(_WKRestrictedOpenerType)openerType forDomain:(NSString *)domain
 {
     _websiteDataStore->setRestrictedOpenerTypeForDomainForTesting(WebCore::RegistrableDomain::fromRawString(domain), static_cast<WebKit::RestrictedOpenerType>(openerType));
+}
+
+-(void)_getAppBadgeForTesting:(void(^)(NSNumber *))completionHandler
+{
+    _websiteDataStore->getAppBadgeForTesting([completionHandlerCopy = makeBlockPtr(completionHandler)] (std::optional<uint64_t> badge) {
+        if (badge)
+            completionHandlerCopy([NSNumber numberWithUnsignedLongLong:*badge]);
+        else
+            completionHandlerCopy(nil);
+    });
 }
 
 @end

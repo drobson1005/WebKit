@@ -128,6 +128,7 @@
 #include "InternalsMapLike.h"
 #include "InternalsSetLike.h"
 #include "JSDOMPromiseDeferred.h"
+#include "JSFile.h"
 #include "JSImageData.h"
 #include "JSInternals.h"
 #include "LegacySchemeRegistry.h"
@@ -558,6 +559,7 @@ void Internals::resetToConsistentState(Page& page)
     page.setPagination(Pagination());
 
     page.setDefersLoading(false);
+    page.setResourceCachingDisabledByWebInspector(false);
 
     auto* localMainFrame = dynamicDowncast<LocalFrame>(page.mainFrame());
     if (!localMainFrame)
@@ -3806,15 +3808,6 @@ void Internals::setFooterHeight(float height)
     document->page()->setFooterHeight(height);
 }
 
-void Internals::setTopContentInset(float contentInset)
-{
-    Document* document = contextDocument();
-    if (!document || !document->page())
-        return;
-
-    document->page()->setTopContentInset(contentInset);
-}
-
 #if ENABLE(FULLSCREEN_API)
 
 void Internals::webkitWillEnterFullScreenForElement(Element& element)
@@ -5374,8 +5367,38 @@ RefPtr<File> Internals::createFile(const String& path)
     if (!url.protocolIsFile())
         return nullptr;
 
+    if (auto* page = document->page())
+        page->chrome().client().registerBlobPathForTesting(url.fileSystemPath(), [] () { });
+
     return File::create(document, url.fileSystemPath());
 }
+void Internals::asyncCreateFile(const String& path, DOMPromiseDeferred<IDLInterface<File>>&& promise)
+{
+    Document* document = contextDocument();
+    if (!document) {
+        promise.reject(ExceptionCode::InvalidStateError);
+        return;
+    }
+
+    URL url = document->completeURL(path);
+    if (!url.protocolIsFile()) {
+        promise.reject(ExceptionCode::InvalidStateError);
+        return;
+    }
+
+    if (auto* page = document->page()) {
+        auto fileSystemPath = url.fileSystemPath();
+        page->chrome().client().registerBlobPathForTesting(fileSystemPath, [promise = WTFMove(promise), weakDocument = WeakPtr { *document }, url = WTFMove(url)] () mutable {
+            if (!weakDocument) {
+                promise.reject(ExceptionCode::InvalidStateError);
+                return;
+            }
+            promise.resolve(File::create(weakDocument.get(), url.fileSystemPath()));
+        });
+    } else
+        promise.reject(ExceptionCode::InvalidStateError);
+}
+
 
 String Internals::createTemporaryFile(const String& name, const String& contents)
 {
@@ -7563,6 +7586,15 @@ void Internals::getImageBufferResourceLimits(ImageBufferResourceLimitsPromise&& 
         }
         promise.resolve(*limits);
     });
+}
+
+void Internals::setResourceCachingDisabledByWebInspector(bool disabled)
+{
+    RefPtr document = contextDocument();
+    if (!document || !document->page())
+        return;
+
+    document->page()->setResourceCachingDisabledByWebInspector(disabled);
 }
 
 } // namespace WebCore

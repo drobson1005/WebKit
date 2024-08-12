@@ -39,6 +39,7 @@
 #include "CSSPropertyNames.h"
 #include "CSSStyleDeclaration.h"
 #include "CSSStyleSheet.h"
+#include "CSSViewTransitionRule.h"
 #include "CachedCSSStyleSheet.h"
 #include "CachedFontLoadRequest.h"
 #include "CachedFrame.h"
@@ -147,6 +148,7 @@
 #include "JSCustomElementInterface.h"
 #include "JSDOMWindowCustom.h"
 #include "JSLazyEventListener.h"
+#include "JSViewTransitionUpdateCallback.h"
 #include "KeyboardEvent.h"
 #include "KeyframeEffect.h"
 #include "LayoutDisallowedScope.h"
@@ -162,6 +164,7 @@
 #include "MediaProducer.h"
 #include "MediaQueryList.h"
 #include "MediaQueryMatcher.h"
+#include "MediaSession.h"
 #include "MediaStream.h"
 #include "MessageEvent.h"
 #include "MouseEventWithHitTestResults.h"
@@ -169,6 +172,8 @@
 #include "NameNodeList.h"
 #include "NavigationDisabler.h"
 #include "NavigationScheduler.h"
+#include "Navigator.h"
+#include "NavigatorMediaSession.h"
 #include "NestingLevelIncrementer.h"
 #include "NodeIterator.h"
 #include "NodeRareData.h"
@@ -177,9 +182,10 @@
 #include "NotificationController.h"
 #include "OpportunisticTaskScheduler.h"
 #include "OrientationNotifier.h"
-#include "OverflowEvent.h"
 #include "PageConsoleClient.h"
 #include "PageGroup.h"
+#include "PageRevealEvent.h"
+#include "PageSwapEvent.h"
 #include "PageTransitionEvent.h"
 #include "PaintWorkletGlobalScope.h"
 #include "Performance.h"
@@ -252,6 +258,7 @@
 #include "SleepDisabler.h"
 #include "SocketProvider.h"
 #include "SpeechRecognition.h"
+#include "StartViewTransitionOptions.h"
 #include "StaticNodeList.h"
 #include "StorageEvent.h"
 #include "StringCallback.h"
@@ -2760,9 +2767,9 @@ auto Document::updateLayout(OptionSet<LayoutOptions> layoutOptions, const Elemen
                 } else
                     context = nullptr;
             }
-            if (frameView->layoutContext().needsLayout()) {
+            if (frameView->layoutContext().isLayoutPending() || renderView()->needsLayout()) {
                 ContentVisibilityForceLayoutScope scope(*renderView(), context);
-                frameView->layoutContext().layout(layoutOptions.contains(LayoutOptions::CanDeferUpdateLayerPositions));
+                frameView->layoutContext().layout();
                 result = UpdateLayoutResult::ChangesDone;
             }
 
@@ -2939,17 +2946,17 @@ void Document::pageSizeAndMarginsInPixels(int pageIndex, IntSize& pageSize, int&
     int width = pageSize.width();
     int height = pageSize.height();
     switch (style->pageSizeType()) {
-    case PAGE_SIZE_AUTO:
+    case PageSizeType::Auto:
         break;
-    case PAGE_SIZE_AUTO_LANDSCAPE:
+    case PageSizeType::AutoLandscape:
         if (width < height)
             std::swap(width, height);
         break;
-    case PAGE_SIZE_AUTO_PORTRAIT:
+    case PageSizeType::AutoPortrait:
         if (width > height)
             std::swap(width, height);
         break;
-    case PAGE_SIZE_RESOLVED: {
+    case PageSizeType::Resolved: {
         auto& size = style->pageSize();
         ASSERT(size.width.isFixed());
         ASSERT(size.height.isFixed());
@@ -5323,6 +5330,76 @@ void Document::visibilityAdjustmentStateDidChange()
         audioProducer.visibilityAdjustmentStateDidChange();
 }
 
+#if ENABLE(MEDIA_STREAM) && ENABLE(MEDIA_SESSION)
+static bool hasRealtimeMediaSource(const HashSet<Ref<RealtimeMediaSource>>& sources, const Function<bool(const RealtimeMediaSource&)>& filterSource)
+{
+    for (Ref source : sources) {
+        if (!source->isEnded() && filterSource(source.get()))
+            return true;
+    }
+    return false;
+}
+
+void Document::processCaptureStateDidChange(Function<bool(const Page&)>&& isPageMutedCallback, Function<bool(const RealtimeMediaSource&)>&& filterSource, MediaSessionAction action)
+{
+    RefPtr page = this->page();
+    if (!page)
+        return;
+
+    RefPtr window = domWindow();
+    RefPtr mediaSession = window ? NavigatorMediaSession::mediaSessionIfExists(window->protectedNavigator()) : nullptr;
+    if (!mediaSession)
+        return;
+
+    if (!hasRealtimeMediaSource(m_captureSources, filterSource))
+        return;
+
+    eventLoop().queueTask(TaskSource::MediaElement, [weakDocument = WeakPtr { *this }, weakSession = WeakPtr { *mediaSession }, isPageMuted = isPageMutedCallback(*page), filterSource = WTFMove(filterSource), isPageMutedCallback = WTFMove(isPageMutedCallback), action] {
+        RefPtr protecteDocument = weakDocument.get();
+        if (!protecteDocument)
+            return;
+
+        RefPtr page = protecteDocument->page();
+        if (!page || isPageMuted != isPageMutedCallback(*page) || !hasRealtimeMediaSource(protecteDocument->m_captureSources, filterSource))
+            return;
+
+        if (RefPtr protectedSession = weakSession.get()) {
+            MediaSessionActionDetails details;
+            details.action = action;
+            details.isActivating = !isPageMuted;
+            protectedSession->callActionHandler(details);
+        }
+    });
+}
+
+void Document::cameraCaptureStateDidChange()
+{
+    processCaptureStateDidChange([] (auto& page) {
+        return page.mutedState().contains(MediaProducerMutedState::VideoCaptureIsMuted);
+    }, [] (auto& source) {
+        return source.deviceType() == CaptureDevice::DeviceType::Camera;
+    }, MediaSessionAction::Togglecamera);
+}
+
+void Document::microphoneCaptureStateDidChange()
+{
+    processCaptureStateDidChange([] (auto& page) {
+        return page.mutedState().contains(MediaProducerMutedState::AudioCaptureIsMuted);
+    }, [] (auto& source) {
+        return source.deviceType() == CaptureDevice::DeviceType::Microphone;
+    }, MediaSessionAction::Togglemicrophone);
+}
+
+void Document::screenshareCaptureStateDidChange()
+{
+    processCaptureStateDidChange([] (auto& page) {
+        return page.mutedState().contains(MediaProducerMutedState::ScreenCaptureIsMuted) || page.mutedState().contains(MediaProducerMutedState::WindowCaptureIsMuted);
+    }, [] (auto& source) {
+        return source.deviceType() == CaptureDevice::DeviceType::Screen || source.deviceType() == CaptureDevice::DeviceType::Window;
+    }, MediaSessionAction::Togglescreenshare);
+}
+#endif
+
 void Document::pageMutedStateDidChange()
 {
     for (auto& audioProducer : m_audioProducers)
@@ -6041,7 +6118,7 @@ void Document::textRemoved(Node& text, unsigned offset, unsigned length)
 void Document::textNodesMerged(Text& oldNode, unsigned offset)
 {
     if (!m_ranges.isEmpty()) {
-        NodeWithIndex oldNodeWithIndex(&oldNode);
+        NodeWithIndex oldNodeWithIndex(oldNode);
         for (auto& range : m_ranges)
             Ref { range.get() }->textNodesMerged(oldNodeWithIndex, offset);
     }
@@ -6148,17 +6225,6 @@ void Document::queueTaskToDispatchEventOnWindow(TaskSource source, Ref<Event>&& 
     });
 }
 
-void Document::enqueueOverflowEvent(Ref<Event>&& event)
-{
-    // https://developer.mozilla.org/en-US/docs/Web/API/Element/overflow_event
-    // FIXME: This event is totally unspecified.
-    RefPtr target = event->target();
-    RELEASE_ASSERT(target);
-    eventLoop().queueTask(TaskSource::DOMManipulation, [protectedTarget = GCReachableRef<Node>(downcast<Node>(*target)), event = WTFMove(event)] {
-        protectedTarget->dispatchEvent(event);
-    });
-}
-
 ExceptionOr<Ref<Event>> Document::createEvent(const String& type)
 {
     // Please do *not* add new event classes to this function unless they are required
@@ -6223,8 +6289,6 @@ ExceptionOr<Ref<Event>> Document::createEvent(const String& type)
         return Ref<Event> { KeyboardEvent::createForBindings() };
     if (equalLettersIgnoringASCIICase(type, "mutationevent"_s) || equalLettersIgnoringASCIICase(type, "mutationevents"_s))
         return Ref<Event> { MutationEvent::createForBindings() };
-    if (equalLettersIgnoringASCIICase(type, "overflowevent"_s))
-        return Ref<Event> { OverflowEvent::createForBindings() };
     if (equalLettersIgnoringASCIICase(type, "popstateevent"_s))
         return Ref<Event> { PopStateEvent::createForBindings() };
     if (equalLettersIgnoringASCIICase(type, "wheelevent"_s))
@@ -6271,9 +6335,6 @@ void Document::addListenerTypeIfNeeded(const AtomString& eventType)
         break;
     case EventType::DOMCharacterDataModified:
         addListenerType(ListenerType::DOMCharacterDataModified);
-        break;
-    case EventType::overflowchanged:
-        addListenerType(ListenerType::OverflowChanged);
         break;
     case EventType::scroll:
         addListenerType(ListenerType::Scroll);
@@ -8009,6 +8070,69 @@ void Document::dispatchPagehideEvent(PageshowEventPersistence persisted)
         return;
     m_lastPageStatus = PageStatus::Hidden;
     dispatchWindowEvent(PageTransitionEvent::create(eventNames().pagehideEvent, persisted == PageshowEventPersistence::Persisted), this);
+}
+
+// https://www.w3.org/TR/css-view-transitions-2/#vt-rule-algo
+bool Document::resolveViewTransitionRule()
+{
+    if (visibilityState() == VisibilityState::Hidden)
+        return false;
+
+    auto rule = styleScope().resolver().viewTransitionRule();
+    if (rule)
+        return rule->computedNavigation() == ViewTransitionNavigation::Auto;
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#revealing-the-document
+void Document::reveal()
+{
+    if (!settings().crossDocumentViewTransitionsEnabled())
+        return;
+
+    if (m_hasBeenRevealed)
+        return;
+    m_hasBeenRevealed = true;
+
+    PageRevealEvent::Init init;
+
+    // FIXME: This should implement more of https://drafts.csswg.org/css-view-transitions-2/#resolve-inbound-cross-document-view-transition
+    if (m_inboundViewTransitionParams && resolveViewTransitionRule())
+        init.viewTransition = ViewTransition::createInbound(*this, std::exchange(m_inboundViewTransitionParams, nullptr));
+
+    dispatchWindowEvent(PageRevealEvent::create(eventNames().pagerevealEvent, WTFMove(init)), this);
+}
+
+void Document::transferViewTransitionParams(Document& newDocument)
+{
+    newDocument.m_inboundViewTransitionParams = std::exchange(m_inboundViewTransitionParams, nullptr);
+}
+
+void Document::dispatchPageswapEvent(bool canTriggerCrossDocumentViewTransition)
+{
+    if (!settings().crossDocumentViewTransitionsEnabled())
+        return;
+
+    RefPtr<ViewTransition> oldViewTransition;
+
+    PageSwapEvent::Init swapInit;
+    if (canTriggerCrossDocumentViewTransition && globalObject()) {
+        oldViewTransition = ViewTransition::createOutbound(*this);
+        swapInit.viewTransition = oldViewTransition;
+    }
+
+    dispatchWindowEvent(PageSwapEvent::create(eventNames().pageswapEvent, WTFMove(swapInit)), this);
+
+    // FIXME: This should actually defer the navigation, and run the setupViewTransition
+    // (capture the old state) on the next rendering update.
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#deactivate-a-document-for-a-cross-document-navigation
+    if (oldViewTransition && oldViewTransition->phase() != ViewTransitionPhase::Done) {
+        oldViewTransition->setupViewTransition();
+
+        // FIXME: This should set the params on the new Document, but it doesn't exist yet.
+        // Store it on the old, and we'll call transferViewTransitionParams soon.
+        m_inboundViewTransitionParams = oldViewTransition->takeViewTransitionParams().moveToUniquePtr();
+    }
 }
 
 void Document::enqueueSecurityPolicyViolationEvent(SecurityPolicyViolationEventInit&& eventInit)
@@ -10132,7 +10256,12 @@ const FixedVector<CSSPropertyID>& Document::exposedComputedCSSPropertyIDs()
     if (!m_exposedComputedCSSPropertyIDs.has_value()) {
         std::remove_const_t<decltype(computedPropertyIDs)> exposed;
         auto end = std::copy_if(computedPropertyIDs.begin(), computedPropertyIDs.end(), exposed.begin(), [&](auto property) {
-            return isExposed(property, m_settings.ptr());
+            if (!isExposed(property, m_settings.ptr()))
+                return false;
+            // If the standard property is exposed no need to expose the alias.
+            if (auto standard = cascadeAliasProperty(property); standard != property && isExposed(standard, m_settings.ptr()))
+                return false;
+            return true;
         });
         m_exposedComputedCSSPropertyIDs.emplace(exposed.begin(), end);
     }
@@ -10649,18 +10778,35 @@ void Document::flushDeferredRenderingIsSuppressedForViewTransitionChanges()
     }
 }
 
-RefPtr<ViewTransition> Document::startViewTransition(RefPtr<ViewTransitionUpdateCallback>&& updateCallback)
+RefPtr<ViewTransition> Document::startViewTransition(StartViewTransitionCallbackOptions&& callbackOptions)
 {
     if (!globalObject())
         return nullptr;
 
-    Ref viewTransition = ViewTransition::create(*this, WTFMove(updateCallback));
+    RefPtr<ViewTransitionUpdateCallback> updateCallback = nullptr;
+    Vector<AtomString> activeTypes { };
+
+    if (callbackOptions) {
+        WTF::switchOn(*callbackOptions, [&](RefPtr<JSViewTransitionUpdateCallback>& callback) {
+            updateCallback = WTFMove(callback);
+        }, [&](StartViewTransitionOptions& options) {
+            updateCallback = WTFMove(options.update);
+
+            if (options.types) {
+                ASSERT(settings().viewTransitionTypesEnabled());
+                activeTypes = WTFMove(*options.types);
+            }
+        });
+    }
+
+    Ref viewTransition = ViewTransition::createSamePage(*this, WTFMove(updateCallback), WTFMove(activeTypes));
 
     if (RefPtr activeViewTransition = m_activeViewTransition)
         activeViewTransition->skipViewTransition(Exception { ExceptionCode::AbortError, "Old view transition aborted by new view transition."_s });
 
     setActiveViewTransition(WTFMove(viewTransition));
     scheduleRenderingUpdate(RenderingUpdateStep::PerformPendingViewTransitions);
+
     return m_activeViewTransition;
 }
 

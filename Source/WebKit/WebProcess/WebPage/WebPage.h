@@ -1001,8 +1001,8 @@ public:
     void didChangeSelectionForAccessibility() { m_isChangingSelectionForAccessibility = false; }
 
 #if PLATFORM(IOS_FAMILY) && ENABLE(IOS_TOUCH_EVENTS)
-    void dispatchAsynchronousTouchEvents(Vector<EventDispatcher::TouchEventData, 1>&&);
-    void cancelAsynchronousTouchEvents(Vector<EventDispatcher::TouchEventData, 1>&&);
+    void dispatchAsynchronousTouchEvents(UniqueRef<EventDispatcher::TouchEventQueue>&&);
+    void cancelAsynchronousTouchEvents(UniqueRef<EventDispatcher::TouchEventQueue>&&);
 #endif
 
     bool hasRichlyEditableSelection() const;
@@ -1151,8 +1151,6 @@ public:
 
 #if PLATFORM(COCOA)
     bool isSpeaking() const;
-    void speak(const String&);
-    void stopSpeaking();
 
     void performDictionaryLookupForSelection(WebCore::LocalFrame&, const WebCore::VisibleSelection&, WebCore::TextIndicatorPresentationTransition);
 #endif
@@ -1287,6 +1285,8 @@ public:
     void updateStringForFind(const String&);
 
     bool canShowWhileLocked() const { return m_page && m_page->canShowWhileLocked(); }
+
+    void shouldDismissKeyboardAfterTapAtPoint(WebCore::FloatPoint, CompletionHandler<void(bool)>&&);
 #endif
 
 #if ENABLE(META_VIEWPORT)
@@ -1711,7 +1711,7 @@ public:
     void modelInlinePreviewDidFailToLoad(WebCore::PlatformLayerIdentifier, const WebCore::ResourceError&);
 #endif
 
-#if ENABLE(VIDEO)
+#if ENABLE(IMAGE_ANALYSIS) && ENABLE(VIDEO)
     void beginTextRecognitionForVideoInElementFullScreen(const WebCore::HTMLVideoElement&);
     void cancelTextRecognitionForVideoInElementFullScreen();
 #endif
@@ -1757,8 +1757,10 @@ public:
     const Logger& logger() const;
     const void* logIdentifier() const;
 
-#if (PLATFORM(GTK) || PLATFORM(WPE)) && USE(GBM)
+#if PLATFORM(GTK) || PLATFORM(WPE)
+#if USE(GBM)
     const Vector<DMABufRendererBufferFormat>& preferredBufferFormats() const { return m_preferredBufferFormats; }
+#endif
 #endif
 
 #if ENABLE(EXTENSION_CAPABILITIES)
@@ -1783,12 +1785,14 @@ public:
 
     void removeInitialTextAnimation(const WebCore::WritingTools::SessionID&);
     void addInitialTextAnimation(const WebCore::WritingTools::SessionID&);
-    void addSourceTextAnimation(const WebCore::WritingTools::SessionID&, const WebCore::CharacterRange&, const String, WTF::CompletionHandler<void(WebCore::TextAnimationRunMode)>&&);
-    void addDestinationTextAnimation(const WebCore::WritingTools::SessionID&, const WebCore::CharacterRange&, const String);
+    void addSourceTextAnimation(const WebCore::WritingTools::SessionID&, const WebCore::CharacterRange&, const String&, CompletionHandler<void(WebCore::TextAnimationRunMode)>&&);
+    void addDestinationTextAnimation(const WebCore::WritingTools::SessionID&, const std::optional<WebCore::CharacterRange>&, const String&);
     void clearAnimationsForSessionID(const WebCore::WritingTools::SessionID&);
 
     std::optional<WebCore::TextIndicatorData> createTextIndicatorForRange(const WebCore::SimpleRange&);
     void createTextIndicatorForTextAnimationID(const WTF::UUID&, CompletionHandler<void(std::optional<WebCore::TextIndicatorData>&&)>&&);
+
+    void didEndPartialIntelligenceTextPonderingAnimation();
 #endif
 
     void startObservingNowPlayingMetadata();
@@ -1805,6 +1809,8 @@ public:
 #if ENABLE(CONTEXT_MENUS)
     void showContextMenuFromFrame(const WebCore::FrameIdentifier&, const ContextMenuContextData&, const UserData&);
 #endif
+
+    void setTopContentInset(float);
 
 private:
     WebPage(WebCore::PageIdentifier, WebPageCreationParameters&&);
@@ -2003,7 +2009,6 @@ private:
 #if PLATFORM(COCOA)
     void setTopContentInsetFenced(float, const WTF::MachSendRight&);
 #endif
-    void setTopContentInset(float);
 
     void viewWillStartLiveResize();
     void viewWillEndLiveResize();
@@ -2310,6 +2315,9 @@ private:
     void writingToolsSessionDidReceiveAction(const WebCore::WritingTools::Session&, WebCore::WritingTools::Action);
 
     void updateUnderlyingTextVisibilityForTextAnimationID(const WTF::UUID&, bool, CompletionHandler<void()>&&);
+
+    void showSelectionForWritingToolsSessionAssociatedWithAnimationID(const WTF::UUID&);
+    void showSelectionForWritingToolsSessionWithID(const WebCore::WritingTools::SessionID&);
 #endif
 
     void remotePostMessage(WebCore::FrameIdentifier source, const String& sourceOrigin, WebCore::FrameIdentifier target, std::optional<WebCore::SecurityOriginData>&& targetOrigin, const WebCore::MessageWithMessagePorts&);
@@ -2779,8 +2787,10 @@ private:
     WebCore::Color m_accentColor;
 #endif
 
-#if (PLATFORM(GTK) || PLATFORM(WPE)) && USE(GBM)
+#if PLATFORM(GTK) || PLATFORM(WPE)
+#if USE(GBM)
     Vector<DMABufRendererBufferFormat> m_preferredBufferFormats;
+#endif
 #endif
 
 #if ENABLE(APP_BOUND_DOMAINS)

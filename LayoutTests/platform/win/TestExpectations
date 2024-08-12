@@ -101,6 +101,8 @@ fast/dom/HTMLLinkElement/prefetch-too-many-clients.html [ Skip ]
 # MEDIA_CAPTURE is disabled
 fast/forms/file/file-input-capture.html [ Skip ]
 
+http/wpt/mediasession [ Skip ]
+
 # MEDIA_SOURCE is disabled
 webkit.org/b/64731 fast/history/page-cache-media-source-opened.html [ Skip ]
 webkit.org/b/64731 fast/history/page-cache-media-source-closed.html [ Skip ]
@@ -289,6 +291,7 @@ fast/forms/select-multiple-elements-with-mouse-drag-with-options-less-than-size.
 http/tests/local/drag-over-remote-content.html [ Skip ]
 http/tests/misc/bubble-drag-events.html [ Skip ]
 http/tests/misc/drag-over-iframe-invalid-source-crash.html [ Skip ]
+http/tests/security/drag-drop-local-file.html [ Skip ]
 http/tests/security/drag-drop-same-unique-origin.html [ Skip ]
 http/tests/security/drag-over-remote-content-iframe.html [ Skip ]
 http/tests/security/resources/drag-drop-allowed.html [ Skip ]
@@ -349,6 +352,9 @@ fast/text/hidpi-text-selection-gap-between-words.html [ Skip ]
 
 # This test relies on iOS-specific font fallback.
 fast/text/arabic-blocked-fonts.html [ Pass ImageOnlyFailure ]
+
+# Tests glyph metrics of Apple Emoji font
+webkit.org/b/159755 fast/text/emoji-num-glyphs.html [ Skip ]
 
 # the test that uses these methods is Cocoa-specific, see webkit.org/b/152247
 fast/forms/attributed-strings.html [ Failure ]
@@ -499,6 +505,7 @@ fast/css-generated-content/quotes-lang-case-insensitive.html [ ImageOnlyFailure 
 fast/css-generated-content/quotes-lang.html [ ImageOnlyFailure Pass ]
 fast/css/cascade/box-shadow-and-webkit-box-shadow-cascade-order.html [ ImageOnlyFailure ]
 fast/css/counters/counter-list-item.html [ ImageOnlyFailure ]
+fast/css/cssom-insertrule-crash.html [ ImageOnlyFailure ]
 fast/css/display-contents-all.html [ ImageOnlyFailure ]
 fast/css/unexpected-word-wrapping-with-non-empty-spans.html [ ImageOnlyFailure ]
 fast/custom-elements/defined-update-style.html [ ImageOnlyFailure ]
@@ -709,9 +716,6 @@ http/tests/cache-storage [ Skip ]
 http/tests/canvas/canvas-slow-font-loading.html [ ImageOnlyFailure ]
 http/tests/canvas/color-fonts [ Skip ]
 
-# Flaky GC test 
-webkit.org/b/277234 http/tests/canvas/ctx.2d-canvas-style-no-document-leak.html [ Skip ] # Pass Failure
-
 http/wpt/clear-site-data/partitioning.html [ Skip ] # Not supported yet. This test is slow.
 
 http/tests/contentdispositionattachmentsandbox [ Skip ]
@@ -780,7 +784,6 @@ http/tests/mime/html-with-nosniff-html.html [ Skip ]
 
 http/tests/misc/authentication-redirect-3/authentication-sent-to-redirect-same-origin-with-location-credentials.html [ Failure ]
 http/tests/misc/favicon-loads-with-icon-loading-override.html [ Failure ]
-http/tests/misc/form-submit-file-cross-site.html [ Skip ]
 http/tests/misc/link-rel-icon-beforeload.html [ Failure ]
 http/tests/misc/timer-vs-loading.html [ Skip ]
 http/tests/misc/willCacheResponse-delegate-callback.html [ Failure ]
@@ -857,9 +860,6 @@ webkit.org/b/255747 http/tests/security/canvas-remote-read-remote-video-localhos
 webkit.org/b/255747 http/tests/security/canvas-remote-read-remote-video-redirect.html [ Skip ] # Crash
 
 http/tests/security/canvas-remote-read-remote-video-hls.html [ Skip ] # Timeout
-
-http/tests/performance/performance-resource-timing-cross-origin-media.html [ Skip ] # Timeout
-http/tests/performance/performance-resource-timing-cross-origin-media-with-cors.html [ Skip ] # Timeout
 
 http/tests/security/clipboard/copy-paste-html-across-origin-sanitizes-html.html [ Skip ] # Failure
 http/tests/security/clipboard/copy-paste-html-across-origin-strips-mso-list.html [ Skip ] # Failure
@@ -990,7 +990,7 @@ http/tests/misc/form-post-textplain.html [ Failure ]
 http/tests/misc/gamepads-insecure.html [ Failure ]
 http/tests/misc/large-js-program.py [ Skip ] # Timeout
 http/wpt/fetch/response-opaque-clone.html [ Skip ]
-http/wpt/fetch/response-status-text.html [ Failure ]
+http/wpt/fetch/response-status-text.html [ Failure Slow ]
 
 
 http/tests/lists/list-new-parent-no-sibling-append.html [ Failure ]
@@ -1011,7 +1011,6 @@ http/tests/workers/service/shownotification-denied.html [ Failure ]
 http/wpt/service-workers/fetch-service-worker-preload-download-through-direct-preload.https.html [ Failure ]
 http/wpt/service-workers/fetch-service-worker-preload-use-download-and-clone.https.html [ Failure ]
 http/wpt/service-workers/fetch-service-worker-preload-use-download.https.html [ Failure ]
-http/wpt/service-workers/form-data-upload.html [ Failure ]
 http/wpt/service-workers/navigate-iframes-window-client.https.html [ Failure ]
 
 http/wpt/service-workers/fetch-service-worker-preload-changing-request.https.html [ Failure Pass ]
@@ -1029,7 +1028,6 @@ http/tests/permissions/permission-state-for-notifications-in-ephemeral-session.h
 http/tests/workers/service/service-worker-resource-timing.https.html [ Skip ] # Timeout
 http/wpt/service-workers/navigation-timing.https.html [ Skip ] # Timeout
 
-http/tests/misc/form-submit-file-cross-site-redirect.html [ Failure ]
 http/tests/ssl/curl/certificate-and-authentication.html [ Failure ]
 
 # Needs site isolation drawing implementation
@@ -1142,7 +1140,6 @@ imported/w3c/web-platform-tests/css/css-anchor-position/anchor-center-htb-htb.ht
 imported/w3c/web-platform-tests/css/css-anchor-position/anchor-center-htb-vrl.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-anchor-position/anchor-center-vrl-htb.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-anchor-position/anchor-center-vrl-vrl.html [ Pass ]
-imported/w3c/web-platform-tests/css/css-anchor-position/anchor-getComputedStyle-002.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-anchor-position/anchor-invalid-fallback.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-anchor-position/anchor-position-borders-001.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-anchor-position/anchor-position-borders-002.html [ Pass ]
@@ -1696,7 +1693,6 @@ http/wpt/credential-management [ Skip ]
 http/wpt/cross-origin-opener-policy [ Skip ]
 http/wpt/cross-origin-resource-policy [ Skip ]
 http/wpt/crypto [ Skip ]
-http/wpt/css/css-highlight-api [ Skip ]
 http/wpt/entries-api [ Skip ]
 http/wpt/geometry [ Skip ]
 http/wpt/identity [ Skip ]
@@ -2157,8 +2153,6 @@ fast/gradients/alpha-premultiplied.html [ ImageOnlyFailure ]
 fast/js-promise/js-promise-invalid-context-access.html [ Failure ]
 
 # Not applicable.
-webgl/webgl-via-metal-flag-on.html [ Skip ]
-webgl/webgl-via-metal-flag-off.html [ Skip ]
 webgl/webgl-backend-type.html [ Skip ]
 
 fast/text/text-overflow-over-64k.html [ ImageOnlyFailure ]
@@ -3935,6 +3929,8 @@ editing/style/unbold-in-bold.html [ Failure ]
 
 fast/html/body-color-legacy-parsing-3.html [ Pass ImageOnlyFailure ]
 
+webkit.org/b/277612 fast/html/request-video-frame-callback-does-not-leak.html [ Pass Failure ]
+
 # Fails on Buildbot
 fast/picture/viewport-resize.html [ Pass Failure ]
 
@@ -4031,6 +4027,12 @@ animations/no-style-recalc-during-accelerated-animation.html [ Pass Failure ]
 
 webkit.org/b/133151 js/cached-window-properties.html [ Skip ] # Slow
 
+editing/selection/rtl-move-selection-right-left.html [ Slow ]
+fast/canvas/webgl/lose-context-on-timeout-async.html [ Slow ]
+fast/canvas/webgl/lose-context-on-timeout.html [ Slow ]
+fast/canvas/webgl/uninitialized-test.html [ Slow ]
+fast/canvas/webgl/webgl-clear-composited-notshowing.html [ Slow ]
+
 fast/css3-text/css3-text-decoration/text-decoration-thickness.html [ ImageOnlyFailure ]
 fast/forms/listbox-zero-item-height.html [ Failure ]
 
@@ -4067,6 +4069,7 @@ js/dom/webassembly-memory-shared-fail.html [ Skip ]
 storage/indexeddb/wasm-exceptions.html [ Skip ]
 wasm [ Skip ]
 webgl/2.0.y/conformance2/wasm [ Skip ]
+workers/wasm-long-compile-many.html [ Skip ]
 workers/wasm-long-compile.html [ Skip ]
 workers/wasm-mem-post-message.html [ Skip ]
 

@@ -46,6 +46,7 @@
 #include "ContextMenuClient.h"
 #include "ContextMenuController.h"
 #include "CookieJar.h"
+#include "CredentialRequestCoordinator.h"
 #include "CryptoClient.h"
 #include "DOMRect.h"
 #include "DOMRectList.h"
@@ -398,6 +399,7 @@ Page::Page(PageConfiguration&& pageConfiguration)
 #endif
 #if ENABLE(WEB_AUTHN)
     , m_authenticatorCoordinator(makeUniqueRef<AuthenticatorCoordinator>(WTFMove(pageConfiguration.authenticatorCoordinatorClient)))
+    , m_credentialRequestCoordinator(makeUniqueRef<CredentialRequestCoordinator>(WTFMove(pageConfiguration.credentialRequestCoordinatorClient)))
 #endif
 #if ENABLE(APPLICATION_MANIFEST)
     , m_applicationManifest(pageConfiguration.applicationManifest)
@@ -1923,6 +1925,10 @@ void Page::updateRendering()
         initialDocuments.append(document);
     });
 
+    runProcessingStep(RenderingUpdateStep::Reveal, [] (Document& document) {
+        document.reveal();
+    });
+
     runProcessingStep(RenderingUpdateStep::FlushAutofocusCandidates, [] (Document& document) {
         if (document.isTopDocument())
             document.flushAutofocusCandidates();
@@ -1989,7 +1995,7 @@ void Page::updateRendering()
     });
 
     runProcessingStep(RenderingUpdateStep::Images, [] (Document& document) {
-        for (auto& image : document.cachedResourceLoader().allCachedSVGImages()) {
+        for (auto& image : document.protectedCachedResourceLoader()->allCachedSVGImages()) {
             if (RefPtr page = image->internalPage())
                 page->isolatedUpdateRendering();
         }
@@ -2754,11 +2760,25 @@ void Page::mediaEngineChanged(HTMLMediaElement& mediaElement)
 
 #endif
 
-void Page::setMuted(MediaProducerMutedStateFlags muted)
+void Page::setMuted(MediaProducerMutedStateFlags mutedState)
 {
-    m_mutedState = muted;
+#if ENABLE(MEDIA_SESSION)
+    bool cameraCaptureStateDidChange = mutedState.contains(MediaProducerMutedState::VideoCaptureIsMuted) != m_mutedState.contains(MediaProducerMutedState::VideoCaptureIsMuted);
+    bool microphoneCaptureStateDidChange = mutedState.contains(MediaProducerMutedState::AudioCaptureIsMuted) != m_mutedState.contains(MediaProducerMutedState::AudioCaptureIsMuted);
+    bool screenshareCaptureStateDidChange = (mutedState.contains(MediaProducerMutedState::ScreenCaptureIsMuted) || mutedState.contains(MediaProducerMutedState::WindowCaptureIsMuted)) != (m_mutedState.contains(MediaProducerMutedState::ScreenCaptureIsMuted) || m_mutedState.contains(MediaProducerMutedState::WindowCaptureIsMuted));
+#endif
 
-    forEachDocument([] (Document& document) {
+    m_mutedState = mutedState;
+
+    forEachDocument([&] (Document& document) {
+#if ENABLE(MEDIA_STREAM) && ENABLE(MEDIA_SESSION)
+        if (cameraCaptureStateDidChange)
+            document.cameraCaptureStateDidChange();
+        if (microphoneCaptureStateDidChange)
+            document.microphoneCaptureStateDidChange();
+        if (screenshareCaptureStateDidChange)
+            document.screenshareCaptureStateDidChange();
+#endif
         document.pageMutedStateDidChange();
     });
 }
@@ -4435,6 +4455,7 @@ SpeechRecognitionConnection& Page::speechRecognitionConnection()
 WTF::TextStream& operator<<(WTF::TextStream& ts, RenderingUpdateStep step)
 {
     switch (step) {
+    case RenderingUpdateStep::Reveal: ts << "Reveal"; break;
     case RenderingUpdateStep::FlushAutofocusCandidates: ts << "FlushAutofocusCandidates"; break;
     case RenderingUpdateStep::Resize: ts << "Resize"; break;
     case RenderingUpdateStep::Scroll: ts << "Scroll"; break;
@@ -4941,6 +4962,11 @@ void Page::respondToReappliedWritingToolsEditing(EditCommandComposition* command
 std::optional<SimpleRange> Page::contextRangeForSessionWithID(const WritingTools::Session::ID& sessionID) const
 {
     return m_writingToolsController->contextRangeForSessionWithID(sessionID);
+}
+
+void Page::showSelectionForWritingToolsSessionWithID(const WritingTools::Session::ID& sessionID) const
+{
+    return m_writingToolsController->showSelectionForWritingToolsSessionWithID(sessionID);
 }
 
 void Page::writingToolsSessionDidReceiveAction(const WritingTools::Session& session, WritingTools::Action action)

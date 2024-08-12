@@ -615,8 +615,6 @@ public:
     void setHeaderHeight(float);
     void setFooterHeight(float);
 
-    void setTopContentInset(float);
-
 #if ENABLE(FULLSCREEN_API)
     void webkitWillEnterFullScreenForElement(Element&);
     void webkitDidEnterFullScreenForElement(Element&);
@@ -870,6 +868,7 @@ public:
     void disableCORSForURL(const String&);
 
     RefPtr<File> createFile(const String&);
+    void asyncCreateFile(const String&, DOMPromiseDeferred<IDLInterface<File>>&&);
     String createTemporaryFile(const String& name, const String& contents);
 
     void queueMicroTask(int);
@@ -1490,6 +1489,8 @@ public:
     using ImageBufferResourceLimits = WebCore::ImageBufferResourceLimits;
     using ImageBufferResourceLimitsPromise = DOMPromiseDeferred<IDLDictionary<ImageBufferResourceLimits>>;
     void getImageBufferResourceLimits(ImageBufferResourceLimitsPromise&&);
+
+    void setResourceCachingDisabledByWebInspector(bool);
 
 private:
     explicit Internals(Document&);

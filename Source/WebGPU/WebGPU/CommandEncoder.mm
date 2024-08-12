@@ -666,7 +666,12 @@ Ref<RenderPassEncoder> CommandEncoder::beginRenderPass(const WGPURenderPassDescr
     auto mtlRenderCommandEncoder = [m_commandBuffer renderCommandEncoderWithDescriptor:mtlDescriptor];
     ASSERT(!m_existingCommandEncoder);
     setExistingEncoder(mtlRenderCommandEncoder);
-    return RenderPassEncoder::create(mtlRenderCommandEncoder, descriptor, visibilityResultBufferSize, depthReadOnly, stencilReadOnly, *this, visibilityResultBuffer, maxDrawCount, m_device);
+    return RenderPassEncoder::create(mtlRenderCommandEncoder, descriptor, visibilityResultBufferSize, depthReadOnly, stencilReadOnly, *this, visibilityResultBuffer, maxDrawCount, m_device, mtlDescriptor);
+}
+
+id<MTLCommandBuffer> CommandEncoder::commandBuffer() const
+{
+    return m_commandBuffer;
 }
 
 NSString* CommandEncoder::errorValidatingCopyBufferToBuffer(const Buffer& source, uint64_t sourceOffset, const Buffer& destination, uint64_t destinationOffset, uint64_t size)
@@ -1112,10 +1117,10 @@ NSString* CommandEncoder::errorValidatingCopyTextureToBuffer(const WGPUImageCopy
 
 void CommandEncoder::clearTextureIfNeeded(const WGPUImageCopyTexture& destination, NSUInteger slice)
 {
-    clearTextureIfNeeded(destination, slice, m_device->device(), m_blitCommandEncoder);
+    clearTextureIfNeeded(destination, slice, m_device, m_blitCommandEncoder);
 }
 
-void CommandEncoder::clearTextureIfNeeded(const WGPUImageCopyTexture& destination, NSUInteger slice, id<MTLDevice> device, id<MTLBlitCommandEncoder> blitCommandEncoder)
+void CommandEncoder::clearTextureIfNeeded(const WGPUImageCopyTexture& destination, NSUInteger slice, const Device& device, id<MTLBlitCommandEncoder> blitCommandEncoder)
 {
     auto& texture = fromAPI(destination.texture);
     NSUInteger mipLevel = destination.mipLevel;
@@ -1134,7 +1139,7 @@ bool CommandEncoder::encoderIsCurrent(id<MTLCommandEncoder> commandEncoder) cons
     return existingEncoder == commandEncoder;
 }
 
-void CommandEncoder::clearTextureIfNeeded(Texture& texture, NSUInteger mipLevel, NSUInteger slice, id<MTLDevice> device, id<MTLBlitCommandEncoder> blitCommandEncoder)
+void CommandEncoder::clearTextureIfNeeded(Texture& texture, NSUInteger mipLevel, NSUInteger slice, const Device& device, id<MTLBlitCommandEncoder> blitCommandEncoder)
 {
     if (!blitCommandEncoder || texture.previouslyCleared(mipLevel, slice))
         return;
@@ -1161,7 +1166,8 @@ void CommandEncoder::clearTextureIfNeeded(Texture& texture, NSUInteger mipLevel,
     NSUInteger bufferLength = bytesPerImage * depth;
     if (!bufferLength)
         return;
-    id<MTLBuffer> temporaryBuffer = [device newBufferWithLength:bufferLength options:MTLResourceStorageModeShared];
+    id<MTLBuffer> temporaryBuffer = device.safeCreateBuffer(bufferLength);
+
     if (!temporaryBuffer)
         return;
 

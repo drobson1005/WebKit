@@ -165,9 +165,7 @@ std::optional<LayoutUnit> RenderGrid::availableSpaceForGutters(GridTrackSizingDi
 
 void RenderGrid::computeTrackSizesForDefiniteSize(GridTrackSizingDirection direction, LayoutUnit availableSpace, GridLayoutState& gridLayoutState)
 {
-    m_trackSizingAlgorithm.setup(direction, numTracks(direction), SizingOperation::TrackSizing, availableSpace, gridLayoutState);
-    m_trackSizingAlgorithm.run();
-
+    m_trackSizingAlgorithm.run(direction, numTracks(direction), SizingOperation::TrackSizing, availableSpace, gridLayoutState);
     ASSERT(m_trackSizingAlgorithm.tracksAreWiderThanMinTrackBreadth());
 }
 
@@ -316,7 +314,6 @@ void RenderGrid::layoutGrid(bool relayoutChildren)
         LayoutStateMaintainer statePusher(*this, locationOffset(), isTransformed() || hasReflection() || style().isFlippedBlocksWritingMode());
 
         GridLayoutState gridLayoutState;
-        CheckedRef checkedGridLayoutState = gridLayoutState;
 
         computeLayoutRequirementsForItemsBeforeLayout(gridLayoutState);
 
@@ -705,15 +702,14 @@ void RenderGrid::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, Layo
         maxLogicalWidth = std::max(maxLogicalWidth, gridItemMaxWidth);
     }
 
-    LayoutUnit scrollbarWidth = intrinsicScrollbarLogicalWidth();
+    LayoutUnit scrollbarWidth = intrinsicScrollbarLogicalWidthIncludingGutter();
     minLogicalWidth += scrollbarWidth;
     maxLogicalWidth += scrollbarWidth;
 }
 
 void RenderGrid::computeTrackSizesForIndefiniteSize(GridTrackSizingAlgorithm& algorithm, GridTrackSizingDirection direction, GridLayoutState& gridLayoutState, LayoutUnit* minIntrinsicSize, LayoutUnit* maxIntrinsicSize) const
 {
-    algorithm.setup(direction, numTracks(direction), SizingOperation::IntrinsicSizeComputation, std::nullopt, gridLayoutState);
-    algorithm.run();
+    algorithm.run(direction, numTracks(direction), SizingOperation::IntrinsicSizeComputation, std::nullopt, gridLayoutState);
 
     size_t numberOfTracks = algorithm.tracks(direction).size();
     LayoutUnit totalGuttersSize = direction == GridTrackSizingDirection::ForColumns && explicitIntrinsicInnerLogicalSize(direction).has_value() ? 0_lu : guttersSize(direction, 0, numberOfTracks, std::nullopt);
@@ -2628,6 +2624,20 @@ RenderGrid::GridWrapper::GridWrapper(RenderGrid& renderGrid)
 void RenderGrid::GridWrapper::resetCurrentGrid() const
 {
     m_currentGrid = std::ref(const_cast<Grid&>(m_layoutGrid));
+}
+
+void RenderGrid::computeOverflow(LayoutUnit oldClientAfterEdge, bool recomputeFloats)
+{
+    RenderBlock::computeOverflow(oldClientAfterEdge, recomputeFloats);
+
+    if (!hasPotentiallyScrollableOverflow() || isMasonry() || isSubgridRows() || isSubgridColumns())
+        return;
+
+    // FIXME: We should handle RTL and other writing modes also.
+    if (style().direction() == TextDirection::LTR && isHorizontalWritingMode()) {
+        auto gridAreaSize = LayoutSize { m_columnPositions.last(), m_rowPositions.last() };
+        addLayoutOverflow({ { }, gridAreaSize });
+    }
 }
 
 } // namespace WebCore

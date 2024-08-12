@@ -222,6 +222,7 @@ private:
 
     void paintChildren(PaintInfo& forSelf, const LayoutPoint& paintOffset, PaintInfo& forChild, bool usePrintRect) override;
     LayoutOptionalOutsets allowedLayoutOverflow() const override;
+    void computeOverflow(LayoutUnit oldClientAfterEdge, bool recomputeFloats = false) final;
 
     LayoutUnit availableAlignmentSpaceForGridItemBeforeStretching(LayoutUnit gridAreaBreadthForGridItem, const RenderBox&, GridTrackSizingDirection) const;
     StyleSelfAlignmentData justifySelfForGridItem(const RenderBox&, StretchingMode = StretchingMode::Any, const RenderStyle* = nullptr) const;
@@ -275,6 +276,8 @@ private:
         mutable std::reference_wrapper<Grid> m_currentGrid { std::ref(m_layoutGrid) };
     } m_grid;
 
+    // FIXME: Refactor m_trackSizingAlgorithm to be inside of layoutGrid and layoutMasonry.
+    // https://bugs.webkit.org/show_bug.cgi?id=277496
     GridTrackSizingAlgorithm m_trackSizingAlgorithm;
 
     Vector<LayoutUnit> m_columnPositions;

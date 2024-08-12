@@ -37,6 +37,7 @@ class InternalObserver;
 class ScriptExecutionContext;
 class JSSubscriptionObserverCallback;
 class PredicateCallback;
+class MapperCallback;
 struct SubscriptionObserver;
 struct SubscribeOptions;
 
@@ -53,9 +54,13 @@ public:
     void subscribe(ScriptExecutionContext&, std::optional<ObserverUnion>, SubscribeOptions);
     void subscribeInternal(ScriptExecutionContext&, Ref<InternalObserver>, SubscribeOptions);
 
+    Ref<Observable> map(ScriptExecutionContext&, MapperCallback&);
+
     Ref<Observable> filter(ScriptExecutionContext&, PredicateCallback&);
 
     Ref<Observable> take(ScriptExecutionContext&, uint64_t);
+
+    Ref<Observable> drop(ScriptExecutionContext&, uint64_t);
 
 private:
     Ref<SubscriberCallback> m_subscriberCallback;

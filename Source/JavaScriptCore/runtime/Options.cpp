@@ -637,12 +637,10 @@ static inline void disableAllWasmOptions()
     Options::useWasmFaultSignalHandler() = false;
     Options::numberOfWasmCompilerThreads() = 0;
 
-    Options::useWasmTypedFunctionReferences() = false;
     Options::useWasmGC() = false;
     Options::useWasmSIMD() = false;
     Options::useWasmRelaxedSIMD() = false;
     Options::useWasmTailCalls() = false;
-    Options::useWasmExtendedConstantExpressions() = false;
 }
 
 static inline void disableAllJITOptions()
@@ -659,8 +657,10 @@ static inline void disableAllJITOptions()
     Options::useJITCage() = false;
     Options::useConcurrentJIT() = false;
 
-    if (!Options::useInterpretedJSEntryWrappers() && Options::useWasm())
+    if (!Options::useWasmJITLessJSEntrypoint() && Options::useWasm())
         disableAllWasmOptions();
+
+    Options::useWasmSIMD() = false;
 
     Options::usePollingTraps() = true;
 
@@ -774,11 +774,6 @@ void Options::notifyOptionsChanged()
             Options::useDFGJIT() = false;
             Options::useFTLJIT() = false;
         }
-
-        // Windows: Building with WEBASSEMBLY_OMGJIT and disabling at runtime
-#if OS(WINDOWS)
-        Options::useOMGJIT() = false;
-#endif
 
         if (Options::dumpDisassembly()
             || Options::asyncDisassembly()

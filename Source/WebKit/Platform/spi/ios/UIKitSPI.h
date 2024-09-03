@@ -1247,6 +1247,10 @@ typedef NS_ENUM(NSUInteger, _UIScrollDeviceCategory) {
 
 @class UITextInputArrowKeyHistory;
 
+@interface UIApplication (InternalBSAction)
+- (void)_registerInternalBSActionHandler:(id<_UIApplicationBSActionHandler>)handler;
+@end
+
 WTF_EXTERN_C_BEGIN
 
 BOOL UIKeyboardEnabledInputModesAllowOneToManyShortcuts(void);

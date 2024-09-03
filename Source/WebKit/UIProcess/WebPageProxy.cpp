@@ -6038,6 +6038,9 @@ void WebPageProxy::didDestroyFrame(IPC::Connection& connection, FrameIdentifier 
     if (RefPtr frame = WebFrameProxy::webFrame(frameID))
         frame->disconnect();
 
+    if (m_framesWithSubresourceLoadingForPageLoadTiming.remove(frameID) && m_framesWithSubresourceLoadingForPageLoadTiming.isEmpty())
+        generatePageLoadingTimingSoon();
+
     forEachWebContentProcess([&](auto& webProcess, auto pageID) {
         if (!webProcess.hasConnection() || &webProcess.connection() == &connection)
             return;
@@ -6094,20 +6097,22 @@ void WebPageProxy::setNetworkRequestsInProgress(bool networkRequestsInProgress)
     internals().pageLoadState.setNetworkRequestsInProgress(transaction, networkRequestsInProgress);
 }
 
-void WebPageProxy::startNetworkRequestsForPageLoadTiming()
+void WebPageProxy::startNetworkRequestsForPageLoadTiming(WebCore::FrameIdentifier frameID)
 {
     m_generatePageLoadTimingTimer.stop();
-    ++m_subresourceLoadingCountForPageLoadTiming;
+    auto addResult = m_framesWithSubresourceLoadingForPageLoadTiming.add(frameID);
+    ASSERT_UNUSED(addResult, addResult.isNewEntry);
 }
 
-void WebPageProxy::endNetworkRequestsForPageLoadTiming(WallTime timestamp)
+void WebPageProxy::endNetworkRequestsForPageLoadTiming(WebCore::FrameIdentifier frameID, WallTime timestamp)
 {
-    ASSERT(m_subresourceLoadingCountForPageLoadTiming);
-    --m_subresourceLoadingCountForPageLoadTiming;
+    auto didRemove = m_framesWithSubresourceLoadingForPageLoadTiming.remove(frameID);
+    ASSERT_UNUSED(didRemove, didRemove);
     if (!m_pageLoadTiming)
         return;
     m_pageLoadTiming->updateEndOfNetworkRequests(timestamp);
-    generatePageLoadingTimingSoon();
+    if (m_framesWithSubresourceLoadingForPageLoadTiming.isEmpty())
+        generatePageLoadingTimingSoon();
 }
 
 void WebPageProxy::generatePageLoadingTimingSoon()
@@ -6115,7 +6120,7 @@ void WebPageProxy::generatePageLoadingTimingSoon()
     m_generatePageLoadTimingTimer.stop();
     if (!m_pageLoadTiming)
         return;
-    if (m_subresourceLoadingCountForPageLoadTiming)
+    if (m_framesWithSubresourceLoadingForPageLoadTiming.size())
         return;
     if (!m_pageLoadTiming->firstMeaningfulPaint())
         return;
@@ -10544,7 +10549,15 @@ bool WebPageProxy::useGPUProcessForDOMRenderingEnabled() const
 
 WebPageCreationParameters WebPageProxy::creationParameters(WebProcessProxy& process, DrawingAreaProxy& drawingArea, WebCore::FrameIdentifier mainFrameIdentifier, std::optional<RemotePageParameters>&& remotePageParameters, bool isProcessSwap, RefPtr<API::WebsitePolicies>&& websitePolicies)
 {
-    WebPageCreationParameters parameters;
+    Ref userContentController = m_userContentController;
+    if (RefPtr userContentControllerFromWebsitePolicies = websitePolicies ? websitePolicies->userContentController() : nullptr)
+        userContentController = userContentControllerFromWebsitePolicies.releaseNonNull();
+    process.addWebUserContentControllerProxy(userContentController);
+
+    WebPageCreationParameters parameters {
+        .pageGroupData = m_pageGroup->data(),
+        .userContentControllerParameters = userContentController->parameters()
+    };
 
     parameters.processDisplayName = configuration().processDisplayName();
 
@@ -10557,7 +10570,6 @@ WebPageCreationParameters WebPageProxy::creationParameters(WebProcessProxy& proc
     parameters.drawingAreaIdentifier = drawingArea.identifier();
     parameters.webPageProxyIdentifier = internals().identifier;
     parameters.store = preferencesStore();
-    parameters.pageGroupData = m_pageGroup->data();
     parameters.isEditable = m_isEditable;
     parameters.underlayColor = internals().underlayColor;
     parameters.useFixedLayout = m_useFixedLayout;
@@ -10725,12 +10737,6 @@ WebPageCreationParameters WebPageProxy::creationParameters(WebProcessProxy& proc
     parameters.crossOriginAccessControlCheckEnabled = m_configuration->crossOriginAccessControlCheckEnabled();
     parameters.hasResourceLoadClient = !!m_resourceLoadClient;
     parameters.portsForUpgradingInsecureSchemeForTesting = m_configuration->portsForUpgradingInsecureSchemeForTesting();
-
-    std::reference_wrapper<WebUserContentControllerProxy> userContentController(m_userContentController.get());
-    if (auto* userContentControllerFromWebsitePolicies = websitePolicies ? websitePolicies->userContentController() : nullptr)
-        userContentController = *userContentControllerFromWebsitePolicies;
-    process.addWebUserContentControllerProxy(userContentController);
-    parameters.userContentControllerParameters = userContentController.get().parameters();
 
 #if ENABLE(WK_WEB_EXTENSIONS)
     if (m_webExtensionController)

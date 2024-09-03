@@ -574,16 +574,16 @@ enum class WindowKind : uint8_t;
 template<typename> class MonotonicObjectIdentifier;
 
 using ActivityStateChangeID = uint64_t;
-using GeolocationIdentifier = LegacyNullableObjectIdentifier<GeolocationIdentifierType>;
+using GeolocationIdentifier = ObjectIdentifier<GeolocationIdentifierType>;
 using LayerHostingContextID = uint32_t;
 using NetworkResourceLoadIdentifier = LegacyNullableObjectIdentifier<NetworkResourceLoadIdentifierType>;
-using PDFPluginIdentifier = LegacyNullableObjectIdentifier<PDFPluginIdentifierType>;
+using PDFPluginIdentifier = ObjectIdentifier<PDFPluginIdentifierType>;
 using PlaybackSessionContextIdentifier = WebCore::HTMLMediaElementIdentifier;
 using SnapshotOptions = OptionSet<SnapshotOption>;
 using SpeechRecognitionPermissionRequestCallback = CompletionHandler<void(std::optional<WebCore::SpeechRecognitionError>&&)>;
 using SpellDocumentTag = int64_t;
-using TapIdentifier = LegacyNullableObjectIdentifier<TapIdentifierType>;
-using TextCheckerRequestID = LegacyNullableObjectIdentifier<TextCheckerRequestType>;
+using TapIdentifier = ObjectIdentifier<TapIdentifierType>;
+using TextCheckerRequestID = ObjectIdentifier<TextCheckerRequestType>;
 using TransactionID = MonotonicObjectIdentifier<TransactionIDType>;
 using WebPageProxyIdentifier = LegacyNullableObjectIdentifier<WebPageProxyIdentifierType>;
 using WebURLSchemeHandlerIdentifier = ObjectIdentifier<WebURLSchemeHandler>;
@@ -2511,8 +2511,8 @@ public:
 
     void simulateClickOverFirstMatchingTextInViewportWithUserInteraction(String&& targetText, CompletionHandler<void(bool)>&&);
 
-    void startNetworkRequestsForPageLoadTiming();
-    void endNetworkRequestsForPageLoadTiming(WallTime);
+    void startNetworkRequestsForPageLoadTiming(WebCore::FrameIdentifier);
+    void endNetworkRequestsForPageLoadTiming(WebCore::FrameIdentifier, WallTime);
 
 private:
     void getWebCryptoMasterKey(CompletionHandler<void(std::optional<Vector<uint8_t>>&&)>&&);
@@ -3195,7 +3195,7 @@ private:
     bool m_isLoadingAlternateHTMLStringForFailingProvisionalLoad { false };
 
     std::unique_ptr<WebPageLoadTiming> m_pageLoadTiming;
-    unsigned m_subresourceLoadingCountForPageLoadTiming { 0 };
+    HashSet<WebCore::FrameIdentifier> m_framesWithSubresourceLoadingForPageLoadTiming;
     RunLoop::Timer m_generatePageLoadTimingTimer;
 
     std::unique_ptr<DrawingAreaProxy> m_drawingArea;

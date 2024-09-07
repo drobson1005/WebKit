@@ -386,6 +386,8 @@ inline GridPosition RenderStyle::initialGridItemColumnEnd() { return { }; }
 inline GridPosition RenderStyle::initialGridItemColumnStart() { return { }; }
 inline GridPosition RenderStyle::initialGridItemRowEnd() { return { }; }
 inline GridPosition RenderStyle::initialGridItemRowStart() { return { }; }
+inline GridTrackList RenderStyle::initialGridColumnList() { return { }; }
+inline GridTrackList RenderStyle::initialGridRowList() { return { }; }
 inline Vector<GridTrackSize> RenderStyle::initialGridRowTrackSizes() { return { }; }
 constexpr OptionSet<HangingPunctuation> RenderStyle::initialHangingPunctuation() { return { }; }
 inline const AtomString& RenderStyle::initialHyphenationString() { return nullAtom(); }
@@ -957,7 +959,7 @@ constexpr bool RenderStyle::preserveNewline(WhiteSpace mode)
     return mode != WhiteSpace::Normal && mode != WhiteSpace::NoWrap;
 }
 
-inline BlockFlowDirection RenderStyle::blockFlowDirection() const
+inline FlowDirection RenderStyle::blockFlowDirection() const
 {
     return writingModeToBlockFlowDirection(writingMode());
 }

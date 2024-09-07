@@ -5825,6 +5825,11 @@ void WebPage::captureDevicesChanged()
     m_userMediaPermissionRequestManager->captureDevicesChanged();
 }
 
+void WebPage::voiceActivityDetected()
+{
+    corePage()->voiceActivityDetected();
+}
+
 #if USE(GSTREAMER)
 void WebPage::setOrientationForMediaCapture(uint64_t rotation)
 {
@@ -7888,6 +7893,7 @@ void WebPage::loadAndDecodeImage(WebCore::ResourceRequest&& request, std::option
     });
 }
 
+#if PLATFORM(MAC)
 void WebPage::flushPendingThemeColorChange()
 {
     if (!m_pendingThemeColorChange)
@@ -7897,6 +7903,7 @@ void WebPage::flushPendingThemeColorChange()
 
     send(Messages::WebPageProxy::ThemeColorChanged(m_page->themeColor()));
 }
+#endif
 
 void WebPage::flushPendingPageExtendedBackgroundColorChange()
 {

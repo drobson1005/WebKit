@@ -23,6 +23,7 @@
 #pragma once
 
 #include "CSSCustomPropertySyntax.h"
+#include "CSSParserContext.h"
 #include "CSSParserTokenRange.h"
 #include "CSSPropertyParserHelpers.h"
 #include "StyleRuleType.h"
@@ -92,6 +93,9 @@ private:
     // @view-transition descriptors.
     bool parseViewTransitionDescriptor(CSSPropertyID);
 
+    // @-internal-base-appearance descriptors.
+    bool parseInternalBaseAppearanceDescriptor(CSSPropertyID, bool important);
+
     void addProperty(CSSPropertyID longhand, CSSPropertyID shorthand, RefPtr<CSSValue>&&, bool important, bool implicit = false);
     void addExpandedProperty(CSSPropertyID shorthand, RefPtr<CSSValue>&&, bool important, bool implicit = false);
 
@@ -117,9 +121,7 @@ private:
     bool consumeGridShorthand(bool important);
     bool consumeGridAreaShorthand(bool important);
 
-    bool consumePlaceContentShorthand(bool important);
-    bool consumePlaceItemsShorthand(bool important);
-    bool consumePlaceSelfShorthand(bool important);
+    bool consumeAlignShorthand(const StylePropertyShorthand&, bool important);
 
     bool consumeFont(bool important);
     bool consumeTextDecorationSkip(bool important);

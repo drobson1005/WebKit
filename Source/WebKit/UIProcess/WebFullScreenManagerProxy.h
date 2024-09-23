@@ -58,7 +58,9 @@ namespace WebKit {
 class WebPageProxy;
 struct SharedPreferencesForWebProcess;
 
-class WebFullScreenManagerProxyClient {
+class WebFullScreenManagerProxyClient : public CanMakeCheckedPtr<WebFullScreenManagerProxyClient> {
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(WebFullScreenManagerProxyClient);
 public:
     virtual ~WebFullScreenManagerProxyClient() { }
 
@@ -120,6 +122,8 @@ public:
     void unlockFullscreenOrientation();
 
 private:
+    Ref<WebPageProxy> protectedPage() const;
+
     void supportsFullScreen(bool withKeyboard, CompletionHandler<void(bool)>&&);
     void enterFullScreen(bool blocksReturnToFullscreenFromPictureInPicture, FullScreenMediaDetails&&);
     void exitFullScreen();
@@ -137,8 +141,8 @@ private:
     WTFLogChannel& logChannel() const;
 #endif
 
-    WebPageProxy& m_page;
-    WebFullScreenManagerProxyClient& m_client;
+    WeakRef<WebPageProxy> m_page;
+    CheckedRef<WebFullScreenManagerProxyClient> m_client;
     FullscreenState m_fullscreenState { FullscreenState::NotInFullscreen };
     bool m_blocksReturnToFullscreenFromPictureInPicture { false };
 #if ENABLE(VIDEO_USES_ELEMENT_FULLSCREEN)

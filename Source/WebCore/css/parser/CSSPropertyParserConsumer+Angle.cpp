@@ -26,13 +26,11 @@
 #include "CSSPropertyParserConsumer+Angle.h"
 #include "CSSPropertyParserConsumer+AngleDefinitions.h"
 
-#include "CSSCalcParser.h"
 #include "CSSCalcSymbolTable.h"
 #include "CSSCalcValue.h"
 #include "CSSPropertyParserConsumer+CSSPrimitiveValueResolver.h"
 #include "CSSPropertyParserConsumer+MetaConsumer.h"
-#include "CSSPropertyParserConsumer+PercentDefinitions.h"
-#include "CSSPropertyParserConsumer+RawResolver.h"
+#include "CSSPropertyParserConsumer+PercentageDefinitions.h"
 #include "CalculationCategory.h"
 
 namespace WebCore {
@@ -45,17 +43,17 @@ std::optional<AngleRaw> validatedRange(AngleRaw value, CSSPropertyParserOptions 
     return value;
 }
 
-std::optional<UnevaluatedCalc<AngleRaw>> AngleKnownTokenTypeFunctionConsumer::consume(CSSParserTokenRange& range, CSSCalcSymbolsAllowed symbolsAllowed, CSSPropertyParserOptions options)
+std::optional<UnevaluatedCalc<AngleRaw>> AngleKnownTokenTypeFunctionConsumer::consume(CSSParserTokenRange& range, const CSSParserContext& context, CSSCalcSymbolsAllowed symbolsAllowed, CSSPropertyParserOptions options)
 {
     auto rangeCopy = range;
-    if (RefPtr value = consumeCalcRawWithKnownTokenTypeFunction(rangeCopy, Calculation::Category::Angle, WTFMove(symbolsAllowed), options)) {
+    if (RefPtr value = CSSCalcValue::parse(rangeCopy, context, Calculation::Category::Angle, WTFMove(symbolsAllowed), options)) {
         range = rangeCopy;
         return {{ value.releaseNonNull() }};
     }
     return std::nullopt;
 }
 
-std::optional<AngleRaw> AngleKnownTokenTypeDimensionConsumer::consume(CSSParserTokenRange& range, CSSCalcSymbolsAllowed, CSSPropertyParserOptions options)
+std::optional<AngleRaw> AngleKnownTokenTypeDimensionConsumer::consume(CSSParserTokenRange& range, const CSSParserContext&, CSSCalcSymbolsAllowed, CSSPropertyParserOptions options)
 {
     ASSERT(range.peek().type() == DimensionToken);
 
@@ -80,7 +78,7 @@ std::optional<AngleRaw> AngleKnownTokenTypeDimensionConsumer::consume(CSSParserT
     return std::nullopt;
 }
 
-std::optional<AngleRaw> AngleKnownTokenTypeNumberConsumer::consume(CSSParserTokenRange& range, CSSCalcSymbolsAllowed, CSSPropertyParserOptions options)
+std::optional<AngleRaw> AngleKnownTokenTypeNumberConsumer::consume(CSSParserTokenRange& range, const CSSParserContext&, CSSCalcSymbolsAllowed, CSSPropertyParserOptions options)
 {
     ASSERT(range.peek().type() == NumberToken);
 
@@ -98,33 +96,23 @@ std::optional<AngleRaw> AngleKnownTokenTypeNumberConsumer::consume(CSSParserToke
 
 // MARK: - Consumer functions
 
-std::optional<AngleRaw> consumeAngleRaw(CSSParserTokenRange& range, CSSParserMode parserMode, UnitlessQuirk unitless, UnitlessZeroQuirk unitlessZero)
+RefPtr<CSSPrimitiveValue> consumeAngle(CSSParserTokenRange& range, const CSSParserContext& context, UnitlessQuirk unitless, UnitlessZeroQuirk unitlessZero)
 {
     const auto options = CSSPropertyParserOptions {
-        .parserMode = parserMode,
+        .parserMode = context.mode,
         .unitless = unitless,
         .unitlessZero = unitlessZero
     };
-    return RawResolver<AngleRaw>::consumeAndResolve(range, { }, { }, options);
+    return CSSPrimitiveValueResolver<AngleRaw>::consumeAndResolve(range, context, { }, { }, options);
 }
 
-RefPtr<CSSPrimitiveValue> consumeAngle(CSSParserTokenRange& range, CSSParserMode parserMode, UnitlessQuirk unitless, UnitlessZeroQuirk unitlessZero)
+RefPtr<CSSPrimitiveValue> consumeAngleOrPercent(CSSParserTokenRange& range, const CSSParserContext& context)
 {
     const auto options = CSSPropertyParserOptions {
-        .parserMode = parserMode,
-        .unitless = unitless,
-        .unitlessZero = unitlessZero
-    };
-    return CSSPrimitiveValueResolver<AngleRaw>::consumeAndResolve(range, { }, { }, options);
-}
-
-RefPtr<CSSPrimitiveValue> consumeAngleOrPercent(CSSParserTokenRange& range, CSSParserMode parserMode)
-{
-    const auto options = CSSPropertyParserOptions {
-        .parserMode = parserMode,
+        .parserMode = context.mode,
         .unitlessZero = UnitlessZeroQuirk::Allow
     };
-    return CSSPrimitiveValueResolver<AngleRaw, PercentRaw>::consumeAndResolve(range, { }, { }, options);
+    return CSSPrimitiveValueResolver<AngleRaw, PercentageRaw>::consumeAndResolve(range, context, { }, { }, options);
 }
 
 } // namespace CSSPropertyParserHelpers

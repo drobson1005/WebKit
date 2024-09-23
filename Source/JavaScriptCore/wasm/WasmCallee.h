@@ -63,6 +63,7 @@ public:
 
     CodePtr<WasmEntryPtrTag> entrypoint() const;
     RegisterAtOffsetList* calleeSaveRegisters();
+    // Used by Wasm's fault signal handler to determine if the fault came from Wasm.
     std::tuple<void*, void*> range() const;
 
     const HandlerInfo* handlerForIndex(JSWebAssemblyInstance&, unsigned, const Tag*);
@@ -128,82 +129,24 @@ protected:
 #endif
 };
 
-class JSEntrypointCallee : public Callee {
+class JSEntrypointCallee final : public Callee {
     WTF_MAKE_TZONE_ALLOCATED(JSEntrypointCallee);
-protected:
-    JS_EXPORT_PRIVATE JSEntrypointCallee(Wasm::CompilationMode mode) : Callee(mode) { }
-};
-
-class JSEntrypointJITCallee final : public JSEntrypointCallee {
-    WTF_MAKE_TZONE_ALLOCATED(JSEntrypointJITCallee);
 public:
     friend class Callee;
+    friend class JSC::LLIntOffsetsExtractor;
 
-#if ENABLE(JIT)
-    void setEntrypoint(Wasm::Entrypoint&&);
-#endif
-
-    static inline Ref<JSEntrypointJITCallee> create()
+    static inline Ref<JSEntrypointCallee> create(TypeIndex typeIndex, bool usesSIMD)
     {
-        return adoptRef(*new JSEntrypointJITCallee);
-    }
-
-private:
-    inline JSEntrypointJITCallee()
-        : JSEntrypointCallee(Wasm::CompilationMode::JSEntrypointJITMode)
-    {
-    }
-
-#if ENABLE(JIT)
-    std::tuple<void*, void*> rangeImpl() const
-    {
-        void* start = m_entrypoint.compilation->codeRef().executableMemory()->start().untaggedPtr();
-        void* end = m_entrypoint.compilation->codeRef().executableMemory()->end().untaggedPtr();
-        return { start, end };
-    }
-
-    CodePtr<WasmEntryPtrTag> entrypointImpl() const { return m_entrypoint.compilation->code().retagged<WasmEntryPtrTag>(); }
-
-    RegisterAtOffsetList* calleeSaveRegistersImpl() { return &m_entrypoint.calleeSaveRegisters; }
-#else
-    std::tuple<void*, void*> rangeImpl() const { return { nullptr, nullptr }; }
-    CodePtr<WasmEntryPtrTag> entrypointImpl() const { return { }; }
-    RegisterAtOffsetList* calleeSaveRegistersImpl() { return nullptr; }
-#endif
-
-#if ENABLE(JIT)
-    Wasm::Entrypoint m_entrypoint;
-#endif
-};
-
-class JITLessJSEntrypointCallee final : public JSEntrypointCallee {
-    WTF_MAKE_TZONE_ALLOCATED(JITLessJSEntrypointCallee);
-public:
-    static inline Ref<JITLessJSEntrypointCallee> create(unsigned frameSize, TypeIndex typeIndex, bool usesSIMD)
-    {
-        return adoptRef(*new JITLessJSEntrypointCallee(frameSize, typeIndex, usesSIMD));
-    }
-
-    inline bool hasReplacement() const { return !!m_replacementCallee; }
-
-    inline void setReplacement(RefPtr<Wasm::Callee> callee)
-    {
-        // Note that we can compile the same function with multiple memory modes, which can cause the JS->Wasm stub generator to
-        // race. That's fine, both stubs should do the same thing.
-        if (m_replacementCallee)
-            return;
-        ASSERT(callee);
-        m_replacementCallee = WTFMove(callee);
+        return adoptRef(*new JSEntrypointCallee(typeIndex, usesSIMD));
     }
 
     CodePtr<WasmEntryPtrTag> entrypointImpl() const;
     static JS_EXPORT_PRIVATE RegisterAtOffsetList* calleeSaveRegistersImpl();
     std::tuple<void*, void*> rangeImpl() const { return { nullptr, nullptr }; }
-
-    static constexpr ptrdiff_t offsetOfIdent() { return OBJECT_OFFSETOF(JITLessJSEntrypointCallee, ident); }
-    static constexpr ptrdiff_t offsetOfWasmCallee() { return OBJECT_OFFSETOF(JITLessJSEntrypointCallee, wasmCallee); }
-    static constexpr ptrdiff_t offsetOfWasmFunctionPrologue() { return OBJECT_OFFSETOF(JITLessJSEntrypointCallee, wasmFunctionPrologue); }
-    static constexpr ptrdiff_t offsetOfFrameSize() { return OBJECT_OFFSETOF(JITLessJSEntrypointCallee, frameSize); }
+    static constexpr ptrdiff_t offsetOfIdent() { return OBJECT_OFFSETOF(JSEntrypointCallee, m_ident); }
+    static constexpr ptrdiff_t offsetOfWasmCallee() { return OBJECT_OFFSETOF(JSEntrypointCallee, m_wasmCallee); }
+    static constexpr ptrdiff_t offsetOfWasmFunctionPrologue() { return OBJECT_OFFSETOF(JSEntrypointCallee, m_wasmFunctionPrologue); }
+    static constexpr ptrdiff_t offsetOfFrameSize() { return OBJECT_OFFSETOF(JSEntrypointCallee, m_frameSize); }
 
     // Space for callee-saves; Not included in frameSize
     static constexpr unsigned SpillStackSpaceAligned = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(3 * sizeof(UCPURegister));
@@ -211,19 +154,32 @@ public:
     static constexpr unsigned RegisterStackSpaceAligned = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(
         FPRInfo::numberOfArgumentRegisters * bytesForWidth(Width::Width64) + GPRInfo::numberOfArgumentRegisters * sizeof(UCPURegister));
 
-    const unsigned ident { 0xBF };
-    const unsigned frameSize;
-    // This must be initialized after the callee is created unfortunately.
-    EncodedJSValue wasmCallee;
-    const TypeIndex typeIndex;
-    // In the JIT case, we want to always call the llint prologue from a jit function.
-    // In the no-jit case, we dont' care.
-    CodePtr<WasmEntryPtrTag> wasmFunctionPrologue;
+    unsigned ident() const { return m_ident; }
+    unsigned frameSize() const { return m_frameSize; }
+    EncodedJSValue wasmCallee() const { return m_wasmCallee; }
+    TypeIndex typeIndex() const { return m_typeIndex; }
+
+    void setWasmCallee(EncodedJSValue wasmCallee)
+    {
+        m_wasmCallee = wasmCallee;
+    }
+
+    void setReplacementTarget(CodePtr<WasmEntryPtrTag> replacement)
+    {
+        m_wasmFunctionPrologue = replacement;
+    }
 
 private:
-    JITLessJSEntrypointCallee(unsigned frameSize, TypeIndex, bool);
+    JSEntrypointCallee(TypeIndex, bool);
 
-    RefPtr<Wasm::Callee> m_replacementCallee { nullptr };
+    const unsigned m_ident { 0xBF };
+    unsigned m_frameSize { };
+    // This must be initialized after the callee is created unfortunately.
+    EncodedJSValue m_wasmCallee;
+    const TypeIndex m_typeIndex;
+    // In the JIT case, we want to always call the llint prologue from a jit function.
+    // In the no-jit case, we dont' care.
+    CodePtr<WasmEntryPtrTag> m_wasmFunctionPrologue;
 };
 
 class WasmToJSCallee final : public Callee {
@@ -236,37 +192,42 @@ public:
     static WasmToJSCallee& singleton();
 
 private:
-
     WasmToJSCallee();
-
-    std::tuple<void*, void*> rangeImpl() const
-    {
-        return { nullptr, nullptr };
-    }
-
+    std::tuple<void*, void*> rangeImpl() const { return { nullptr, nullptr }; }
     CodePtr<WasmEntryPtrTag> entrypointImpl() const { return { }; }
-
     RegisterAtOffsetList* calleeSaveRegistersImpl() { return nullptr; }
 };
 
 #if ENABLE(JIT)
 
-class JSToWasmICCallee final : public JITCallee {
+class JSToWasmICCallee final : public Callee {
     WTF_MAKE_TZONE_ALLOCATED(JSToWasmICCallee);
 public:
-    static Ref<JSToWasmICCallee> create()
+    static Ref<JSToWasmICCallee> create(RegisterAtOffsetList&& calleeSaves)
     {
-        return adoptRef(*new JSToWasmICCallee);
+        return adoptRef(*new JSToWasmICCallee(WTFMove(calleeSaves)));
     }
 
-    using JITCallee::setEntrypoint;
+    RegisterAtOffsetList* calleeSaveRegistersImpl() { return &m_calleeSaves; }
+    CodePtr<JSEntryPtrTag> jsEntrypoint() { return m_jsToWasmICEntrypoint.code(); }
+
+    void setEntrypoint(MacroAssemblerCodeRef<JSEntryPtrTag>&&);
 
 private:
-    JSToWasmICCallee()
-        : JITCallee(Wasm::CompilationMode::JSToWasmICMode)
+    friend class Callee;
+    JSToWasmICCallee(RegisterAtOffsetList&& calleeSaves)
+        : Callee(Wasm::CompilationMode::JSToWasmICMode)
+        , m_calleeSaves(WTFMove(calleeSaves))
     {
     }
+
+    std::tuple<void*, void*> rangeImpl() const { return { nullptr, nullptr }; }
+    CodePtr<WasmEntryPtrTag> entrypointImpl() const { return { }; }
+
+    MacroAssemblerCodeRef<JSEntryPtrTag> m_jsToWasmICEntrypoint;
+    RegisterAtOffsetList m_calleeSaves;
 };
+
 #endif
 
 #if ENABLE(WEBASSEMBLY_BBQJIT) || ENABLE(WEBASSEMBLY_OMGJIT)
@@ -525,12 +486,13 @@ public:
     // I couldn't figure out how to stop LLIntOffsetsExtractor.cpp from yelling at me.
     // So just making these public.
     const uint8_t* m_bytecode;
-    const uint32_t m_bytecodeLength;
+    const uint8_t* m_bytecodeEnd;
     Vector<uint8_t> m_metadataVector;
     const uint8_t* m_metadata;
     Vector<uint8_t> m_argumINTBytecode;
     const uint8_t* m_argumINTBytecodePointer;
-    const uint32_t m_returnMetadata;
+    Vector<uint8_t> m_uINTBytecode;
+    const uint8_t* m_uINTBytecodePointer;
 
     unsigned m_localSizeToAlloc;
     unsigned m_numRethrowSlotsToAlloc;

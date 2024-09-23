@@ -343,6 +343,7 @@ private:
                 
             case MultiPutByOffset:
             case MultiDeleteByOffset: {
+                // These nodes may cause transition too.
                 considerBarrier(m_node->child1());
                 break;
             }
@@ -383,6 +384,7 @@ private:
             case NewArray:
             case NewArrayWithSize:
             case NewArrayWithConstantSize:
+            case NewArrayWithSizeAndStructure:
             case NewArrayBuffer:
             case NewInternalFieldObject:
             case NewTypedArray:

@@ -238,6 +238,8 @@ public:
     void addRemoteVideoTrackProxy(WebCore::VideoTrackPrivate&);
     void addRemoteTextTrackProxy(WebCore::InbandTextTrackPrivate&);
 
+    const SharedPreferencesForWebProcess& sharedPreferencesForWebProcess() const;
+
 private:
     RemoteMediaPlayerProxy(RemoteMediaPlayerManagerProxy&, WebCore::MediaPlayerIdentifier, WebCore::MediaPlayerClientIdentifier, Ref<IPC::Connection>&&, WebCore::MediaPlayerEnums::MediaEngineIdentifier, RemoteMediaPlayerProxyConfiguration&&, RemoteVideoFrameObjectHeap&, const WebCore::ProcessIdentity&);
 
@@ -382,11 +384,17 @@ private:
 
 #if !RELEASE_LOG_DISABLED
     const Logger& mediaPlayerLogger() final { return m_logger; }
+    Ref<const Logger> protectedMediaPlayerLogger() const { return m_logger; }
     const void* mediaPlayerLogIdentifier() { return reinterpret_cast<const void*>(m_configuration.logIdentifier); }
     const Logger& logger() { return mediaPlayerLogger(); }
     const void* logIdentifier() { return mediaPlayerLogIdentifier(); }
     ASCIILiteral logClassName() const { return "RemoteMediaPlayerProxy"_s; }
     WTFLogChannel& logChannel() const;
+#endif
+
+    RefPtr<WebCore::MediaPlayer> protectedPlayer() const { return m_player; }
+#if ENABLE(MEDIA_SOURCE)
+    RefPtr<RemoteMediaSourceProxy> protectedMediaSourceProxy() const { return m_mediaSourceProxy; }
 #endif
 
     Vector<Ref<RemoteAudioTrackProxy>> m_audioTracks;
@@ -441,7 +449,7 @@ private:
     RefPtr<WebCore::VideoFrame> m_videoFrameForCurrentTime;
     bool m_shouldCheckHardwareSupport { false };
 #if !RELEASE_LOG_DISABLED
-    const Logger& m_logger;
+    Ref<const Logger> m_logger;
 #endif
 };
 

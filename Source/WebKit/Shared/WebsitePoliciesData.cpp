@@ -163,9 +163,22 @@ void WebsitePoliciesData::applyToDocumentLoader(WebsitePoliciesData&& websitePol
     documentLoader.setModalContainerObservationPolicy(websitePolicies.modalContainerObservationPolicy);
     documentLoader.setColorSchemePreference(websitePolicies.colorSchemePreference);
     documentLoader.setAdvancedPrivacyProtections(websitePolicies.advancedPrivacyProtections);
-    documentLoader.setOriginatorAdvancedPrivacyProtections(websitePolicies.advancedPrivacyProtections);
+    if (!documentLoader.originatorAdvancedPrivacyProtections())
+        documentLoader.setOriginatorAdvancedPrivacyProtections(websitePolicies.advancedPrivacyProtections);
     documentLoader.setIdempotentModeAutosizingOnlyHonorsPercentages(websitePolicies.idempotentModeAutosizingOnlyHonorsPercentages);
     documentLoader.setHTTPSByDefaultMode(websitePolicies.httpsByDefaultMode);
+
+    switch (websitePolicies.pushAndNotificationsEnabledPolicy) {
+    case WebsitePushAndNotificationsEnabledPolicy::UseGlobalPolicy:
+        documentLoader.setPushAndNotificationsEnabledPolicy(WebCore::PushAndNotificationsEnabledPolicy::UseGlobalPolicy);
+        break;
+    case WebsitePushAndNotificationsEnabledPolicy::No:
+        documentLoader.setPushAndNotificationsEnabledPolicy(WebCore::PushAndNotificationsEnabledPolicy::No);
+        break;
+    case WebsitePushAndNotificationsEnabledPolicy::Yes:
+        documentLoader.setPushAndNotificationsEnabledPolicy(WebCore::PushAndNotificationsEnabledPolicy::Yes);
+        break;
+    }
 
     if (!documentLoader.frame())
         return;

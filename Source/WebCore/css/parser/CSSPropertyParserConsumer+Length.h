@@ -33,16 +33,15 @@ namespace WebCore {
 class CSSParserTokenRange;
 class CSSPrimitiveValue;
 
+struct CSSParserContext;
+
 namespace CSSPropertyParserHelpers {
 
 // MARK: - Consumer functions
 
 // MARK: - Length
-RefPtr<CSSPrimitiveValue> consumeLength(CSSParserTokenRange&, CSSParserMode, ValueRange = ValueRange::All, UnitlessQuirk = UnitlessQuirk::Forbid);
-
-// MARK: - Length or Percent
-std::optional<LengthOrPercentRaw> consumeLengthOrPercentRaw(CSSParserTokenRange&, CSSParserMode);
-RefPtr<CSSPrimitiveValue> consumeLengthOrPercent(CSSParserTokenRange&, CSSParserMode, ValueRange = ValueRange::All, UnitlessQuirk = UnitlessQuirk::Forbid, UnitlessZeroQuirk = UnitlessZeroQuirk::Allow, NegativePercentagePolicy = NegativePercentagePolicy::Forbid, AnchorPolicy = AnchorPolicy::Forbid);
+RefPtr<CSSPrimitiveValue> consumeLength(CSSParserTokenRange&, const CSSParserContext&, ValueRange = ValueRange::All, UnitlessQuirk = UnitlessQuirk::Forbid);
+RefPtr<CSSPrimitiveValue> consumeLength(CSSParserTokenRange&, const CSSParserContext&, CSSParserMode overrideParserMode, ValueRange = ValueRange::All, UnitlessQuirk = UnitlessQuirk::Forbid);
 
 } // namespace CSSPropertyParserHelpers
 } // namespace WebCore

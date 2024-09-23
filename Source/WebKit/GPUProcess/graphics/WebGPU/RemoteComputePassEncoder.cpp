@@ -31,7 +31,10 @@
 #include "RemoteComputePassEncoderMessages.h"
 #include "StreamServerConnection.h"
 #include "WebGPUObjectHeap.h"
+#include <WebCore/WebGPUBindGroup.h>
+#include <WebCore/WebGPUBuffer.h>
 #include <WebCore/WebGPUComputePassEncoder.h>
+#include <WebCore/WebGPUComputePipeline.h>
 #include <wtf/TZoneMallocInlines.h>
 
 namespace WebKit {
@@ -62,7 +65,7 @@ void RemoteComputePassEncoder::stopListeningForIPC()
 
 void RemoteComputePassEncoder::setPipeline(WebGPUIdentifier computePipeline)
 {
-    auto convertedComputePipeline = m_objectHeap->convertComputePipelineFromBacking(computePipeline);
+    auto convertedComputePipeline = protectedObjectHeap()->convertComputePipelineFromBacking(computePipeline);
     ASSERT(convertedComputePipeline);
     if (!convertedComputePipeline)
         return;
@@ -77,7 +80,7 @@ void RemoteComputePassEncoder::dispatch(WebCore::WebGPU::Size32 workgroupCountX,
 
 void RemoteComputePassEncoder::dispatchIndirect(WebGPUIdentifier indirectBuffer, WebCore::WebGPU::Size64 indirectOffset)
 {
-    auto convertedIndirectBuffer = m_objectHeap->convertBufferFromBacking(indirectBuffer);
+    auto convertedIndirectBuffer = protectedObjectHeap()->convertBufferFromBacking(indirectBuffer);
     ASSERT(convertedIndirectBuffer);
     if (!convertedIndirectBuffer)
         return;
@@ -93,7 +96,7 @@ void RemoteComputePassEncoder::end()
 void RemoteComputePassEncoder::setBindGroup(WebCore::WebGPU::Index32 index, WebGPUIdentifier bindGroup,
     std::optional<Vector<WebCore::WebGPU::BufferDynamicOffset>>&& offsets)
 {
-    auto convertedBindGroup = m_objectHeap->convertBindGroupFromBacking(bindGroup);
+    auto convertedBindGroup = protectedObjectHeap()->convertBindGroupFromBacking(bindGroup);
     ASSERT(convertedBindGroup);
     if (!convertedBindGroup)
         return;

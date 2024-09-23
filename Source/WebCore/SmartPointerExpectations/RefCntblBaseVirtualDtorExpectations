@@ -27,6 +27,7 @@ css/CSSGradientValue.h
 css/CSSGridAutoRepeatValue.h
 css/CSSGridIntegerRepeatValue.h
 css/CSSGridLineNamesValue.h
+css/CSSGridLineValue.h
 css/CSSGridTemplateAreasValue.h
 css/CSSImageSetOptionValue.h
 css/CSSImageSetValue.h
@@ -45,6 +46,7 @@ css/CSSRectValue.h
 css/CSSReflectValue.h
 css/CSSScrollValue.h
 css/CSSShadowValue.h
+css/CSSShapeSegmentValue.h
 css/CSSSubgridValue.h
 css/CSSTimingFunctionValue.h
 css/CSSTransformListValue.h
@@ -52,6 +54,7 @@ css/CSSUnicodeRangeValue.h
 css/CSSValueList.h
 css/CSSValuePair.h
 css/CSSVariableReferenceValue.h
+css/CSSViewTransitionRule.h
 css/CSSViewValue.h
 css/DOMMatrix.h
 css/DeprecatedCSSOMPrimitiveValue.h

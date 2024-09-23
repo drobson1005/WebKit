@@ -207,6 +207,9 @@ public:
 
     void setPDFDisplayModeForTesting(const String&) final;
 
+    double minScaleFactor() const final;
+    double maxScaleFactor() const final;
+
 private:
     explicit UnifiedPDFPlugin(WebCore::HTMLPlugInElement&);
     bool isUnifiedPDFPlugin() const override { return true; }
@@ -548,9 +551,7 @@ private:
 
     float scaleForPagePreviews() const;
 
-#if PLATFORM(MAC)
     void createPasswordEntryForm();
-#endif
 
     bool isInDiscreteDisplayMode() const;
     bool isShowingTwoPages() const;
@@ -611,10 +612,10 @@ private:
 
     RetainPtr<WKPDFFormMutationObserver> m_pdfMutationObserver;
 
-#if PLATFORM(MAC)
     RefPtr<PDFPluginPasswordField> m_passwordField;
     RefPtr<PDFPluginPasswordForm> m_passwordForm;
 
+#if PLATFORM(MAC)
     bool m_isScrollingWithAnimationToPageExtent { false };
     std::optional<WebCore::ScrollDirection> m_animatedKeyboardScrollingDirection;
 #endif
@@ -624,6 +625,11 @@ private:
 #if ENABLE(UNIFIED_PDF_DATA_DETECTION)
     std::unique_ptr<PDFDataDetectorOverlayController> m_dataDetectorOverlayController;
 #endif
+
+    // FIXME: We should rationalize these with the values in ViewGestureController.
+    // For now, we'll leave them differing as they do in PDFPlugin.
+    static constexpr double minimumZoomScale = 0.2;
+    static constexpr double maximumZoomScale = 6.0;
 };
 
 WTF::TextStream& operator<<(WTF::TextStream&, RepaintRequirement);

@@ -117,7 +117,7 @@ ProvisionalPageProxy::ProvisionalPageProxy(WebPageProxy& page, Ref<FrameProcess>
     } else if (m_page->preferences().siteIsolationEnabled())
         m_mainFrame = m_page->mainFrame();
     else {
-        m_mainFrame = WebFrameProxy::create(protectedPage(), m_frameProcess, FrameIdentifier::generate(), WebFrameProxy::IsMainFrame::Yes);
+        m_mainFrame = WebFrameProxy::create(protectedPage(), m_frameProcess, FrameIdentifier::generate(), previousMainFrame->effectiveSandboxFlags(), IsMainFrame::Yes);
 
         // Restore the main frame's committed URL as some clients may rely on it until the next load is committed.
         m_mainFrame->frameLoadState().setURL(previousMainFrame->url());
@@ -234,7 +234,7 @@ void ProvisionalPageProxy::cancel()
 
 void ProvisionalPageProxy::initializeWebPage(RefPtr<API::WebsitePolicies>&& websitePolicies)
 {
-    m_drawingArea = m_page->pageClient().createDrawingAreaProxy(protectedProcess());
+    m_drawingArea = m_page->protectedPageClient()->createDrawingAreaProxy(protectedProcess());
 
     bool registerWithInspectorController { true };
     if (websitePolicies)
@@ -248,7 +248,10 @@ void ProvisionalPageProxy::initializeWebPage(RefPtr<API::WebsitePolicies>&& webs
             m_mainFrame = existingRemotePageProxy->page()->mainFrame();
             m_messageReceiverRegistration.stopReceivingMessages();
             m_messageReceiverRegistration.transferMessageReceivingFrom(existingRemotePageProxy->messageReceiverRegistration(), *this);
-            send(Messages::WebPage::CreateProvisionalFrame({ }, m_mainFrame->frameID()));
+            send(Messages::WebPage::CreateProvisionalFrame(ProvisionalFrameCreationParameters {
+                std::nullopt,
+                m_mainFrame->effectiveSandboxFlags(),
+            }, m_mainFrame->frameID()));
             m_needsCookieAccessAddedInNetworkProcess = true;
             registerWithInspectorController = false; // FIXME: <rdar://121240770> This is a hack. There seems to be a bug in our interaction with WebPageInspectorController.
         }
@@ -362,10 +365,11 @@ void ProvisionalPageProxy::didStartProvisionalLoadForFrame(FrameIdentifier frame
 
 void ProvisionalPageProxy::didFailProvisionalLoadForFrame(FrameInfoData&& frameInfo, ResourceRequest&& request, std::optional<WebCore::NavigationIdentifier> navigationID, const String& provisionalURL, const WebCore::ResourceError& error, WebCore::WillContinueLoading willContinueLoading, const UserData& userData, WebCore::WillInternallyHandleFailure willInternallyHandleFailure)
 {
-    if (!validateInput(frameInfo.frameID, navigationID))
+    MESSAGE_CHECK(frameInfo.frameID);
+    if (!validateInput(*frameInfo.frameID, navigationID))
         return;
 
-    PROVISIONALPAGEPROXY_RELEASE_LOG_ERROR(ProcessSwapping, "didFailProvisionalLoadForFrame: frameID=%" PRIu64, frameInfo.frameID.object().toUInt64());
+    PROVISIONALPAGEPROXY_RELEASE_LOG_ERROR(ProcessSwapping, "didFailProvisionalLoadForFrame: frameID=%" PRIu64, frameInfo.frameID->object().toUInt64());
     ASSERT(!m_provisionalLoadURL.isNull());
     m_provisionalLoadURL = { };
 
@@ -378,7 +382,7 @@ void ProvisionalPageProxy::didFailProvisionalLoadForFrame(FrameInfoData&& frameI
     } else if (auto* pageMainFrame = m_page->mainFrame())
         pageMainFrame->didFailProvisionalLoad();
 
-    RefPtr frame = WebFrameProxy::webFrame(frameInfo.frameID);
+    RefPtr frame = WebFrameProxy::webFrame(*frameInfo.frameID);
     MESSAGE_CHECK(frame);
     m_page->didFailProvisionalLoadForFrameShared(protectedProcess(), *frame, WTFMove(frameInfo), WTFMove(request), navigationID, provisionalURL, error, willContinueLoading, userData, willInternallyHandleFailure); // May delete |this|.
 }
@@ -427,7 +431,8 @@ void ProvisionalPageProxy::didChangeProvisionalURLForFrame(FrameIdentifier frame
 
 void ProvisionalPageProxy::decidePolicyForNavigationActionAsync(NavigationActionData&& data, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
 {
-    if (!validateInput(data.frameInfo.frameID, data.navigationID))
+    MESSAGE_CHECK(data.frameInfo.frameID);
+    if (!validateInput(*data.frameInfo.frameID, data.navigationID))
         return completionHandler({ });
 
     m_page->decidePolicyForNavigationActionAsyncShared(protectedProcess(), WTFMove(data), WTFMove(completionHandler));
@@ -435,7 +440,8 @@ void ProvisionalPageProxy::decidePolicyForNavigationActionAsync(NavigationAction
 
 void ProvisionalPageProxy::decidePolicyForResponse(FrameInfoData&& frameInfo, std::optional<WebCore::NavigationIdentifier> navigationID, const WebCore::ResourceResponse& response, const WebCore::ResourceRequest& request, bool canShowMIMEType, const String& downloadAttribute, bool isShowingInitialAboutBlank, WebCore::CrossOriginOpenerPolicyValue activeDocumentCOOPValue, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
 {
-    if (!validateInput(frameInfo.frameID, navigationID))
+    MESSAGE_CHECK(frameInfo.frameID);
+    if (!validateInput(*frameInfo.frameID, navigationID))
         return completionHandler({ });
 
     m_page->decidePolicyForResponseShared(protectedProcess(), m_webPageID, WTFMove(frameInfo), navigationID, response, request, canShowMIMEType, downloadAttribute, isShowingInitialAboutBlank, activeDocumentCOOPValue, WTFMove(completionHandler));
@@ -512,11 +518,6 @@ void ProvisionalPageProxy::didDestroyNavigation(WebCore::NavigationIdentifier na
     m_page->didDestroyNavigationShared(protectedProcess(), navigationID);
 }
 
-void ProvisionalPageProxy::startNetworkRequestsForPageLoadTiming(WebCore::FrameIdentifier frameID)
-{
-    m_page->startNetworkRequestsForPageLoadTiming(frameID);
-}
-
 #if USE(QUICK_LOOK)
 void ProvisionalPageProxy::requestPasswordForQuickLookDocumentInMainFrame(const String& fileName, CompletionHandler<void(const String&)>&& completionHandler)
 {
@@ -525,7 +526,7 @@ void ProvisionalPageProxy::requestPasswordForQuickLookDocumentInMainFrame(const 
 #endif
 
 #if PLATFORM(COCOA)
-void ProvisionalPageProxy::registerWebProcessAccessibilityToken(std::span<const uint8_t> data, FrameIdentifier)
+void ProvisionalPageProxy::registerWebProcessAccessibilityToken(std::span<const uint8_t> data)
 {
     m_accessibilityToken = Vector(data);
 }
@@ -692,11 +693,6 @@ void ProvisionalPageProxy::didReceiveMessage(IPC::Connection& connection, IPC::D
 
     if (decoder.messageName() == Messages::WebPageProxy::DidPerformServerRedirect::name()) {
         IPC::handleMessage<Messages::WebPageProxy::DidPerformServerRedirect>(connection, decoder, this, &ProvisionalPageProxy::didPerformServerRedirect);
-        return;
-    }
-
-    if (decoder.messageName() == Messages::WebPageProxy::StartNetworkRequestsForPageLoadTiming::name()) {
-        IPC::handleMessage<Messages::WebPageProxy::StartNetworkRequestsForPageLoadTiming>(connection, decoder, this, &ProvisionalPageProxy::startNetworkRequestsForPageLoadTiming);
         return;
     }
 

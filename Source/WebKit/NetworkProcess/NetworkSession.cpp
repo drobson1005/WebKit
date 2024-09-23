@@ -57,6 +57,7 @@
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/RuntimeApplicationChecks.h>
 #include <WebCore/SWServer.h>
+#include <numeric>
 #include <wtf/TZoneMallocInlines.h>
 
 #if PLATFORM(COCOA)
@@ -89,6 +90,11 @@ std::unique_ptr<NetworkSession> NetworkSession::create(NetworkProcess& networkPr
 #if USE(CURL)
     return NetworkSessionCurl::create(networkProcess, parameters);
 #endif
+}
+
+Ref<NetworkProcess> NetworkSession::protectedNetworkProcess()
+{
+    return networkProcess();
 }
 
 NetworkStorageSession* NetworkSession::networkStorageSession() const
@@ -125,7 +131,7 @@ static Ref<NetworkStorageManager> createNetworkStorageManager(NetworkProcess& ne
 #if ENABLE(WEB_PUSH_NOTIFICATIONS)
 static WebPushD::WebPushDaemonConnectionConfiguration configurationWithHostAuditToken(NetworkProcess& networkProcess, WebPushD::WebPushDaemonConnectionConfiguration configuration)
 {
-#if PLATFORM(COCOA)
+#if !USE(EXTENSIONKIT)
     auto token = networkProcess.parentProcessConnection()->getAuditToken();
     if (token) {
         Vector<uint8_t> auditTokenData(sizeof(*token));
@@ -196,6 +202,7 @@ NetworkSession::NetworkSession(NetworkProcess& networkProcess, const NetworkSess
 
     setBlobRegistryTopOriginPartitioningEnabled(parameters.isBlobRegistryTopOriginPartitioningEnabled);
     setShouldSendPrivateTokenIPCForTesting(parameters.shouldSendPrivateTokenIPCForTesting);
+    setOptInCookiePartitioningEnabled(parameters.isOptInCookiePartitioningEnabled);
 
     SandboxExtension::consumePermanently(parameters.serviceWorkerRegistrationDirectoryExtensionHandle);
     m_serviceWorkerInfo = ServiceWorkerInfo {
@@ -513,6 +520,13 @@ void NetworkSession::setShouldSendPrivateTokenIPCForTesting(bool enabled)
     m_shouldSendPrivateTokenIPCForTesting = enabled;
 }
 
+void NetworkSession::setOptInCookiePartitioningEnabled(bool enabled)
+{
+    RELEASE_LOG(Storage, "NetworkSession::setOptInCookiePartitioningEnabled as %" PUBLIC_LOG_STRING " for session %" PRIu64, enabled ? "enabled" : "disabled", m_sessionID.toUInt64());
+    if (CheckedPtr storageSession = networkStorageSession())
+        storageSession->setOptInCookiePartitioningEnabled(enabled);
+}
+
 void NetworkSession::allowTLSCertificateChainForLocalPCMTesting(const WebCore::CertificateInfo& certificateInfo)
 {
     privateClickMeasurement().allowTLSCertificateChainForLocalPCMTesting(certificateInfo);
@@ -713,6 +727,50 @@ void NetworkSession::setEmulatedConditions(std::optional<int64_t>&& bytesPerSeco
 }
 
 #endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)
+
+static double connectionTimesMovingAverage(const Deque<Seconds, 25>& connectionTimes)
+{
+    constexpr double alphaSmoothing { 0.75 };
+    // EWMA:
+    // s_0 = x_0
+    // s_t = a * x_{t-1} + (1 - a) * s_{t-1}
+    //
+    // Where x_0 is the average of all recent connection timings, and alpha is 0.75.
+
+    double average = std::accumulate(connectionTimes.begin(), connectionTimes.end(), Seconds { }).seconds() / connectionTimes.size();
+    for (auto&& timing : connectionTimes)
+        average = alphaSmoothing * timing.seconds() + (1 - alphaSmoothing) * average;
+
+    return average;
+}
+
+void NetworkSession::recordHTTPSConnectionTiming(const NetworkLoadMetrics& metrics)
+{
+    constexpr double minumumConnectionTimeout { 3 };
+    constexpr double computedTimeoutScalingFactor { 1.5 };
+
+    if (metrics.reusedConnection())
+        return;
+
+    if (metrics.secureConnectionStart == reusedTLSConnectionSentinel)
+        return;
+
+    Seconds connectionEstablishmentTime = metrics.connectEnd - metrics.secureConnectionStart;
+    if (connectionEstablishmentTime.seconds() <= 0.0)
+        return;
+
+    auto& recentTiming = m_recentHTTPSConnectionTiming;
+    if (recentTiming.recentConnectionTimings.size() >= recentTiming.maxEntries)
+        recentTiming.recentConnectionTimings.removeFirst();
+    recentTiming.recentConnectionTimings.append(connectionEstablishmentTime);
+
+    auto newMovingAverage = connectionTimesMovingAverage(recentTiming.recentConnectionTimings);
+    newMovingAverage = std::max(minumumConnectionTimeout, newMovingAverage * computedTimeoutScalingFactor);
+    if (newMovingAverage != recentTiming.currentMovingAverage) {
+        recentTiming.currentMovingAverage = newMovingAverage;
+        RELEASE_LOG(Network, "NetworkSession::recordHTTPSConnectionTiming: Updating moving average: %lf", newMovingAverage);
+    }
+}
 
 void NetworkSession::softUpdate(ServiceWorkerJobData&& jobData, bool shouldRefreshCache, WebCore::ResourceRequest&& request, CompletionHandler<void(WebCore::WorkerFetchResult&&)>&& completionHandler)
 {

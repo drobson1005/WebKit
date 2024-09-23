@@ -42,12 +42,19 @@ namespace Calculation {
 enum class Category : uint8_t;
 }
 
+namespace CSSPropertyParserHelpers {
+struct CSSPropertyParserOptions;
+}
+
 class CSSCalcSymbolTable;
 class CSSCalcSymbolsAllowed;
 class CSSParserTokenRange;
 class CSSToLengthConversionData;
 class CalculationValue;
 class RenderStyle;
+
+struct CSSParserContext;
+struct Length;
 
 enum CSSValueID : uint16_t;
 
@@ -56,9 +63,7 @@ enum class ValueRange : uint8_t;
 
 class CSSCalcValue final : public CSSValue {
 public:
-    static bool isCalcFunction(CSSValueID);
-
-    static RefPtr<CSSCalcValue> parse(CSSValueID function, const CSSParserTokenRange&, Calculation::Category, ValueRange, CSSCalcSymbolsAllowed);
+    static RefPtr<CSSCalcValue> parse(CSSParserTokenRange&, const CSSParserContext&, Calculation::Category, CSSCalcSymbolsAllowed, CSSPropertyParserHelpers::CSSPropertyParserOptions);
 
     static Ref<CSSCalcValue> create(const CalculationValue&, const RenderStyle&);
     static Ref<CSSCalcValue> create(CSSCalc::Tree&&);
@@ -79,20 +84,25 @@ public:
     double doubleValueDeprecated(const CSSCalcSymbolTable&) const;
 
     double computeLengthPx(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
+
+    Ref<CalculationValue> createCalculationValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
     Ref<CalculationValue> createCalculationValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
 
-    NumberRaw numberValueDeprecated(const CSSCalcSymbolTable&) const;
+    NumberRaw numberValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
     NumberRaw numberValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
-    PercentRaw percentValueDeprecated(const CSSCalcSymbolTable&) const;
-    PercentRaw percentValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
-    AngleRaw angleValueDeprecated(const CSSCalcSymbolTable&) const;
+    PercentageRaw percentageValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
+    PercentageRaw percentageValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
+    AngleRaw angleValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
     AngleRaw angleValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
-    LengthRaw lengthValueDeprecated(const CSSCalcSymbolTable&) const;
+    LengthRaw lengthValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
     LengthRaw lengthValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
-    ResolutionRaw resolutionValueDeprecated(const CSSCalcSymbolTable&) const;
+    ResolutionRaw resolutionValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
     ResolutionRaw resolutionValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
-    TimeRaw timeValueDeprecated(const CSSCalcSymbolTable&) const;
+    TimeRaw timeValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
     TimeRaw timeValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
+
+    Length lengthPercentageValueNoConversionDataRequired(const CSSCalcSymbolTable&) const;
+    Length lengthPercentageValue(const CSSToLengthConversionData&, const CSSCalcSymbolTable&) const;
 
     void collectComputedStyleDependencies(ComputedStyleDependencies&) const;
 

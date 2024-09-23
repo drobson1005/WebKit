@@ -71,6 +71,7 @@
 #include <WebCore/TextureMapperPlatformLayerProxyProvider.h>
 #elif USE(TEXTURE_MAPPER)
 #include <WebCore/TextureMapperPlatformLayer.h>
+#include <WebCore/TextureMapperPlatformLayerProxy.h>
 #endif
 
 #if ENABLE(ENCRYPTED_MEDIA)
@@ -185,7 +186,6 @@ MediaPlayerPrivateRemote::MediaPlayerPrivateRemote(MediaPlayer* player, MediaPla
     , m_logIdentifier(player->mediaPlayerLogIdentifier())
 #endif
     , m_player(*player)
-    , m_mediaResourceLoader(player->createResourceLoader())
 #if PLATFORM(COCOA)
     , m_videoLayerManager(makeUniqueRef<VideoLayerManagerObjC>(logger(), logIdentifier()))
 #endif
@@ -1007,7 +1007,14 @@ void MediaPlayerPrivateRemote::load(const URL& url, const ContentType& contentTy
 {
     if (m_remoteEngineIdentifier == MediaPlayerEnums::MediaEngineIdentifier::AVFoundationMSE
         || (platformStrategies()->mediaStrategy().mockMediaSourceEnabled() && m_remoteEngineIdentifier == MediaPlayerEnums::MediaEngineIdentifier::MockMSE)) {
-        auto identifier = RemoteMediaSourceIdentifier::generate();
+
+        RefPtr mediaSourcePrivate = downcast<MediaSourcePrivateRemote>(client.mediaSourcePrivate());
+        RemoteMediaSourceIdentifier identifier;
+        if (mediaSourcePrivate) {
+            mediaSourcePrivate->setPlayer(this);
+            identifier = mediaSourcePrivate->identifier();
+        } else
+            identifier = RemoteMediaSourceIdentifier::generate();
         connection().sendWithAsyncReply(Messages::RemoteMediaPlayerProxy::LoadMediaSource(url, contentType, DeprecatedGlobalSettings::webMParserEnabled(), identifier), [weakThis = ThreadSafeWeakPtr { *this }, this](RemoteMediaPlayerConfiguration&& configuration) {
             RefPtr protectedThis = weakThis.get();
             if (!protectedThis)
@@ -1020,8 +1027,12 @@ void MediaPlayerPrivateRemote::load(const URL& url, const ContentType& contentTy
             updateConfiguration(WTFMove(configuration));
             player->mediaEngineUpdated();
         }, m_id);
-        m_mediaSourcePrivate = MediaSourcePrivateRemote::create(m_manager.gpuProcessConnection(), identifier, m_manager.typeCache(m_remoteEngineIdentifier), *this, client);
-
+        if (mediaSourcePrivate) {
+            m_mediaSourcePrivate = WTFMove(mediaSourcePrivate);
+            // MediaSource can only be re-opened after RemoteMediaPlayerProxy::LoadMediaSource has been called.
+            client.reOpen();
+        } else
+            m_mediaSourcePrivate = MediaSourcePrivateRemote::create(m_manager.gpuProcessConnection(), identifier, m_manager.typeCache(m_remoteEngineIdentifier), *this, client);
         return;
     }
 
@@ -1218,19 +1229,11 @@ void MediaPlayerPrivateRemote::paintCurrentFrameInContext(GraphicsContext& conte
     if (context.paintingDisabled())
         return;
 
-    auto nativeImage = nativeImageForCurrentTime();
-    if (!nativeImage)
+    RefPtr videoFrame = videoFrameForCurrentTime();
+    if (!videoFrame)
         return;
-    context.drawNativeImage(*nativeImage, rect, FloatRect { { }, nativeImage->size() });
+    context.drawVideoFrame(*videoFrame, rect, ImageOrientation::Orientation::None, false);
 }
-
-#if !USE(AVFOUNDATION)
-bool MediaPlayerPrivateRemote::copyVideoTextureToPlatformTexture(WebCore::GraphicsContextGL*, PlatformGLObject, GCGLenum, GCGLint, GCGLenum, GCGLenum, GCGLenum, bool, bool)
-{
-    notImplemented();
-    return false;
-}
-#endif
 
 #if PLATFORM(COCOA) && !HAVE(AVSAMPLEBUFFERDISPLAYLAYER_COPYDISPLAYEDPIXELBUFFER)
 void MediaPlayerPrivateRemote::willBeAskedToPaintGL()
@@ -1247,6 +1250,11 @@ RefPtr<WebCore::VideoFrame> MediaPlayerPrivateRemote::videoFrameForCurrentTime()
 {
     if (readyState() < MediaPlayer::ReadyState::HaveCurrentData)
         return { };
+
+#if PLATFORM(COCOA)
+    if (m_videoFrameGatheredWithVideoFrameMetadata)
+        return m_videoFrameGatheredWithVideoFrameMetadata;
+#endif
 
     auto sendResult = connection().sendSync(Messages::RemoteMediaPlayerProxy::VideoFrameForCurrentTimeIfChanged(), m_id);
     if (!sendResult.succeeded())
@@ -1653,7 +1661,9 @@ void MediaPlayerPrivateRemote::requestResource(RemoteMediaResourceIdentifier rem
     assertIsMainRunLoop();
 
     ASSERT(!m_mediaResources.contains(remoteMediaResourceIdentifier));
-    auto resource = m_mediaResourceLoader->requestResource(WTFMove(request), options);
+
+    RefPtr player = m_player.get();
+    RefPtr resource = player ? player->mediaResourceLoader()->requestResource(WTFMove(request), options) : nullptr;
 
     if (!resource) {
         // FIXME: Get the error from MediaResourceLoader::requestResource.
@@ -1667,7 +1677,12 @@ void MediaPlayerPrivateRemote::requestResource(RemoteMediaResourceIdentifier rem
 
 void MediaPlayerPrivateRemote::sendH2Ping(const URL& url, CompletionHandler<void(Expected<WTF::Seconds, WebCore::ResourceError>&&)>&& completionHandler)
 {
-    m_mediaResourceLoader->sendH2Ping(url, WTFMove(completionHandler));
+    RefPtr player = m_player.get();
+    if (!player) {
+        completionHandler(makeUnexpected(internalError(url)));
+        return;
+    }
+    player->mediaResourceLoader()->sendH2Ping(url, WTFMove(completionHandler));
 }
 
 void MediaPlayerPrivateRemote::removeResource(RemoteMediaResourceIdentifier remoteMediaResourceIdentifier)

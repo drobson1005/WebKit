@@ -674,6 +674,8 @@ public:
                 m_wasmTag = &wasmException->tag();
             } else if (ErrorInstance* error = jsDynamicCast<ErrorInstance*>(thrownValue))
                 m_catchableFromWasm = error->isCatchableFromWasm();
+            else
+                m_catchableFromWasm = true;
         }
 #else
         UNUSED_PARAM(thrownValue);
@@ -1243,6 +1245,12 @@ ALWAYS_INLINE JSValue Interpreter::executeCallImpl(VM& vm, JSObject* function, c
         ASSERT(jitCode == functionExecutable->generatedJITCodeForCall().ptr());
         return JSValue::decode(vmEntryToJavaScript(jitCode->addressForCall(), &vm, &protoCallFrame));
     }
+
+#if ENABLE(WEBASSEMBLY)
+    if (callData.native.isWasm)
+        return JSValue::decode(vmEntryToWasm(jsCast<WebAssemblyFunction*>(function)->jsEntrypoint(MustCheckArity).taggedPtr(), &vm, &protoCallFrame));
+#endif
+
     return JSValue::decode(vmEntryToNative(nativeFunction.taggedPtr(), &vm, &protoCallFrame));
 }
 

@@ -98,8 +98,10 @@ void LLIntPlan::compileFunction(uint32_t functionIndex)
     unsigned functionIndexSpace = m_moduleInformation->importFunctionTypeIndices.size() + functionIndex;
     ASSERT_UNUSED(functionIndexSpace, m_moduleInformation->typeIndexFromFunctionIndexSpace(functionIndexSpace) == typeIndex);
 
+    beginCompilerSignpost(CompilationMode::LLIntMode, functionIndexSpace);
     m_unlinkedWasmToWasmCalls[functionIndex] = Vector<UnlinkedWasmToWasmCall>();
     auto parseAndCompileResult = parseAndCompileBytecode(function.data, signature, m_moduleInformation.get(), functionIndex);
+    endCompilerSignpost(CompilationMode::LLIntMode, functionIndexSpace);
 
     if (UNLIKELY(!parseAndCompileResult)) {
         Locker locker { m_lock };
@@ -167,20 +169,7 @@ bool LLIntPlan::ensureEntrypoint(LLIntCallee&, unsigned functionIndex)
     if (m_entrypoints[functionIndex])
         return true;
 
-    if (!Options::useWasmJITLessJSEntrypoint())
-        return false;
-
-    TypeIndex typeIndex = m_moduleInformation->internalFunctionTypeIndices[functionIndex];
-    const TypeDefinition& signature = TypeInformation::get(typeIndex).expand();
-    CallInformation wasmFrameConvention = wasmCallingConvention().callInformationFor(signature, CallRole::Caller);
-
-    RegisterAtOffsetList savedResultRegisters = wasmFrameConvention.computeResultsOffsetList();
-    size_t totalFrameSize = wasmFrameConvention.headerAndArgumentStackSizeInBytes;
-    totalFrameSize += savedResultRegisters.sizeOfAreaInBytes();
-    totalFrameSize += JITLessJSEntrypointCallee::RegisterStackSpaceAligned;
-    totalFrameSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(totalFrameSize);
-
-    m_entrypoints[functionIndex] = JITLessJSEntrypointCallee::create(totalFrameSize, typeIndex, m_moduleInformation->usesSIMD(functionIndex));
+    m_entrypoints[functionIndex] = JSEntrypointCallee::create(m_moduleInformation->internalFunctionTypeIndices[functionIndex], m_moduleInformation->usesSIMD(functionIndex));
     return true;
 }
 
@@ -209,8 +198,8 @@ void LLIntPlan::didCompleteCompilation()
             }
         }
         if (auto& callee = m_entrypoints[functionIndex]) {
-            if (callee->compilationMode() == CompilationMode::JITLessJSEntrypointMode)
-                static_cast<JITLessJSEntrypointCallee*>(callee.get())->wasmCallee = CalleeBits::encodeNativeCallee(&m_callees[functionIndex].get());
+            if (callee->compilationMode() == CompilationMode::JSToWasmEntrypointMode)
+                static_cast<JSEntrypointCallee*>(callee.get())->setWasmCallee(CalleeBits::encodeNativeCallee(&m_callees[functionIndex].get()));
             m_jsEntrypointCallees.add(functionIndex, callee);
         }
     }

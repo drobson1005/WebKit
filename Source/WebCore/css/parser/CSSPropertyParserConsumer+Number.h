@@ -33,12 +33,13 @@ namespace WebCore {
 class CSSPrimitiveValue;
 class CSSParserTokenRange;
 
+struct CSSParserContext;
+
 namespace CSSPropertyParserHelpers {
 
 // MARK: - Consumer functions
 
-std::optional<NumberRaw> consumeNumberRaw(CSSParserTokenRange&, ValueRange = ValueRange::All);
-RefPtr<CSSPrimitiveValue> consumeNumber(CSSParserTokenRange&, ValueRange = ValueRange::All);
+RefPtr<CSSPrimitiveValue> consumeNumber(CSSParserTokenRange&, const CSSParserContext&, ValueRange = ValueRange::All);
 
 } // namespace CSSPropertyParserHelpers
 } // namespace WebCore

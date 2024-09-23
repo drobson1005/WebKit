@@ -2326,7 +2326,7 @@ TEST(ServiceWorkers, SuspendNetworkProcess)
 TEST(WebKit, ServiceWorkerDatabaseWithRecordsTableButUnexpectedSchema)
 {
     // Copy the baked database files to the database directory
-    NSURL *url1 = [[NSBundle mainBundle] URLForResource:@"BadServiceWorkerRegistrations-4" withExtension:@"sqlite3" subdirectory:@"TestWebKitAPI.resources"];
+    NSURL *url1 = [NSBundle.test_resourcesBundle URLForResource:@"BadServiceWorkerRegistrations-4" withExtension:@"sqlite3"];
 
     NSURL *swPath = [NSURL fileURLWithPath:[@"~/Library/Caches/com.apple.WebKit.TestWebKitAPI/WebKit/ServiceWorkers/" stringByExpandingTildeInPath]];
     [[NSFileManager defaultManager] removeItemAtURL:swPath error:nil];
@@ -4007,6 +4007,28 @@ static constexpr auto ServiceWorkerNotYetFocusedMain =
 "        alert('Exception: ' + e);"
 "    }"
 "}"
+""
+"function getFocusResult(counter) {"
+"    try {"
+"        if (!counter)"
+"            counter = 0;"
+"        worker.postMessage('getFocusResult');"
+"        navigator.serviceWorker.onmessage = async event => {"
+"            if (event.data !== 'none') {"
+"                alert(event.data);"
+"                return;"
+"            }"
+"            if (counter > 100) {"
+"                alert('focus timed out');"
+"                return;"
+"            }"
+"            await new Promise(resolve => setTimeout(resolve, 50));"
+"            getFocusResult(++counter);"
+"        };"
+"    } catch (e) {"
+"         alert(e);"
+"    }"
+"}"
 "window.onload = registerServiceWorker;"
 "</script>"_s;
 
@@ -4028,16 +4050,21 @@ static constexpr auto ServiceWorkerNotYetFocusedClient =
 "</script>"_s;
 
 static constexpr auto ServiceWorkerNotYetFocusedJS =
+"var focusResult = 'none';"
+"self.addEventListener('message', event => {"
+"    event.source.postMessage(focusResult);"
+"});"
+""
 "async function serveContent(event) {"
 "    try {"
 "        const client = await self.clients.get(event.resultingClientId);"
-"        client.focus();"
+"        client.focus().then(() => focusResult = 'PASS focus', () => focusResult = 'FAIL focus');"
 "    } catch (e) {"
 "        return new Response('<div>Error page</div><script>alert(Response);</script>', {headers: {'Content-Type': 'text/html'} });"
 "    }"
 "    return fetch(event.request);"
 "}"
-"self.addEventListener('fetch', (event) => {"
+"self.addEventListener('fetch', event => {"
 "    event.respondWith(serveContent(event));"
 "});"_s;
 
@@ -4094,6 +4121,11 @@ TEST(ServiceWorker, FocusNotYetLoadedClient)
     auto webView2 = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 300, 300) configuration:configuration.get() addToWindow:YES]);
     [webView2 loadRequest:server.request("/delayed-client"_s)];
     EXPECT_WK_STREQ([webView2 _test_waitForAlert], "PASS");
+
+    [webView1 evaluateJavaScript:@"getFocusResult()" completionHandler:^(id value, NSError *error) {
+        EXPECT_NULL(error);
+    }];
+    EXPECT_WK_STREQ([webView1 _test_waitForAlert], "PASS focus");
 }
 #endif
 

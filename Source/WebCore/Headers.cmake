@@ -35,6 +35,8 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     Modules/WebGPU/GPUBufferUsage.h
     Modules/WebGPU/GPUCanvasAlphaMode.h
     Modules/WebGPU/GPUCanvasConfiguration.h
+    Modules/WebGPU/GPUCanvasToneMapping.h
+    Modules/WebGPU/GPUCanvasToneMappingMode.h
     Modules/WebGPU/GPUColorDict.h
     Modules/WebGPU/GPUColorTargetState.h
     Modules/WebGPU/GPUColorWrite.h
@@ -197,6 +199,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     Modules/WebGPU/InternalAPI/WebGPUBufferUsage.h
     Modules/WebGPU/InternalAPI/WebGPUCanvasAlphaMode.h
     Modules/WebGPU/InternalAPI/WebGPUCanvasConfiguration.h
+    Modules/WebGPU/InternalAPI/WebGPUCanvasToneMappingMode.h
     Modules/WebGPU/InternalAPI/WebGPUColor.h
     Modules/WebGPU/InternalAPI/WebGPUColorTargetState.h
     Modules/WebGPU/InternalAPI/WebGPUColorWrite.h
@@ -693,10 +696,11 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     animation/AcceleratedTimeline.h
     animation/AnimationFrameRatePreset.h
     animation/AnimationTimeline.h
+    animation/AnimationTimelinesController.h
+    animation/CSSNumberishTime.h
     animation/CSSPropertyBlendingClient.h
     animation/CustomAnimationOptions.h
     animation/CompositeOperation.h
-    animation/DocumentTimelinesController.h
     animation/EffectTiming.h
     animation/FillMode.h
     animation/FrameRateAligner.h
@@ -709,6 +713,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     animation/ScrollAxis.h
     animation/ScrollTimeline.h
     animation/ScrollTimelineOptions.h
+    animation/TimelineScope.h
     animation/ViewTimeline.h
     animation/ViewTimelineOptions.h
     animation/WebAnimationTypes.h
@@ -1017,6 +1022,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/FocusOptions.h
     dom/FragmentDirectiveParser.h
     dom/FragmentDirectiveRangeFinder.h
+    dom/FragmentDirectiveUtilities.h
     dom/FullscreenManager.h
     dom/GCReachableRef.h
     dom/GetHTMLOptions.h
@@ -1610,6 +1616,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/RenderingUpdateScheduler.h
     page/ScreenOrientationLockType.h
     page/ScreenOrientationType.h
+    page/ScriptTelemetryCategory.h
     page/ScrollBehavior.h
     page/ScrollIntoViewOptions.h
     page/ScrollLogicalPosition.h
@@ -1828,6 +1835,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/SharedMemory.h
     platform/SharedStringHash.h
     platform/SimpleCaretAnimator.h
+    platform/Site.h
     platform/SleepDisabler.h
     platform/SleepDisablerClient.h
     platform/SleepDisablerIdentifier.h

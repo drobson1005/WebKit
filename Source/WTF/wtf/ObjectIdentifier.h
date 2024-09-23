@@ -32,6 +32,8 @@
 
 namespace WTF {
 
+class PrintStream;
+
 template<typename RawValue>
 struct ObjectIdentifierThreadSafeAccessTraits {
 };
@@ -80,7 +82,7 @@ public:
         return String::number(m_identifier);
     }
 
-    static bool isValidIdentifier(RawValue identifier) { return identifier && identifier != hashTableDeletedValue(); }
+    static constexpr bool isValidIdentifier(RawValue identifier) { return identifier && identifier != hashTableDeletedValue(); }
 
 protected:
     explicit constexpr ObjectIdentifierGenericBase(RawValue identifier)
@@ -92,7 +94,7 @@ protected:
     ~ObjectIdentifierGenericBase() = default;
     ObjectIdentifierGenericBase(HashTableDeletedValueType) : m_identifier(hashTableDeletedValue()) { }
 
-    static RawValue hashTableDeletedValue() { return std::numeric_limits<RawValue>::max(); }
+    static constexpr RawValue hashTableDeletedValue() { return std::numeric_limits<RawValue>::max(); }
 
 private:
     RawValue m_identifier { 0 };
@@ -112,7 +114,7 @@ public:
         return m_identifier.toString();
     }
 
-    static bool isValidIdentifier(RawValue identifier) { return identifier && identifier != hashTableDeletedValue(); }
+    static constexpr bool isValidIdentifier(RawValue identifier) { return identifier && !identifier.isHashTableDeletedValue(); }
 
 protected:
     explicit constexpr ObjectIdentifierGenericBase(RawValue identifier)
@@ -147,11 +149,16 @@ public:
     explicit constexpr ObjectIdentifierGeneric(RawValue identifier)
         : ObjectIdentifierGenericBase<RawValue>(identifier)
     {
-        RELEASE_ASSERT(supportsNullState == SupportsObjectIdentifierNullState::Yes || !!identifier);
+        if constexpr (supportsNullState == SupportsObjectIdentifierNullState::Yes)
+            RELEASE_ASSERT(!identifier || ObjectIdentifierGenericBase<RawValue>::isValidIdentifier(identifier));
+        else
+            RELEASE_ASSERT(ObjectIdentifierGenericBase<RawValue>::isValidIdentifier(identifier));
     }
 
     bool isValid() const requires(supportsNullState == SupportsObjectIdentifierNullState::Yes) { return ObjectIdentifierGenericBase<RawValue>::isValidIdentifier(ObjectIdentifierGenericBase<RawValue>::toRawValue()); }
     explicit operator bool() const requires(supportsNullState == SupportsObjectIdentifierNullState::Yes) { return ObjectIdentifierGenericBase<RawValue>::toRawValue(); }
+
+    bool isHashTableEmptyValue() const { return !ObjectIdentifierGenericBase<RawValue>::toRawValue(); }
 
     ObjectIdentifierGeneric() requires (supportsNullState == SupportsObjectIdentifierNullState::Yes) = default;
 
@@ -216,6 +223,7 @@ struct ObjectIdentifierGenericBaseHash<UUID> {
 
 template<typename T, typename U, typename V, SupportsObjectIdentifierNullState supportsNullState> struct HashTraits<ObjectIdentifierGeneric<T, U, V, supportsNullState>> : SimpleClassHashTraits<ObjectIdentifierGeneric<T, U, V, supportsNullState>> {
     static ObjectIdentifierGeneric<T, U, V, supportsNullState> emptyValue() { return ObjectIdentifierGeneric<T, U, V, supportsNullState>(ObjectIdentifierGeneric<T, U, V, supportsNullState>::InvalidIdValue); }
+    static bool isEmptyValue(const ObjectIdentifierGeneric<T, U, V, supportsNullState>& value) { return value.isHashTableEmptyValue(); }
 };
 
 template<typename T, typename U, typename V, SupportsObjectIdentifierNullState supportsNullState> struct DefaultHash<ObjectIdentifierGeneric<T, U, V, supportsNullState>> : ObjectIdentifierGenericBaseHash<V> { };
@@ -223,6 +231,10 @@ template<typename T, typename U, typename V, SupportsObjectIdentifierNullState s
 WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const ObjectIdentifierGenericBase<uint64_t>&);
 
 WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const ObjectIdentifierGenericBase<UUID>&);
+
+WTF_EXPORT_PRIVATE void printInternal(PrintStream&, const ObjectIdentifierGenericBase<uint64_t>&);
+
+WTF_EXPORT_PRIVATE void printInternal(PrintStream&, const ObjectIdentifierGenericBase<UUID>&);
 
 template<typename RawValue>
 class ObjectIdentifierGenericBaseStringTypeAdapter {

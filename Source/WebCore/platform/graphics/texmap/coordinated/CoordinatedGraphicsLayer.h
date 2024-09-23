@@ -41,7 +41,7 @@
 #if USE(SKIA)
 namespace WebCore {
 class BitmapTexture;
-class SkiaAcceleratedBufferPool;
+class BitmapTexturePool;
 }
 #endif
 
@@ -64,7 +64,7 @@ public:
 #if USE(CAIRO)
     virtual Nicosia::PaintingEngine& paintingEngine() = 0;
 #elif USE(SKIA)
-    virtual SkiaAcceleratedBufferPool* skiaAcceleratedBufferPool() const = 0;
+    virtual BitmapTexturePool* skiaAcceleratedBitmapTexturePool() const = 0;
     virtual WorkerPool* skiaUnacceleratedThreadedRenderingPool() const = 0;
 #endif
 
@@ -119,6 +119,7 @@ public:
     bool shouldDirectlyCompositeImage(Image*) const override;
     void setContentsToPlatformLayer(PlatformLayer*, ContentsLayerPurpose) override;
     void setContentsDisplayDelegate(RefPtr<GraphicsLayerContentsDisplayDelegate>&&, ContentsLayerPurpose) override;
+    RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate(GraphicsLayerAsyncContentsDisplayDelegate*) override;
     void setMaskLayer(RefPtr<GraphicsLayer>&&) override;
     void setReplicatedByLayer(RefPtr<GraphicsLayer>&&) override;
     void setNeedsDisplay() override;

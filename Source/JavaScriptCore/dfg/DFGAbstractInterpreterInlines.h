@@ -3303,6 +3303,11 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
         break;
     }
 
+    case NewArrayWithSizeAndStructure: {
+        setTypeForNode(node, SpecArray);
+        break;
+    }
+
     case NewArrayWithConstantSize:
         setForNode(node, m_graph.globalObjectFor(node->origin.semantic)->arrayStructureForIndexingTypeDuringAllocation(node->indexingMode()));
         break;
@@ -3781,13 +3786,25 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
         break;
     }
 
-    case GetClosureVar:
-        if (JSValue value = m_graph.tryGetConstantClosureVar(forNode(node->child1()), node->scopeOffset())) {
-            setConstant(node, *m_graph.freeze(value));
+    case GetClosureVar: {
+        JSValue value = m_graph.tryGetConstantClosureVar(forNode(node->child1()), node->scopeOffset());
+        if (node->hasDoubleResult()) {
+            if (value && value.isNumber()) {
+                if (!std::isnan(value.asNumber())) {
+                    setConstant(node, *m_graph.freeze(value));
+                    break;
+                }
+            }
+            setTypeForNode(node, SpecBytecodeRealNumber);
             break;
         }
-        makeBytecodeTopForNode(node);
+
+        if (value)
+            setConstant(node, *m_graph.freeze(value));
+        else
+            makeBytecodeTopForNode(node);
         break;
+    }
             
     case PutClosureVar:
         break;
@@ -4430,15 +4447,21 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
         // by something other than AI, maybe by CSE for example) that obscures AI's view of the structure
         // at the point where GetByOffset runs. Currently, when that happens, we'll have to rely entirely
         // on the type that ByteCodeParser was able to prove.
-        AbstractValue value = m_graph.inferredValueForProperty(
-            forNode(node->child2()), data.offset, m_state.structureClobberState());
+        AbstractValue value = m_graph.inferredValueForProperty(forNode(node->child2()), data.offset, m_state.structureClobberState());
 
         // If we decide that there does not exist any value that this can return, then it's probably
         // because the compilation was already invalidated.
         if (value.isClear())
             m_state.setIsValid(false);
 
-        setForNode(node, value);
+        if (node->hasDoubleResult()) {
+            if (value.isType(SpecBytecodeRealNumber))
+                setForNode(node, value);
+            else
+                setTypeForNode(node, SpecBytecodeRealNumber);
+        } else
+            setForNode(node, value);
+
         if (value.m_value)
             m_state.setShouldTryConstantFolding(true);
         break;
@@ -4501,7 +4524,13 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
         if (forNode(node->child1()).changeStructure(m_graph, baseSet) == Contradiction)
             m_state.setIsValid(false);
         
-        setForNode(node, result);
+        if (node->hasDoubleResult()) {
+            if (result.isType(SpecBytecodeRealNumber))
+                setForNode(node, result);
+            else
+                setTypeForNode(node, SpecBytecodeRealNumber);
+        } else
+            setForNode(node, result);
         break;
     }
             
@@ -4893,12 +4922,19 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
         break;
     }
 
-    case GetGlobalVar:
-        makeHeapTopForNode(node);
+    case GetGlobalVar: {
+        if (node->hasDoubleResult())
+            setTypeForNode(node, SpecBytecodeRealNumber);
+        else
+            makeHeapTopForNode(node);
         break;
+    }
 
     case GetGlobalLexicalVariable:
-        makeBytecodeTopForNode(node);
+        if (node->hasDoubleResult())
+            setTypeForNode(node, SpecBytecodeRealNumber);
+        else
+            makeBytecodeTopForNode(node);
         break;
 
     case GetDynamicVar:
@@ -5010,10 +5046,10 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
             if (callee && newTarget) {
                 JSGlobalObject* globalObject = m_graph.globalObjectFor(node->origin.semantic);
                 if (callee->globalObject() == globalObject) {
-                    if (callee->classInfo() == ObjectConstructor::info() && node->numChildren() == 2) {
-                        if (FunctionRareData* rareData = newTarget->rareData()) {
-                            if (rareData->allocationProfileWatchpointSet().isStillValid() && globalObject->structureCacheClearedWatchpointSet().isStillValid()) {
-                                Structure* structure = rareData->internalFunctionAllocationStructure();
+                    if (FunctionRareData* rareData = newTarget->rareData()) {
+                        if (rareData->allocationProfileWatchpointSet().isStillValid() && globalObject->structureCacheClearedWatchpointSet().isStillValid()) {
+                            Structure* structure = rareData->internalFunctionAllocationStructure();
+                            if (callee->classInfo() == ObjectConstructor::info() && node->numChildren() == 2) {
                                 if (structure && structure->classInfoForCells() == JSFinalObject::info() && structure->hasMonoProto()) {
                                     m_graph.freeze(rareData);
                                     m_graph.watchpoints().addLazily(rareData->allocationProfileWatchpointSet());
@@ -5023,6 +5059,22 @@ bool AbstractInterpreter<AbstractStateType>::executeEffects(unsigned clobberLimi
                                     didFoldClobberWorld();
                                     setForNode(node, structure);
                                     break;
+                                }
+                            }
+
+                            if (callee->classInfo() == ArrayConstructor::info() && node->numChildren() == 3 && !m_graph.hasExitSite(node->origin.semantic, BadType) && !m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
+                                if (structure && structure->classInfoForCells() == JSArray::info() && structure->hasMonoProto() && !hasAnyArrayStorage(structure->indexingType())) {
+                                    if (m_graph.isWatchingHavingABadTimeWatchpoint(node)) {
+
+                                        m_graph.freeze(rareData);
+                                        m_graph.watchpoints().addLazily(rareData->allocationProfileWatchpointSet());
+                                        m_graph.freeze(globalObject);
+                                        m_graph.watchpoints().addLazily(globalObject->structureCacheClearedWatchpointSet());
+                                        m_state.setShouldTryConstantFolding(true);
+                                        didFoldClobberWorld();
+                                        setTypeForNode(node, SpecArray);
+                                        break;
+                                    }
                                 }
                             }
                         }

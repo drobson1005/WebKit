@@ -244,7 +244,7 @@ const WeakHashSet<SVGElement, WeakPtrImplWithEventTargetData>& SVGElement::insta
 std::optional<FloatRect> SVGElement::getBoundingBox() const
 {
     if (is<SVGGraphicsElement>(*this)) {
-        if (auto renderer = this->renderer())
+        if (CheckedPtr renderer = this->renderer())
             return renderer->objectBoundingBox();
     }
     return std::nullopt;
@@ -915,8 +915,6 @@ CSSPropertyID SVGElement::cssPropertyIdForSVGAttributeName(const QualifiedName& 
         return CSSPropertyImageRendering;
     case AttributeNames::heightAttr:
         return CSSPropertyHeight;
-    case AttributeNames::kerningAttr:
-        return CSSPropertyKerning;
     case AttributeNames::letter_spacingAttr:
         return CSSPropertyLetterSpacing;
     case AttributeNames::lighting_colorAttr:

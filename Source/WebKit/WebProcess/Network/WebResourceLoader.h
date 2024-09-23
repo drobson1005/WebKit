@@ -62,7 +62,7 @@ public:
     struct TrackingParameters {
         WebPageProxyIdentifier webPageProxyID;
         Markable<WebCore::PageIdentifier> pageID;
-        WebCore::FrameIdentifier frameID;
+        Markable<WebCore::FrameIdentifier> frameID;
         WebCore::ResourceLoaderIdentifier resourceID;
     };
 
@@ -70,7 +70,7 @@ public:
 
     ~WebResourceLoader();
 
-    void didReceiveWebResourceLoaderMessage(IPC::Connection&, IPC::Decoder&);
+    void didReceiveMessage(IPC::Connection&, IPC::Decoder&);
 
     WebCore::ResourceLoader* resourceLoader() const { return m_coreLoader.get(); }
 

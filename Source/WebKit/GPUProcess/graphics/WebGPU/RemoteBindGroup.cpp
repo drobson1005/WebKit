@@ -53,12 +53,12 @@ RemoteBindGroup::~RemoteBindGroup() = default;
 
 void RemoteBindGroup::destruct()
 {
-    m_objectHeap->removeObject(m_identifier);
+    Ref { m_objectHeap.get() }->removeObject(m_identifier);
 }
 
 void RemoteBindGroup::updateExternalTextures(WebGPUIdentifier externalTextureIdentifier)
 {
-    if (auto externalTexture = m_objectHeap->convertExternalTextureFromBacking(externalTextureIdentifier); externalTexture.get())
+    if (auto externalTexture = protectedObjectHeap()->convertExternalTextureFromBacking(externalTextureIdentifier); externalTexture.get())
         m_backing->updateExternalTextures(*externalTexture.get());
 }
 

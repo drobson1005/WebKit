@@ -520,9 +520,6 @@ webkit.org/b/132421 fast/multicol/fixed-stack.html [ ImageOnlyFailure ]
 # Incomplete implementation of eventSender causes this test to fail
 webkit.org/b/42194 fast/scrolling/scroll-select-list.html [ ImageOnlyFailure ]
 
-webkit.org/b/107018 svg/animations/animate-linear-discrete-additive.svg [ ImageOnlyFailure Pass ]
-webkit.org/b/107018 svg/animations/animate-linear-discrete-additive-b.svg [ ImageOnlyFailure Pass ]
-webkit.org/b/107018 svg/animations/animate-linear-discrete-additive-c.svg  [ ImageOnlyFailure Pass ]
 webkit.org/b/107018 svg/animations/mozilla/animateMotion-mpath-pathLength-1.svg [ ImageOnlyFailure Pass ]
 
 webkit.org/b/124476 platform/mac-wk2/plugins/slow/asynchronous-plugin-initialization-multiple.html [ Pass Failure ]
@@ -579,6 +576,12 @@ imported/w3c/web-platform-tests/css/css-transforms/transform3d-preserve3d-001.ht
 imported/w3c/web-platform-tests/css/cssom-view/scroll-behavior-element.html [ Failure ]
 
 webkit.org/b/260640 [ Release arm64 ] editing/execCommand/apply-inline-style-to-element-with-no-renderer-crash.html [ Pass Failure ]
+
+# webkit.org/b/278928 AX: AXTextOperation over multiple ranges is entirely broken
+[ Debug ] accessibility/mac/text-operation/text-operation-capitalize.html [ Crash ]
+[ Debug ] accessibility/mac/text-operation/text-operation-lowercase.html [ Crash ]
+[ Debug ] accessibility/mac/text-operation/text-operation-smart-replace.html [ Crash ]
+[ Debug ] accessibility/mac/text-operation/text-operation-uppercase.html [ Crash ]
 
 ### END OF (1) Classified failures with bug reports
 ########################################
@@ -1325,12 +1328,6 @@ webkit.org/b/231083 [ Debug ] imported/w3c/web-platform-tests/content-security-p
 
 webkit.org/b/235605 [ arm64 ] fast/scrolling/mac/j-shaped-scroll-rubberband.html [ Failure ]
 
-# Plugins
-# FIXME: Remove these tests.
-platform/mac-wk2/plugins/npruntime/remove-property-from-javascript.html [ Skip ]
-platform/mac-wk2/plugins/npp-setwindow-called-on-scroll.html [ Skip ]
-platform/mac-wk2/plugins/destroy-during-async-npp-new.html [ Skip ]
-
 fast/text/install-font-style-recalc.html [ Pass ]
 
 webkit.org/b/239095 http/wpt/cache-storage/cache-storage-networkprocess-crash.html [ Pass Crash ]
@@ -1641,8 +1638,6 @@ http/tests/webgpu/webgpu/api/validation/queue/destroyed [ Pass ]
 
 http/tests/webgpu/webgpu/shader/execution/flow_control/switch.html [ Pass ]
 
-webkit.org/b/263920 svg/transforms/transformed-text-fill-gradient.html [ Pass ImageOnlyFailure ]
-
 webkit.org/b/264266 [ Ventura+ x86_64 ] imported/w3c/web-platform-tests/css/filter-effects/filters-drop-shadow-002.html [ ImageOnlyFailure ]
 
 webkit.org/b/264306 [ Sonoma+ ] fast/scrolling/mac/scrollbars/very-wide-overlay-scrollbar.html [ Pass ImageOnlyFailure Timeout ]
@@ -1852,3 +1847,22 @@ imported/w3c/web-platform-tests/content-security-policy/inheritance/history.sub.
 
 # webkit.org/b/279140 [ macOS wk2 ] REGRESSION (283140@main): [ macOS wk2 ] fast/scrolling/mac/scrollbars/scrollbar-state.html is a constant failure 
 fast/scrolling/mac/scrollbars/scrollbar-state.html [ Failure ] 
+
+# webkit.org/b/279359 http/wpt/mediastream/mediastreamtrackprocessor-videoframe-timestamp.html  is asserting on debug
+[ Sonoma+ Debug ] http/wpt/mediastream/mediastreamtrackprocessor-videoframe-timestamp.html  [ Skip ]
+[ Sonoma+ Debug ] http/wpt/mediasession/voiceActivityDetection.html [ Skip ]
+
+# webkit.org/b/279404 [ Ventura ] http/tests/storageAccess/request-and-grant-access-then-navigate-cross-site-should-not-have-access.https.html is a flaky failure
+[ Ventura ] http/tests/storageAccess/request-and-grant-access-then-navigate-cross-site-should-not-have-access.https.html [ Pass Failure ]
+
+# webkit.org/b/279477 REGRESSION (283102@main?): [macOS iOS wk2 Debug EWS ] ASSERTION FAILED: WebKit::WebPageProxy::startNetworkRequestsForPageLoadTiming(WebCore::FrameIdentifier) result of http/tests/site-isolation/window-open-with-name-cross-site.html to crash
+[ Debug ] http/tests/site-isolation/window-open-with-name-cross-site.html [ Skip ]
+
+# webkit.org/b/279747 [ macOS wk2 ] editing/input/scroll-viewport-page-up-down.html is a flaky text failure
+editing/input/scroll-viewport-page-up-down.html [ Pass Failure ]
+
+# webkit.org/b/279463 Flaky ASSERTION FAILED: m_clients.contains(client) in VideoTrack::clearClient on imported/w3c/web-platform-tests/media-source/URL-createObjectURL.html
+[ Sonoma Debug arm64 ] imported/w3c/web-platform-tests/media-source/URL-createObjectURL.html [ Pass Crash ]
+
+# webkit.org/b/280037 [ Ventura wk2 ] imported/w3c/web-platform-tests/pointerevents/pointerevent_lostpointercapture_remove_setcapture_node.html is a flaky failure
+[ Ventura ] imported/w3c/web-platform-tests/pointerevents/pointerevent_lostpointercapture_remove_setcapture_node.html [ Pass Failure ]

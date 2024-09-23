@@ -26,10 +26,15 @@
 #include "config.h"
 #include "ScrollTimeline.h"
 
+#include "AnimationTimelinesController.h"
 #include "CSSPrimitiveValueMappings.h"
 #include "CSSScrollValue.h"
 #include "CSSValuePool.h"
+#include "Document.h"
+#include "DocumentInlines.h"
 #include "Element.h"
+#include "RenderLayerScrollableArea.h"
+#include "RenderView.h"
 
 namespace WebCore {
 
@@ -73,6 +78,8 @@ ScrollTimeline::ScrollTimeline(ScrollTimelineOptions&& options)
     : m_source(WTFMove(options.source))
     , m_axis(options.axis)
 {
+    if (m_source)
+        m_source->protectedDocument()->ensureTimelinesController().addTimeline(*this);
 }
 
 ScrollTimeline::ScrollTimeline(const AtomString& name, ScrollAxis axis)
@@ -119,6 +126,51 @@ Ref<CSSValue> ScrollTimeline::toCSSValue(const RenderStyle&) const
     }();
 
     return CSSScrollValue::create(CSSPrimitiveValue::create(scroller), CSSPrimitiveValue::create(toCSSValueID(m_axis)));
+}
+
+AnimationTimelinesController* ScrollTimeline::controller() const
+{
+    if (m_source)
+        return &m_source->protectedDocument()->ensureTimelinesController();
+    return nullptr;
+}
+
+AnimationTimeline::ShouldUpdateAnimationsAndSendEvents ScrollTimeline::documentWillUpdateAnimationsAndSendEvents()
+{
+    if (m_source && m_source->isConnected())
+        return AnimationTimeline::ShouldUpdateAnimationsAndSendEvents::Yes;
+    return AnimationTimeline::ShouldUpdateAnimationsAndSendEvents::No;
+}
+
+ScrollableArea* ScrollTimeline::scrollableAreaForSourceRenderer(RenderElement* renderer, Ref<Document> document)
+{
+    CheckedPtr renderBox = dynamicDowncast<RenderBox>(renderer);
+    if (!renderBox)
+        return nullptr;
+
+    if (renderer->element() == document->documentElement())
+        return &renderer->view().frameView();
+
+    return (renderBox->canBeScrolledAndHasScrollableArea() && renderBox->hasLayer()) ? renderBox->layer()->scrollableArea() : nullptr;
+}
+
+ScrollTimeline::Data ScrollTimeline::computeScrollTimelineData() const
+{
+    if (!m_source)
+        return { };
+
+    auto* sourceScrollableArea = scrollableAreaForSourceRenderer(m_source->renderer(), m_source->document());
+    if (!sourceScrollableArea)
+        return { };
+
+    // https://drafts.csswg.org/scroll-animations-1/#scroll-timeline-progress
+    // Progress (the current time) for a scroll progress timeline is calculated as:
+    // scroll offset ÷ (scrollable overflow size − scroll container size)
+
+    float maxScrollOffset = axis() == ScrollAxis::Block ? sourceScrollableArea->maximumScrollOffset().y() : sourceScrollableArea->maximumScrollOffset().x();
+    float scrollOffset = axis() == ScrollAxis::Block ? sourceScrollableArea->scrollOffset().y() : sourceScrollableArea->scrollOffset().x();
+
+    return { maxScrollOffset, scrollOffset };
 }
 
 } // namespace WebCore

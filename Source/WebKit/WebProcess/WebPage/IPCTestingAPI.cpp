@@ -549,7 +549,7 @@ static JSValueRef jsSendWithAsyncReply(IPC::Connection& connection, uint64_t des
         },
         IPC::Connection::AsyncReplyID::generate()
     };
-    auto asyncReplyID = handler.replyID;
+    auto asyncReplyID = *handler.replyID;
     auto result = connection.sendMessageWithAsyncReply(WTFMove(encoder), WTFMove(handler), IPC::SendOption::IPCTestingMessage);
     if (result != IPC::Error::NoError) {
         *exception = createErrorFromIPCError(context, result);
@@ -2367,7 +2367,7 @@ static bool encodeArgument(IPC::Encoder& encoder, JSContextRef context, JSValueR
         if (!frameIdentifier || !processIdentifier)
             return false;
         encoder << WebCore::FrameIdentifier {
-            LegacyNullableObjectIdentifier<WebCore::FrameIdentifierType>(frameIdentifier),
+            ObjectIdentifier<WebCore::FrameIdentifierType>(frameIdentifier),
             LegacyNullableObjectIdentifier<WebCore::ProcessIdentifierType>(processIdentifier)
         };
         return true;

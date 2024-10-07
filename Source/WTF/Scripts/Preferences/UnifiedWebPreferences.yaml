@@ -605,6 +605,7 @@ ApplePayEnabled:
     WebCore:
       "ENABLE(APPLE_PAY_REMOTE_UI)": true
       default: false
+  sharedPreferenceForWebProcess: true
 
 # FIXME: This is on by default in WebKit2 PLATFORM(COCOA). Perhaps we should consider turning it on for WebKitLegacy as well.
 AsyncClipboardAPIEnabled:
@@ -908,6 +909,45 @@ BlockMediaLayerRehostingInWebContentProcess:
     WebKit:
       default: true
     WebCore:
+      default: false
+
+BlockMobileAssetInWebContentSandbox:
+  type: bool
+  status: internal
+  category: networking
+  humanReadableName: "Block MobileAsset service in the WebContent sandbox"
+  humanReadableDescription: "Block MobileAsset service in the WebContent sandbox"
+  webcoreBinding: none
+  condition: HAVE(SANDBOX_STATE_FLAGS)
+  exposed: [ WebKit ]
+  defaultValue:
+    WebKit:
+      default: false
+
+BlockMobileGestaltInWebContentSandbox:
+  type: bool
+  status: internal
+  category: networking
+  humanReadableName: "Block MobileGestalt service in the WebContent sandbox"
+  humanReadableDescription: "Block MobileGestalt service in the WebContent sandbox"
+  webcoreBinding: none
+  condition: HAVE(SANDBOX_STATE_FLAGS) && PLATFORM(IOS)
+  exposed: [ WebKit ]
+  defaultValue:
+    WebKit:
+      default: false
+
+BlockOpenDirectoryInWebContentSandbox:
+  type: bool
+  status: internal
+  category: networking
+  humanReadableName: "Block OpenDirectory service in the WebContent sandbox"
+  humanReadableDescription: "Block OpenDirectory service in the WebContent sandbox"
+  webcoreBinding: none
+  condition: HAVE(SANDBOX_STATE_FLAGS) && PLATFORM(MAC)
+  exposed: [ WebKit ]
+  defaultValue:
+    WebKit:
       default: false
 
 # We would have to partition BroadcastChannel based on PageGroups if we wanted to enable this for WebKitLegacy.
@@ -1272,6 +1312,20 @@ CSSPaintingAPIEnabled:
       default: false
     WebKit:
       "ENABLE(EXPERIMENTAL_FEATURES)": true
+      default: false
+    WebCore:
+      default: false
+
+CSSProgressFunctionEnabled:
+  type: bool
+  category: css
+  status: preview
+  humanReadableName: "CSS progress()"
+  humanReadableDescription: "Enable support for CSS Values and Units Module Level 5 progress()"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
       default: false
     WebCore:
       default: false
@@ -2076,20 +2130,6 @@ CustomPasteboardDataEnabled:
       "PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WIN)": true
       default: false
 
-CustomStateSetEnabled:
-  type: bool
-  status: stable
-  category: dom
-  humanReadableName: "CustomStateSet and :state() pseudo class"
-  humanReadableDescription: "Support for CustomStateSet in custom elements"
-  defaultValue:
-    WebKitLegacy:
-      default: true
-    WebKit:
-      default: true
-    WebCore:
-      default: true
-
 DNSPrefetchingEnabled:
   type: bool
   status: embedder
@@ -2456,6 +2496,7 @@ DeviceOrientationPermissionAPIEnabled:
       default: false
     WebCore:
       default: false
+  sharedPreferenceForWebProcess: true
 
 DeviceWidth:
   type: uint32_t
@@ -2661,7 +2702,7 @@ EnumeratingVisibleNetworkInterfacesEnabled:
   exposed: [ WebKit ]
   defaultValue:
     WebKit:
-      default: false
+      default: true
 
 EventHandlerDrivenSmoothKeyboardScrollingEnabled:
   type: bool
@@ -2832,17 +2873,17 @@ FileSystemAccessEnabled:
 
 FilterLinkDecorationByDefaultEnabled:
   type: bool
-  status: testable
+  status: stable
   category: networking
   humanReadableName: "Filter Link Decoration"
   humanReadableDescription: "Enable Filtering Link Decoration"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
-      default: false
+      default: true
     WebCore:
-      default: false
+      default: true
 
 FixedFontFamily:
   type: String
@@ -3061,6 +3102,20 @@ GenericCueAPIEnabled:
     WebCore:
       default: false
 
+GeolocationAPIEnabled:
+  type: bool
+  status: embedder
+  humanReadableName: "Geolocation API"
+  humanReadableDescription: "Enable Geolocation API"
+  defaultValue:
+    WebKitLegacy:
+      default: true
+    WebKit:
+      default: true
+    WebCore:
+      default: true
+  sharedPreferenceForWebProcess: true
+
 GetCoalescedEventsEnabled:
   type: bool
   status: stable
@@ -3146,6 +3201,22 @@ GraphicsContextFiltersEnabled:
        default: true
      WebCore:
        default: true
+
+HDRForImagesEnabled:
+  type: bool
+  status: unstable
+  category: media
+  webcoreOnChange: setNeedsRelayoutAllFrames
+  humanReadableName: "HDR for Images Support"
+  humanReadableDescription: "HDR for Images Support"
+  condition: HAVE(HDR_SUPPORT)
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
 
 HTTPEquivEnabled:
   type: bool
@@ -3346,17 +3417,17 @@ ImageAnimationControlEnabled:
 
 ImageCaptureEnabled:
   type: bool
-  status: testable
+  status: stable
   category: media
   humanReadableName: "Image Capture API"
   humanReadableDescription: "Enable Image Capture API"
   condition: ENABLE(MEDIA_STREAM)
   defaultValue:
-    WebKitLegacy:
-      default: false
     WebKit:
+      "PLATFORM(COCOA)": true
       default: false
     WebCore:
+      "PLATFORM(COCOA)": true
       default: false
 
 ImageControlsEnabled:
@@ -3397,6 +3468,20 @@ InactiveMediaCaptureStreamRepromptIntervalInMinutes:
     WebKit:
       "PLATFORM(IOS_FAMILY)": 1
       default: 10
+
+IncludeIgnoredInCoreAXTree:
+  type: bool
+  status: internal
+  condition: ENABLE(INCLUDE_IGNORED_IN_CORE_AX_TREE)
+  humanReadableName: "Include ignored elements in core accessibility tree"
+  humanReadableDescription: "When true, accessibility-is-ignored is not used to build the core, platform-agnostic accessibility tree, and instead is expected to be applied at any platform-exposed layer."
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
 
 IncompleteImageBorderEnabled:
   type: bool
@@ -5106,6 +5191,7 @@ NotificationEventEnabled:
     WebKit:
       "ENABLE(NOTIFICATION_EVENT) && !PLATFORM(IOS_FAMILY)": true
       default: false
+  sharedPreferenceForWebProcess: true
 
 NotificationsEnabled:
   type: bool
@@ -5407,6 +5493,7 @@ PeerConnectionEnabled:
     WebCore:
       default: true
   disableInLockdownMode: true
+  sharedPreferenceForWebProcess: true
 
 PeerConnectionVideoScalingAdaptationDisabled:
   type: bool
@@ -5772,7 +5859,7 @@ ReportingEnabled:
 
 RequestIdleCallbackEnabled:
   type: bool
-  status: stable
+  status: testable
   category: dom
   humanReadableName: "requestIdleCallback"
   humanReadableDescription: "Enable requestIdleCallback support"
@@ -5780,7 +5867,6 @@ RequestIdleCallbackEnabled:
     WebKitLegacy:
       default: false
     WebKit:
-      "USE(CF)": true
       default: false
     WebCore:
       default: false
@@ -6285,6 +6371,18 @@ SelectionFlippingEnabled:
     WebKit:
       "PLATFORM(VISION)" : false
       default: true
+
+SelectionHonorsOverflowScrolling:
+  type: bool
+  status: internal
+  humanReadableName: "Selection Honors Overflow Scrolling"
+  humanReadableDescription: "Selection honors overflow scrolling"
+  webcoreBinding: none
+  condition: PLATFORM(IOS_FAMILY)
+  exposed: [ WebKit ]
+  defaultValue:
+    WebKit:
+      default: false
 
 SendMouseEventsToDisabledFormControlsEnabled:
   type: bool
@@ -6955,6 +7053,7 @@ SystemPreviewEnabled:
     WebCore:
       default: false
   disableInLockdownMode: true
+  sharedPreferenceForWebProcess: true
 
 TabsToLinks:
   type: bool
@@ -7253,6 +7352,20 @@ UAVisualTransitionDetectionEnabled:
     WebCore:
       default: true
 
+URLPatternAPIEnabled:
+  type: bool
+  category: dom
+  status: unstable
+  humanReadableName: "URL Pattern API"
+  humanReadableDescription: "Enable URL Pattern API"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
+
 # FIXME: Is this implemented for WebKitLegacy? If not, this should be excluded from WebKitLegacy entirely.
 UndoManagerAPIEnabled:
   type: bool
@@ -7334,6 +7447,18 @@ UseARKitForModel:
   webcoreBinding: none
   exposed: [ WebKit ]
   condition: ENABLE(ARKIT_INLINE_PREVIEW)
+  defaultValue:
+    WebKit:
+      default: true
+
+UseAVCaptureDeviceRotationCoordinatorAPI:
+  type: bool
+  status: internal
+  humanReadableName: "Use AVCaptureDeviceRotationCoordinator API"
+  humanReadableDescription: "Use AVCaptureDeviceRotationCoordinator API"
+  webcoreBinding: none
+  exposed: [ WebKit ]
+  condition: HAVE(AVCAPTUREDEVICEROTATIONCOORDINATOR)
   defaultValue:
     WebKit:
       default: true
@@ -7463,6 +7588,19 @@ UseImageDocumentForSubframePDF:
       default: false
     WebCore:
       PLATFORM(IOS_FAMILY): true
+      default: false
+
+UseMicrophoneMuteStatusAPI:
+  type: bool
+  status: preview
+  category: media
+  humanReadableName: "Use Microphone Mute Status API"
+  humanReadableDescription: "Use Microphone Mute Status API"
+  condition: ENABLE(MEDIA_STREAM)
+  defaultValue:
+    WebKit:
+      default: false
+    WebCore:
       default: false
 
 UsePreHTML5ParserQuirks:
@@ -8023,6 +8161,7 @@ WebCodecsVideoEnabled:
       "USE(GSTREAMER)": true
       default: false
   disableInLockdownMode: true
+  sharedPreferenceForWebProcess: true
 
 WebCryptoSafeCurvesEnabled:
   type: bool
@@ -8134,7 +8273,7 @@ WebGPUEnabled:
 
 WebGPUHDREnabled:
   type: bool
-  status: internal
+  status: unstable
   category: dom
   humanReadableName: "WebGPU support for HDR"
   humanReadableDescription: "WebGPU High Dynamic Range through canvas configuration tone mapping mode"
@@ -8290,6 +8429,21 @@ WebRTCH265CodecEnabled:
       default: false
     WebCore:
       "PLATFORM(COCOA)": true
+      default: false
+
+WebRTCL4SEnabled:
+  type: bool
+  status: testable
+  category: media
+  condition: ENABLE(WEB_RTC)
+  humanReadableName: "WebRTC L4S support"
+  humanReadableDescription: "Enable WebRTC L4S support"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
       default: false
 
 WebRTCMediaPipelineAdditionalLoggingEnabled:

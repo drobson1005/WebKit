@@ -52,6 +52,8 @@
 #include "ArgumentCodersUnix.h"
 #endif
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 namespace IPC {
 
 template<typename T, size_t Extent> struct ArgumentCoder<std::span<T, Extent>> {
@@ -513,8 +515,8 @@ template<typename T, size_t inlineCapacity, typename OverflowHandler, size_t min
 
 template<typename T, size_t inlineCapacity, typename OverflowHandler, size_t minCapacity> struct ArgumentCoder<Vector<T, inlineCapacity, OverflowHandler, minCapacity>> : VectorArgumentCoder<std::is_arithmetic<T>::value, T, inlineCapacity, OverflowHandler, minCapacity> { };
 
-template<typename KeyArg, typename MappedArg, typename HashArg, typename KeyTraitsArg, typename MappedTraitsArg, typename HashTableTraits> struct ArgumentCoder<HashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg, HashTableTraits>> {
-    typedef HashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg, HashTableTraits> HashMapType;
+template<typename KeyArg, typename MappedArg, typename HashArg, typename KeyTraitsArg, typename MappedTraitsArg, typename HashTableTraits> struct ArgumentCoder<UncheckedKeyHashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg, HashTableTraits>> {
+    typedef UncheckedKeyHashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg, HashTableTraits> HashMapType;
 
     template<typename Encoder, typename T>
     static void encode(Encoder& encoder, T&& hashMap)
@@ -811,3 +813,5 @@ template<typename T, typename Traits> struct ArgumentCoder<WTF::Markable<T, Trai
 };
 
 } // namespace IPC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

@@ -26,10 +26,11 @@
 #pragma once
 
 #include "AnimationTimeline.h"
+#include "Element.h"
 #include "ScrollAxis.h"
 #include "ScrollTimelineOptions.h"
-#include "TimelineRange.h"
 #include <wtf/Ref.h>
+#include <wtf/WeakHashSet.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
@@ -40,6 +41,8 @@ class Element;
 class RenderStyle;
 class ScrollableArea;
 
+struct TimelineRange;
+
 class ScrollTimeline : public AnimationTimeline {
 public:
     static Ref<ScrollTimeline> create(ScrollTimelineOptions&& = { });
@@ -47,7 +50,8 @@ public:
     static Ref<ScrollTimeline> createFromCSSValue(const CSSScrollValue&);
 
     virtual Element* source() const { return m_source.get(); }
-    void setSource(Element*);
+    Element* sourceElementForProgressCalculation() const;
+    void setSource(const Element*);
 
     ScrollAxis axis() const { return m_axis; }
     void setAxis(ScrollAxis axis) { m_axis = axis; }
@@ -63,7 +67,11 @@ public:
     AnimationTimelinesController* controller() const override;
     static ScrollableArea* scrollableAreaForSourceRenderer(RenderElement*, Ref<Document>);
 
-    std::optional<WebAnimationTime> currentTime() override;
+    std::optional<WebAnimationTime> currentTime(const TimelineRange&) override;
+    TimelineRange defaultRange() const override;
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> timelineScopeDeclaredElement() const { return m_timelineScopeElement; }
+    void setTimelineScopeElement(const Element&);
+    void clearTimelineScopeDeclaredElement() { m_timelineScopeElement = nullptr; }
 
 protected:
     explicit ScrollTimeline(const AtomString&, ScrollAxis);
@@ -74,7 +82,7 @@ protected:
         float rangeEnd { 0 };
     };
     static float floatValueForOffset(const Length&, float);
-    virtual Data computeTimelineData(const TimelineRange& = { }) const;
+    virtual Data computeTimelineData(const TimelineRange&) const;
 
 private:
     enum class Scroller : uint8_t { Nearest, Root, Self };
@@ -84,10 +92,13 @@ private:
 
     bool isScrollTimeline() const final { return true; }
 
+    void animationTimingDidChange(WebAnimation&) override;
+
     WeakPtr<Element, WeakPtrImplWithEventTargetData> m_source;
     ScrollAxis m_axis { ScrollAxis::Block };
     AtomString m_name;
-    Scroller m_scroller { Scroller::Nearest };
+    Scroller m_scroller { Scroller::Self };
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> m_timelineScopeElement;
 };
 
 } // namespace WebCore

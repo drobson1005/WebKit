@@ -124,7 +124,6 @@ public:
     unsigned textEmphasisFill : 1; // TextEmphasisFill
     unsigned textEmphasisMark : 3; // TextEmphasisMark
     unsigned textEmphasisPosition : 4; // TextEmphasisPosition
-    unsigned textOrientation : 2; // TextOrientation
     unsigned textIndentLine : 1; // TextIndentLine
     unsigned textIndentType : 1; // TextIndentType
     unsigned textUnderlinePosition : 4; // TextUnderlinePosition
@@ -185,7 +184,7 @@ public:
     short hyphenationLimitLines { -1 };
 
 #if ENABLE(DARK_MODE_CSS)
-    StyleColorScheme colorScheme;
+    Style::ColorScheme colorScheme;
 #endif
 
     AtomString textEmphasisCustomMark;

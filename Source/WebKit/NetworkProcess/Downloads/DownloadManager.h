@@ -76,10 +76,10 @@ public:
         virtual ~Client() { }
 
         // CheckedPtr interface
-        virtual uint32_t ptrCount() const = 0;
-        virtual uint32_t ptrCountWithoutThreadCheck() const = 0;
-        virtual void incrementPtrCount() const = 0;
-        virtual void decrementPtrCount() const = 0;
+        virtual uint32_t checkedPtrCount() const = 0;
+        virtual uint32_t checkedPtrCountWithoutThreadCheck() const = 0;
+        virtual void incrementCheckedPtrCount() const = 0;
+        virtual void decrementCheckedPtrCount() const = 0;
 
         virtual void didCreateDownload() = 0;
         virtual void didDestroyDownload() = 0;
@@ -93,7 +93,7 @@ public:
     ~DownloadManager();
 
     void startDownload(PAL::SessionID, DownloadID, const WebCore::ResourceRequest&, const std::optional<WebCore::SecurityOriginData>& topOrigin, std::optional<NavigatingToAppBoundDomain>, const String& suggestedName = { }, WebCore::FromDownloadAttribute = WebCore::FromDownloadAttribute::No, std::optional<WebCore::FrameIdentifier> frameID = std::nullopt, std::optional<WebCore::PageIdentifier> = std::nullopt, std::optional<WebCore::ProcessIdentifier> = std::nullopt);
-    void dataTaskBecameDownloadTask(DownloadID, std::unique_ptr<Download>&&);
+    void dataTaskBecameDownloadTask(DownloadID, Ref<Download>&&);
     void convertNetworkLoadToDownload(DownloadID, Ref<NetworkLoad>&&, ResponseCompletionHandler&&,  Vector<RefPtr<WebCore::BlobDataFileReference>>&&, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
     void downloadDestinationDecided(DownloadID, Ref<NetworkDataTask>&&);
 
@@ -108,7 +108,7 @@ public:
 #endif
 #endif
     
-    Download* download(DownloadID downloadID) { return m_downloads.get(downloadID); }
+    Download* download(DownloadID);
 
     void downloadFinished(Download&);
     bool isDownloading() const { return !m_downloads.isEmpty(); }
@@ -126,8 +126,8 @@ public:
 
 private:
     CheckedRef<Client> m_client;
-    UncheckedKeyHashMap<DownloadID, Ref<PendingDownload>> m_pendingDownloads;
-    UncheckedKeyHashMap<DownloadID, RefPtr<NetworkDataTask>> m_downloadsAfterDestinationDecided;
+    HashMap<DownloadID, Ref<PendingDownload>> m_pendingDownloads;
+    HashMap<DownloadID, RefPtr<NetworkDataTask>> m_downloadsAfterDestinationDecided;
     DownloadMap m_downloads;
 };
 

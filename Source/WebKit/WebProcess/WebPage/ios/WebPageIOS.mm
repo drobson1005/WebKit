@@ -144,10 +144,12 @@
 #import <WebCore/RenderImage.h>
 #import <WebCore/RenderLayer.h>
 #import <WebCore/RenderLayerBacking.h>
+#import <WebCore/RenderLayerScrollableArea.h>
 #import <WebCore/RenderThemeIOS.h>
 #import <WebCore/RenderVideo.h>
 #import <WebCore/RenderView.h>
 #import <WebCore/RenderedDocumentMarker.h>
+#import <WebCore/ScrollableArea.h>
 #import <WebCore/Settings.h>
 #import <WebCore/ShadowRoot.h>
 #import <WebCore/SharedBuffer.h>
@@ -160,6 +162,7 @@
 #import <WebCore/ViewportArguments.h>
 #import <WebCore/VisibleUnits.h>
 #import <WebCore/WebEvent.h>
+#import <WebCore/WritingSuggestionData.h>
 #import <pal/system/ios/UserInterfaceIdiom.h>
 #import <wtf/MathExtras.h>
 #import <wtf/MemoryPressureHandler.h>
@@ -825,12 +828,13 @@ void WebPage::handleSyntheticClick(Node& nodeRespondingToClick, const WebCore::F
     auto& respondingDocument = nodeRespondingToClick.document();
     m_hasHandledSyntheticClick = true;
 
-    if (!respondingDocument.settings().contentChangeObserverEnabled()) {
+    if (!respondingDocument.settings().contentChangeObserverEnabled() || respondingDocument.quirks().shouldIgnoreContentObservationForClick(nodeRespondingToClick)) {
         completeSyntheticClick(nodeRespondingToClick, location, modifiers, WebCore::SyntheticClickType::OneFingerTap, pointerId);
         return;
     }
 
     auto& contentChangeObserver = respondingDocument.contentChangeObserver();
+    contentChangeObserver.setClickTarget(nodeRespondingToClick);
     auto targetNodeWentFromHiddenToVisible = contentChangeObserver.hiddenTouchTarget() == &nodeRespondingToClick && ContentChangeObserver::isConsideredVisible(nodeRespondingToClick);
     {
         LOG_WITH_STREAM(ContentObservation, stream << "handleSyntheticClick: node(" << &nodeRespondingToClick << ") " << location);
@@ -846,7 +850,7 @@ void WebPage::handleSyntheticClick(Node& nodeRespondingToClick, const WebCore::F
 
     if (targetNodeWentFromHiddenToVisible) {
         LOG(ContentObservation, "handleSyntheticClick: target node was hidden and now is visible -> hover.");
-        send(Messages::WebPageProxy::DidHandleTapAsHover());
+        didHandleTapAsHover();
         return;
     }
 
@@ -866,7 +870,7 @@ void WebPage::handleSyntheticClick(Node& nodeRespondingToClick, const WebCore::F
     auto observedContentChange = contentChangeObserver.observedContentChange();
     auto continueContentObservation = !(observedContentChange == WKContentVisibilityChange || targetNodeTriggersFastPath);
     if (continueContentObservation) {
-        // Wait for callback to completePendingSyntheticClickForContentChangeObserver() to decide whether to send the click event.
+        // Wait for callback to didFinishContentChangeObserving() to decide whether to send the click event.
         const Seconds observationDuration = 32_ms;
         contentChangeObserver.startContentObservationForDuration(observationDuration);
         LOG(ContentObservation, "handleSyntheticClick: Can't decide it yet -> wait.");
@@ -884,15 +888,21 @@ void WebPage::handleSyntheticClick(Node& nodeRespondingToClick, const WebCore::F
         auto shouldStayAtHoverState = observedContentChange == WKContentVisibilityChange;
         if (shouldStayAtHoverState) {
             // The move event caused new contents to appear. Don't send synthetic click event, but just ensure that the mouse is on the most recent content.
-            if (auto* localMainFrame = dynamicDowncast<WebCore::LocalFrame>(protectedThis->corePage()->mainFrame()))
+            if (RefPtr localMainFrame = dynamicDowncast<WebCore::LocalFrame>(protectedThis->corePage()->mainFrame()))
                 dispatchSyntheticMouseMove(*localMainFrame, location, modifiers, pointerId);
             LOG(ContentObservation, "handleSyntheticClick: Observed meaningful visible change -> hover.");
-            protectedThis->send(Messages::WebPageProxy::DidHandleTapAsHover());
+            protectedThis->didHandleTapAsHover();
             return;
         }
         LOG(ContentObservation, "handleSyntheticClick: calling completeSyntheticClick -> click.");
         protectedThis->completeSyntheticClick(targetNode, location, modifiers, WebCore::SyntheticClickType::OneFingerTap, pointerId);
     });
+}
+
+void WebPage::didHandleTapAsHover()
+{
+    invokePendingSyntheticClickCallback(SyntheticClickResult::Hover);
+    send(Messages::WebPageProxy::DidHandleTapAsHover());
 }
 
 void WebPage::didFinishContentChangeObserving(WKContentChange observedContentChange)
@@ -917,7 +927,7 @@ void WebPage::didFinishContentChangeObserving(WKContentChange observedContentCha
         if (auto* localMainFrame = dynamicDowncast<WebCore::LocalFrame>(protectedThis->corePage()->mainFrame()))
             dispatchSyntheticMouseMove(*localMainFrame, location, modifiers, pointerId);
 
-        protectedThis->send(Messages::WebPageProxy::DidHandleTapAsHover());
+        protectedThis->didHandleTapAsHover();
     });
     m_pendingSyntheticClickNode = nullptr;
     m_pendingSyntheticClickLocation = { };
@@ -929,9 +939,11 @@ void WebPage::completeSyntheticClick(Node& nodeRespondingToClick, const WebCore:
 {
     SetForScope completeSyntheticClickScope { m_completingSyntheticClick, true };
     IntPoint roundedAdjustedPoint = roundedIntPoint(location);
-    auto* localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
-    if (!localMainFrame)
+    RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
+    if (!localMainFrame) {
+        invokePendingSyntheticClickCallback(SyntheticClickResult::PageInvalid);
         return;
+    }
 
     RefPtr oldFocusedFrame = m_page->checkedFocusController()->focusedLocalFrame();
     RefPtr<Element> oldFocusedElement = oldFocusedFrame ? oldFocusedFrame->document()->focusedElement() : nullptr;
@@ -970,6 +982,8 @@ void WebPage::completeSyntheticClick(Node& nodeRespondingToClick, const WebCore:
 
     if (m_isClosed)
         return;
+
+    invokePendingSyntheticClickCallback(SyntheticClickResult::Click);
 
     if ((!handledPress && !handledRelease) || !nodeRespondingToClick.isElementNode())
         send(Messages::WebPageProxy::DidNotHandleTapAsClick(roundedIntPoint(location)));
@@ -1228,12 +1242,14 @@ void WebPage::handleTwoFingerTapAtPoint(const WebCore::IntPoint& point, OptionSe
 }
 
 void WebPage::potentialTapAtPosition(WebKit::TapIdentifier requestID, const WebCore::FloatPoint& position, bool shouldRequestMagnificationInformation)
-{   
-    if (auto* localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame()))
+{
+    if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame()))
         m_potentialTapNode = localMainFrame->nodeRespondingToClickEvents(position, m_potentialTapLocation, m_potentialTapSecurityOrigin.get());
     m_wasShowingInputViewForFocusedElementDuringLastPotentialTap = m_isShowingInputViewForFocusedElement;
 
-    if (shouldRequestMagnificationInformation && m_potentialTapNode && m_viewGestureGeometryCollector) {
+    RefPtr viewGestureGeometryCollector = m_viewGestureGeometryCollector;
+
+    if (shouldRequestMagnificationInformation && m_potentialTapNode && viewGestureGeometryCollector) {
         // FIXME: Could this be combined into tap highlight?
         FloatPoint origin = position;
         FloatRect absoluteBoundingRect;
@@ -1241,7 +1257,7 @@ void WebPage::potentialTapAtPosition(WebKit::TapIdentifier requestID, const WebC
         double viewportMinimumScale;
         double viewportMaximumScale;
 
-        m_viewGestureGeometryCollector->computeZoomInformationForNode(*m_potentialTapNode, origin, absoluteBoundingRect, fitEntireRect, viewportMinimumScale, viewportMaximumScale);
+        viewGestureGeometryCollector->computeZoomInformationForNode(*m_potentialTapNode, origin, absoluteBoundingRect, fitEntireRect, viewportMinimumScale, viewportMaximumScale);
 
         bool nodeIsRootLevel = is<WebCore::Document>(*m_potentialTapNode) || is<WebCore::HTMLBodyElement>(*m_potentialTapNode);
         send(Messages::WebPageProxy::HandleSmartMagnificationInformationForPotentialTap(requestID, absoluteBoundingRect, fitEntireRect, viewportMinimumScale, viewportMaximumScale, nodeIsRootLevel));
@@ -1298,6 +1314,7 @@ void WebPage::commitPotentialTapFailed()
     if (auto* localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame()))
         ContentChangeObserver::didCancelPotentialTap(*localMainFrame);
     clearSelectionAfterTapIfNeeded();
+    invokePendingSyntheticClickCallback(SyntheticClickResult::Failed);
 
     send(Messages::WebPageProxy::CommitPotentialTapFailed());
     send(Messages::WebPageProxy::DidNotHandleTapAsClick(roundedIntPoint(m_potentialTapLocation)));
@@ -1655,7 +1672,7 @@ static std::pair<std::optional<SimpleRange>, SelectionWasFlipped> rangeForPointI
 
     if (!selectionFlippingEnabled) {
         auto node = selectionStart.deepEquivalent().containerNode();
-        if (node && node->renderStyle() && node->renderStyle()->isVerticalWritingMode()) {
+        if (node && node->renderStyle() && node->renderStyle()->writingMode().isVertical()) {
             if (baseIsStart) {
                 int startX = selectionStart.absoluteCaretBounds().center().x();
                 if (pointInDocument.x() > startX)
@@ -1893,6 +1910,32 @@ void WebPage::dispatchSyntheticMouseEventsForSelectionGesture(SelectionTouch tou
     }
 }
 
+void WebPage::clearSelectionAfterTappingSelectionHighlightIfNeeded(WebCore::FloatPoint location)
+{
+    RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
+    if (!localMainFrame)
+        return;
+
+    auto result = localMainFrame->checkedEventHandler()->hitTestResultAtPoint(LayoutPoint { location }, {
+        HitTestRequest::Type::ReadOnly,
+        HitTestRequest::Type::AllowVisibleChildFrameContentOnly,
+        HitTestRequest::Type::IncludeAllElementsUnderPoint,
+        HitTestRequest::Type::CollectMultipleElements,
+    });
+
+    bool tappedVideo = false;
+    bool tappedLiveText = false;
+    for (Ref node : result.listBasedTestResult()) {
+        if (is<HTMLVideoElement>(node))
+            tappedVideo = true;
+        else if (ImageOverlay::isOverlayText(node))
+            tappedLiveText = true;
+    }
+
+    if (tappedVideo && !tappedLiveText)
+        clearSelection();
+}
+
 void WebPage::updateSelectionWithTouches(const IntPoint& point, SelectionTouch selectionTouch, bool baseIsStart, CompletionHandler<void(const WebCore::IntPoint&, SelectionTouch, OptionSet<SelectionFlags>)>&& completionHandler)
 {
     RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
@@ -2002,7 +2045,38 @@ void WebPage::extendSelectionForReplacement(CompletionHandler<void()>&& completi
     if (!rangeToSelect)
         return;
 
+    if (auto lastRange = std::exchange(m_lastSelectedReplacementRange, { }); lastRange && makeSimpleRange(*lastRange) == rangeToSelect)
+        return;
+
     setSelectedRangeDispatchingSyntheticMouseEventsIfNeeded(*rangeToSelect, position.affinity());
+    m_lastSelectedReplacementRange = rangeToSelect->makeWeakSimpleRange();
+}
+
+void WebPage::resetLastSelectedReplacementRangeIfNeeded()
+{
+    if (!m_lastSelectedReplacementRange)
+        return;
+
+    auto replacementRange = makeSimpleRange(*m_lastSelectedReplacementRange);
+    if (!replacementRange) {
+        m_lastSelectedReplacementRange = { };
+        return;
+    }
+
+    RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
+    if (!frame) {
+        m_lastSelectedReplacementRange = { };
+        return;
+    }
+
+    auto selectedRange = frame->selection().selection().toNormalizedRange();
+    if (!selectedRange) {
+        m_lastSelectedReplacementRange = { };
+        return;
+    }
+
+    if (!contains(ComposedTree, *replacementRange, *selectedRange))
+        m_lastSelectedReplacementRange = { };
 }
 
 void WebPage::extendSelection(WebCore::TextGranularity granularity, CompletionHandler<void()>&& completionHandler)
@@ -2104,35 +2178,34 @@ void WebPage::moveSelectionByOffset(int32_t offset, CompletionHandler<void()>&& 
     
 void WebPage::startAutoscrollAtPosition(const WebCore::FloatPoint& positionInWindow)
 {
-    auto* localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame());
-    if (!localMainFrame)
-        return;
-
-    if (m_focusedElement && m_focusedElement->renderer()) {
-        localMainFrame->eventHandler().startSelectionAutoscroll(m_focusedElement->renderer(), positionInWindow);
-        return;
-    }
-    
     RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame();
     if (!frame)
         return;
+
+    if (m_focusedElement && m_focusedElement->renderer()) {
+        frame->eventHandler().startSelectionAutoscroll(m_focusedElement->renderer(), positionInWindow);
+        return;
+    }
+
     auto& selection = frame->selection().selection();
     if (!selection.isRange())
         return;
+
     auto range = selection.toNormalizedRange();
     if (!range)
         return;
+
     auto* renderer = range->start.container->renderer();
     if (!renderer)
         return;
 
-    Ref(*localMainFrame)->eventHandler().startSelectionAutoscroll(renderer, positionInWindow);
+    frame->eventHandler().startSelectionAutoscroll(renderer, positionInWindow);
 }
     
 void WebPage::cancelAutoscroll()
 {
-    if (auto* localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame()))
-        localMainFrame->eventHandler().cancelSelectionAutoscroll();
+    if (RefPtr frame = m_page->checkedFocusController()->focusedOrMainFrame())
+        frame->eventHandler().cancelSelectionAutoscroll();
 }
 
 void WebPage::requestEvasionRectsAboveSelection(CompletionHandler<void(const Vector<FloatRect>&)>&& reply)
@@ -3689,7 +3762,7 @@ std::optional<FocusedElementInformation> WebPage::focusedElementInformation()
         bool inFixed = false;
         renderer->localToContainerPoint(FloatPoint(), nullptr, UseTransforms, &inFixed);
         information.insideFixedPosition = inFixed;
-        information.isRTL = renderer->style().direction() == TextDirection::RTL;
+        information.isRTL = renderer->writingMode().isBidiRTL();
 
 #if ENABLE(ASYNC_SCROLLING)
         if (auto* scrollingCoordinator = this->scrollingCoordinator())
@@ -4439,7 +4512,7 @@ void WebPage::applicationWillResignActive()
     [[NSNotificationCenter defaultCenter] postNotificationName:WebUIApplicationWillResignActiveNotification object:nil];
 
     // FIXME(224775): Move to WebProcess
-    if (auto* manager = PlatformMediaSessionManager::sharedManagerIfExists())
+    if (auto* manager = PlatformMediaSessionManager::singletonIfExists())
         manager->applicationWillBecomeInactive();
 
     if (m_page)
@@ -4454,7 +4527,7 @@ void WebPage::applicationDidEnterBackground(bool isSuspendedUnderLock)
     freezeLayerTree(LayerTreeFreezeReason::BackgroundApplication);
 
     // FIXME(224775): Move to WebProcess
-    if (auto* manager = PlatformMediaSessionManager::sharedManagerIfExists())
+    if (auto* manager = PlatformMediaSessionManager::singletonIfExists())
         manager->applicationDidEnterBackground(isSuspendedUnderLock);
 
     if (m_page)
@@ -4476,7 +4549,7 @@ void WebPage::applicationWillEnterForeground(bool isSuspendedUnderLock)
     [[NSNotificationCenter defaultCenter] postNotificationName:WebUIApplicationWillEnterForegroundNotification object:nil userInfo:@{@"isSuspendedUnderLock": @(isSuspendedUnderLock)}];
 
     // FIXME(224775): Move to WebProcess
-    if (auto* manager = PlatformMediaSessionManager::sharedManagerIfExists())
+    if (auto* manager = PlatformMediaSessionManager::singletonIfExists())
         manager->applicationWillEnterForeground(isSuspendedUnderLock);
 
     if (m_page)
@@ -4488,7 +4561,7 @@ void WebPage::applicationDidBecomeActive()
     [[NSNotificationCenter defaultCenter] postNotificationName:WebUIApplicationDidBecomeActiveNotification object:nil];
 
     // FIXME(224775): Move to WebProcess
-    if (auto* manager = PlatformMediaSessionManager::sharedManagerIfExists())
+    if (auto* manager = PlatformMediaSessionManager::singletonIfExists())
         manager->applicationDidBecomeActive();
 
     if (m_page)
@@ -4497,13 +4570,13 @@ void WebPage::applicationDidBecomeActive()
 
 void WebPage::applicationDidEnterBackgroundForMedia(bool isSuspendedUnderLock)
 {
-    if (auto* manager = PlatformMediaSessionManager::sharedManagerIfExists())
+    if (auto* manager = PlatformMediaSessionManager::singletonIfExists())
         manager->applicationDidEnterBackground(isSuspendedUnderLock);
 }
 
 void WebPage::applicationWillEnterForegroundForMedia(bool isSuspendedUnderLock)
 {
-    if (auto* manager = PlatformMediaSessionManager::sharedManagerIfExists())
+    if (auto* manager = PlatformMediaSessionManager::singletonIfExists())
         manager->applicationWillEnterForeground(isSuspendedUnderLock);
 }
 
@@ -5223,7 +5296,7 @@ void WebPage::requestDocumentEditingContext(DocumentEditingContextRequest&& requ
     auto isTextObscured = [] (const VisiblePosition& visiblePosition) {
         if (RefPtr textControl = enclosingTextFormControl(visiblePosition.deepEquivalent())) {
             if (auto* input = dynamicDowncast<HTMLInputElement>(textControl.get())) {
-                if (input->isAutoFilledAndObscured())
+                if (input->autofilledAndObscured())
                     return true;
             }
         }
@@ -5262,6 +5335,11 @@ void WebPage::requestDocumentEditingContext(DocumentEditingContextRequest&& requ
             static_cast<uint64_t>(distanceToSelectionStart),
             static_cast<uint64_t>(distanceToSelectionEnd - distanceToSelectionStart)
         };
+    } else if (auto* suggestion = frame->editor().writingSuggestionData()) {
+        if (auto suffix = suggestion->content(); !suffix.isEmpty()) {
+            context.markedText = AttributedString::fromNSAttributedString(adoptNS([[NSAttributedString alloc] initWithString:WTFMove(suffix)]));
+            context.selectedRangeInMarkedText = { 0, 0 };
+        }
     }
 
     auto characterRectsForRange = [](const SimpleRange& range, unsigned startOffset) {
@@ -5590,6 +5668,7 @@ void WebPage::computeEnclosingLayerID(EditorState& state, const VisibleSelection
     if (!endLayer)
         return;
 
+    CheckedPtr<RenderLayer> enclosingLayer;
     for (CheckedPtr layer = startLayer->commonAncestorWithLayer(*endLayer); layer; layer = layer->enclosingContainingBlockLayer(CrossFrameBoundaries::Yes)) {
         if (!layer->isComposited())
             continue;
@@ -5603,10 +5682,99 @@ void WebPage::computeEnclosingLayerID(EditorState& state, const VisibleSelection
         if (!identifier)
             continue;
 
+        enclosingLayer = layer;
         state.visualData->enclosingLayerID = WTFMove(identifier);
+        break;
+    }
+
+    if (!state.visualData->enclosingLayerID)
         return;
+
+    auto nextScroller = [](RenderLayer& layer, IncludeSelfOrNot includeSelf) {
+        return layer.enclosingScrollableLayer(includeSelf, CrossFrameBoundaries::Yes);
+    };
+
+    for (CheckedPtr layer = nextScroller(*enclosingLayer, IncludeSelfOrNot::IncludeSelf); layer; layer = nextScroller(*layer, IncludeSelfOrNot::ExcludeSelf)) {
+        CheckedRef renderer = layer->renderer();
+        WeakPtr scrollableArea = [&] -> ScrollableArea* {
+            if (renderer->isRenderView())
+                return renderer->document().isTopDocument() ? nullptr : renderer->frame().view();
+
+            return layer->scrollableArea();
+        }();
+
+        if (!scrollableArea)
+            continue;
+
+        auto scrollingNodeID = scrollableArea->scrollingNodeID();
+        if (!scrollingNodeID)
+            continue;
+
+        state.visualData->enclosingScrollPosition = scrollableArea->scrollPosition();
+        state.visualData->enclosingScrollingNodeID = WTFMove(scrollingNodeID);
+        break;
     }
 }
+
+void WebPage::invokePendingSyntheticClickCallback(SyntheticClickResult result)
+{
+    if (auto callback = std::exchange(m_pendingSyntheticClickCallback, { }))
+        callback(result);
+}
+
+void WebPage::callAfterPendingSyntheticClick(CompletionHandler<void(SyntheticClickResult)>&& completion)
+{
+    if (m_pendingSyntheticClickCallback)
+        return completion(SyntheticClickResult::Failed);
+
+    sendWithAsyncReply(Messages::WebPageProxy::IsPotentialTapInProgress(), [weakPage = WeakPtr { *this }, completion = WTFMove(completion)](bool isTapping) mutable {
+        RefPtr page = weakPage.get();
+        if (!page || page->m_isClosed)
+            return completion(SyntheticClickResult::PageInvalid);
+
+        if (!isTapping)
+            return completion(SyntheticClickResult::Failed);
+
+        if (!page->m_potentialTapNode)
+            return completion(SyntheticClickResult::Failed);
+
+        page->m_pendingSyntheticClickCallback = WTFMove(completion);
+    });
+}
+
+#if ENABLE(IOS_TOUCH_EVENTS)
+
+void WebPage::didSwallowClickEvent(const PlatformMouseEvent& event, Node& node)
+{
+    if (!m_userIsInteracting)
+        return;
+
+    if (event.type() != PlatformEventType::MouseReleased)
+        return;
+
+    if (event.syntheticClickType() != SyntheticClickType::NoTap)
+        return;
+
+    RefPtr element = dynamicDowncast<Element>(node);
+    if (!element)
+        return;
+
+    Ref document = node.document();
+    if (!document->quirks().shouldSynthesizeTouchEventsAfterNonSyntheticClick(node))
+        return;
+
+    bool isReplaced = false;
+    auto bounds = node.absoluteBoundingRect(&isReplaced);
+    if (bounds.isEmpty())
+        return;
+
+    callOnMainRunLoop([bounds, document = WTFMove(document)] mutable {
+        if (RefPtr frame = document->frame())
+            frame->checkedEventHandler()->dispatchSimulatedTouchEvent(roundedIntPoint(bounds.center()));
+    });
+}
+
+#endif // ENABLE(IOS_TOUCH_EVENTS)
 
 } // namespace WebKit
 

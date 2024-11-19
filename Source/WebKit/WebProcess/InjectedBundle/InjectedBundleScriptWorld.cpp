@@ -37,7 +37,7 @@
 namespace WebKit {
 using namespace WebCore;
 
-using WorldMap = UncheckedKeyHashMap<SingleThreadWeakRef<DOMWrapperWorld>, WeakRef<InjectedBundleScriptWorld>>;
+using WorldMap = HashMap<SingleThreadWeakRef<DOMWrapperWorld>, WeakRef<InjectedBundleScriptWorld>>;
 
 static WorldMap& allWorlds()
 {
@@ -114,6 +114,11 @@ DOMWrapperWorld& InjectedBundleScriptWorld::coreWorld()
 void InjectedBundleScriptWorld::clearWrappers()
 {
     m_world->clearWrappers();
+}
+
+void InjectedBundleScriptWorld::setAllowAutofill()
+{
+    m_world->setAllowAutofill();
 }
 
 void InjectedBundleScriptWorld::makeAllShadowRootsOpen()

@@ -87,8 +87,8 @@ public:
 
     struct EdgeHashTraits : HashTraits<Edge> {
         static constexpr bool emptyValueIsZero = true;
-        static void constructDeletedValue(Edge& slot) { slot.m_source = bitwise_cast<Node*>(static_cast<intptr_t>(-1)); }
-        static bool isDeletedValue(const Edge& edge) { return edge.m_source == bitwise_cast<Node*>(static_cast<intptr_t>(-1)); }
+        static void constructDeletedValue(Edge& slot) { slot.m_source = std::bit_cast<Node*>(static_cast<intptr_t>(-1)); }
+        static bool isDeletedValue(const Edge& edge) { return edge.m_source == std::bit_cast<Node*>(static_cast<intptr_t>(-1)); }
     };
 
     struct EdgeHash {
@@ -170,7 +170,7 @@ public:
 
 private:
     FixedVector<Node> m_nodes;
-    UncheckedKeyHashMap<String, Node*> m_nodeMap;
+    HashMap<String, Node*> m_nodeMap;
     EdgeSet m_edges;
 };
 

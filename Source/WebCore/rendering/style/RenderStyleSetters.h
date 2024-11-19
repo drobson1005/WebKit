@@ -269,6 +269,7 @@ inline void RenderStyle::setPerspective(float perspective) { SET_NESTED(m_nonInh
 inline void RenderStyle::setPerspectiveOriginX(Length&& length) { SET_NESTED(m_nonInheritedData, rareData, perspectiveOriginX, WTFMove(length)); }
 inline void RenderStyle::setPerspectiveOriginY(Length&& length) { SET_NESTED(m_nonInheritedData, rareData, perspectiveOriginY, WTFMove(length)); }
 inline void RenderStyle::setPositionAnchor(const AtomString& anchor) { SET_NESTED(m_nonInheritedData, rareData, positionAnchor, anchor); }
+inline void RenderStyle::setPositionTryOrder(Style::PositionTryOrder order) { SET_NESTED(m_nonInheritedData, rareData, positionTryOrder, static_cast<unsigned>(order)); }
 inline void RenderStyle::setResize(Resize r) { SET_NESTED(m_nonInheritedData, miscData, resize, static_cast<unsigned>(r)); }
 inline void RenderStyle::setRight(Length&& length) { SET_NESTED(m_nonInheritedData, surroundData, offset.right(), WTFMove(length)); }
 inline void RenderStyle::setRowGap(GapLength&& gapLength) { SET_NESTED(m_nonInheritedData, rareData, rowGap, WTFMove(gapLength)); }
@@ -281,8 +282,6 @@ inline void RenderStyle::setViewTimelineAxes(const Vector<ScrollAxis>& axes) { S
 inline void RenderStyle::setViewTimelineInsets(const Vector<ViewTimelineInsets>& insets) { SET_NESTED(m_nonInheritedData, rareData, viewTimelineInsets, insets); }
 inline void RenderStyle::setViewTimelineNames(const Vector<AtomString>& names) { SET_NESTED(m_nonInheritedData, rareData, viewTimelineNames, names); }
 inline void RenderStyle::setTimelineScope(const TimelineScope& scope) { SET_NESTED(m_nonInheritedData, rareData, timelineScope, scope); }
-inline void RenderStyle::setAnimationRangeStart(const SingleTimelineRange& range) { SET_NESTED(m_nonInheritedData, rareData, animationRangeStart, range); }
-inline void RenderStyle::setAnimationRangeEnd(const SingleTimelineRange& range) { SET_NESTED(m_nonInheritedData, rareData, animationRangeEnd, range); }
 inline void RenderStyle::setScrollbarColor(const std::optional<ScrollbarColor>& color) { SET(m_rareInheritedData, scrollbarColor, color); }
 inline void RenderStyle::setScrollbarThumbColor(const StyleColor& color) { m_rareInheritedData.access().scrollbarColor->thumbColor = color; }
 inline void RenderStyle::setScrollbarTrackColor(const StyleColor& color) { m_rareInheritedData.access().scrollbarColor->trackColor = color; }
@@ -364,7 +363,7 @@ inline void RenderStyle::setApplePayButtonType(ApplePayButtonType type) { SET_NE
 inline void RenderStyle::setBoxDecorationBreak(BoxDecorationBreak value) { SET_NESTED(m_nonInheritedData, boxData, m_boxDecorationBreak, static_cast<unsigned>(value)); }
 
 #if ENABLE(DARK_MODE_CSS)
-inline void RenderStyle::setColorScheme(StyleColorScheme scheme) { SET(m_rareInheritedData, colorScheme, scheme); }
+inline void RenderStyle::setColorScheme(Style::ColorScheme scheme) { SET(m_rareInheritedData, colorScheme, scheme); }
 inline void RenderStyle::setHasExplicitlySetColorScheme() { SET_NESTED(m_nonInheritedData, miscData, hasExplicitlySetColorScheme, true); }
 #endif
 
@@ -454,6 +453,14 @@ inline void RenderStyle::setColumnCount(unsigned short count)
     SET_DOUBLY_NESTED(m_nonInheritedData, miscData, multiCol, autoCount, false);
 }
 
+inline bool RenderStyle::setDirection(TextDirection bidiDirection)
+{
+    if (writingMode().computedTextDirection() == bidiDirection)
+        return false;
+    m_inheritedFlags.writingMode.setTextDirection(bidiDirection);
+    return true;
+}
+
 inline bool RenderStyle::setUsedZoom(float zoomLevel)
 {
     if (compareEqual(m_rareInheritedData->usedZoom, zoomLevel))
@@ -509,7 +516,7 @@ inline void RenderStyle::setHasExplicitlySetWritingMode()
 
 inline void RenderStyle::setLogicalHeight(Length&& height)
 {
-    if (isHorizontalWritingMode())
+    if (writingMode().isHorizontal())
         setHeight(WTFMove(height));
     else
         setWidth(WTFMove(height));
@@ -517,7 +524,7 @@ inline void RenderStyle::setLogicalHeight(Length&& height)
 
 inline void RenderStyle::setLogicalWidth(Length&& width)
 {
-    if (isHorizontalWritingMode())
+    if (writingMode().isHorizontal())
         setWidth(WTFMove(width));
     else
         setHeight(WTFMove(width));
@@ -525,7 +532,7 @@ inline void RenderStyle::setLogicalWidth(Length&& width)
 
 inline void RenderStyle::setLogicalMinWidth(Length&& width)
 {
-    if (isHorizontalWritingMode())
+    if (writingMode().isHorizontal())
         setMinWidth(WTFMove(width));
     else
         setMinHeight(WTFMove(width));
@@ -533,7 +540,7 @@ inline void RenderStyle::setLogicalMinWidth(Length&& width)
 
 inline void RenderStyle::setLogicalMaxWidth(Length&& width)
 {
-    if (isHorizontalWritingMode())
+    if (writingMode().isHorizontal())
         setMaxWidth(WTFMove(width));
     else
         setMaxHeight(WTFMove(width));
@@ -541,7 +548,7 @@ inline void RenderStyle::setLogicalMaxWidth(Length&& width)
 
 inline void RenderStyle::setLogicalMinHeight(Length&& height)
 {
-    if (isHorizontalWritingMode())
+    if (writingMode().isHorizontal())
         setMinHeight(WTFMove(height));
     else
         setMinWidth(WTFMove(height));
@@ -549,7 +556,7 @@ inline void RenderStyle::setLogicalMinHeight(Length&& height)
 
 inline void RenderStyle::setLogicalMaxHeight(Length&& height)
 {
-    if (isHorizontalWritingMode())
+    if (writingMode().isHorizontal())
         setMaxHeight(WTFMove(height));
     else
         setMaxWidth(WTFMove(height));
@@ -582,9 +589,9 @@ inline void RenderStyle::setShapeOutside(RefPtr<ShapeValue>&& value)
 
 inline bool RenderStyle::setTextOrientation(TextOrientation textOrientation)
 {
-    if (compareEqual(static_cast<TextOrientation>(m_rareInheritedData->textOrientation), textOrientation))
+    if (writingMode().computedTextOrientation() == textOrientation)
         return false;
-    m_rareInheritedData.access().textOrientation = static_cast<unsigned>(textOrientation);
+    m_inheritedFlags.writingMode.setTextOrientation(textOrientation);
     return true;
 }
 
@@ -605,11 +612,11 @@ inline void RenderStyle::setWidows(unsigned short count)
     SET_PAIR(m_rareInheritedData, widows, clampedCount, hasAutoWidows, false);
 }
 
-inline bool RenderStyle::setWritingMode(WritingMode mode)
+inline bool RenderStyle::setWritingMode(StyleWritingMode mode)
 {
-    if (mode == writingMode())
+    if (mode == writingMode().computedWritingMode())
         return false;
-    m_inheritedFlags.writingMode = static_cast<unsigned>(mode);
+    m_inheritedFlags.writingMode.setWritingMode(mode);
     return true;
 }
 

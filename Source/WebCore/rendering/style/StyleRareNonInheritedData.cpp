@@ -93,8 +93,6 @@ StyleRareNonInheritedData::StyleRareNonInheritedData()
     // viewTimelineInsets
     // viewTimelineNames
     // timelineScope
-    // animationRangeStart
-    // animationRangeEnd
     // scrollbarGutter
     , scrollbarWidth(RenderStyle::initialScrollbarWidth())
     , zoom(RenderStyle::initialZoom())
@@ -129,6 +127,7 @@ StyleRareNonInheritedData::StyleRareNonInheritedData()
     , textBoxTrim(static_cast<unsigned>(RenderStyle::initialTextBoxTrim()))
     , overflowAnchor(static_cast<unsigned>(RenderStyle::initialOverflowAnchor()))
     , hasClip(false)
+    , positionTryOrder(static_cast<unsigned>(RenderStyle::initialPositionTryOrder()))
     , fieldSizing(RenderStyle::initialFieldSizing())
 {
 }
@@ -191,8 +190,6 @@ inline StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonIn
     , viewTimelineInsets(o.viewTimelineInsets)
     , viewTimelineNames(o.viewTimelineNames)
     , timelineScope(o.timelineScope)
-    , animationRangeStart(o.animationRangeStart)
-    , animationRangeEnd(o.animationRangeEnd)
     , scrollbarGutter(o.scrollbarGutter)
     , scrollbarWidth(o.scrollbarWidth)
     , zoom(o.zoom)
@@ -227,6 +224,7 @@ inline StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonIn
     , textBoxTrim(o.textBoxTrim)
     , overflowAnchor(o.overflowAnchor)
     , hasClip(o.hasClip)
+    , positionTryOrder(o.positionTryOrder)
     , fieldSizing(o.fieldSizing)
 {
 }
@@ -294,8 +292,6 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && viewTimelineInsets == o.viewTimelineInsets
         && viewTimelineNames == o.viewTimelineNames
         && timelineScope == o.timelineScope
-        && animationRangeStart == o.animationRangeStart
-        && animationRangeEnd == o.animationRangeEnd
         && scrollbarGutter == o.scrollbarGutter
         && scrollbarWidth == o.scrollbarWidth
         && zoom == o.zoom
@@ -332,6 +328,7 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && viewTransitionClasses == o.viewTransitionClasses
         && viewTransitionName == o.viewTransitionName
         && hasClip == o.hasClip
+        && positionTryOrder == o.positionTryOrder
         && fieldSizing == o.fieldSizing;
 }
 

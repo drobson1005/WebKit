@@ -472,7 +472,7 @@ bool RenderElement::repaintBeforeStyleChange(StyleDifference diff, const RenderS
             }
         }
 
-        if (diff == StyleDifference::Layout && parent()->style().isFlippedBlocksWritingMode()) {
+        if (diff == StyleDifference::Layout && parent()->writingMode().isBlockFlipped()) {
             // FIXME: Repaint during (after) layout is currently broken for flipped writing modes in block direction (mostly affecting vertical-rl) (see webkit.org/b/70762)
             // This repaint call here ensures we invalidate at least the current rect which should cover the non-moving type of cases.
             return RequiredRepaint::RendererOnly;
@@ -880,7 +880,7 @@ void RenderElement::styleWillChange(StyleDifference diff, const RenderStyle& new
         if (visibilityChanged || inertChanged) {
             Ref document = this->document();
             if (CheckedPtr cache = document->existingAXObjectCache())
-                cache->childrenChanged(checkedParent().get(), this);
+                cache->onInertOrVisibilityChange(*this);
         }
 
         // Keep layer hierarchy visibility bits up to date if visibility or skipped content state changes.
@@ -2040,8 +2040,7 @@ void RenderElement::paintFocusRing(const PaintInfo& paintInfo, const RenderStyle
     styleOptions.add(StyleColorOptions::UseSystemAppearance);
     auto focusRingColor = usePlatformFocusRingColorForOutlineStyleAuto() ? RenderTheme::singleton().focusRingColor(styleOptions) : style.visitedDependentColorWithColorFilter(CSSPropertyOutlineColor);
     if (useShrinkWrappedFocusRingForOutlineStyleAuto() && style.hasBorderRadius()) {
-        Path path = PathUtilities::pathWithShrinkWrappedRectsForOutline(pixelSnappedFocusRingRects, style.border(), outlineOffset, style.direction(), style.writingMode(),
-            document().deviceScaleFactor());
+        Path path = PathUtilities::pathWithShrinkWrappedRectsForOutline(pixelSnappedFocusRingRects, style.border(), outlineOffset, style.writingMode(), document().deviceScaleFactor());
         if (path.isEmpty()) {
             for (auto rect : pixelSnappedFocusRingRects)
                 path.addRect(rect);

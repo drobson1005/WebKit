@@ -28,23 +28,35 @@
 #include "FrameRateAligner.h"
 #include "ReducedResolutionSeconds.h"
 #include "ScrollAxis.h"
+#include "TimelineScope.h"
 #include "Timer.h"
 #include <wtf/CancellableTask.h>
 #include <wtf/CheckedRef.h>
 #include <wtf/Markable.h>
 #include <wtf/Seconds.h>
 #include <wtf/WeakHashSet.h>
+#include <wtf/text/AtomStringHash.h>
 
 namespace WebCore {
 
 class AnimationTimeline;
 class CSSTransition;
 class Document;
+class Element;
 class ScrollTimeline;
 class ViewTimeline;
 class WebAnimation;
 
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+class AcceleratedEffectStackUpdater;
+#endif
+
 struct ViewTimelineInsets;
+struct TimelineMapAttachOperation {
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> element;
+    AtomString name;
+    WeakPtr<WebAnimation, WeakPtrImplWithEventTargetData> animation;
+};
 
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(AnimationTimelinesController);
 class AnimationTimelinesController final : public CanMakeCheckedPtr<AnimationTimelinesController> {
@@ -67,22 +79,37 @@ public:
     WEBCORE_EXPORT void resumeAnimations();
     bool animationsAreSuspended() const { return m_isSuspended; }
 
-    void registerNamedScrollTimeline(const AtomString&, Element&, ScrollAxis);
-    void unregisterNamedScrollTimeline(const AtomString&);
-    ScrollTimeline* scrollTimelineForName(const AtomString&) const;
+    void registerNamedScrollTimeline(const AtomString&, const Element&, ScrollAxis);
+    void registerNamedViewTimeline(const AtomString&, const Element&, ScrollAxis, ViewTimelineInsets&&);
+    void unregisterNamedTimeline(const AtomString&, const Element&);
+    void setTimelineForName(const AtomString&, const Element&, WebAnimation&);
+    void updateNamedTimelineMapForTimelineScope(const TimelineScope&, const Element&);
+    void updateTimelineForTimelineScope(const Ref<ScrollTimeline>&, const AtomString&);
 
-    void registerNamedViewTimeline(const AtomString&, Element&, ScrollAxis, ViewTimelineInsets&&);
-    void unregisterNamedViewTimelineForSubject(const AtomString&, const Element&);
-    ViewTimeline* viewTimelineForNameAndSubject(const AtomString&, const Element&) const;
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+    AcceleratedEffectStackUpdater* existingAcceleratedEffectStackUpdater() const { return m_acceleratedEffectStackUpdater.get(); }
+    AcceleratedEffectStackUpdater& acceleratedEffectStackUpdater();
+#endif
 
 private:
+
     ReducedResolutionSeconds liveCurrentTime() const;
     void cacheCurrentTime(ReducedResolutionSeconds);
     void maybeClearCachedCurrentTime();
 
+    Vector<Ref<ScrollTimeline>>& timelinesForName(const AtomString&);
+    Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>> relatedTimelineScopeElements(const AtomString&);
+    void attachPendingOperations();
+
+    Vector<TimelineMapAttachOperation> m_pendingAttachOperations;
+    Vector<std::pair<TimelineScope, WeakPtr<Element, WeakPtrImplWithEventTargetData>>> m_timelineScopeEntries;
+    UncheckedKeyHashMap<AtomString, Vector<Ref<ScrollTimeline>>> m_nameToTimelineMap;
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+    std::unique_ptr<AcceleratedEffectStackUpdater> m_acceleratedEffectStackUpdater;
+#endif
+
     UncheckedKeyHashMap<FramesPerSecond, ReducedResolutionSeconds> m_animationFrameRateToLastTickTimeMap;
-    UncheckedKeyHashMap<AtomString, Ref<ScrollTimeline>> m_nameToScrollTimelineMap;
-    UncheckedKeyHashMap<AtomString, Vector<Ref<ViewTimeline>>> m_nameToViewTimelinesMap;
     WeakHashSet<AnimationTimeline> m_timelines;
     TaskCancellationGroup m_currentTimeClearingTaskCancellationGroup;
     Document& m_document;

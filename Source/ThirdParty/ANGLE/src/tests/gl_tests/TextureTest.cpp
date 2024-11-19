@@ -2759,7 +2759,7 @@ TEST_P(Texture2DTest, PBOWithMultipleDraws)
 // Almost mirrors UnitTest_DMSAA_dst_read test from Android skqp test suite
 TEST_P(Texture2DTestES3, UnitTest_DMSAA_dst_read)
 {
-    glEnable(GL_MULTISAMPLE);
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_sRGB_write_control"));
 
     GLTexture texture;
     glActiveTexture(GL_TEXTURE31);
@@ -3866,7 +3866,8 @@ void main()
     std::vector<GLColor> textureColor(kTextureWidth * kTextureHeight, GLColor::red);
     constexpr uint32_t kIterationCount = 4096;
 
-    for (uint32_t i = 0; i < kIterationCount; i++)
+    uint32_t iteration = 0;
+    for (; iteration < kIterationCount; iteration++)
     {
         GLTexture texture;
         glBindTexture(GL_TEXTURE_2D, texture);
@@ -3879,15 +3880,15 @@ void main()
         EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
         drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
 
-        if (getPerfCounters().commandQueueSubmitCallsTotal == expectedSubmitCalls)
+        if (getPerfCounters().commandQueueSubmitCallsTotal >= expectedSubmitCalls)
         {
             break;
         }
     }
 
     glEndPerfMonitorAMD(monitor);
-
-    EXPECT_EQ(getPerfCounters().commandQueueSubmitCallsTotal, expectedSubmitCalls);
+    EXPECT_EQ(getPerfCounters().commandQueueSubmitCallsTotal, expectedSubmitCalls)
+        << "iteration " << iteration;
     EXPECT_EQ(getPerfCounters().deviceMemoryImageAllocationFallbacks,
               expectedDeviceMemoryFallbacks);
     ASSERT_GL_NO_ERROR();

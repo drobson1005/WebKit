@@ -206,6 +206,18 @@ window.UIHelper = class UIHelper {
         });
     }
 
+    static roundToDevicePixel(value)
+    {
+        return Math.round(value * devicePixelRatio) / devicePixelRatio;
+    }
+
+    static roundRectToDevicePixel(rect)
+    {
+        return Object.fromEntries(Object.keys(rect).map(key => {
+            return [key, this.roundToDevicePixel(rect[key])];
+        }));
+    }
+
     static tapAt(x, y, modifiers=[])
     {
         console.assert(this.isIOSFamily());
@@ -1322,13 +1334,21 @@ window.UIHelper = class UIHelper {
         return new Promise(resolve => testRunner.runUIScript(uiScript, resolve));
     }
 
-    static applyAutocorrection(newText, oldText)
+    static selectWordForReplacement()
+    {
+        if (!this.isWebKit2())
+            return;
+
+        return new Promise(resolve => testRunner.runUIScript("uiController.selectWordForReplacement()", resolve));
+    }
+
+    static applyAutocorrection(newText, oldText, underline)
     {
         if (!this.isWebKit2())
             return;
 
         const [escapedNewText, escapedOldText] = [newText.replace(/`/g, "\\`"), oldText.replace(/`/g, "\\`")];
-        const uiScript = `uiController.applyAutocorrection(\`${escapedNewText}\`, \`${escapedOldText}\`, () => uiController.uiScriptComplete())`;
+        const uiScript = `uiController.applyAutocorrection(\`${escapedNewText}\`, \`${escapedOldText}\`, () => uiController.uiScriptComplete(), ${underline})`;
         return new Promise(resolve => testRunner.runUIScript(uiScript, resolve));
     }
 

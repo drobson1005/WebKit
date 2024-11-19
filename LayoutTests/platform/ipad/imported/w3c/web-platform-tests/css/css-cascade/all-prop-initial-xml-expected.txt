@@ -187,7 +187,6 @@ PASS left
 PASS letter-spacing
 PASS lighting-color
 PASS line-break
-PASS line-fit-edge
 PASS line-height
 PASS list-style-image
 PASS list-style-position
@@ -265,6 +264,7 @@ PASS perspective-origin
 PASS pointer-events
 PASS position
 PASS position-anchor
+PASS position-try-order
 PASS print-color-adjust
 PASS quotes
 PASS r

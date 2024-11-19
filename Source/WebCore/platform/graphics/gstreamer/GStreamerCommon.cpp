@@ -46,12 +46,14 @@
 #include <wtf/RuntimeApplicationChecks.h>
 #include <wtf/Scope.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/UUID.h>
 #include <wtf/glib/GThreadSafeWeakPtr.h>
 #include <wtf/glib/GUniquePtr.h>
 #include <wtf/glib/RunLoopSourcePriority.h>
 #include <wtf/glib/WTFGType.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/StringToIntegerConversion.h>
 
 #if USE(GSTREAMER_MPEGTS)
 #define GST_USE_UNSTABLE_API
@@ -69,7 +71,7 @@
 #include "GStreamerMediaStreamSource.h"
 #endif
 
-#if ENABLE(SPEECH_SYNTHESIS)
+#if USE(FLITE)
 #include "WebKitFliteSourceGStreamer.h"
 #endif
 
@@ -93,6 +95,11 @@
 #include <gst/gstinitstaticplugins.h>
 #else
 #define IS_GST_FULL_1_18 0
+#endif
+
+#if USE(GBM)
+#include "DRMDeviceManager.h"
+#include <drm_fourcc.h>
 #endif
 
 GST_DEBUG_CATEGORY(webkit_gst_common_debug);
@@ -229,6 +236,51 @@ bool getSampleVideoInfo(GstSample* sample, GstVideoInfo& videoInfo)
 }
 #endif
 
+std::optional<TrackID> getStreamIdFromPad(const GRefPtr<GstPad>& pad)
+{
+    GUniquePtr<gchar> streamIdAsCharacters(gst_pad_get_stream_id(pad.get()));
+    if (!streamIdAsCharacters) {
+        GST_DEBUG_OBJECT(pad.get(), "Failed to get stream-id from pad");
+        return std::nullopt;
+    }
+
+    std::optional<TrackID> streamId(parseStreamId(StringView::fromLatin1(streamIdAsCharacters.get())));
+    if (!streamId)
+        GST_WARNING_OBJECT(pad.get(), "Got invalid stream-id from pad: %s", streamIdAsCharacters.get());
+
+    return streamId;
+}
+
+std::optional<TrackID> getStreamIdFromStream(const GRefPtr<GstStream>& stream)
+{
+    const gchar* streamIdAsCharacters = gst_stream_get_stream_id(stream.get());
+    if (!streamIdAsCharacters) {
+        GST_DEBUG_OBJECT(stream.get(), "Failed to get stream-id from stream");
+        return std::nullopt;
+    }
+
+    std::optional<TrackID> streamId(parseStreamId(StringView::fromLatin1(streamIdAsCharacters)));
+    if (!streamId)
+        GST_WARNING_OBJECT(stream.get(), "Got invalid stream-id from stream: %s", streamIdAsCharacters);
+
+    return streamId;
+}
+
+std::optional<TrackID> parseStreamId(StringView stringId)
+{
+    auto maybeUUID = WTF::UUID::parse(stringId);
+    if (maybeUUID.has_value())
+        return maybeUUID.value().low();
+
+    // GStreamer docs advise against interpreting contents of a stream-id,
+    // however this is the format qtdemux uses for stream-id creation,
+    // so we can reasonably rely on it.
+    size_t position = stringId.find('/');
+    if (position == notFound || position + 1 == stringId.length())
+        return parseIntegerAllowingTrailingJunk<TrackID>(stringId);
+
+    return parseIntegerAllowingTrailingJunk<TrackID>(stringId.substring(position + 1));
+}
 
 StringView capsMediaType(const GstCaps* caps)
 {
@@ -310,7 +362,9 @@ bool ensureGStreamerInitialized()
         // is to register the playbin3 element under the playbin namespace. We
         // can't allow this, when we create playbin, we want playbin2, not
         // playbin3.
-        if (g_getenv("USE_PLAYBIN3"))
+        // The USE_PLAYBIN3 environment variable is no longer supported.
+        // https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6255
+        if (!webkitGstCheckVersion(1, 24, 0) && g_getenv("USE_PLAYBIN3"))
             WTFLogAlways("The USE_PLAYBIN3 variable was detected in the environment. Expect playback issues or please unset it.");
 
 #if ENABLE(VIDEO) || ENABLE(WEB_AUDIO)
@@ -387,7 +441,7 @@ void registerWebKitGStreamerElements()
         gst_element_register(nullptr, "webkitmediasrc", GST_RANK_PRIMARY, WEBKIT_TYPE_MEDIA_SRC);
 #endif
 
-#if ENABLE(SPEECH_SYNTHESIS)
+#if USE(FLITE)
         gst_element_register(nullptr, "webkitflitesrc", GST_RANK_NONE, WEBKIT_TYPE_FLITE_SRC);
 #endif
 
@@ -829,6 +883,11 @@ void connectSimpleBusMessageCallback(GstElement* pipeline, Function<void(GstMess
             break;
         }
         case GST_MESSAGE_LATENCY:
+            // Recalculate the latency, we don't need any special handling
+            // here other than the GStreamer default.
+            // This can happen if the latency of live elements changes, or
+            // for one reason or another a new live element is added or
+            // removed from the pipeline.
             gst_bin_recalculate_latency(GST_BIN_CAST(pipeline.get()));
             break;
         default:
@@ -1662,6 +1721,104 @@ void gstStructureFilterAndMapInPlace(GstStructure* structure, Function<bool(GstI
     }, &callback);
 #endif
 }
+
+#if !GST_CHECK_VERSION(1, 24, 0)
+static GstVideoFormat drmFourccToGstVideoFormat(uint32_t fourcc)
+{
+    switch (fourcc) {
+    case DRM_FORMAT_XRGB8888:
+        return GST_VIDEO_FORMAT_BGRx;
+    case DRM_FORMAT_XBGR8888:
+        return GST_VIDEO_FORMAT_RGBx;
+    case DRM_FORMAT_ARGB8888:
+        return GST_VIDEO_FORMAT_BGRA;
+    case DRM_FORMAT_ABGR8888:
+        return GST_VIDEO_FORMAT_RGBA;
+    case DRM_FORMAT_YUV420:
+        return GST_VIDEO_FORMAT_I420;
+    case DRM_FORMAT_YVU420:
+        return GST_VIDEO_FORMAT_YV12;
+    case DRM_FORMAT_NV12:
+        return GST_VIDEO_FORMAT_NV12;
+    case DRM_FORMAT_NV21:
+        return GST_VIDEO_FORMAT_NV21;
+    case DRM_FORMAT_YUV444:
+        return GST_VIDEO_FORMAT_Y444;
+    case DRM_FORMAT_YUV411:
+        return GST_VIDEO_FORMAT_Y41B;
+    case DRM_FORMAT_YUV422:
+        return GST_VIDEO_FORMAT_Y42B;
+    case DRM_FORMAT_P010:
+        return GST_VIDEO_FORMAT_P010_10LE;
+    default:
+        break;
+    }
+
+    RELEASE_ASSERT_NOT_REACHED();
+    return GST_VIDEO_FORMAT_UNKNOWN;
+}
+#endif // !GST_CHECK_VERSION(1, 24, 0)
+
+#if USE(GBM)
+GRefPtr<GstCaps> buildDMABufCaps()
+{
+    GRefPtr<GstCaps> caps = adoptGRef(gst_caps_from_string("video/x-raw(memory:DMABuf), width = " GST_VIDEO_SIZE_RANGE ", height = " GST_VIDEO_SIZE_RANGE ", framerate = " GST_VIDEO_FPS_RANGE));
+#if GST_CHECK_VERSION(1, 24, 0)
+    gst_caps_set_simple(caps.get(), "format", G_TYPE_STRING, "DMA_DRM", nullptr);
+
+    static const char* formats = g_getenv("WEBKIT_GST_DMABUF_FORMATS");
+    if (formats && *formats) {
+        auto formatsString = StringView::fromLatin1(formats);
+        GValue drmSupportedFormats = G_VALUE_INIT;
+        g_value_init(&drmSupportedFormats, GST_TYPE_LIST);
+        for (auto token : formatsString.split(',')) {
+            GValue value = G_VALUE_INIT;
+            g_value_init(&value, G_TYPE_STRING);
+            g_value_set_string(&value, token.toStringWithoutCopying().ascii().data());
+            gst_value_list_append_and_take_value(&drmSupportedFormats, &value);
+        }
+        gst_caps_set_value(caps.get(), "drm-format", &drmSupportedFormats);
+        g_value_unset(&drmSupportedFormats);
+        return caps;
+    }
+#endif
+
+    GValue supportedFormats = G_VALUE_INIT;
+    g_value_init(&supportedFormats, GST_TYPE_LIST);
+    const auto& dmabufFormats = PlatformDisplay::sharedDisplay().dmabufFormatsForVideo();
+    for (const auto& format : dmabufFormats) {
+#if GST_CHECK_VERSION(1, 24, 0)
+        if (format.modifiers.isEmpty() || format.modifiers[0] == DRM_FORMAT_MOD_INVALID) {
+            GValue value = G_VALUE_INIT;
+            g_value_init(&value, G_TYPE_STRING);
+            g_value_take_string(&value, gst_video_dma_drm_fourcc_to_string(format.fourcc, DRM_FORMAT_MOD_LINEAR));
+            gst_value_list_append_and_take_value(&supportedFormats, &value);
+        } else {
+            for (auto modifier : format.modifiers) {
+                GValue value = G_VALUE_INIT;
+                g_value_init(&value, G_TYPE_STRING);
+                g_value_take_string(&value, gst_video_dma_drm_fourcc_to_string(format.fourcc, modifier));
+                gst_value_list_append_and_take_value(&supportedFormats, &value);
+            }
+        }
+#else
+        GValue value = G_VALUE_INIT;
+        g_value_init(&value, G_TYPE_STRING);
+        g_value_set_string(&value, gst_video_format_to_string(drmFourccToGstVideoFormat(format.fourcc)));
+        gst_value_list_append_and_take_value(&supportedFormats, &value);
+#endif
+    }
+
+#if GST_CHECK_VERSION(1, 24, 0)
+    gst_caps_set_value(caps.get(), "drm-format", &supportedFormats);
+#else
+    gst_caps_set_value(caps.get(), "format", &supportedFormats);
+#endif
+    g_value_unset(&supportedFormats);
+
+    return caps;
+}
+#endif // USE(GBM)
 
 #undef GST_CAT_DEFAULT
 

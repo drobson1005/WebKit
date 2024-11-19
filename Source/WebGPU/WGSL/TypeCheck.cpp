@@ -249,7 +249,7 @@ private:
     TypeStore& m_types;
     Vector<Error> m_errors;
     Vector<BreakTarget> m_breakTargetStack;
-    UncheckedKeyHashMap<String, OverloadedDeclaration> m_overloadedOperations;
+    HashMap<String, OverloadedDeclaration> m_overloadedOperations;
 };
 
 TypeChecker::TypeChecker(ShaderModule& shaderModule)
@@ -461,7 +461,7 @@ void TypeChecker::visit(AST::Structure& structure)
 {
     visitAttributes(structure.attributes());
 
-    UncheckedKeyHashMap<String, const Type*> fields;
+    HashMap<String, const Type*> fields;
     for (unsigned i = 0; i < structure.members().size(); ++i) {
         auto& member = structure.members()[i];
         visitAttributes(member.attributes());
@@ -1271,7 +1271,7 @@ void TypeChecker::visit(AST::CallExpression& call)
                     return;
                 }
 
-                UncheckedKeyHashMap<String, ConstantValue> constantFields;
+                HashMap<String, ConstantValue> constantFields;
                 bool isConstant = true;
                 for (unsigned i = 0; i < numberOfArguments; ++i) {
                     auto& argument = call.arguments()[i];
@@ -1676,7 +1676,10 @@ void TypeChecker::visit(AST::UnaryExpression& unary)
         auto* type = infer(unary.expression(), Evaluation::Runtime);
         auto* pointer = std::get_if<Types::Pointer>(type);
         if (!pointer) {
-            typeError(unary.span(), "cannot dereference expression of type '"_s, *type, '\'');
+            if (isBottom(type))
+                inferred(type);
+            else
+                typeError(unary.span(), "cannot dereference expression of type '"_s, *type, '\'');
             return;
         }
 
@@ -2033,6 +2036,11 @@ const Type* TypeChecker::chooseOverload(ASCIILiteral kind, const SourceSpan& spa
 
 const Type* TypeChecker::infer(AST::Expression& expression, Evaluation evaluation, DiscardResult discardResult)
 {
+    if (evaluation > m_evaluation) {
+        typeError(InferBottom::No, expression.span(), "cannot use "_s, evaluationToString(evaluation), " value in "_s, evaluationToString(m_evaluation), " expression"_s);
+        return m_types.bottomType();
+    }
+
     auto discardResultScope = SetForScope(m_discardResult, discardResult);
     auto evaluationScope = SetForScope(m_evaluation, evaluation);
 
@@ -2237,6 +2245,8 @@ Behaviors TypeChecker::analyzeStatements(AST::Statement::List& statements)
 const Type* TypeChecker::check(AST::Expression& expression, Constraint constraint, Evaluation evaluation)
 {
     auto* type = infer(expression, evaluation);
+    if (isBottom(type))
+        return type;
     type = satisfyOrPromote(type, constraint, m_types);
     if (!type)
         return nullptr;

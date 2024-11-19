@@ -69,7 +69,7 @@ public:
     void addProxy(const RemoteCDMIdentifier&, RefPtr<RemoteCDMProxy>&&);
     void removeProxy(const RemoteCDMIdentifier&);
 
-    void addInstance(const RemoteCDMInstanceIdentifier&, std::unique_ptr<RemoteCDMInstanceProxy>&&);
+    void addInstance(const RemoteCDMInstanceIdentifier&, Ref<RemoteCDMInstanceProxy>&&);
     void removeInstance(const RemoteCDMInstanceIdentifier&);
     RemoteCDMInstanceProxy* getInstance(const RemoteCDMInstanceIdentifier&);
 
@@ -100,9 +100,9 @@ private:
     void supportsKeySystem(const String& keySystem, CompletionHandler<void(bool)>&&);
 
     ThreadSafeWeakPtr<GPUConnectionToWebProcess> m_gpuConnectionToWebProcess;
-    UncheckedKeyHashMap<RemoteCDMIdentifier, RefPtr<RemoteCDMProxy>> m_proxies;
-    UncheckedKeyHashMap<RemoteCDMInstanceIdentifier, std::unique_ptr<RemoteCDMInstanceProxy>> m_instances;
-    UncheckedKeyHashMap<RemoteCDMInstanceSessionIdentifier, std::unique_ptr<RemoteCDMInstanceSessionProxy>> m_sessions;
+    HashMap<RemoteCDMIdentifier, RefPtr<RemoteCDMProxy>> m_proxies;
+    HashMap<RemoteCDMInstanceIdentifier, Ref<RemoteCDMInstanceProxy>> m_instances;
+    HashMap<RemoteCDMInstanceSessionIdentifier, std::unique_ptr<RemoteCDMInstanceSessionProxy>> m_sessions;
 
 #if !RELEASE_LOG_DISABLED
     mutable RefPtr<Logger> m_logger;

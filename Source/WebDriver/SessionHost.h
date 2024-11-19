@@ -45,22 +45,26 @@ namespace WebDriver {
 
 struct ConnectToBrowserAsyncData;
 
-class SessionHost
+class SessionHost final
+    : public RefCounted<SessionHost>
 #if USE(INSPECTOR_SOCKET_SERVER)
-    : public Inspector::RemoteInspectorConnectionClient
+    , public Inspector::RemoteInspectorConnectionClient
 #endif
 {
     WTF_MAKE_FAST_ALLOCATED(SessionHost);
 public:
-    explicit SessionHost(Capabilities&& capabilities)
-        : m_capabilities(WTFMove(capabilities))
+
+    static Ref<SessionHost> create(Capabilities&& capabilities)
     {
+        return adoptRef(*new SessionHost(WTFMove(capabilities)));
     }
+
     ~SessionHost();
 
 #if ENABLE(WEBDRIVER_BIDI)
     using BrowserTerminatedObserver = WTF::Observer<void(const String&)>;
-    void addBrowserTerminatedObserver(const BrowserTerminatedObserver&);
+    static void addBrowserTerminatedObserver(const BrowserTerminatedObserver&);
+    static void removeBrowserTerminatedObserver(const BrowserTerminatedObserver&);
 #endif
 
     void setHostAddress(const String& ip, uint16_t port) { m_targetIp = ip; m_targetPort = port; }
@@ -81,6 +85,12 @@ public:
     long sendCommandToBackend(const String&, RefPtr<JSON::Object>&& parameters, Function<void (CommandResponse&&)>&&);
 
 private:
+
+    explicit SessionHost(Capabilities&& capabilities)
+        : m_capabilities(WTFMove(capabilities))
+    {
+    }
+
     struct Target {
         uint64_t id { 0 };
         CString name;
@@ -103,7 +113,7 @@ private:
     void setTargetList(uint64_t connectionID, Vector<Target>&&);
     void sendMessageToFrontend(uint64_t connectionID, uint64_t targetID, const char* message);
 #elif USE(INSPECTOR_SOCKET_SERVER)
-    UncheckedKeyHashMap<String, CallHandler>& dispatchMap() override;
+    HashMap<String, CallHandler>& dispatchMap() override;
     void didClose(Inspector::RemoteInspectorSocketEndpoint&, Inspector::ConnectionID) final;
     void sendWebInspectorEvent(const String&);
 
@@ -121,7 +131,7 @@ private:
     uint64_t m_connectionID { 0 };
     Target m_target;
 
-    UncheckedKeyHashMap<long, Function<void (CommandResponse&&)>> m_commandRequests;
+    HashMap<long, Function<void (CommandResponse&&)>> m_commandRequests;
 
     String m_targetIp;
     uint16_t m_targetPort { 0 };

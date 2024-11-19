@@ -301,7 +301,12 @@ private:
 #endif
 };
 
-class MockRealtimeAudioSourceFactory final : public AudioCaptureFactory
+class MockRealtimeAudioSourceFactory final
+#if PLATFORM(COCOA)
+    : public CoreAudioCaptureSourceFactory
+#else
+    : public AudioCaptureFactory
+#endif
 {
 public:
     CaptureSourceOrError createAudioCaptureSource(const CaptureDevice& device, MediaDeviceHashSalts&& hashSalts, const MediaConstraints* constraints, std::optional<PageIdentifier> pageIdentifier) final
@@ -320,11 +325,6 @@ public:
 private:
     CaptureDeviceManager& audioCaptureDeviceManager() final { return MockRealtimeMediaSourceCenter::singleton().audioCaptureDeviceManager(); }
     const Vector<CaptureDevice>& speakerDevices() const final { return MockRealtimeMediaSourceCenter::speakerDevices(); }
-#if PLATFORM(COCOA)
-    void enableMutedSpeechActivityEventListener(Function<void()>&& callback) final {
-        CoreAudioSharedUnit::singleton().enableMutedSpeechActivityEventListener(WTFMove(callback)); }
-    void disableMutedSpeechActivityEventListener() final { CoreAudioSharedUnit::singleton().disableMutedSpeechActivityEventListener(); }
-#endif
 };
 
 static Vector<MockMediaDevice>& devices()
@@ -333,10 +333,10 @@ static Vector<MockMediaDevice>& devices()
     return devices;
 }
 
-static UncheckedKeyHashMap<String, MockMediaDevice>& deviceMap()
+static HashMap<String, MockMediaDevice>& deviceMap()
 {
     static NeverDestroyed map = [] {
-        UncheckedKeyHashMap<String, MockMediaDevice> map;
+        HashMap<String, MockMediaDevice> map;
         for (auto& device : devices())
             map.add(device.persistentId, device);
         return map;

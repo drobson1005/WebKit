@@ -44,7 +44,7 @@
 #include "WritingDirection.h"
 #include <memory>
 #include <wtf/TZoneMallocInlines.h>
-#include <wtf/WeakRef.h>
+#include <wtf/WeakPtr.h>
 
 #if PLATFORM(COCOA)
 OBJC_CLASS NSAttributedString;
@@ -177,9 +177,8 @@ private:
     TemporarySelectionChange m_selectionChange;
 };
 
-class Editor final : public CanMakeCheckedPtr<Editor> {
+class Editor final : public CanMakeWeakPtr<Editor> {
     WTF_MAKE_TZONE_ALLOCATED_EXPORT(Editor, WEBCORE_EXPORT);
-    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(Editor);
 public:
     explicit Editor(Document&);
     ~Editor();
@@ -194,6 +193,12 @@ public:
     WEBCORE_EXPORT TextCheckerClient* textChecker() const;
 
     CompositeEditCommand* lastEditCommand() { return m_lastEditCommand.get(); }
+
+    Document& document() const { return m_document.get(); }
+    Ref<Document> protectedDocument() const { return m_document.get(); }
+
+    WEBCORE_EXPORT void ref() const;
+    WEBCORE_EXPORT void deref() const;
 
     void handleKeyboardEvent(KeyboardEvent&);
     void handleInputMethodKeydown(KeyboardEvent&);
@@ -406,7 +411,7 @@ public:
 
     // international text input composition
     bool hasComposition() const { return m_compositionNode; }
-    WEBCORE_EXPORT void setComposition(const String&, const Vector<CompositionUnderline>&, const Vector<CompositionHighlight>&, const UncheckedKeyHashMap<String, Vector<CharacterRange>>&, unsigned selectionStart, unsigned selectionEnd);
+    WEBCORE_EXPORT void setComposition(const String&, const Vector<CompositionUnderline>&, const Vector<CompositionHighlight>&, const HashMap<String, Vector<CharacterRange>>&, unsigned selectionStart, unsigned selectionEnd);
 #if PLATFORM(COCOA)
     WEBCORE_EXPORT void setWritingSuggestion(const String&, const CharacterRange& selection);
 #endif
@@ -429,7 +434,7 @@ public:
     bool compositionUsesCustomHighlights() const { return !m_customCompositionHighlights.isEmpty(); }
     const Vector<CompositionHighlight>& customCompositionHighlights() const { return m_customCompositionHighlights; }
     bool compositionUsesCustomAnnotations() const { return !m_customCompositionAnnotations.isEmpty(); }
-    const UncheckedKeyHashMap<String, Vector<CharacterRange>>& customCompositionAnnotations() const { return m_customCompositionAnnotations; }
+    const HashMap<String, Vector<CharacterRange>>& customCompositionAnnotations() const { return m_customCompositionAnnotations; }
 
     // FIXME: This should be a page-level concept (i.e. on EditorClient) instead of on the Editor, which
     // is a frame-specific concept, because executing an editing command can run JavaScript that can do
@@ -635,9 +640,6 @@ public:
     WEBCORE_EXPORT void closeTyping();
 
 private:
-    Document& document() const { return m_document.get(); }
-    Ref<Document> protectedDocument() const { return m_document.get(); }
-
     bool canDeleteRange(const SimpleRange&) const;
     bool canSmartReplaceWithPasteboard(Pasteboard&);
     void pasteAsPlainTextWithPasteboard(Pasteboard&);
@@ -699,13 +701,13 @@ private:
     unsigned m_compositionEnd;
     Vector<CompositionUnderline> m_customCompositionUnderlines;
     Vector<CompositionHighlight> m_customCompositionHighlights;
-    UncheckedKeyHashMap<String, Vector<CharacterRange>> m_customCompositionAnnotations;
+    HashMap<String, Vector<CharacterRange>> m_customCompositionAnnotations;
     bool m_ignoreSelectionChanges { false };
     bool m_shouldStartNewKillRingSequence { false };
     bool m_shouldStyleWithCSS { false };
-    const std::unique_ptr<PAL::KillRing> m_killRing;
-    const std::unique_ptr<SpellChecker> m_spellChecker;
-    const std::unique_ptr<AlternativeTextController> m_alternativeTextController;
+    const UniqueRef<PAL::KillRing> m_killRing;
+    const UniqueRef<SpellChecker> m_spellChecker;
+    const UniqueRef<AlternativeTextController> m_alternativeTextController;
     EditorParagraphSeparator m_defaultParagraphSeparator { EditorParagraphSeparator::div };
     bool m_overwriteModeEnabled { false };
 

@@ -154,7 +154,7 @@ struct Array {
 
 struct Struct {
     AST::Structure& structure;
-    UncheckedKeyHashMap<String, const Type*> fields { };
+    HashMap<String, const Type*> fields { };
 };
 
 struct PrimitiveStruct {
@@ -320,7 +320,7 @@ public:
     unsigned length() const { return m_string.length(); }
     bool is8Bit() const { return m_string.is8Bit(); }
     template<typename CharacterType>
-    void writeTo(CharacterType* destination) const
+    void writeTo(std::span<CharacterType> destination) const
     {
         StringView { m_string }.getCharacters(destination);
         WTF_STRINGTYPEADAPTER_COPIED_WTF_STRING();

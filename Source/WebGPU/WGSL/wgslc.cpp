@@ -70,7 +70,10 @@ private:
 void CommandLine::parseArguments(int argc, char** argv)
 {
     for (int i = 1; i < argc; ++i) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
         const char* arg = argv[i];
+#pragma clang diagnostic pop
         if (!strcmp(arg, "-h") || !strcmp(arg, "--help"))
             printUsageStatement(true);
 
@@ -118,7 +121,11 @@ static int runWGSL(const CommandLine& options)
     FileSystem::closeFile(handle);
     auto source = emptyString();
     if (readResult.has_value())
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
         source = String::fromUTF8WithLatin1Fallback(std::span(readResult->data(), readResult->size()));
+#pragma clang diagnostic pop
+
     auto checkResult = WGSL::staticCheck(source, std::nullopt, configuration);
     if (auto* failedCheck = std::get_if<WGSL::FailedCheck>(&checkResult)) {
         for (const auto& error : failedCheck->errors)
@@ -144,7 +151,7 @@ static int runWGSL(const CommandLine& options)
         return EXIT_FAILURE;
     }
 
-    UncheckedKeyHashMap<String, WGSL::ConstantValue> constantValues;
+    HashMap<String, WGSL::ConstantValue> constantValues;
     const auto& entryPointInformation = result.entryPoints.get(entrypointName);
     for (const auto& [originalName, constant] : entryPointInformation.specializationConstants) {
         if (!constant.defaultValue) {

@@ -69,8 +69,8 @@ public:
 
     InjectedBundleScriptWorld* worldForIdentifier(ContentWorldIdentifier);
 
-    void addContentWorlds(const Vector<std::pair<ContentWorldIdentifier, String>>&);
-    InjectedBundleScriptWorld* addContentWorld(const std::pair<ContentWorldIdentifier, String>&);
+    void addContentWorlds(const Vector<ContentWorldData>&);
+    InjectedBundleScriptWorld* addContentWorld(const ContentWorldData&);
     void addUserScripts(Vector<WebUserScriptData>&&, InjectUserScriptImmediately);
     void addUserStyleSheets(const Vector<WebUserStyleSheetData>&);
     void addUserScriptMessageHandlers(const Vector<WebScriptMessageHandlerData>&);
@@ -122,14 +122,14 @@ private:
 
     UserContentControllerIdentifier m_identifier;
 
-    typedef UncheckedKeyHashMap<RefPtr<InjectedBundleScriptWorld>, Vector<std::pair<std::optional<UserScriptIdentifier>, WebCore::UserScript>>> WorldToUserScriptMap;
+    typedef HashMap<RefPtr<InjectedBundleScriptWorld>, Vector<std::pair<std::optional<UserScriptIdentifier>, WebCore::UserScript>>> WorldToUserScriptMap;
     WorldToUserScriptMap m_userScripts;
 
-    typedef UncheckedKeyHashMap<RefPtr<InjectedBundleScriptWorld>, Vector<std::pair<std::optional<UserStyleSheetIdentifier>, WebCore::UserStyleSheet>>> WorldToUserStyleSheetMap;
+    typedef HashMap<RefPtr<InjectedBundleScriptWorld>, Vector<std::pair<std::optional<UserStyleSheetIdentifier>, WebCore::UserStyleSheet>>> WorldToUserStyleSheetMap;
     WorldToUserStyleSheetMap m_userStyleSheets;
 
 #if ENABLE(USER_MESSAGE_HANDLERS)
-    typedef UncheckedKeyHashMap<RefPtr<InjectedBundleScriptWorld>, Vector<std::pair<ScriptMessageHandlerIdentifier, RefPtr<WebUserMessageHandlerDescriptorProxy>>>> WorldToUserMessageHandlerVectorMap;
+    typedef HashMap<RefPtr<InjectedBundleScriptWorld>, Vector<std::pair<ScriptMessageHandlerIdentifier, RefPtr<WebUserMessageHandlerDescriptorProxy>>>> WorldToUserMessageHandlerVectorMap;
     WorldToUserMessageHandlerVectorMap m_userMessageHandlers;
 #endif
 #if ENABLE(CONTENT_EXTENSIONS)

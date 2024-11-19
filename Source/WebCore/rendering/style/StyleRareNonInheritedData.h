@@ -195,9 +195,6 @@ public:
 
     TimelineScope timelineScope;
 
-    SingleTimelineRange animationRangeStart;
-    SingleTimelineRange animationRangeEnd;
-
     ScrollbarGutter scrollbarGutter;
     ScrollbarWidth scrollbarWidth { ScrollbarWidth::Auto };
 
@@ -250,6 +247,8 @@ public:
     unsigned overflowAnchor : 1; // Scroll Anchoring- OverflowAnchor
 
     bool hasClip : 1;
+
+    unsigned positionTryOrder : 3; // Style::PositionTryOrder; 5 values so 3 bits.
 
     FieldSizing fieldSizing { FieldSizing::Fixed };
 

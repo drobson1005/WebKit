@@ -43,6 +43,8 @@
 #include <pal/cf/AudioToolboxSoftLink.h>
 #include <pal/cf/CoreMediaSoftLink.h>
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 namespace WebCore {
 
 class LocalAudioMediaStreamTrackRendererInternalUnit final : public AudioMediaStreamTrackRendererInternalUnit, public RefCounted<LocalAudioMediaStreamTrackRendererInternalUnit>  {
@@ -65,11 +67,12 @@ private:
     void stop() final;
     void retrieveFormatDescription(CompletionHandler<void(std::optional<CAAudioStreamDescription>)>&&) final;
     void setAudioOutputDevice(const String&) final;
+    const String& audioOutputDeviceID() const final { return m_audioOutputDeviceID; }
 
     OSStatus render(AudioUnitRenderActionFlags*, const AudioTimeStamp*, UInt32 sampleCount, AudioBufferList*);
     static OSStatus renderingCallback(void*, AudioUnitRenderActionFlags*, const AudioTimeStamp*, UInt32 inBusNumber, UInt32 sampleCount, AudioBufferList*);
 
-    WeakPtr<Client> m_client;
+    ThreadSafeWeakPtr<Client> m_client;
     std::optional<CAAudioStreamDescription> m_outputDescription;
     AudioComponentInstance m_remoteIOUnit { nullptr };
     bool m_isStarted { false };
@@ -77,6 +80,7 @@ private:
 #if PLATFORM(MAC)
     uint32_t m_deviceID { 0 };
 #endif
+    String m_audioOutputDeviceID;
 };
 
 
@@ -100,6 +104,8 @@ void LocalAudioMediaStreamTrackRendererInternalUnit::setAudioOutputDevice(const 
         RELEASE_LOG(WebRTC, "AudioMediaStreamTrackRendererInternalUnit::setAudioOutputDeviceId - did not find device");
         return;
     }
+
+    m_audioOutputDeviceID = deviceID;
 
     auto audioUnitDeviceID = device ? device->deviceID() : 0;
     if (m_deviceID == audioUnitDeviceID)
@@ -306,5 +312,7 @@ Ref<AudioMediaStreamTrackRendererInternalUnit> AudioMediaStreamTrackRendererInte
 }
 
 } // namespace WebCore
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
 #endif // ENABLE(MEDIA_STREAM)

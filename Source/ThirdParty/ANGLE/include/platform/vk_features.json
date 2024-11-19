@@ -670,6 +670,14 @@
             "issue": "http://anglebug.com/42263914"
         },
         {
+            "name": "expose_ES32_for_testing",
+            "category": "Workarounds",
+            "description": [
+                "Expose GLES 3.2 for testing purposes on platforms that currently do not fully support it."
+            ],
+            "issue": "http://issuetracker.google.com/376899587"
+        },
+        {
             "name": "emulate_R32f_image_atomic_exchange",
             "category": "Workarounds",
             "description": [
@@ -788,6 +796,13 @@
             "category": "Features",
             "description": [
                 "Whether the Vulkan backend supports non-coherent framebuffer fetch"
+            ]
+        },
+        {
+            "name": "supports_shader_framebuffer_fetch_depth_stencil",
+            "category": "Features",
+            "description": [
+                "Whether the Vulkan backend supports coherent depth/stencil framebuffer fetch"
             ]
         },
         {
@@ -1807,10 +1822,18 @@
             "name": "verify_pipeline_cache_in_blob_cache",
             "category": "Features",
             "description": [
-                "Wether need to perform verification of stored PipelineCacheVk data chunks or not. ",
+                "Whether need to perform verification of stored PipelineCacheVk data chunks or not. ",
                 "Relevant, when blob cache does not evict old items first (no LRU) or evicts more old items than required when storing a new item."
             ],
             "issue": "https://anglebug.com/42263322"
+        },
+        {
+            "name": "descriptor_set_cache",
+            "category": "Features",
+            "description": [
+                "Whether cache the individual descriptorSet or not."
+            ],
+            "issue": "angleproject:372268711"
         }
     ]
 }

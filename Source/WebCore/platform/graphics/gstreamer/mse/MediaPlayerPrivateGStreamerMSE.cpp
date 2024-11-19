@@ -109,7 +109,7 @@ static Vector<RefPtr<MediaSourceTrackGStreamer>> filterOutRepeatingTracks(const 
     uniqueTracks.reserveInitialCapacity(tracks.size());
 
     for (const auto& track : tracks) {
-        if (!uniqueTracks.containsIf([&track](const auto& current) { return track->stringId() == current->stringId(); }))
+        if (!uniqueTracks.containsIf([&track](const auto& current) { return track->id() == current->id(); }))
             uniqueTracks.append(track);
     }
 
@@ -219,7 +219,7 @@ MediaTime MediaPlayerPrivateGStreamerMSE::duration() const
     if (UNLIKELY(!m_pipeline || m_didErrorOccur))
         return MediaTime();
 
-    return m_mediaTimeDuration;
+    return m_mediaTimeDuration.isValid() ? m_mediaTimeDuration : MediaTime::zeroTime();
 }
 
 void MediaPlayerPrivateGStreamerMSE::seekToTarget(const SeekTarget& target)

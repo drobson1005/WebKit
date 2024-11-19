@@ -29,7 +29,7 @@
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudioTypes.h>
-#include <wtf/CanMakeWeakPtr.h>
+#include <wtf/ThreadSafeWeakPtr.h>
 
 namespace WebCore {
 
@@ -43,12 +43,9 @@ public:
     virtual void ref() const = 0;
     virtual void deref() const = 0;
 
-    class Client : public CanMakeWeakPtr<Client, WeakPtrFactoryInitialization::Eager> {
+    class Client : public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<Client> {
     public:
         virtual ~Client() = default;
-
-        virtual void ref() const = 0;
-        virtual void deref() const = 0;
 
         virtual OSStatus render(size_t sampleCount, AudioBufferList&, uint64_t sampleTime, double hostTime, AudioUnitRenderActionFlags&) = 0;
         virtual void reset() = 0;
@@ -61,6 +58,7 @@ public:
     virtual void stop() = 0;
     virtual void retrieveFormatDescription(CompletionHandler<void(std::optional<CAAudioStreamDescription>)>&&) = 0;
     virtual void setAudioOutputDevice(const String&) = 0;
+    virtual const String& audioOutputDeviceID() const = 0;
 };
 
 }

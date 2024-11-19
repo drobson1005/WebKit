@@ -212,6 +212,7 @@ public:
 
     void setNavigationGesturesEnabled(bool value);
     void setIgnoresViewportScaleLimits(bool);
+    void setUseDarkAppearanceForTesting(bool);
 
     void setShouldDownloadUndisplayableMIMETypes(bool value) { m_shouldDownloadUndisplayableMIMETypes = value; }
     void setShouldAllowDeviceOrientationAndMotionAccess(bool);
@@ -461,6 +462,7 @@ private:
     void platformDestroy();
     WKContextRef platformAdjustContext(WKContextRef, WKContextConfigurationRef);
     void platformInitializeContext();
+    void platformEnsureGPUProcessConfiguredForOptions(const TestOptions&);
     void platformCreateWebView(WKPageConfigurationRef, const TestOptions&);
     static UniqueRef<PlatformWebView> platformCreateOtherPage(PlatformWebView* parentView, WKPageConfigurationRef, const TestOptions&);
 
@@ -626,6 +628,8 @@ private:
     static const char* libraryPathForTesting();
     static const char* platformLibraryPathForTesting();
 
+    void setTracksRepaints(bool);
+
     WKRetainPtr<WKURLRef> m_mainResourceURL;
     std::unique_ptr<TestInvocation> m_currentInvocation;
 #if PLATFORM(COCOA)
@@ -702,7 +706,7 @@ private:
     bool m_isGeolocationPermissionAllowed { false };
     std::optional<bool> m_screenWakeLockPermission;
 
-    UncheckedKeyHashMap<String, RefPtr<OriginSettings>> m_cachedUserMediaPermissions;
+    HashMap<String, RefPtr<OriginSettings>> m_cachedUserMediaPermissions;
 
     typedef Vector<std::pair<String, WKRetainPtr<WKUserMediaPermissionRequestRef>>> PermissionRequestList;
     PermissionRequestList m_userMediaPermissionRequests;
@@ -763,7 +767,7 @@ private:
             , abandonedDocumentURL(inAbandonedDocumentURL)
         { }
     };
-    UncheckedKeyHashMap<String, AbandonedDocumentInfo> m_abandonedDocumentInfo;
+    HashMap<String, AbandonedDocumentInfo> m_abandonedDocumentInfo;
 
     uint64_t m_serverTrustEvaluationCallbackCallsCount { 0 };
     bool m_shouldDismissJavaScriptAlertsAsynchronously { false };

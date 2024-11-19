@@ -36,11 +36,11 @@
 #include "WebMResourceClient.h"
 #include <wtf/HashFunctions.h>
 #include <wtf/LoggerHelper.h>
+#include <wtf/NativePromise.h>
 #include <wtf/StdUnorderedMap.h>
 #include <wtf/TZoneMalloc.h>
 #include <wtf/UniqueRef.h>
 #include <wtf/Vector.h>
-#include <wtf/threads/BinarySemaphore.h>
 
 OBJC_CLASS AVSampleBufferAudioRenderer;
 OBJC_CLASS AVSampleBufferDisplayLayer;
@@ -164,9 +164,6 @@ private:
     bool updateLastImage();
     void paint(GraphicsContext&, const FloatRect&) final;
     void paintCurrentFrameInContext(GraphicsContext&, const FloatRect&) final;
-#if PLATFORM(COCOA) && !HAVE(AVSAMPLEBUFFERDISPLAYLAYER_COPYDISPLAYEDPIXELBUFFER)
-    void willBeAskedToPaintGL() final;
-#endif
     RefPtr<VideoFrame> videoFrameForCurrentTime() final;
     DestinationColorSpace colorSpace() final;
 
@@ -325,6 +322,7 @@ private:
     RetainPtr<AVSampleBufferRenderSynchronizer> m_synchronizer;
     RetainPtr<id> m_durationObserver;
     RetainPtr<CVPixelBufferRef> m_lastPixelBuffer;
+    MediaTime m_lastPixelBufferPresentationTimeStamp;
     RefPtr<NativeImage> m_lastImage;
     std::unique_ptr<PixelBufferConformerCV> m_rgbConformer;
     RefPtr<WebCoreDecompressionSession> m_decompressionSession;
@@ -347,9 +345,6 @@ private:
 
     MediaPlayer::NetworkState m_networkState { MediaPlayer::NetworkState::Empty };
     MediaPlayer::ReadyState m_readyState { MediaPlayer::ReadyState::HaveNothing };
-#if !HAVE(AVSAMPLEBUFFERDISPLAYLAYER_COPYDISPLAYEDPIXELBUFFER)
-    bool m_hasBeenAskedToPaintGL { false };
-#endif
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
     RefPtr<MediaPlaybackTarget> m_playbackTarget;
@@ -364,7 +359,6 @@ private:
     uint64_t m_lastConvertedSampleCount { 0 };
     uint64_t m_sampleCount { 0 };
     ProcessIdentity m_resourceOwner;
-    std::unique_ptr<BinarySemaphore> m_hasAvailableVideoFrameSemaphore;
 
     FloatSize m_naturalSize;
     MediaTime m_currentTime;
@@ -395,6 +389,7 @@ private:
     void seekToTarget(const SeekTarget&) final;
     bool seeking() const final;
     void seekInternal();
+    Ref<GenericPromise> seekTo(const MediaTime&);
     void maybeCompleteSeek();
     MediaTime clampTimeToLastSeekTime(const MediaTime&) const;
     bool shouldBePlaying() const;
@@ -410,6 +405,7 @@ private:
         SeekCompleted,
     };
     SeekState m_seekState { SeekCompleted };
+    std::optional<GenericPromise::Producer> m_seekPromise;
     bool m_isSynchronizerSeeking { false };
 #if HAVE(SPATIAL_TRACKING_LABEL)
     String m_defaultSpatialTrackingLabel;

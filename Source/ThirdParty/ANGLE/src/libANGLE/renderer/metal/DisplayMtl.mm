@@ -731,6 +731,10 @@ void DisplayMtl::ensureCapsInitialized() const
     // On macOS exclude [[position]] from maxVaryingVectors.
     mNativeCaps.maxVaryingVectors         = 31 - 1;
     mNativeCaps.maxVertexOutputComponents = mNativeCaps.maxFragmentInputComponents = 124 - 4;
+#elif TARGET_OS_SIMULATOR
+    mNativeCaps.max2DTextureSize          = 8192;
+    mNativeCaps.maxVaryingVectors         = 31 - 1;
+    mNativeCaps.maxVertexOutputComponents = mNativeCaps.maxFragmentInputComponents = 124 - 4;
 #else
     if (supportsAppleGPUFamily(3))
     {
@@ -1004,27 +1008,23 @@ void DisplayMtl::initializeExtensions() const
 
     mNativeExtensions.sampleVariablesOES = true;
 
-    if (@available(macOS 11.0, *))
+    if ([mMetalDevice supportsPullModelInterpolation])
     {
-        mNativeExtensions.shaderMultisampleInterpolationOES =
-            [mMetalDevice supportsPullModelInterpolation];
-        if (mNativeExtensions.shaderMultisampleInterpolationOES)
+        mNativeExtensions.shaderMultisampleInterpolationOES = true;
+        mNativeCaps.subPixelInterpolationOffsetBits         = 4;
+        if (supportsAppleGPUFamily(1))
         {
-            mNativeCaps.subPixelInterpolationOffsetBits = 4;
-            if (supportsAppleGPUFamily(1))
-            {
-                mNativeCaps.minInterpolationOffset = -0.5f;
-                mNativeCaps.maxInterpolationOffset = +0.5f;
-            }
-            else
-            {
-                // On non-Apple GPUs, the actual range is usually
-                // [-0.5, +0.4375] but due to framebuffer Y-flip
-                // the effective range for the Y direction will be
-                // [-0.4375, +0.5] when the default FBO is bound.
-                mNativeCaps.minInterpolationOffset = -0.4375f;  // -0.5 + (2 ^ -4)
-                mNativeCaps.maxInterpolationOffset = +0.4375f;  // +0.5 - (2 ^ -4)
-            }
+            mNativeCaps.minInterpolationOffset = -0.5f;
+            mNativeCaps.maxInterpolationOffset = +0.5f;
+        }
+        else
+        {
+            // On non-Apple GPUs, the actual range is usually
+            // [-0.5, +0.4375] but due to framebuffer Y-flip
+            // the effective range for the Y direction will be
+            // [-0.4375, +0.5] when the default FBO is bound.
+            mNativeCaps.minInterpolationOffset = -0.4375f;  // -0.5 + (2 ^ -4)
+            mNativeCaps.maxInterpolationOffset = +0.4375f;  // +0.5 - (2 ^ -4)
         }
     }
 
@@ -1347,11 +1347,13 @@ angle::Result DisplayMtl::initializeShaderLibrary()
 {
     mtl::AutoObjCPtr<NSError *> err = nil;
 #if ANGLE_METAL_XCODE_BUILDS_SHADERS || ANGLE_METAL_HAS_PREBUILT_INTERNAL_SHADERS
-    mDefaultShaders = mtl::CreateShaderLibraryFromBinary(getMetalDevice(), gDefaultMetallib,
-                                                         std::size(gDefaultMetallib), &err);
+    mDefaultShaders = mtl::CreateShaderLibraryFromStaticBinary(getMetalDevice(), gDefaultMetallib,
+                                                               std::size(gDefaultMetallib), &err);
 #else
-    mDefaultShaders = mtl::CreateShaderLibrary(getMetalDevice(), gDefaultMetallibSrc,
-                                               std::size(gDefaultMetallibSrc), &err);
+    const bool disableFastMath = false;
+    const bool usesInvariance  = true;
+    mDefaultShaders            = mtl::CreateShaderLibrary(getMetalDevice(), gDefaultMetallibSrc, {},
+                                                          disableFastMath, usesInvariance, &err);
 #endif
 
     if (err)
@@ -1386,11 +1388,7 @@ bool DisplayMtl::supportsEitherGPUFamily(uint8_t iOSFamily, uint8_t macFamily) c
 bool DisplayMtl::supports32BitFloatFiltering() const
 {
 #if !TARGET_OS_WATCH
-    if (@available(macOS 11.0, *))
-    {
-        return [mMetalDevice supports32BitFloatFiltering];
-    }
-    return true;  // Always true on old macOS
+    return [mMetalDevice supports32BitFloatFiltering];
 #else
     return false;
 #endif
@@ -1398,14 +1396,14 @@ bool DisplayMtl::supports32BitFloatFiltering() const
 
 bool DisplayMtl::supportsBCTextureCompression() const
 {
-    if (@available(macOS 11.0, macCatalyst 16.4, iOS 16.4, *))
+    if (@available(macCatalyst 16.4, iOS 16.4, *))
     {
         return [mMetalDevice supportsBCTextureCompression];
     }
-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
-    return true;  // Always true on old macOS
+#if TARGET_OS_MACCATALYST
+    return true;  // Always true on old Catalyst
 #else
-    return false;  // Always false everywhere else
+    return false;  // Always false on old iOS
 #endif
 }
 

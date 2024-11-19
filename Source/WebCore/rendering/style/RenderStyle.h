@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "PseudoElementIdentifier.h"
+#include "WritingMode.h"
 #include <unicode/utypes.h>
 #include <wtf/CheckedRef.h>
 #include <wtf/DataRef.h>
@@ -35,7 +37,6 @@ namespace WebCore {
 
 class AnimationList;
 class AutosizeStatus;
-class BasicShapePath;
 class BorderData;
 class BorderValue;
 class CSSCustomPropertyValue;
@@ -81,12 +82,12 @@ class ScrollTimeline;
 class ShadowData;
 class ShapeValue;
 class StyleColor;
-class StyleColorScheme;
 class StyleContentAlignmentData;
 class StyleCustomPropertyData;
 class StyleImage;
 class StyleInheritedData;
 class StyleNonInheritedData;
+class StylePathData;
 class StyleRareInheritedData;
 class StyleReflection;
 class StyleScrollSnapArea;
@@ -211,7 +212,6 @@ enum class TextCombine : bool;
 enum class TextDecorationLine : uint8_t;
 enum class TextDecorationSkipInk : uint8_t;
 enum class TextDecorationStyle : uint8_t;
-enum class TextDirection : bool;
 enum class TextEmphasisFill : bool;
 enum class TextEmphasisMark : uint8_t;
 enum class TextEmphasisPosition : uint8_t;
@@ -219,7 +219,6 @@ enum class TextGroupAlign : uint8_t;
 enum class TextIndentLine : bool;
 enum class TextIndentType : bool;
 enum class TextJustify : uint8_t;
-enum class TextOrientation : uint8_t;
 enum class TextOverflow : bool;
 enum class TextSecurity : uint8_t;
 enum class TextTransform : uint8_t;
@@ -242,7 +241,6 @@ enum class Visibility : uint8_t;
 enum class WhiteSpace : uint8_t;
 enum class WhiteSpaceCollapse : uint8_t;
 enum class WordBreak : uint8_t;
-enum class WritingMode : uint8_t;
 
 struct BlockEllipsis;
 struct BorderDataRadii;
@@ -286,8 +284,10 @@ using LayoutBoxExtent = RectEdges<LayoutUnit>;
 namespace Style {
 class CustomPropertyRegistry;
 class ViewTransitionName;
-struct PseudoElementIdentifier;
+struct ColorScheme;
 struct ScopedName;
+
+enum class PositionTryOrder : uint8_t;
 }
 
 constexpr auto PublicPseudoIDBits = 17;
@@ -298,7 +298,7 @@ constexpr auto PseudoElementTypeBits = 5;
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(PseudoStyleCache);
 struct PseudoStyleCache {
     WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(PseudoStyleCache);
-    Vector<std::unique_ptr<RenderStyle>, 4> styles;
+    HashMap<Style::PseudoElementIdentifier, std::unique_ptr<RenderStyle>> styles;
 };
 
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(RenderStyle);
@@ -427,6 +427,8 @@ public:
     // attribute getter methods
 
     constexpr DisplayType display() const { return static_cast<DisplayType>(m_nonInheritedFlags.effectiveDisplay); }
+    constexpr WritingMode writingMode() const { return m_inheritedFlags.writingMode; }
+    bool isLeftToRightDirection() const { return writingMode().isBidiLTR(); } // deprecated, because of confusion between physical inline directions and bidi / line-relative directions
 
     inline const Length& left() const;
     inline const Length& right() const;
@@ -448,7 +450,9 @@ public:
     inline bool hasInFlowPosition() const;
     inline bool hasViewportConstrainedPosition() const;
     Float floating() const { return static_cast<Float>(m_nonInheritedFlags.floating); }
-    static UsedFloat usedFloat(const RenderObject&);
+    static UsedFloat usedFloat(const RenderObject&); // Returns logical left/right (block-relative).
+    Clear clear() const { return static_cast<Clear>(m_nonInheritedFlags.clear); }
+    static UsedClear usedClear(const RenderObject&); // Returns logical left/right (block-relative).
 
     inline const Length& width() const;
     inline const Length& height() const;
@@ -456,7 +460,13 @@ public:
     inline const Length& maxWidth() const;
     inline const Length& minHeight() const;
     inline const Length& maxHeight() const;
-    
+
+    inline const Length& logicalWidth(const WritingMode) const;
+    inline const Length& logicalHeight(const WritingMode) const;
+    inline const Length& logicalMinWidth(const WritingMode) const;
+    inline const Length& logicalMaxWidth(const WritingMode) const;
+    inline const Length& logicalMinHeight(const WritingMode) const;
+    inline const Length& logicalMaxHeight(const WritingMode) const;
     inline const Length& logicalWidth() const;
     inline const Length& logicalHeight() const;
     inline const Length& logicalMinWidth() const;
@@ -470,15 +480,14 @@ public:
     inline const BorderValue& borderTop() const;
     inline const BorderValue& borderBottom() const;
 
-
-    inline const BorderValue& borderBefore() const;
-    inline const BorderValue& borderAfter() const;
-    inline const BorderValue& borderStart() const;
-    inline const BorderValue& borderEnd() const;
-    const BorderValue& borderBefore(const RenderStyle& styleForFlow) const;
-    const BorderValue& borderAfter(const RenderStyle& styleForFlow) const;
-    const BorderValue& borderStart(const RenderStyle& styleForFlow) const;
-    const BorderValue& borderEnd(const RenderStyle& styleForFlow) const;
+    const BorderValue& borderBefore(const WritingMode) const;
+    const BorderValue& borderAfter(const WritingMode) const;
+    const BorderValue& borderStart(const WritingMode) const;
+    const BorderValue& borderEnd(const WritingMode) const;
+    const BorderValue& borderBefore() const { return borderBefore(writingMode()); }
+    const BorderValue& borderAfter() const { return borderAfter(writingMode()); }
+    const BorderValue& borderStart() const { return borderStart(writingMode()); }
+    const BorderValue& borderEnd() const { return borderEnd(writingMode()); }
 
     inline const NinePieceImage& borderImage() const;
     inline StyleImage* borderImageSource() const;
@@ -514,10 +523,14 @@ public:
     inline bool borderBottomIsTransparent() const;
     inline FloatBoxExtent borderWidth() const;
 
-    float borderBeforeWidth() const;
-    float borderAfterWidth() const;
-    float borderStartWidth() const;
-    float borderEndWidth() const;
+    float borderBeforeWidth(const WritingMode) const;
+    float borderAfterWidth(const WritingMode) const;
+    float borderStartWidth(const WritingMode) const;
+    float borderEndWidth(const WritingMode) const;
+    float borderBeforeWidth() const { return borderBeforeWidth(writingMode()); }
+    float borderAfterWidth() const { return borderAfterWidth(writingMode()); }
+    float borderStartWidth() const { return borderStartWidth(writingMode()); }
+    float borderEndWidth() const { return borderEndWidth(writingMode()); }
 
     inline bool borderIsEquivalentForPainting(const RenderStyle&) const;
 
@@ -549,9 +562,6 @@ public:
     inline bool hasClip() const;
 
     UnicodeBidi unicodeBidi() const { return static_cast<UnicodeBidi>(m_nonInheritedFlags.unicodeBidi); }
-
-    Clear clear() const { return static_cast<Clear>(m_nonInheritedFlags.clear); }
-    static UsedClear usedClear(const RenderObject&);
 
     FieldSizing fieldSizing() const;
 
@@ -604,10 +614,6 @@ public:
     inline float usedZoom() const;
     
     inline TextZoom textZoom() const;
-
-    TextDirection direction() const { return static_cast<TextDirection>(m_inheritedFlags.direction); }
-    inline bool isLeftToRightDirection() const;
-    inline bool hasExplicitlySetDirection() const;
 
     const Length& specifiedLineHeight() const;
     WEBCORE_EXPORT const Length& lineHeight() const;
@@ -671,24 +677,30 @@ public:
     StyleImage* listStyleImage() const;
     ListStylePosition listStylePosition() const { return static_cast<ListStylePosition>(m_inheritedFlags.listStylePosition); }
     inline bool isFixedTableLayout() const;
+
+    inline const LengthBox& marginBox() const;
     inline const Length& marginTop() const;
     inline const Length& marginBottom() const;
     inline const Length& marginLeft() const;
     inline const Length& marginRight() const;
+    inline const Length& marginStart(const WritingMode) const;
+    inline const Length& marginEnd(const WritingMode) const;
+    inline const Length& marginBefore(const WritingMode) const;
+    inline const Length& marginAfter(const WritingMode) const;
     inline const Length& marginBefore() const;
     inline const Length& marginAfter() const;
     inline const Length& marginStart() const;
     inline const Length& marginEnd() const;
-    inline const Length& marginStartUsing(const RenderStyle* otherStyle) const;
-    inline const Length& marginEndUsing(const RenderStyle* otherStyle) const;
-    inline const Length& marginBeforeUsing(const RenderStyle* otherStyle) const;
-    inline const Length& marginAfterUsing(const RenderStyle* otherStyle) const;
 
     inline const LengthBox& paddingBox() const;
     inline const Length& paddingTop() const;
     inline const Length& paddingBottom() const;
     inline const Length& paddingLeft() const;
     inline const Length& paddingRight() const;
+    inline const Length& paddingBefore(const WritingMode) const;
+    inline const Length& paddingAfter(const WritingMode) const;
+    inline const Length& paddingStart(const WritingMode) const;
+    inline const Length& paddingEnd(const WritingMode) const;
     inline const Length& paddingBefore() const;
     inline const Length& paddingAfter() const;
     inline const Length& paddingStart() const;
@@ -918,14 +930,12 @@ public:
     inline RubyOverhang rubyOverhang() const;
 
 #if ENABLE(DARK_MODE_CSS)
-    inline StyleColorScheme colorScheme() const;
+    inline Style::ColorScheme colorScheme() const;
     inline void setHasExplicitlySetColorScheme();
     inline bool hasExplicitlySetColorScheme() const;
 #endif
 
     inline TableLayoutType tableLayout() const;
-
-    inline TextOrientation textOrientation() const;
 
     inline ObjectFit objectFit() const;
     inline const LengthPoint& objectPosition() const;
@@ -996,14 +1006,6 @@ public:
     static inline const TimelineScope initialTimelineScope();
     inline const TimelineScope& timelineScope() const;
     inline void setTimelineScope(const TimelineScope&);
-
-    static inline const SingleTimelineRange initialAnimationRangeStart();
-    inline const SingleTimelineRange& animationRangeStart() const;
-    inline void setAnimationRangeStart(const SingleTimelineRange&);
-
-    static inline const SingleTimelineRange initialAnimationRangeEnd();
-    inline const SingleTimelineRange& animationRangeEnd() const;
-    inline void setAnimationRangeEnd(const SingleTimelineRange&);
 
     inline const AnimationList* animations() const;
     inline const AnimationList* transitions() const;
@@ -1098,14 +1100,6 @@ public:
 
     inline TextSecurity textSecurity() const;
     inline InputSecurity inputSecurity() const;
-
-    WritingMode writingMode() const { return static_cast<WritingMode>(m_inheritedFlags.writingMode); }
-    inline bool isHorizontalWritingMode() const;
-    inline bool isVerticalWritingMode() const;
-    inline bool isFlippedLinesWritingMode() const;
-    inline bool isFlippedBlocksWritingMode() const;
-    FlowDirection blockFlowDirection() const;
-    TypographicMode typographicMode() const;
 
     inline ImageOrientation imageOrientation() const;
     inline ImageRendering imageRendering() const;
@@ -1300,8 +1294,6 @@ public:
     inline void setTextUnderlinePosition(OptionSet<TextUnderlinePosition>);
     inline void setTextUnderlineOffset(TextUnderlineOffset);
     inline void setTextDecorationThickness(TextDecorationThickness);
-    void setDirection(TextDirection v) { m_inheritedFlags.direction = static_cast<unsigned>(v); }
-    inline void setHasExplicitlySetDirection();
     void setLineHeight(Length&&);
     bool setZoom(float);
     inline bool setUsedZoom(float);
@@ -1547,7 +1539,6 @@ public:
     inline void setTextEmphasisMark(TextEmphasisMark);
     inline void setTextEmphasisCustomMark(const AtomString&);
     inline void setTextEmphasisPosition(OptionSet<TextEmphasisPosition>);
-    bool setTextOrientation(TextOrientation);
 
     inline void setObjectFit(ObjectFit);
     inline void setObjectPosition(LengthPoint);
@@ -1557,7 +1548,7 @@ public:
     inline void setRubyOverhang(RubyOverhang);
 
 #if ENABLE(DARK_MODE_CSS)
-    inline void setColorScheme(StyleColorScheme);
+    inline void setColorScheme(Style::ColorScheme);
 #endif
 
     inline void setTableLayout(TableLayoutType);
@@ -1744,9 +1735,9 @@ public:
     inline const Length& y() const;
     inline void setY(Length&&);
 
-    inline void setD(RefPtr<BasicShapePath>&&);
-    inline BasicShapePath* d() const;
-    static BasicShapePath* initialD() { return nullptr; }
+    inline void setD(RefPtr<StylePathData>&&);
+    inline StylePathData* d() const;
+    static StylePathData* initialD() { return nullptr; }
 
     inline float floodOpacity() const;
     inline void setFloodOpacity(float);
@@ -1838,10 +1829,14 @@ public:
     constexpr bool isDisplayTableOrTablePart() const;
     constexpr bool isOriginalDisplayListItemType() const;
 
-    inline bool setWritingMode(WritingMode);
+    inline bool setDirection(TextDirection bidiDirection);
+    inline bool hasExplicitlySetDirection() const;
+    inline void setHasExplicitlySetDirection();
 
+    inline bool setWritingMode(StyleWritingMode);
     inline bool hasExplicitlySetWritingMode() const;
     inline void setHasExplicitlySetWritingMode();
+    inline bool setTextOrientation(TextOrientation);
 
     // A unique style is one that has matches something that makes it impossible to share.
     bool unique() const { return m_nonInheritedFlags.isUnique; }
@@ -1900,7 +1895,7 @@ public:
     static constexpr ColumnAxis initialColumnAxis();
     static constexpr ColumnProgression initialColumnProgression();
     static constexpr TextDirection initialDirection();
-    static constexpr WritingMode initialWritingMode();
+    static constexpr StyleWritingMode initialWritingMode();
     static constexpr TextCombine initialTextCombine();
     static constexpr TextOrientation initialTextOrientation();
     static constexpr ObjectFit initialObjectFit();
@@ -2054,7 +2049,7 @@ public:
     static QuotesData* initialQuotes() { return nullptr; }
 
 #if ENABLE(DARK_MODE_CSS)
-    static constexpr StyleColorScheme initialColorScheme();
+    static inline Style::ColorScheme initialColorScheme();
 #endif
 
     static constexpr TextIndentLine initialTextIndentLine();
@@ -2269,6 +2264,10 @@ public:
     inline const AtomString& positionAnchor() const;
     inline void setPositionAnchor(const AtomString&);
 
+    static constexpr Style::PositionTryOrder initialPositionTryOrder();
+    inline Style::PositionTryOrder positionTryOrder() const;
+    inline void setPositionTryOrder(Style::PositionTryOrder);
+
 private:
     struct NonInheritedFlags {
         friend bool operator==(const NonInheritedFlags&, const NonInheritedFlags&) = default;
@@ -2310,46 +2309,46 @@ private:
     struct InheritedFlags {
         friend bool operator==(const InheritedFlags&, const InheritedFlags&) = default;
 
-        // Writing Mode = 4 bits
-        unsigned writingMode : 3; // WritingMode
-        unsigned direction : 1; // TextDirection
+        // Writing Mode = 8 bits (can be packed into 6 if needed)
+        WritingMode writingMode;
 
-        // Text Formatting = 19 bits
-        unsigned whiteSpaceCollapse : 3; // WhiteSpaceCollapse
-        unsigned textWrapMode : 1; // TextWrapMode
-        unsigned textAlign : 4; // TextAlignMode
-        unsigned textWrapStyle : 2; // TextWrapStyle
-        unsigned textTransform : TextTransformBits; // OptionSet<TextTransform>
-        unsigned textDecorationLines : TextDecorationLineBits;
+        // Text Formatting = 19 bits aligned onto 2 bytes + 4 trailing bits
+        unsigned char whiteSpaceCollapse : 3; // WhiteSpaceCollapse
+        unsigned char textWrapMode : 1; // TextWrapMode
+        unsigned char textAlign : 4; // TextAlignMode
+        unsigned char textWrapStyle : 2; // TextWrapStyle
+        unsigned char textTransform : TextTransformBits; // OptionSet<TextTransform>
+        unsigned char : 1; // byte alignment
+        unsigned char textDecorationLines : TextDecorationLineBits;
 
-        // Cursors and Visibility = 13 bits
-        unsigned pointerEvents : 4; // PointerEvents
-        unsigned visibility : 2; // Visibility
-        unsigned cursor : 6; // CursorType
+        // Cursors and Visibility = 13 bits aligned onto 4 bits + 1 byte + 1 bit
+        unsigned char pointerEvents : 4; // PointerEvents
+        unsigned char visibility : 2; // Visibility
+        unsigned char cursor : 6; // CursorType
 #if ENABLE(CURSOR_VISIBILITY)
-        unsigned cursorVisibility : 1; // CursorVisibility
+        unsigned char cursorVisibility : 1; // CursorVisibility
 #endif
 
         // Display Type-Specific = 5 bits
-        unsigned listStylePosition : 1; // ListStylePosition
-        unsigned emptyCells : 1; // EmptyCell
-        unsigned borderCollapse : 1; // BorderCollapse
-        unsigned captionSide : 2; // CaptionSide
+        unsigned char listStylePosition : 1; // ListStylePosition
+        unsigned char emptyCells : 1; // EmptyCell
+        unsigned char borderCollapse : 1; // BorderCollapse
+        unsigned char captionSide : 2; // CaptionSide
 
         // -webkit- Stuff = 2 bits
-        unsigned boxDirection : 1; // BoxDirection
-        unsigned rtlOrdering : 1; // Order
+        unsigned char boxDirection : 1; // BoxDirection
+        unsigned char rtlOrdering : 1; // Order
 
         // Color Stuff = 5 bits
-        unsigned hasExplicitlySetColor : 1;
-        unsigned printColorAdjust : 1; // PrintColorAdjust
-        unsigned insideLink : 2; // InsideLink
-        unsigned insideDefaultButton : 1;
+        unsigned char hasExplicitlySetColor : 1;
+        unsigned char printColorAdjust : 1; // PrintColorAdjust
+        unsigned char insideLink : 2; // InsideLink
+        unsigned char insideDefaultButton : 1;
 
 #if ENABLE(TEXT_AUTOSIZING)
         unsigned autosizeStatus : 5;
 #endif
-        // Total = 53 bits (fits in 8 bytes)
+        // Total = 57 bits (fits in 8 bytes)
     };
 
     // This constructor is used to implement the replace operation.

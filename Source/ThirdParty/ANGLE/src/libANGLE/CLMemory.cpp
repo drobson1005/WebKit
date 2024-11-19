@@ -30,11 +30,11 @@ MemFlags InheritMemFlags(MemFlags flags, Memory *parent)
                                   CL_MEM_HOST_NO_ACCESS);
         const MemFlags hostPtrFlags(CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR |
                                     CL_MEM_COPY_HOST_PTR);
-        if (flags.isNotSet(access))
+        if (flags.excludes(access))
         {
             flags.set(parentFlags.mask(access));
         }
-        if (flags.isNotSet(hostAccess))
+        if (flags.excludes(hostAccess))
         {
             flags.set(parentFlags.mask(hostAccess));
         }
@@ -162,8 +162,10 @@ Memory::Memory(const Buffer &buffer,
                void *hostPtr)
     : mContext(&context),
       mProperties(std::move(properties)),
-      mFlags(flags),
-      mHostPtr(flags.isSet(CL_MEM_USE_HOST_PTR) ? hostPtr : nullptr),
+      mFlags(flags.excludes(CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)
+                 ? cl::MemFlags{flags.get() | CL_MEM_READ_WRITE}
+                 : flags),
+      mHostPtr(flags.intersects(CL_MEM_USE_HOST_PTR) ? hostPtr : nullptr),
       mImpl(nullptr),
       mSize(size),
       mMapCount(0u)
@@ -193,7 +195,7 @@ Memory::Memory(Context &context,
     : mContext(&context),
       mProperties(std::move(properties)),
       mFlags(InheritMemFlags(flags, parent)),
-      mHostPtr(flags.isSet(CL_MEM_USE_HOST_PTR) ? hostPtr : nullptr),
+      mHostPtr(flags.intersects(CL_MEM_USE_HOST_PTR) ? hostPtr : nullptr),
       mParent(parent),
       mImpl(nullptr),
       mSize(0u),

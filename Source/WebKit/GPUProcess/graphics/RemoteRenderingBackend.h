@@ -145,7 +145,7 @@ private:
     void cacheGradient(Ref<WebCore::Gradient>&&);
     void cacheFilter(Ref<WebCore::Filter>&&);
     void cacheFont(const WebCore::Font::Attributes&, WebCore::FontPlatformDataAttributes, std::optional<WebCore::RenderingResourceIdentifier>);
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) || USE(SKIA)
     void cacheFontCustomPlatformData(WebCore::FontCustomPlatformSerializedData&&);
 #else
     void cacheFontCustomPlatformData(Ref<WebCore::FontCustomPlatformData>&&);
@@ -184,7 +184,7 @@ private:
 
     Ref<ShapeDetection::ObjectHeap> protectedShapeDetectionObjectHeap() const;
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) || USE(SKIA)
     bool shouldUseLockdownFontParser() const;
 #endif
 
@@ -199,9 +199,9 @@ private:
     RenderingBackendIdentifier m_renderingBackendIdentifier;
     RefPtr<WebCore::SharedMemory> m_getPixelBufferSharedMemory;
 
-    UncheckedKeyHashMap<WebCore::RenderingResourceIdentifier, IPC::ScopedActiveMessageReceiveQueue<RemoteDisplayListRecorder>> m_remoteDisplayLists WTF_GUARDED_BY_CAPABILITY(workQueue());
-    UncheckedKeyHashMap<WebCore::RenderingResourceIdentifier, IPC::ScopedActiveMessageReceiveQueue<RemoteImageBuffer>> m_remoteImageBuffers WTF_GUARDED_BY_CAPABILITY(workQueue());
-    UncheckedKeyHashMap<WebKit::RemoteImageBufferSetIdentifier, IPC::ScopedActiveMessageReceiveQueue<RemoteImageBufferSet>> m_remoteImageBufferSets WTF_GUARDED_BY_CAPABILITY(workQueue());
+    HashMap<WebCore::RenderingResourceIdentifier, IPC::ScopedActiveMessageReceiveQueue<RemoteDisplayListRecorder>> m_remoteDisplayLists WTF_GUARDED_BY_CAPABILITY(workQueue());
+    HashMap<WebCore::RenderingResourceIdentifier, IPC::ScopedActiveMessageReceiveQueue<RemoteImageBuffer>> m_remoteImageBuffers WTF_GUARDED_BY_CAPABILITY(workQueue());
+    HashMap<WebKit::RemoteImageBufferSetIdentifier, IPC::ScopedActiveMessageReceiveQueue<RemoteImageBufferSet>> m_remoteImageBufferSets WTF_GUARDED_BY_CAPABILITY(workQueue());
     Ref<ShapeDetection::ObjectHeap> m_shapeDetectionObjectHeap;
 };
 

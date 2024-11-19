@@ -1337,9 +1337,9 @@ void Editor::reappliedEditing(EditCommandComposition& composition)
 Editor::Editor(Document& document)
     : m_client(document.page() ? &document.page()->editorClient() : nullptr)
     , m_document(document)
-    , m_killRing(makeUnique<PAL::KillRing>())
-    , m_spellChecker(makeUnique<SpellChecker>(document))
-    , m_alternativeTextController(makeUnique<AlternativeTextController>(document))
+    , m_killRing(makeUniqueRef<PAL::KillRing>())
+    , m_spellChecker(makeUniqueRefWithoutRefCountedCheck<SpellChecker>(*this))
+    , m_alternativeTextController(makeUniqueRef<AlternativeTextController>(document))
     , m_editorUIUpdateTimer(*this, &Editor::editorUIUpdateTimerFired)
 #if ENABLE(TELEPHONE_NUMBER_DETECTION) && !PLATFORM(IOS_FAMILY)
     , m_telephoneNumberDetectionUpdateTimer(*this, &Editor::scanSelectionForTelephoneNumbers, 0_s)
@@ -1348,6 +1348,16 @@ Editor::Editor(Document& document)
 }
 
 Editor::~Editor() = default;
+
+void Editor::ref() const
+{
+    m_document->ref();
+}
+
+void Editor::deref() const
+{
+    m_document->deref();
+}
 
 void Editor::clear()
 {
@@ -2094,7 +2104,7 @@ WritingDirection Editor::baseWritingDirectionForSelectionStart() const
             return result;
     }
 
-    switch (renderer->style().direction()) {
+    switch (renderer->writingMode().bidiDirection()) {
     case TextDirection::LTR:
         return WritingDirection::LeftToRight;
     case TextDirection::RTL:
@@ -2360,7 +2370,7 @@ void Editor::setWritingSuggestion(const String& fullTextWithPrediction, const Ch
 }
 #endif
 
-void Editor::setComposition(const String& text, const Vector<CompositionUnderline>& underlines, const Vector<CompositionHighlight>& highlights, const UncheckedKeyHashMap<String, Vector<CharacterRange>>& annotations, unsigned selectionStart, unsigned selectionEnd)
+void Editor::setComposition(const String& text, const Vector<CompositionUnderline>& underlines, const Vector<CompositionHighlight>& highlights, const HashMap<String, Vector<CharacterRange>>& annotations, unsigned selectionStart, unsigned selectionEnd)
 {
     Ref document = protectedDocument();
     SetCompositionScope setCompositionScope(document.copyRef());
@@ -4134,8 +4144,8 @@ void Editor::scanSelectionForTelephoneNumbers()
     m_detectedTelephoneNumberRanges.clear();
     
     auto notifyController = makeScopeExit([&] {
-        if (auto* page = document().page())
-            page->servicesOverlayController().selectedTelephoneNumberRangesChanged();
+        if (RefPtr page = document().page())
+            page->protectedServicesOverlayController()->selectedTelephoneNumberRangesChanged();
     });
 
     auto selection = document().selection().selection();

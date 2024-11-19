@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <wtf/OverflowPolicy.h>
 #include <wtf/SaturatedArithmetic.h>
 #include <wtf/text/StringConcatenateNumbers.h>
 
@@ -43,8 +44,7 @@ public:
     StringBuilder(StringBuilder&&) = default;
     StringBuilder& operator=(StringBuilder&&) = default;
 
-    enum class OverflowHandler { CrashOnOverflow, RecordOverflow }; // FIXME: Despite its use in Checked<>, "handler" does not seem the correct name for this.
-    explicit StringBuilder(OverflowHandler);
+    explicit StringBuilder(OverflowPolicy);
 
     void clear();
     void swap(StringBuilder&);
@@ -108,10 +108,10 @@ private:
     template<typename CharacterType> void reallocateBuffer(unsigned requiredCapacity);
     void reallocateBuffer(unsigned requiredCapacity);
 
-    template<typename CharacterType> CharacterType* extendBufferForAppending(unsigned requiredLength);
-    template<typename CharacterType> CharacterType* extendBufferForAppendingSlowCase(unsigned requiredLength);
-    WTF_EXPORT_PRIVATE LChar* extendBufferForAppendingLChar(unsigned requiredLength);
-    WTF_EXPORT_PRIVATE UChar* extendBufferForAppendingWithUpconvert(unsigned requiredLength);
+    template<typename CharacterType> std::span<CharacterType> extendBufferForAppending(unsigned requiredLength);
+    template<typename CharacterType> std::span<CharacterType> extendBufferForAppendingSlowCase(unsigned requiredLength);
+    WTF_EXPORT_PRIVATE std::span<LChar> extendBufferForAppendingLChar(unsigned requiredLength);
+    WTF_EXPORT_PRIVATE std::span<UChar> extendBufferForAppendingWithUpconvert(unsigned requiredLength);
 
     WTF_EXPORT_PRIVATE void reifyString() const;
 
@@ -132,8 +132,8 @@ template<typename CharacterType> bool equal(const StringBuilder&, const Characte
 
 // Inline function implementations.
 
-inline StringBuilder::StringBuilder(OverflowHandler policy)
-    : m_shouldCrashOnOverflow { policy == OverflowHandler::CrashOnOverflow }
+inline StringBuilder::StringBuilder(OverflowPolicy policy)
+    : m_shouldCrashOnOverflow { policy == OverflowPolicy::CrashOnOverflow }
 {
 }
 
@@ -164,11 +164,11 @@ inline void StringBuilder::append(UChar character)
 {
     if (m_buffer && m_length < m_buffer->length() && m_string.isNull()) {
         if (!m_buffer->is8Bit()) {
-            spanConstCast(m_buffer->span16())[m_length++] = character;
+            spanConstCast<UChar>(m_buffer->span16())[m_length++] = character;
             return;
         }
         if (isLatin1(character)) {
-            spanConstCast(m_buffer->span8())[m_length++] = static_cast<LChar>(character);
+            spanConstCast<LChar>(m_buffer->span8())[m_length++] = static_cast<LChar>(character);
             return;
         }
     }
@@ -179,9 +179,9 @@ inline void StringBuilder::append(LChar character)
 {
     if (m_buffer && m_length < m_buffer->length() && m_string.isNull()) {
         if (m_buffer->is8Bit())
-            spanConstCast(m_buffer->span8())[m_length++] = character;
+            spanConstCast<LChar>(m_buffer->span8())[m_length++] = character;
         else
-            spanConstCast(m_buffer->span16())[m_length++] = character;
+            spanConstCast<UChar>(m_buffer->span16())[m_length++] = character;
         return;
     }
     append(WTF::span(character));
@@ -309,12 +309,12 @@ template<typename... StringTypeAdapters> void StringBuilder::appendFromAdapters(
         auto requiredLength = saturatedSum<uint32_t>(m_length, adapters.length()...);
         if (is8Bit() && are8Bit(adapters...)) {
             auto destination = extendBufferForAppendingLChar(requiredLength);
-            if (!destination)
+            if (!destination.data())
                 return;
             stringTypeAdapterAccumulator(destination, adapters...);
         } else {
             auto destination = extendBufferForAppendingWithUpconvert(requiredLength);
-            if (!destination)
+            if (!destination.data())
                 return;
             stringTypeAdapterAccumulator(destination, adapters...);
         }

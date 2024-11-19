@@ -153,6 +153,8 @@ enum class RenderPassClosureReason
     GLFinish,
     EGLSwapBuffers,
     GLReadPixels,
+    IndexRangeReadback,
+    VertexArrayStreaming,
 
     InvalidEnum,
     EnumCount = InvalidEnum,
@@ -215,7 +217,7 @@ class ClearValuesArray final
     gl::AttachmentsMask mEnabled;
 };
 
-void GenerateCaps(const wgpu::Device &device,
+void GenerateCaps(const wgpu::Limits &limitWgpu,
                   gl::Caps *glCaps,
                   gl::TextureCapsMap *glTextureCapsMap,
                   gl::Extensions *glExtensions,
@@ -243,7 +245,8 @@ bool IsWgpuError(WGPUBufferMapAsyncStatus mapBufferStatus);
 bool IsStripPrimitiveTopology(wgpu::PrimitiveTopology topology);
 
 // Required alignments for buffer sizes and mapping
-constexpr size_t kBufferSizeAlignment      = 4;
+constexpr size_t kBufferSizeAlignment         = 4;
+constexpr size_t kBufferCopyToBufferAlignment = 4;
 constexpr size_t kBufferMapSizeAlignment   = kBufferSizeAlignment;
 constexpr size_t kBufferMapOffsetAlignment = 8;
 
@@ -283,6 +286,7 @@ constexpr uint32_t kReservedPerStageDefaultUniformSlotCount = 0;
 }  // namespace rx
 
 #define ANGLE_WGPU_WRAPPER_OBJECTS_X(PROC) \
+    PROC(BindGroup)                        \
     PROC(Buffer)                           \
     PROC(RenderPipeline)
 

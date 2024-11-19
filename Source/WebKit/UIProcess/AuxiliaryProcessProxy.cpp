@@ -60,9 +60,9 @@
 
 namespace WebKit {
 
-static UncheckedKeyHashMap<IPC::Connection::UniqueID, WeakPtr<AuxiliaryProcessProxy>>& connectionToProcessMap()
+static HashMap<IPC::Connection::UniqueID, WeakPtr<AuxiliaryProcessProxy>>& connectionToProcessMap()
 {
-    static MainThreadNeverDestroyed<UncheckedKeyHashMap<IPC::Connection::UniqueID, WeakPtr<AuxiliaryProcessProxy>>> map;
+    static MainThreadNeverDestroyed<HashMap<IPC::Connection::UniqueID, WeakPtr<AuxiliaryProcessProxy>>> map;
     return map.get();
 }
 
@@ -474,7 +474,7 @@ bool AuxiliaryProcessProxy::platformIsBeingDebugged() const
 
 void AuxiliaryProcessProxy::stopResponsivenessTimer()
 {
-    responsivenessTimer().stop();
+    checkedResponsivenessTimer()->stop();
 }
 
 void AuxiliaryProcessProxy::beginResponsivenessChecks()
@@ -493,9 +493,9 @@ void AuxiliaryProcessProxy::startResponsivenessTimer(UseLazyStop useLazyStop)
     }
 
     if (useLazyStop == UseLazyStop::Yes)
-        responsivenessTimer().startWithLazyStop();
+        checkedResponsivenessTimer()->startWithLazyStop();
     else
-        responsivenessTimer().start();
+        checkedResponsivenessTimer()->start();
 }
 
 bool AuxiliaryProcessProxy::mayBecomeUnresponsive()

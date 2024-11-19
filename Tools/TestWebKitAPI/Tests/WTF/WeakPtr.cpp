@@ -3137,21 +3137,6 @@ TEST(WTF_ThreadSafeWeakPtr, RemoveInDestructor)
     }
 }
 
-TEST(WTF_ThreadSafeWeakPtr, WeakRefInDestructor)
-{
-    struct S;
-    static ThreadSafeWeakPtr<S> weakPtr;
-    struct S : ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<S> {
-        ~S() { weakPtr = { *this }; }
-    };
-
-    {
-        auto s = adoptRef(*new S);
-    }
-    auto shouldBeNull = weakPtr.get();
-    EXPECT_NULL(shouldBeNull.get());
-}
-
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DidUpdateRefCountWeakPtrImpl);
 
 class DidUpdateRefCountWeakPtrImpl final {
@@ -3239,7 +3224,7 @@ TEST(WTF_WeakRef, HashSetLookupFromRawRef)
 
 TEST(WTF_WeakRef, HashMapLookupFromRawRef)
 {
-    UncheckedKeyHashMap<WTF::WeakRef<TestType, DidUpdateRefCountWeakPtrImpl>, unsigned> map;
+    HashMap<WTF::WeakRef<TestType, DidUpdateRefCountWeakPtrImpl>, unsigned> map;
 
     TestType object;
     map.add(object, 1);

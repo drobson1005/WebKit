@@ -169,7 +169,7 @@ public:
     std::enable_if_t<sizeof(CurrentType) < sizeof(ReplacementType) || std::is_same_v<ReplacementType, AST::Expression>, void> replace(CurrentType& current, ReplacementType& replacement)
     {
         m_replacements.append([&current, currentCopy = current]() mutable {
-            bitwise_cast<AST::IdentityExpression*>(&current)->~IdentityExpression();
+            std::bit_cast<AST::IdentityExpression*>(&current)->~IdentityExpression();
             new (&current) CurrentType(WTFMove(currentCopy));
         });
 
@@ -181,12 +181,12 @@ public:
     std::enable_if_t<sizeof(CurrentType) >= sizeof(ReplacementType) && !std::is_same_v<ReplacementType, AST::Expression>, void> replace(CurrentType& current, ReplacementType& replacement)
     {
         m_replacements.append([&current, currentCopy = current]() mutable {
-            bitwise_cast<ReplacementType*>(&current)->~ReplacementType();
-            new (bitwise_cast<void*>(&current)) CurrentType(WTFMove(currentCopy));
+            std::bit_cast<ReplacementType*>(&current)->~ReplacementType();
+            new (std::bit_cast<void*>(&current)) CurrentType(WTFMove(currentCopy));
         });
 
         current.~CurrentType();
-        new (bitwise_cast<void*>(&current)) ReplacementType(replacement);
+        new (std::bit_cast<void*>(&current)) ReplacementType(replacement);
     }
 
     template<typename T, size_t size>
@@ -284,7 +284,7 @@ public:
         result.iterator->value.append(WTFMove(validator));
     }
 
-    std::optional<Error> validateOverrides(const UncheckedKeyHashMap<String, ConstantValue>&);
+    std::optional<Error> validateOverrides(const HashMap<String, ConstantValue>&);
 
 private:
     String m_source;
@@ -322,7 +322,7 @@ private:
     std::optional<CallGraph> m_callGraph;
     Vector<std::function<void()>> m_replacements;
     HashSet<uint32_t, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_pipelineOverrideIds;
-    UncheckedKeyHashMap<const AST::Expression*, Vector<Function<std::optional<String>(const ConstantValue&)>>> m_overrideValidations;
+    HashMap<const AST::Expression*, Vector<Function<std::optional<String>(const ConstantValue&)>>> m_overrideValidations;
 };
 
 } // namespace WGSL
